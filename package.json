@@ -1,0 +1,33 @@
+{
+  "name": "beam-protocol",
+  "version": "0.1.0",
+  "description": "Open Agent-to-Agent communication protocol — SMTP for AI Agents",
+  "private": true,
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "dev:directory": "npm run dev --workspace=packages/directory",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "agent-to-agent",
+    "a2a",
+    "ai-agents",
+    "protocol",
+    "beam-protocol",
+    "ed25519",
+    "did"
+  ],
+  "author": "Beam Protocol Contributors",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/beam-protocol/beam-protocol"
+  }
+}
