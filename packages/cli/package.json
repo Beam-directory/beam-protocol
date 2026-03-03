@@ -1,0 +1,37 @@
+{
+  "name": "@beam-protocol/cli",
+  "version": "0.1.0",
+  "description": "Beam Protocol CLI — manage Beam identities, register agents, send intents",
+  "type": "module",
+  "bin": {
+    "beam": "./dist/index.js"
+  },
+  "main": "./dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "dev": "node --watch dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@beam-protocol/sdk": "*",
+    "chalk": "^5.3.0",
+    "commander": "^12.0.0",
+    "inquirer": "^9.2.15",
+    "ora": "^8.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "license": "Apache-2.0",
+  "keywords": [
+    "beam-protocol",
+    "a2a",
+    "ai-agents",
+    "cli"
+  ]
+}
