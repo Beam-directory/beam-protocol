@@ -24,7 +24,7 @@ export class BeamIdentity {
 
   static generate(config: BeamIdentityConfig): BeamIdentity {
     const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-    const beamId = `${config.agentName}@${config.orgName}.beam.id` as BeamIdString
+    const beamId = `${config.agentName}@${config.orgName}.beam.directory` as BeamIdString
     return new BeamIdentity(beamId, privateKey, publicKey)
   }
 
@@ -74,7 +74,7 @@ export class BeamIdentity {
   }
 
   static parseBeamId(beamId: string): { agent: string; org: string } | null {
-    const match = beamId.match(/^([a-z0-9_-]+)@([a-z0-9_-]+)\.beam\.id$/)
+    const match = beamId.match(/^([a-z0-9_-]+)@([a-z0-9_-]+)\.beam\.directory$/)
     if (!match) return null
     return { agent: match[1], org: match[2] }
   }

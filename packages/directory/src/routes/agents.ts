@@ -38,7 +38,7 @@ setInterval(() => {
 // Helpers
 // ---------------------------------------------------------------------------
 
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.id$/
+const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 
 function serializeAgent(row: AgentRow): object {
   return {
@@ -92,7 +92,7 @@ export function agentsRouter(db: Database): Hono {
     // Validate beamId
     if (typeof raw['beamId'] !== 'string' || !BEAM_ID_RE.test(raw['beamId'])) {
       return c.json({
-        error: 'beamId must match pattern agent@org.beam.id (lowercase alphanumeric, hyphens, underscores)',
+        error: 'beamId must match pattern agent@org.beam.directory (lowercase alphanumeric, hyphens, underscores)',
         errorCode: 'INVALID_BEAM_ID',
       }, 400)
     }
@@ -124,7 +124,7 @@ export function agentsRouter(db: Database): Hono {
     const org = raw['org'] as string
 
     // Ensure org in beamId matches provided org
-    const orgFromId = beamId.split('@')[1]  // e.g. "acme.beam.id"
+    const orgFromId = beamId.split('@')[1]  // e.g. "acme.beam.directory"
     const orgSlug = orgFromId?.split('.')[0] // e.g. "acme"
     if (orgSlug !== org) {
       return c.json({

@@ -56,7 +56,7 @@ One intent in, one result out. Under 1 KB. Under 300 ms.
 ### 1. Beam-ID — Identität / Identity
 Jeder Agent hat eine global eindeutige, kryptographisch gesicherte Identität:
 ```
-fischer@coppen.beam.id
+fischer@coppen.beam.directory
 ```
 Ed25519-Schlüsselpaar, DID-kompatibel, verifizierbar über das Directory.
 
@@ -67,8 +67,8 @@ Ein universelles, kompaktes Nachrichtenformat:
 ```json
 {
   "intent": "query.invoice",
-  "from": "jarvis@coppen.beam.id",
-  "to": "fischer@coppen.beam.id",
+  "from": "jarvis@coppen.beam.directory",
+  "to": "fischer@coppen.beam.directory",
   "params": { "invoice_id": "INV-2026-001" }
 }
 ```
@@ -137,9 +137,9 @@ Beam Protocol was born from the practical experience of running 15+ AI agents in
 
 ## Mitmachen / Get Involved
 
-- **GitHub:** [beam-protocol/beam](https://github.com/beam-protocol/beam)
+- **GitHub:** [beam-protocol/beam](https://github.com/beam-directory/beam)
 - **RFC:** [spec/RFC-0001.md](./spec/RFC-0001.md)
-- **Waitlist:** [beam.id](https://beam.id)
+- **Waitlist:** [beam.directory](https://beam.directory)
 - **License:** Apache-2.0
 
 ---

@@ -1,5 +1,5 @@
-/** Beam ID format: agent@org.beam.id */
-export type BeamIdString = `${string}@${string}.beam.id`
+/** Beam ID format: agent@org.beam.directory */
+export type BeamIdString = `${string}@${string}.beam.directory`
 
 export interface BeamIdentityConfig {
   agentName: string

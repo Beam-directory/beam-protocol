@@ -1,4 +1,4 @@
-// Beam ID string format: agent@org.beam.id
+// Beam ID string format: agent@org.beam.directory
 export type BeamIdString = string
 
 export interface AgentRecord {

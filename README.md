@@ -17,7 +17,7 @@
 
 **Beam Protocol is SMTP for AI agents.** It defines how AI agents discover, authenticate, and exchange structured messages across organizational boundaries.
 
-- **Beam-ID** — A globally unique, cryptographically secured agent identity (`agent@org.beam.id`)
+- **Beam-ID** — A globally unique, cryptographically secured agent identity (`agent@org.beam.directory`)
 - **Intent/Result Frames** — A compact, signed message format (<1 KB, <300 ms)
 - **Directory** — A central registry for agent discovery, verification, and trust scoring
 
@@ -58,7 +58,7 @@ const agent = BeamIdentity.generate({
 })
 
 console.log(agent.beamId)
-// → my-agent@my-company.beam.id
+// → my-agent@my-company.beam.directory
 ```
 
 ### Register with the Directory
@@ -92,7 +92,7 @@ const client = new BeamClient({
 await client.connect()
 
 const result = await client.send(
-  'other-agent@other-company.beam.id',
+  'other-agent@other-company.beam.directory',
   'query.status',
   { detail: 'full' }
 )
@@ -135,7 +135,7 @@ client.on('query.status', (frame, respond) => {
 
 | Concept | Description |
 |---|---|
-| **Beam-ID** | `agent@org.beam.id` — Ed25519 key pair, DID-compatible |
+| **Beam-ID** | `agent@org.beam.directory` — Ed25519 key pair, DID-compatible |
 | **Intent Frame** | Signed JSON request: intent, from, to, params, nonce, timestamp, signature |
 | **Result Frame** | Signed JSON response: success/error, payload, nonce, latency, signature |
 | **Directory** | Central registry with agent lookup, search, heartbeat, trust scoring |
@@ -218,7 +218,7 @@ It covers:
 Beam Protocol is open source under Apache-2.0. Contributions welcome.
 
 1. Read the [RFC](./spec/RFC-0001.md)
-2. Check [open issues](https://github.com/beam-protocol/beam/issues)
+2. Check [open issues](https://github.com/beam-directory/beam/issues)
 3. Submit a PR
 
 ---

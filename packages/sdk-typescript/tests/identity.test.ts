@@ -4,7 +4,7 @@ import { BeamIdentity } from '../src/identity.js'
 describe('BeamIdentity', () => {
   it('generate() creates valid beamId format', () => {
     const identity = BeamIdentity.generate({ agentName: 'myagent', orgName: 'myorg' })
-    expect(identity.beamId).toBe('myagent@myorg.beam.id')
+    expect(identity.beamId).toBe('myagent@myorg.beam.directory')
     expect(identity.publicKeyBase64).toBeTruthy()
     expect(typeof identity.publicKeyBase64).toBe('string')
   })
@@ -51,7 +51,7 @@ describe('BeamIdentity', () => {
     const original = BeamIdentity.generate({ agentName: 'testbot', orgName: 'testorg' })
     const data = original.export()
 
-    expect(data.beamId).toBe('testbot@testorg.beam.id')
+    expect(data.beamId).toBe('testbot@testorg.beam.directory')
     expect(typeof data.publicKeyBase64).toBe('string')
     expect(typeof data.privateKeyBase64).toBe('string')
 
@@ -75,28 +75,28 @@ describe('BeamIdentity', () => {
 
   describe('parseBeamId()', () => {
     it('returns correct agent/org for valid beam ID', () => {
-      const result = BeamIdentity.parseBeamId('myagent@myorg.beam.id')
+      const result = BeamIdentity.parseBeamId('myagent@myorg.beam.directory')
       expect(result).not.toBeNull()
       expect(result!.agent).toBe('myagent')
       expect(result!.org).toBe('myorg')
     })
 
     it('returns correct result for hyphenated names', () => {
-      const result = BeamIdentity.parseBeamId('my-agent@my-org.beam.id')
+      const result = BeamIdentity.parseBeamId('my-agent@my-org.beam.directory')
       expect(result).not.toBeNull()
       expect(result!.agent).toBe('my-agent')
       expect(result!.org).toBe('my-org')
     })
 
     it('returns correct result for underscore names', () => {
-      const result = BeamIdentity.parseBeamId('my_agent@my_org.beam.id')
+      const result = BeamIdentity.parseBeamId('my_agent@my_org.beam.directory')
       expect(result).not.toBeNull()
       expect(result!.agent).toBe('my_agent')
       expect(result!.org).toBe('my_org')
     })
 
     it('returns null for invalid format - missing @', () => {
-      expect(BeamIdentity.parseBeamId('myagentmyorg.beam.id')).toBeNull()
+      expect(BeamIdentity.parseBeamId('myagentmyorg.beam.directory')).toBeNull()
     })
 
     it('returns null for invalid format - wrong suffix', () => {
@@ -104,7 +104,7 @@ describe('BeamIdentity', () => {
     })
 
     it('returns null for invalid format - uppercase letters', () => {
-      expect(BeamIdentity.parseBeamId('MyAgent@myorg.beam.id')).toBeNull()
+      expect(BeamIdentity.parseBeamId('MyAgent@myorg.beam.directory')).toBeNull()
     })
 
     it('returns null for empty string', () => {
@@ -112,7 +112,7 @@ describe('BeamIdentity', () => {
     })
 
     it('returns null for partial match', () => {
-      expect(BeamIdentity.parseBeamId('agent@org.beam.id.extra')).toBeNull()
+      expect(BeamIdentity.parseBeamId('agent@org.beam.directory.extra')).toBeNull()
     })
   })
 
