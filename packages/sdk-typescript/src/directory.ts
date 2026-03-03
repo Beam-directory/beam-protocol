@@ -59,7 +59,11 @@ export class BeamDirectory {
 
     const res = await fetch(`${this.baseUrl}/agents/search?${params}`, { headers: this.headers })
     if (!res.ok) throw new BeamDirectoryError(`Search failed: ${res.statusText}`, res.status)
-    return res.json() as Promise<AgentRecord[]>
+    const body = await res.json() as { agents?: AgentRecord[] } | AgentRecord[]
+    // Handle both { agents: [...] } envelope and plain array
+    if (Array.isArray(body)) return body
+    if (body && Array.isArray(body.agents)) return body.agents
+    return [] as AgentRecord[]
   }
 
   async heartbeat(beamId: BeamIdString): Promise<void> {

@@ -23,7 +23,7 @@ export function createIntentFrame(
     nonce: randomUUID(),
     timestamp: new Date().toISOString()
   }
-  frame.signature = identity.sign(canonicalizeFrame(frame))
+  frame.signature = identity.sign(canonicalizeFrame(frame as unknown as Record<string, unknown>))
   return frame
 }
 
@@ -48,7 +48,7 @@ export function createResultFrame(
     ...(options.errorCode !== undefined && { errorCode: options.errorCode }),
     ...(options.latency !== undefined && { latency: options.latency })
   }
-  frame.signature = identity.sign(canonicalizeFrame(frame))
+  frame.signature = identity.sign(canonicalizeFrame(frame as unknown as Record<string, unknown>))
   return frame
 }
 

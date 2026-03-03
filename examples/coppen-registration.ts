@@ -7,8 +7,8 @@
  * Run: npx tsx examples/coppen-registration.ts
  */
 
-import { BeamIdentity, BeamClient, BeamDirectory } from '@beam-protocol/sdk'
-import type { BeamIdString } from '@beam-protocol/sdk'
+import { BeamIdentity, BeamClient, BeamDirectory } from '../packages/sdk-typescript/src/index.js'
+import type { BeamIdString } from '../packages/sdk-typescript/src/index.js'
 
 const DIRECTORY_URL = process.env.BEAM_DIRECTORY_URL ?? 'http://localhost:3100'
 
@@ -41,7 +41,7 @@ async function registerAgents(): Promise<void> {
     capabilities: ['directory-admin', 'orchestration', 'memory', 'scheduling'],
     publicKey: jarvis.publicKeyBase64,
     org: 'coppen'
-  })
+  }) as any
   console.log(`   ✅ ${jarvisRecord.beam_id} — Trust: ${jarvisRecord.trust_score}`)
 
   const fischerRecord = await directory.register({
@@ -50,7 +50,7 @@ async function registerAgents(): Promise<void> {
     capabilities: ['forderungen', 'invoicing', 'customer-communication', 'payments'],
     publicKey: fischer.publicKeyBase64,
     org: 'coppen'
-  })
+  }) as any
   console.log(`   ✅ ${fischerRecord.beam_id} — Trust: ${fischerRecord.trust_score}`)
 
   const claraRecord = await directory.register({
@@ -59,7 +59,7 @@ async function registerAgents(): Promise<void> {
     capabilities: ['customer-service', 'scheduling', 'callbacks', 'voice'],
     publicKey: clara.publicKeyBase64,
     org: 'coppen'
-  })
+  }) as any
   console.log(`   ✅ ${claraRecord.beam_id} — Trust: ${claraRecord.trust_score}`)
 
   console.log()
@@ -71,9 +71,10 @@ async function registerAgents(): Promise<void> {
 
 async function searchDemo(): Promise<void> {
   console.log('🔍 Searching for invoicing agents at COPPEN...')
-  const results = await directory.search({ org: 'coppen', capabilities: ['invoicing'] })
-  for (const agent of results) {
-    console.log(`   Found: ${agent.beam_id} (${agent.display_name}) — Capabilities: ${agent.capabilities}`)
+  const searchResult = await directory.search({ org: 'coppen', capabilities: ['invoicing'] }) as any
+  const agents = searchResult.agents ?? searchResult
+  for (const agent of agents) {
+    console.log(`   Found: ${agent.beam_id} (${agent.display_name}) — Capabilities: ${JSON.stringify(agent.capabilities)}`)
   }
   console.log()
 }
