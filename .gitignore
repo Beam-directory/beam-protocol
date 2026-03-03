@@ -48,3 +48,14 @@ tmp/
 temp/
 beam-directory.db
 dist/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Beam identity (private key!)
+.beam/

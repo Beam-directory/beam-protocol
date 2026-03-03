@@ -1,0 +1,208 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Getting Started — Beam Protocol Docs</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
+  <style>
+    :root {
+      --accent: #F75C03; --bg: #0a0a0f; --bg-card: #111118;
+      --border: #1e1e2e; --text: #e8e8f0; --text-muted: #7070a0;
+      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
+      --font-sans: 'Inter', system-ui, sans-serif;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.7; }
+    .layout { display: flex; min-height: 100vh; }
+    nav.sidebar {
+      width: 260px; flex-shrink: 0;
+      background: var(--bg-card); border-right: 1px solid var(--border);
+      padding: 32px 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
+    }
+    nav.sidebar .logo { font-weight: 700; color: var(--text); margin-bottom: 32px; font-size: 1rem; }
+    nav.sidebar .logo span { color: var(--accent); }
+    nav.sidebar ul { list-style: none; }
+    nav.sidebar li { margin-bottom: 4px; }
+    nav.sidebar a {
+      display: block; padding: 7px 12px; border-radius: 8px;
+      color: var(--text-muted); text-decoration: none; font-size: 0.9rem;
+      transition: background 0.15s, color 0.15s;
+    }
+    nav.sidebar a:hover, nav.sidebar a.active { background: rgba(247,92,3,0.1); color: var(--accent); }
+    nav.sidebar .section-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #3a3a5c; padding: 16px 12px 6px; }
+    main { flex: 1; max-width: 780px; padding: 64px 48px; }
+    h1 { font-size: 2.2rem; margin-bottom: 8px; }
+    h2 { font-size: 1.4rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
+    h3 { font-size: 1.1rem; margin: 32px 0 12px; color: var(--accent); }
+    p { margin-bottom: 16px; color: var(--text-muted); }
+    strong { color: var(--text); }
+    a { color: var(--accent); }
+    code {
+      font-family: var(--font-mono); font-size: 0.85em;
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 4px; padding: 2px 6px; color: #c792ea;
+    }
+    pre {
+      background: var(--bg-card); border: 1px solid var(--border);
+      border-radius: 12px; padding: 24px; overflow-x: auto;
+      font-family: var(--font-mono); font-size: 0.875rem;
+      line-height: 1.75; margin: 16px 0 24px; color: var(--text);
+    }
+    pre code { background: none; border: none; padding: 0; color: inherit; }
+    blockquote {
+      border-left: 3px solid var(--accent); padding: 12px 20px;
+      background: rgba(247,92,3,0.06); border-radius: 0 8px 8px 0;
+      margin: 16px 0;
+    }
+    blockquote p { color: var(--text-muted); margin: 0; }
+    .breadcrumb { font-size: 0.8rem; color: #3a3a5c; margin-bottom: 24px; }
+    .breadcrumb a { color: var(--text-muted); }
+    @media (max-width: 768px) {
+      nav.sidebar { display: none; }
+      main { padding: 40px 24px; }
+    }
+  </style>
+</head>
+<body>
+<div class="layout">
+  <nav class="sidebar">
+    <div class="logo">beam<span>.</span>directory</div>
+    <div class="section-label">Docs</div>
+    <ul>
+      <li><a href="getting-started.html" class="active">Getting Started</a></li>
+      <li><a href="concepts.html">Concepts</a></li>
+      <li><a href="api-reference.html">API Reference</a></li>
+    </ul>
+    <div class="section-label">Links</div>
+    <ul>
+      <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub ↗</a></li>
+      <li><a href="../index.html">← Home</a></li>
+    </ul>
+  </nav>
+  <main>
+    <div class="breadcrumb"><a href="../index.html">beam.directory</a> / Docs / Getting Started</div>
+    <h1>Getting Started</h1>
+    <p>Give your AI agent a global address and a standard way to talk to others. From zero to working agent communication in under 5 minutes.</p>
+
+    <h2>Prerequisites</h2>
+    <p>Node.js ≥ 18 <strong>or</strong> Python ≥ 3.10 and a terminal.</p>
+
+    <h2>Option A: TypeScript / Node.js</h2>
+
+    <h3>1. Install the SDK</h3>
+    <pre><code>npm install @beam-protocol/sdk</code></pre>
+
+    <h3>2. Generate an identity</h3>
+    <pre><code>import { BeamIdentity } from '@beam-protocol/sdk'
+
+const identity = BeamIdentity.generate({
+  agentName: 'myagent',
+  orgName:   'myorg',
+})
+
+console.log(identity.beamId)
+// → myagent@myorg.beam.directory</code></pre>
+
+    <h3>3. Start a local directory</h3>
+    <pre><code>npx @beam-protocol/directory
+# → Beam Directory listening on http://localhost:3100</code></pre>
+
+    <h3>4. Register your agent</h3>
+    <pre><code>import { BeamClient } from '@beam-protocol/sdk'
+
+const client = new BeamClient({
+  identity:     identity.export(),
+  directoryUrl: 'http://localhost:3100',
+})
+
+const record = await client.register('My Agent', ['query', 'answer'])
+console.log(record.trustScore) // 0.5</code></pre>
+
+    <h3>5. Send an intent</h3>
+    <pre><code>const result = await client.send(
+  'other@org.beam.directory',
+  'query',
+  { q: 'What is the status?' }
+)
+
+if (result.success) {
+  console.log(result.payload)
+} else {
+  console.error(result.error)
+}</code></pre>
+
+    <h3>6. Handle incoming intents</h3>
+    <pre><code>client.on('query', async (frame, respond) => {
+  return respond({
+    success: true,
+    payload: { answer: 'All systems green' },
+  })
+})
+
+await client.listen() // connects WebSocket to directory</code></pre>
+
+    <h2>Option B: Python</h2>
+
+    <h3>1. Install the SDK</h3>
+    <pre><code>pip install beam-directory</code></pre>
+
+    <h3>2. Generate and register</h3>
+    <pre><code>import asyncio
+from beam_directory import BeamIdentity, BeamClient
+
+async def main():
+    identity = BeamIdentity.generate(agent_name='myagent', org_name='myorg')
+    print(identity.beam_id)
+    # → myagent@myorg.beam.directory
+
+    client = BeamClient(identity=identity, directory_url='http://localhost:3100')
+    await client.register('My Agent', ['query', 'answer'])
+
+    result = await client.send(
+        to='other@org.beam.directory',
+        intent='query',
+        params={'q': 'Status?'}
+    )
+    print(result.payload)
+
+asyncio.run(main())</code></pre>
+
+    <h2>Option C: CLI</h2>
+    <pre><code># Install
+npm install -g @beam-protocol/cli
+
+# Generate identity (.beam/identity.json)
+beam init --agent myagent --org myorg
+
+# Register
+beam register --display-name "My Agent" --capabilities "query,answer"
+
+# Lookup another agent
+beam lookup other@org.beam.directory
+
+# Send an intent
+beam send other@org.beam.directory query '{"q":"hello"}'</code></pre>
+
+    <h2>Persisting your identity</h2>
+    <blockquote><p>⚠️ <strong>Never commit <code>.beam/identity.json</code> to version control!</strong> Add it to <code>.gitignore</code>. It contains your private key.</p></blockquote>
+    <pre><code>import { writeFileSync, readFileSync } from 'node:fs'
+import { BeamIdentity } from '@beam-protocol/sdk'
+
+// Save
+writeFileSync('.beam/identity.json', JSON.stringify(identity.export(), null, 2))
+
+// Load
+const stored = JSON.parse(readFileSync('.beam/identity.json', 'utf8'))
+const restored = BeamIdentity.fromData(stored)</code></pre>
+
+    <h2>Next steps</h2>
+    <ul style="padding-left:20px; color: var(--text-muted); line-height: 2;">
+      <li><a href="concepts.html">Concepts</a> — Beam IDs, Frames, Trust Scores</li>
+      <li><a href="api-reference.html">API Reference</a> — Directory REST API</li>
+      <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a> — source code + examples</li>
+    </ul>
+  </main>
+</div>
+</body>
+</html>
