@@ -894,6 +894,12 @@ $ beam send clara@coppen.beam.directory query '{"q":"status?"}'
 </footer>
 
 <script>
+  // ── Convex configuration (set by deploy script or inject at build time) ────
+  // To connect the waitlist form to Convex, set this before the script:
+  // window.BEAM_CONVEX_URL = 'https://YOUR_DEPLOYMENT.convex.site';
+  window.BEAM_CONVEX_URL = window.BEAM_CONVEX_URL || null;
+</script>
+<script>
   // ── Code tabs ──────────────────────────────────────────────────────────────
   document.querySelectorAll('.code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -917,18 +923,41 @@ $ beam send clara@coppen.beam.directory query '{"q":"status?"}'
   document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
 
   // ── Waitlist form ──────────────────────────────────────────────────────────
-  document.getElementById('waitlistForm').addEventListener('submit', e => {
+  // CONVEX_HTTP_URL is set at deploy time; falls back to localStorage in dev
+  const CONVEX_WAITLIST_URL = window.BEAM_CONVEX_URL
+    ? window.BEAM_CONVEX_URL + '/waitlist'
+    : null;
+
+  document.getElementById('waitlistForm').addEventListener('submit', async e => {
     e.preventDefault();
     const email = document.getElementById('emailInput').value.trim();
     if (!email || !email.includes('@')) return;
 
-    // Store locally (would hit an API in production)
-    const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
-    if (!signups.includes(email)) signups.push(email);
-    localStorage.setItem('beam_waitlist', JSON.stringify(signups));
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
 
-    document.getElementById('waitlistForm').style.display = 'none';
-    document.getElementById('successMsg').style.display = 'block';
+    try {
+      if (CONVEX_WAITLIST_URL) {
+        const res = await fetch(CONVEX_WAITLIST_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, source: 'landing' }),
+        });
+        if (!res.ok) throw new Error('Server error');
+      } else {
+        // Dev fallback: store locally
+        const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
+        if (!signups.includes(email)) signups.push(email);
+        localStorage.setItem('beam_waitlist', JSON.stringify(signups));
+      }
+
+      document.getElementById('waitlistForm').style.display = 'none';
+      document.getElementById('successMsg').style.display = 'block';
+    } catch (err) {
+      console.error('Waitlist signup failed:', err);
+      if (btn) { btn.disabled = false; btn.textContent = 'Get Early Access'; }
+      alert('Something went wrong. Please try again.');
+    }
   });
 </script>
 </body>
