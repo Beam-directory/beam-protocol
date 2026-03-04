@@ -6,6 +6,21 @@ import type {
   DirectoryConfig
 } from './types.js'
 
+/** Normalize snake_case server response to camelCase AgentRecord */
+function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
+  return {
+    beamId: (raw.beamId ?? raw.beam_id) as AgentRecord['beamId'],
+    displayName: (raw.displayName ?? raw.display_name ?? '') as string,
+    capabilities: (raw.capabilities ?? []) as string[],
+    publicKey: (raw.publicKey ?? raw.public_key ?? '') as string,
+    org: (raw.org ?? '') as string,
+    trustScore: (raw.trustScore ?? raw.trust_score ?? 0) as number,
+    verified: (raw.verified ?? false) as boolean,
+    createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
+    lastSeen: (raw.lastSeen ?? raw.last_seen ?? '') as string,
+  }
+}
+
 export class BeamDirectoryError extends Error {
   constructor(
     message: string,
@@ -59,11 +74,9 @@ export class BeamDirectory {
 
     const res = await fetch(`${this.baseUrl}/agents/search?${params}`, { headers: this.headers })
     if (!res.ok) throw new BeamDirectoryError(`Search failed: ${res.statusText}`, res.status)
-    const body = await res.json() as { agents?: AgentRecord[] } | AgentRecord[]
-    // Handle both { agents: [...] } envelope and plain array
-    if (Array.isArray(body)) return body
-    if (body && Array.isArray(body.agents)) return body.agents
-    return [] as AgentRecord[]
+    const body = await res.json() as { agents?: Record<string, unknown>[] } | Record<string, unknown>[]
+    const raw = Array.isArray(body) ? body : (body?.agents ?? [])
+    return raw.map(normalizeAgent)
   }
 
   async heartbeat(beamId: BeamIdString): Promise<void> {
