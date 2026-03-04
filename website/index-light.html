@@ -18,14 +18,14 @@
     :root {
       --accent:      #F75C03;
       --accent-dim:  #c24802;
-      --bg:          #0a0a0f;
-      --bg-card:     #111118;
-      --bg-code:     #0d0d14;
-      --border:      #1e1e2e;
-      --border-glow: rgba(247, 92, 3, 0.3);
-      --text:        #e8e8f0;
-      --text-muted:  #7070a0;
-      --text-dim:    #4a4a70;
+      --bg:          #ffffff;
+      --bg-card:     #f5f5f8;
+      --bg-code:     #f0f0f5;
+      --border:      #e0e0e8;
+      --border-glow: rgba(247, 92, 3, 0.2);
+      --text:        #1a1a2e;
+      --text-muted:  #6060a0;
+      --text-dim:    #8080a0;
       --green:       #39d98a;
       --blue:        #4c9cf1;
       --purple:      #b06ef3;
@@ -50,7 +50,7 @@
     a:hover { text-decoration: underline; }
 
     .gradient-text {
-      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      background: linear-gradient(135deg, #1a1a2e 0%, var(--accent) 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -65,7 +65,7 @@
       position: fixed; top: 0; left: 0; right: 0; z-index: 100;
       padding: 16px 24px;
       display: flex; align-items: center; justify-content: space-between;
-      background: rgba(10, 10, 15, 0.8);
+      background: rgba(255, 255, 255, 0.9);
       backdrop-filter: blur(12px);
       border-bottom: 1px solid var(--border);
     }
@@ -894,11 +894,6 @@ $ beam send clara@coppen.beam.directory query '{"q":"status?"}'
 </footer>
 
 <script>
-  // ── Convex configuration (set by deploy script or inject at build time) ────
-  // Convex backend for waitlist
-  window.BEAM_CONVEX_URL = 'https://gregarious-mouse-785.eu-west-1.convex.site';
-</script>
-<script>
   // ── Code tabs ──────────────────────────────────────────────────────────────
   document.querySelectorAll('.code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -922,41 +917,18 @@ $ beam send clara@coppen.beam.directory query '{"q":"status?"}'
   document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
 
   // ── Waitlist form ──────────────────────────────────────────────────────────
-  // CONVEX_HTTP_URL is set at deploy time; falls back to localStorage in dev
-  const CONVEX_WAITLIST_URL = window.BEAM_CONVEX_URL
-    ? window.BEAM_CONVEX_URL + '/waitlist'
-    : null;
-
-  document.getElementById('waitlistForm').addEventListener('submit', async e => {
+  document.getElementById('waitlistForm').addEventListener('submit', e => {
     e.preventDefault();
     const email = document.getElementById('emailInput').value.trim();
     if (!email || !email.includes('@')) return;
 
-    const btn = e.target.querySelector('button[type="submit"]');
-    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+    // Store locally (would hit an API in production)
+    const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
+    if (!signups.includes(email)) signups.push(email);
+    localStorage.setItem('beam_waitlist', JSON.stringify(signups));
 
-    try {
-      if (CONVEX_WAITLIST_URL) {
-        const res = await fetch(CONVEX_WAITLIST_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, source: 'landing' }),
-        });
-        if (!res.ok) throw new Error('Server error');
-      } else {
-        // Dev fallback: store locally
-        const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
-        if (!signups.includes(email)) signups.push(email);
-        localStorage.setItem('beam_waitlist', JSON.stringify(signups));
-      }
-
-      document.getElementById('waitlistForm').style.display = 'none';
-      document.getElementById('successMsg').style.display = 'block';
-    } catch (err) {
-      console.error('Waitlist signup failed:', err);
-      if (btn) { btn.disabled = false; btn.textContent = 'Get Early Access'; }
-      alert('Something went wrong. Please try again.');
-    }
+    document.getElementById('waitlistForm').style.display = 'none';
+    document.getElementById('successMsg').style.display = 'block';
   });
 </script>
 </body>
