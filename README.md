@@ -1,14 +1,22 @@
+<h1 align="center">⚡ Beam Protocol</h1>
+
 <p align="center">
-  <h1 align="center">Beam Protocol</h1>
-  <p align="center"><strong>The open communication protocol for AI agents.</strong></p>
-  <p align="center"><em>Das offene Kommunikationsprotokoll für KI-Agenten.</em></p>
+  <strong>The open communication protocol for AI agents.</strong><br/>
+  <em>Das offene Kommunikationsprotokoll für KI-Agenten.</em>
 </p>
 
 <p align="center">
+  <a href="https://beam.directory">🌐 beam.directory</a> ·
   <a href="./LICENSE">Apache-2.0</a> ·
   <a href="./spec/RFC-0001.md">RFC 0001</a> ·
   <a href="./VISION.md">Vision</a> ·
   <a href="#quick-start">Quick Start</a>
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha" />
+  <img src="https://img.shields.io/github/license/Beam-directory/beam-protocol" alt="License" />
+  <img src="https://img.shields.io/badge/tests-57%20passing-brightgreen" alt="Tests" />
 </p>
 
 ---
@@ -44,7 +52,11 @@ MCP solves Agent ↔ Tool. **Beam solves Agent ↔ Agent.**
 ### Install
 
 ```bash
+# TypeScript
 npm install @beam-protocol/sdk
+
+# Python
+pip install beam-directory
 ```
 
 ### Create an Agent Identity
@@ -145,10 +157,12 @@ client.on('query.status', (frame, respond) => {
 
 ## Packages
 
-| Package | Description | Path |
-|---|---|---|
-| `@beam-protocol/sdk` | TypeScript SDK — BeamClient, BeamIdentity, BeamDirectory, Frames | `packages/sdk-typescript/` |
-| `@beam-protocol/directory` | Reference Directory Server — Hono + SQLite | `packages/directory/` |
+| Package | Description | Path | Tests |
+|---|---|---|---|
+| `@beam-protocol/sdk` | TypeScript SDK — BeamClient, BeamIdentity, BeamDirectory, Frames | `packages/sdk-typescript/` | 17/17 ✅ |
+| `beam-directory` | Python SDK — BeamClient, BeamIdentity, frames, crypto | `packages/sdk-python/` | 40/40 ✅ |
+| `@beam-protocol/directory` | Reference Directory Server — Hono + SQLite | `packages/directory/` | — |
+| `beam-cli` | CLI Tool — register, send, lookup, search | `packages/cli/` | — |
 
 ---
 
@@ -202,12 +216,16 @@ It covers:
 ## Roadmap
 
 - [x] RFC 0.1 Specification
-- [x] TypeScript SDK
+- [x] TypeScript SDK (17/17 tests ✅)
+- [x] Python SDK (40/40 tests ✅)
 - [x] Reference Directory Server
-- [ ] WebSocket Intent Routing (live)
-- [ ] Python SDK
-- [ ] CLI Tool (`beam register`, `beam send`, `beam lookup`)
+- [x] CLI Tool (`beam register`, `beam send`, `beam lookup`)
+- [x] Landing Page — [beam.directory](https://beam.directory)
+- [x] End-to-End verified (Register → Search → Intent → Result)
 - [ ] npm publish `@beam-protocol/sdk`
+- [ ] pip publish `beam-directory`
+- [ ] Hosted Directory Server
+- [ ] Dogfood: Internal agent-to-agent communication
 - [ ] Federated Directory Protocol
 - [ ] Developer Documentation Site
 
@@ -218,7 +236,7 @@ It covers:
 Beam Protocol is open source under Apache-2.0. Contributions welcome.
 
 1. Read the [RFC](./spec/RFC-0001.md)
-2. Check [open issues](https://github.com/beam-directory/beam/issues)
+2. Check [open issues](https://github.com/Beam-directory/beam-protocol/issues)
 3. Submit a PR
 
 ---
