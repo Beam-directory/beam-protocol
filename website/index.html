@@ -606,6 +606,7 @@
   <ul class="nav-links">
     <li><a href="#pillars">How it works</a></li>
     <li><a href="#live">Live Results</a></li>
+    <li><a href="#security">Security</a></li>
     <li><a href="#compare">Compare</a></li>
     <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
     <li><a href="#waitlist" class="nav-cta">Get Early Access</a></li>
@@ -701,7 +702,7 @@
         <p>Agents communicate via tiny, signed JSON frames. Under 1 KB, routed in milliseconds, with built-in replay protection.</p>
         <div class="pillar-detail">
           intent: "<span>payment.status_check</span>"<br/>
-          params: { invoiceId: "INV-2847" }<br/>
+          payload: { invoiceId: "INV-2847" }<br/>
           signature: Ed25519
         </div>
       </div>
@@ -755,6 +756,40 @@
         v0.2 built by <strong>OpenAI Codex</strong> in 5 minutes — auto-reconnect, health endpoints, intent catalog, HTTP fallback API.<br/>
         Running on <strong>Mac Studio M3 Ultra</strong> + <strong>Mac Mini M4</strong> on a local network.
       </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Security ───────────────────────────────────────────── -->
+<section id="security" style="padding: 80px 0;">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Security First</span>
+      <h2>Built-in protection against prompt injection</h2>
+      <p>Every frame is signed, validated, and rate-limited before it reaches an agent. No unsigned message ever gets through.</p>
+    </div>
+
+    <div class="pillars-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
+      <div class="pillar-card fade-up" style="padding: 28px;">
+        <div style="font-size: 28px; margin-bottom: 12px;">🔐</div>
+        <h3 style="font-size: 16px; margin-bottom: 8px;">Ed25519 Signatures</h3>
+        <p style="font-size: 14px; line-height: 1.5;">Every intent frame is cryptographically signed. The directory verifies the signature against the sender's registered public key. Tampered frames are rejected.</p>
+      </div>
+      <div class="pillar-card fade-up" style="padding: 28px;">
+        <div style="font-size: 28px; margin-bottom: 12px;">🛡️</div>
+        <h3 style="font-size: 16px; margin-bottom: 8px;">Intent ACL</h3>
+        <p style="font-size: 14px; line-height: 1.5;">Deny-by-default access control. Agents can only receive intents from explicitly authorized senders. Auto-seeded from the intent catalog.</p>
+      </div>
+      <div class="pillar-card fade-up" style="padding: 28px;">
+        <div style="font-size: 28px; margin-bottom: 12px;">📋</div>
+        <h3 style="font-size: 16px; margin-bottom: 8px;">Schema Validation</h3>
+        <p style="font-size: 14px; line-height: 1.5;">Every payload is validated against its JSON Schema before relay. Unknown intent types and malformed data are blocked at the directory level.</p>
+      </div>
+      <div class="pillar-card fade-up" style="padding: 28px;">
+        <div style="font-size: 28px; margin-bottom: 12px;">⏱️</div>
+        <h3 style="font-size: 16px; margin-bottom: 8px;">Rate Limit & Replay Protection</h3>
+        <p style="font-size: 14px; line-height: 1.5;">60 intents/min per agent. Unique nonces prevent replay attacks. Timestamps older than 5 minutes are rejected.</p>
+      </div>
     </div>
   </div>
 </section>
@@ -824,7 +859,7 @@ client = <span class="fn">BeamClient</span>(
 result = <span class="kw">await</span> client.<span class="fn">send</span>(
     to=<span class="str">"clara@coppen.beam.directory"</span>,
     intent=<span class="str">"payment.status_check"</span>,
-    params={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
+    payload={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
 )
 <span class="fn">print</span>(result.payload)
 <span class="cm"># → {"status": "paid", "amount": 2185.00}</span></pre>
