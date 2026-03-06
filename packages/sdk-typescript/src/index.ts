@@ -4,6 +4,7 @@ export { BeamClient } from './client.js'
 export {
   createIntentFrame,
   createResultFrame,
+  signFrame,
   validateIntentFrame,
   validateResultFrame,
   canonicalizeFrame,

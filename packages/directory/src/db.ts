@@ -33,6 +33,19 @@ function initSchema(db: DB): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_nonces_expires ON nonces(expires_at);
+
+    CREATE TABLE IF NOT EXISTS intent_acls (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_beam_id TEXT NOT NULL,
+      intent_type TEXT NOT NULL,
+      allowed_from TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (target_beam_id) REFERENCES agents(beam_id),
+      UNIQUE(target_beam_id, intent_type, allowed_from)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_intent_acls_target_intent
+      ON intent_acls(target_beam_id, intent_type);
   `)
 }
 

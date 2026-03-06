@@ -17,7 +17,7 @@ export interface IntentFrame {
   intent: string
   from: BeamIdString
   to: BeamIdString
-  params: Record<string, unknown>
+  payload: Record<string, unknown>
   nonce: string      // UUID v4
   timestamp: string  // ISO 8601
   signature?: string // Ed25519 base64, set after signing

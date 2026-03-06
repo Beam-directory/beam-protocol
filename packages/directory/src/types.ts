@@ -18,10 +18,18 @@ export interface IntentFrame {
   intent: string
   from: string
   to: string
-  params: Record<string, unknown>
+  payload: Record<string, unknown>
   nonce: string
   timestamp: string
   signature?: string
+}
+
+export interface IntentAclRow {
+  id: number
+  target_beam_id: string
+  intent_type: string
+  allowed_from: string
+  created_at: string
 }
 
 export interface ResultFrame {
