@@ -4,23 +4,22 @@ import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
 import { getAgent, updateLastSeen } from './db.js'
 
-// ---------------------------------------------------------------------------
-// Connection registry
-// ---------------------------------------------------------------------------
-
-// Maps beamId -> active WebSocket connection
 const connections = new Map<string, WebSocket>()
 
-// Maps nonce -> pending result waiter
 const pendingResults = new Map<string, {
   resolve: (frame: ResultFrame) => void
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
 }>()
 
-// ---------------------------------------------------------------------------
-// Public API
-// ---------------------------------------------------------------------------
+export class RelayError extends Error {
+  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT'
+
+  constructor(code: RelayError['code'], message: string) {
+    super(message)
+    this.code = code
+  }
+}
 
 export function createWebSocketServer(db: Database): WebSocketServer {
   const wss = new WebSocketServer({ noServer: true })
@@ -35,14 +34,12 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       return
     }
 
-    // Verify agent is registered before allowing connection
     const agent = getAgent(db, beamId)
     if (!agent) {
       ws.close(1008, `Agent ${beamId} is not registered`)
       return
     }
 
-    // Close any existing connection for this beamId
     const existingWs = connections.get(beamId)
     if (existingWs && existingWs.readyState === WebSocket.OPEN) {
       existingWs.close(1001, 'Replaced by new connection')
@@ -51,7 +48,6 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     connections.set(beamId, ws)
     updateLastSeen(db, beamId)
 
-    // Notify client of successful connection
     sendJson(ws, { type: 'connected', beamId })
 
     ws.on('message', (data: Buffer) => {
@@ -59,7 +55,6 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     })
 
     ws.on('close', () => {
-      // Only remove from registry if this is still the active connection
       if (connections.get(beamId) === ws) {
         connections.delete(beamId)
       }
@@ -80,9 +75,63 @@ export function getConnectedCount(): number {
   return connections.size
 }
 
-// ---------------------------------------------------------------------------
-// Message handling
-// ---------------------------------------------------------------------------
+export function isAgentConnected(beamId: string): boolean {
+  const ws = connections.get(beamId)
+  return Boolean(ws && ws.readyState === WebSocket.OPEN)
+}
+
+export function getConnectedBeamIds(): string[] {
+  return Array.from(connections.entries())
+    .filter(([, ws]) => ws.readyState === WebSocket.OPEN)
+    .map(([beamId]) => beamId)
+}
+
+export async function relayIntentFromHttp(db: Database, frame: IntentFrame, timeoutMs = 60_000): Promise<ResultFrame> {
+  if (!frame || typeof frame !== 'object') {
+    throw new RelayError('BAD_REQUEST', 'Invalid intent frame body')
+  }
+  if (typeof frame.from !== 'string' || typeof frame.to !== 'string' || typeof frame.intent !== 'string') {
+    throw new RelayError('BAD_REQUEST', 'from, to and intent are required')
+  }
+  if (!frame.params || typeof frame.params !== 'object' || Array.isArray(frame.params)) {
+    throw new RelayError('BAD_REQUEST', 'params must be an object')
+  }
+  if (typeof frame.nonce !== 'string' || frame.nonce.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'nonce is required')
+  }
+  if (typeof frame.timestamp !== 'string' || frame.timestamp.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'timestamp is required')
+  }
+  if (typeof frame.signature !== 'string' || frame.signature.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'signature is required')
+  }
+
+  const sender = getAgent(db, frame.from)
+  if (!sender) {
+    throw new RelayError('BAD_REQUEST', `Sender ${frame.from} is not registered`)
+  }
+
+  const recipientWs = connections.get(frame.to)
+  if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    throw new RelayError('OFFLINE', `Agent ${frame.to} is not currently connected`)
+  }
+
+  const resultPromise = createResultWaiter(frame.nonce, timeoutMs)
+
+  try {
+    sendJson(recipientWs, {
+      type: 'intent',
+      frame,
+      senderPublicKey: sender.public_key,
+    })
+  } catch (err) {
+    clearPendingResult(frame.nonce)
+    throw new RelayError('DELIVERY_FAILED', err instanceof Error ? err.message : 'Failed to relay intent')
+  }
+
+  updateLastSeen(db, frame.from)
+  return resultPromise
+}
 
 async function handleMessage(
   db: Database,
@@ -119,7 +168,6 @@ async function handleIntent(
   senderWs: WebSocket,
   frame: IntentFrame
 ): Promise<void> {
-  // Basic frame validation
   if (!frame || typeof frame.nonce !== 'string' || typeof frame.to !== 'string') {
     sendJson(senderWs, {
       type: 'error',
@@ -128,7 +176,6 @@ async function handleIntent(
     return
   }
 
-  // Ensure the sender matches the claimed 'from' field
   if (frame.from !== senderBeamId) {
     sendJson(senderWs, {
       type: 'error',
@@ -138,7 +185,6 @@ async function handleIntent(
     return
   }
 
-  // Look up sender's public key so the recipient can verify the signature
   const senderAgent = getAgent(db, senderBeamId)
   if (!senderAgent) {
     sendJson(senderWs, {
@@ -159,27 +205,16 @@ async function handleIntent(
     return
   }
 
-  // Set up result waiter with 30s timeout
-  const resultPromise = new Promise<ResultFrame>((resolve, reject) => {
-    const timeout = setTimeout(() => {
-      pendingResults.delete(frame.nonce)
-      reject(new Error('Intent timed out waiting for result (30s)'))
-    }, 30_000)
+  const resultPromise = createResultWaiter(frame.nonce, 30_000)
 
-    pendingResults.set(frame.nonce, { resolve, reject, timeout })
-  })
-
-  // Deliver the intent to the recipient, including sender's public key
   sendJson(recipientWs, {
     type: 'intent',
     frame,
     senderPublicKey: senderAgent.public_key,
   })
 
-  // Update sender's last seen on activity
   updateLastSeen(db, senderBeamId)
 
-  // Await result and forward back to sender
   try {
     const result = await resultPromise
     sendJson(senderWs, { type: 'result', frame: result })
@@ -191,22 +226,40 @@ async function handleIntent(
 
 function handleResult(frame: ResultFrame): void {
   if (!frame || typeof frame.nonce !== 'string') {
-    // Cannot identify which waiter to resolve — drop silently
     return
   }
 
   const pending = pendingResults.get(frame.nonce)
-  if (pending) {
-    clearTimeout(pending.timeout)
-    pendingResults.delete(frame.nonce)
-    pending.resolve(frame)
+  if (!pending) {
+    return
   }
-  // If no pending waiter, result is a late reply — ignore
+
+  clearTimeout(pending.timeout)
+  pendingResults.delete(frame.nonce)
+  pending.resolve(frame)
 }
 
-// ---------------------------------------------------------------------------
-// Utility
-// ---------------------------------------------------------------------------
+function createResultWaiter(nonce: string, timeoutMs: number): Promise<ResultFrame> {
+  if (pendingResults.has(nonce)) {
+    clearPendingResult(nonce)
+  }
+
+  return new Promise<ResultFrame>((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      pendingResults.delete(nonce)
+      reject(new RelayError('TIMEOUT', `Intent timed out waiting for result (${timeoutMs}ms)`))
+    }, timeoutMs)
+
+    pendingResults.set(nonce, { resolve, reject, timeout })
+  })
+}
+
+function clearPendingResult(nonce: string): void {
+  const pending = pendingResults.get(nonce)
+  if (!pending) return
+  clearTimeout(pending.timeout)
+  pendingResults.delete(nonce)
+}
 
 function sendJson(ws: WebSocket, payload: object): void {
   if (ws.readyState === WebSocket.OPEN) {
