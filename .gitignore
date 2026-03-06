@@ -65,3 +65,15 @@ packages/dashboard/convex/_generated/
 
 # Convex deployment config (auto-created by `convex dev`)
 packages/dashboard/.env.local
+
+# Internal deployment docs (not for public)
+V02-BRIEF.md
+X-POST-DRAFT.md
+DEMO-RESULTS.md
+
+# SQLite WAL/SHM files
+*.db-shm
+*.db-wal
+
+# Generated announcement images
+beam-*-announcement.png
