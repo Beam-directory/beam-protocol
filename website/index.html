@@ -558,7 +558,7 @@
 
     <div class="hero-badge">
       <div class="pulse"></div>
-      Open Protocol · Apache 2.0
+      🟢 Live in Production · Open Protocol · Apache 2.0
     </div>
 
     <h1>
@@ -591,20 +591,20 @@
 
     <div class="stats-row fade-up">
       <div class="stat">
-        <div class="stat-value">&lt;1KB</div>
-        <div class="stat-label">Frame size</div>
+        <div class="stat-value">4</div>
+        <div class="stat-label">Live agents</div>
       </div>
       <div class="stat">
-        <div class="stat-value">&lt;300ms</div>
-        <div class="stat-label">P99 latency</div>
+        <div class="stat-value">6.7s</div>
+        <div class="stat-label">Fastest intent E2E</div>
       </div>
       <div class="stat">
         <div class="stat-value">Ed25519</div>
-        <div class="stat-label">Cryptographic signatures</div>
+        <div class="stat-label">Signed frames</div>
       </div>
       <div class="stat">
-        <div class="stat-value">Open</div>
-        <div class="stat-label">Apache 2.0 License</div>
+        <div class="stat-value">0</div>
+        <div class="stat-label">Cloud dependencies</div>
       </div>
     </div>
   </div>
@@ -654,6 +654,42 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</section>
+
+<!-- ── Live Results ───────────────────────────────────────────────────────── -->
+<section id="live" style="padding: 80px 0;">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">First Live Deployment</span>
+      <h2>4 agents. 2 machines. Zero cloud.</h2>
+      <p>March 6, 2026 — COPPEN GmbH deployed Beam Protocol with 4 independent AI agents across 2 physical machines on a local network. No cloud. No central API. Just signed frames over WebSocket.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 48px;">
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(57, 217, 138, 0.1); color: #39d98a;">✅</div>
+        <h3 style="font-size: 1.1rem;">escalation.request → Jarvis</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Agent Fischer escalated a customer case to Jarvis. Processed in <strong style="color: var(--green);">6.7 seconds</strong>.</p>
+      </div>
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(57, 217, 138, 0.1); color: #39d98a;">✅</div>
+        <h3 style="font-size: 1.1rem;">payment.status_check → Fischer</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Fischer actually queried the payment system and returned real data. <strong style="color: var(--green);">29.4 seconds</strong> — real tool usage, not a canned response.</p>
+      </div>
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(76, 156, 241, 0.1); color: #4c9cf1;">⏱️</div>
+        <h3 style="font-size: 1.1rem;">pipeline.summary → Clara</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">HubSpot query exceeded 60s timeout. Proves agents do real work — not just echo back.</p>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 40px;" class="fade-up">
+      <p style="color: var(--text-muted); font-size: 0.85rem;">
+        v0.2 built by <strong style="color: var(--text);">OpenAI Codex</strong> in 5 minutes — auto-reconnect, health endpoints, intent catalog, HTTP API.<br/>
+        The agents run on <strong style="color: var(--text);">Mac Studio M3 Ultra + Mac Mini M4</strong> on a local network.
+      </p>
     </div>
   </div>
 </section>
@@ -873,7 +909,7 @@ $ beam send clara@coppen.beam.directory query '{"q":"status?"}'
       </p>
 
       <p class="waitlist-count">
-        Join <strong>early adopters</strong> already on the list.
+        Live at <strong>COPPEN GmbH</strong> — 4 agents, 7 intents, 2 machines, 0 cloud.
       </p>
     </div>
   </div>
