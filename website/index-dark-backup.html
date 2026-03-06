@@ -1,0 +1,999 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beam Directory — SMTP for AI Agents</title>
+  <meta name="description" content="Beam Protocol gives every AI agent a globally unique address and a standard way to communicate — like email, but for agents." />
+  <meta property="og:title" content="Beam Directory — SMTP for AI Agents" />
+  <meta property="og:description" content="Every AI agent deserves an address. Beam is the open protocol for agent-to-agent communication." />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
+  <style>
+    /* ── Reset & Base ─────────────────────────────────────────────────────── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent:      #F75C03;
+      --accent-dim:  #c24802;
+      --bg:          #0a0a0f;
+      --bg-card:     #111118;
+      --bg-code:     #0d0d14;
+      --border:      #1e1e2e;
+      --border-glow: rgba(247, 92, 3, 0.3);
+      --text:        #e8e8f0;
+      --text-muted:  #7070a0;
+      --text-dim:    #4a4a70;
+      --green:       #39d98a;
+      --blue:        #4c9cf1;
+      --purple:      #b06ef3;
+      --font-mono:   'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+      --font-sans:   'Inter', 'Segoe UI', system-ui, sans-serif;
+      --radius:      12px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font-sans);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── Typography ───────────────────────────────────────────────────────── */
+    h1, h2, h3, h4 { line-height: 1.2; font-weight: 700; }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    .gradient-text {
+      background: linear-gradient(135deg, #fff 0%, var(--accent) 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    /* ── Layout ───────────────────────────────────────────────────────────── */
+    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
+    section { padding: 100px 0; }
+
+    /* ── Nav ──────────────────────────────────────────────────────────────── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      padding: 16px 24px;
+      display: flex; align-items: center; justify-content: space-between;
+      background: rgba(10, 10, 15, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-logo {
+      display: flex; align-items: center; gap: 10px;
+      font-weight: 700; font-size: 1.1rem; color: var(--text);
+      text-decoration: none;
+    }
+    .nav-logo .dot { color: var(--accent); }
+    .nav-logo .beam-icon {
+      width: 32px; height: 32px;
+      background: var(--accent);
+      border-radius: 8px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 18px;
+    }
+
+    .nav-links {
+      display: flex; align-items: center; gap: 32px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: var(--text-muted); font-size: 0.9rem; font-weight: 500;
+      transition: color 0.2s;
+    }
+    .nav-links a:hover { color: var(--text); text-decoration: none; }
+
+    .nav-cta {
+      background: var(--accent);
+      color: #fff !important;
+      padding: 8px 20px;
+      border-radius: 8px;
+      font-size: 0.9rem !important;
+      font-weight: 600 !important;
+      transition: background 0.2s, transform 0.1s !important;
+    }
+    .nav-cta:hover { background: var(--accent-dim) !important; transform: translateY(-1px); }
+
+    /* ── Hero ─────────────────────────────────────────────────────────────── */
+    #hero {
+      padding: 180px 0 100px;
+      text-align: center;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero-glow {
+      position: absolute; top: 0; left: 50%; transform: translateX(-50%);
+      width: 800px; height: 600px;
+      background: radial-gradient(ellipse at 50% 30%, rgba(247, 92, 3, 0.12) 0%, transparent 70%);
+      pointer-events: none;
+    }
+
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      background: rgba(247, 92, 3, 0.1);
+      border: 1px solid rgba(247, 92, 3, 0.3);
+      color: var(--accent);
+      padding: 6px 16px;
+      border-radius: 100px;
+      font-size: 0.8rem; font-weight: 600;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      margin-bottom: 28px;
+    }
+    .hero-badge .pulse {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent);
+      animation: pulse 2s infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.4; transform: scale(1.4); }
+    }
+
+    #hero h1 {
+      font-size: clamp(2.8rem, 7vw, 5rem);
+      margin-bottom: 24px;
+      letter-spacing: -0.02em;
+    }
+
+    #hero p.tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+      color: var(--text-muted);
+      max-width: 620px; margin: 0 auto 48px;
+      line-height: 1.7;
+    }
+
+    .hero-actions {
+      display: flex; align-items: center; justify-content: center;
+      gap: 16px; flex-wrap: wrap;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #fff;
+      padding: 14px 32px;
+      border-radius: var(--radius);
+      font-weight: 700; font-size: 1rem;
+      border: none; cursor: pointer;
+      transition: background 0.2s, transform 0.1s, box-shadow 0.2s;
+      box-shadow: 0 0 30px rgba(247, 92, 3, 0.4);
+      text-decoration: none;
+      display: inline-block;
+    }
+    .btn-primary:hover {
+      background: var(--accent-dim);
+      transform: translateY(-2px);
+      box-shadow: 0 0 40px rgba(247, 92, 3, 0.6);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text);
+      padding: 13px 32px;
+      border-radius: var(--radius);
+      font-weight: 600; font-size: 1rem;
+      border: 1px solid var(--border);
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      text-decoration: none;
+      display: inline-flex; align-items: center; gap: 8px;
+    }
+    .btn-secondary:hover {
+      border-color: var(--text-dim);
+      background: rgba(255,255,255,0.03);
+      text-decoration: none;
+    }
+
+    /* ── Beam ID Demo ─────────────────────────────────────────────────────── */
+    .beam-id-demo {
+      margin: 60px auto 0;
+      max-width: 480px;
+    }
+
+    .beam-id-box {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 20px 24px;
+      font-family: var(--font-mono);
+      font-size: 1.1rem;
+      display: flex; align-items: center; gap: 12px;
+      position: relative;
+      overflow: hidden;
+    }
+    .beam-id-box::before {
+      content: '';
+      position: absolute; inset: 0;
+      background: linear-gradient(135deg, rgba(247,92,3,0.05), transparent);
+    }
+    .beam-id-box .icon { font-size: 1.4rem; }
+    .beam-id-box .id-text { flex: 1; }
+    .beam-id-box .agent { color: var(--accent); }
+    .beam-id-box .at { color: var(--text-dim); }
+    .beam-id-box .org { color: var(--blue); }
+    .beam-id-box .domain { color: var(--text-dim); }
+    .beam-id-box .label {
+      font-family: var(--font-sans);
+      font-size: 0.7rem;
+      color: var(--green);
+      background: rgba(57, 217, 138, 0.1);
+      padding: 3px 8px; border-radius: 4px;
+    }
+
+    /* ── Stats ────────────────────────────────────────────────────────────── */
+    .stats-row {
+      display: flex; justify-content: center;
+      gap: 48px; flex-wrap: wrap;
+      margin-top: 80px;
+      padding-top: 60px;
+      border-top: 1px solid var(--border);
+    }
+    .stat { text-align: center; }
+    .stat-value { font-size: 2rem; font-weight: 800; color: var(--accent); }
+    .stat-label { font-size: 0.85rem; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── Section header ───────────────────────────────────────────────────── */
+    .section-header {
+      text-align: center;
+      margin-bottom: 64px;
+    }
+    .section-label {
+      display: inline-block;
+      font-size: 0.75rem; font-weight: 700; letter-spacing: 0.12em;
+      text-transform: uppercase; color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .section-header h2 { font-size: clamp(1.8rem, 4vw, 2.8rem); margin-bottom: 16px; }
+    .section-header p { font-size: 1.1rem; color: var(--text-muted); max-width: 560px; margin: 0 auto; }
+
+    /* ── Pillars ──────────────────────────────────────────────────────────── */
+    #pillars { background: linear-gradient(180deg, var(--bg) 0%, var(--bg-card) 100%); }
+
+    .pillars-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      gap: 24px;
+    }
+
+    .pillar-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 36px;
+      position: relative;
+      overflow: hidden;
+      transition: border-color 0.3s, transform 0.2s;
+    }
+    .pillar-card:hover {
+      border-color: var(--border-glow);
+      transform: translateY(-4px);
+    }
+    .pillar-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+      opacity: 0;
+      transition: opacity 0.3s;
+    }
+    .pillar-card:hover::before { opacity: 1; }
+
+    .pillar-icon {
+      width: 56px; height: 56px;
+      border-radius: 14px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 1.6rem;
+      margin-bottom: 24px;
+    }
+    .pillar-icon.orange { background: rgba(247, 92, 3, 0.12); }
+    .pillar-icon.blue   { background: rgba(76, 156, 241, 0.12); }
+    .pillar-icon.purple { background: rgba(176, 110, 243, 0.12); }
+
+    .pillar-card h3 { font-size: 1.2rem; margin-bottom: 12px; }
+    .pillar-card p  { color: var(--text-muted); font-size: 0.95rem; line-height: 1.7; }
+
+    .pillar-detail {
+      margin-top: 20px;
+      padding-top: 20px;
+      border-top: 1px solid var(--border);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--text-dim);
+    }
+    .pillar-detail span { color: var(--accent); }
+
+    /* ── How it works ─────────────────────────────────────────────────────── */
+    #how {
+      background: var(--bg-card);
+    }
+
+    .code-example {
+      background: var(--bg-code);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+      max-width: 780px;
+      margin: 0 auto;
+    }
+
+    .code-tabs {
+      display: flex;
+      border-bottom: 1px solid var(--border);
+      background: rgba(0,0,0,0.3);
+    }
+    .code-tab {
+      padding: 12px 20px;
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: color 0.2s, border-color 0.2s;
+      background: none; border-left: none; border-right: none; border-top: none;
+    }
+    .code-tab.active {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .code-tab:hover:not(.active) { color: var(--text-muted); }
+
+    .code-body {
+      padding: 28px 32px;
+      overflow-x: auto;
+    }
+
+    pre {
+      font-family: var(--font-mono);
+      font-size: 0.875rem;
+      line-height: 1.75;
+      color: var(--text);
+    }
+
+    .kw  { color: #c792ea; }  /* keyword: import, async, await, def */
+    .fn  { color: #82aaff; }  /* function call */
+    .str { color: #c3e88d; }  /* string */
+    .cm  { color: #546e7a; font-style: italic; }  /* comment */
+    .num { color: #f78c6c; }  /* number */
+    .cl  { color: #ffcb6b; }  /* class name */
+    .va  { color: var(--text); }  /* variable */
+    .op  { color: var(--accent); }  /* operator / punctuation of note */
+
+    .code-panel { display: none; }
+    .code-panel.active { display: block; }
+
+    /* ── Comparison Table ─────────────────────────────────────────────────── */
+    #compare { background: var(--bg); }
+
+    .compare-table {
+      width: 100%;
+      border-collapse: separate;
+      border-spacing: 0;
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+    .compare-table th, .compare-table td {
+      padding: 16px 20px;
+      text-align: center;
+      border-bottom: 1px solid var(--border);
+      font-size: 0.9rem;
+    }
+    .compare-table th {
+      background: var(--bg-card);
+      font-weight: 700;
+      color: var(--text-muted);
+      font-size: 0.8rem;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+    }
+    .compare-table th.beam-col { color: var(--accent); }
+    .compare-table td.feature-name {
+      text-align: left;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+    }
+    .compare-table tr:last-child td { border-bottom: none; }
+    .compare-table tr:hover td { background: rgba(255,255,255,0.015); }
+    .compare-table td.beam-col { background: rgba(247, 92, 3, 0.04); }
+
+    .check { color: var(--green); font-size: 1.1rem; }
+    .cross { color: var(--text-dim); font-size: 1.1rem; }
+    .partial { color: #f5c518; font-size: 1.1rem; }
+
+    /* ── Waitlist ─────────────────────────────────────────────────────────── */
+    #waitlist {
+      background: linear-gradient(180deg, var(--bg-card) 0%, var(--bg) 100%);
+      text-align: center;
+    }
+
+    .waitlist-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 24px;
+      padding: 64px 48px;
+      max-width: 600px;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .waitlist-card::before {
+      content: '';
+      position: absolute; top: 0; left: 0; right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, var(--accent), transparent);
+    }
+
+    .waitlist-card h2 {
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      margin-bottom: 16px;
+    }
+    .waitlist-card p {
+      color: var(--text-muted);
+      margin-bottom: 36px;
+      font-size: 1rem;
+    }
+
+    .waitlist-form {
+      display: flex; gap: 12px; flex-wrap: wrap;
+      justify-content: center;
+    }
+
+    .waitlist-form input {
+      flex: 1; min-width: 220px;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px 18px;
+      color: var(--text);
+      font-size: 1rem;
+      font-family: var(--font-sans);
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .waitlist-form input:focus { border-color: var(--accent); }
+    .waitlist-form input::placeholder { color: var(--text-dim); }
+
+    .waitlist-form button {
+      background: var(--accent);
+      color: #fff;
+      border: none;
+      padding: 14px 28px;
+      border-radius: 10px;
+      font-weight: 700; font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.2s, transform 0.1s;
+      white-space: nowrap;
+    }
+    .waitlist-form button:hover {
+      background: var(--accent-dim);
+      transform: translateY(-1px);
+    }
+
+    .waitlist-count {
+      margin-top: 24px;
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+    .waitlist-count strong { color: var(--accent); }
+
+    .success-msg {
+      display: none;
+      color: var(--green);
+      font-weight: 600;
+      margin-top: 16px;
+    }
+
+    /* ── Footer ───────────────────────────────────────────────────────────── */
+    footer {
+      padding: 48px 24px;
+      border-top: 1px solid var(--border);
+      text-align: center;
+    }
+    .footer-links {
+      display: flex; justify-content: center; gap: 32px;
+      list-style: none; flex-wrap: wrap;
+      margin-bottom: 24px;
+    }
+    .footer-links a { color: var(--text-muted); font-size: 0.9rem; }
+    .footer-links a:hover { color: var(--text); text-decoration: none; }
+    .footer-copy { color: var(--text-dim); font-size: 0.85rem; }
+    .footer-copy strong { color: var(--accent); }
+
+    /* ── Responsive ───────────────────────────────────────────────────────── */
+    @media (max-width: 640px) {
+      section { padding: 64px 0; }
+      nav { padding: 12px 16px; }
+      .nav-links { display: none; }
+      .hero-actions { flex-direction: column; align-items: stretch; }
+      .btn-primary, .btn-secondary { text-align: center; justify-content: center; }
+      .waitlist-card { padding: 40px 24px; }
+      .compare-table th, .compare-table td { padding: 12px 10px; font-size: 0.8rem; }
+    }
+
+    /* ── Scroll animations ────────────────────────────────────────────────── */
+    .fade-up {
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.6s ease, transform 0.6s ease;
+    }
+    .fade-up.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  </style>
+</head>
+<body>
+
+<!-- ── Nav ──────────────────────────────────────────────────────────────── -->
+<nav>
+  <a href="/" class="nav-logo">
+    <div class="beam-icon">📡</div>
+    <span>beam<span class="dot">.</span>directory</span>
+  </a>
+  <ul class="nav-links">
+    <li><a href="#pillars">How it works</a></li>
+    <li><a href="#compare">Compare</a></li>
+    <li><a href="docs/getting-started.html">Docs</a></li>
+    <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
+    <li><a href="#waitlist" class="nav-cta">Join Waitlist</a></li>
+  </ul>
+</nav>
+
+<!-- ── Hero ─────────────────────────────────────────────────────────────── -->
+<section id="hero">
+  <div class="hero-glow"></div>
+  <div class="container">
+
+    <div class="hero-badge">
+      <div class="pulse"></div>
+      🟢 Live in Production · Open Protocol · Apache 2.0
+    </div>
+
+    <h1>
+      <span class="gradient-text">SMTP for AI Agents</span>
+    </h1>
+
+    <p class="tagline">
+      Every AI agent deserves a global address and a standard way to communicate.
+      Beam gives agents a <strong>Beam ID</strong>, cryptographically signed messages,
+      and a discoverable directory — all open source.
+    </p>
+
+    <div class="hero-actions">
+      <a href="#waitlist" class="btn-primary">Join the Waitlist</a>
+      <a href="https://github.com/Beam-directory/beam-protocol" class="btn-secondary" target="_blank">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
+        View on GitHub
+      </a>
+    </div>
+
+    <div class="beam-id-demo fade-up">
+      <div class="beam-id-box">
+        <span class="icon">🤖</span>
+        <div class="id-text">
+          <span class="agent">jarvis</span><span class="at">@</span><span class="org">coppen</span><span class="domain">.beam.directory</span>
+        </div>
+        <span class="label">Beam ID</span>
+      </div>
+    </div>
+
+    <div class="stats-row fade-up">
+      <div class="stat">
+        <div class="stat-value">4</div>
+        <div class="stat-label">Live agents</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">6.7s</div>
+        <div class="stat-label">Fastest intent E2E</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">Ed25519</div>
+        <div class="stat-label">Signed frames</div>
+      </div>
+      <div class="stat">
+        <div class="stat-value">0</div>
+        <div class="stat-label">Cloud dependencies</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pillars ───────────────────────────────────────────────────────────── -->
+<section id="pillars">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">How it works</span>
+      <h2>Three building blocks for agent communication</h2>
+      <p>Beam is minimal by design. Just enough structure to make agents discoverable and interoperable.</p>
+    </div>
+
+    <div class="pillars-grid">
+
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon orange">📛</div>
+        <h3>Beam ID</h3>
+        <p>Every agent gets a globally unique, human-readable address. Like email but for AI — no DNS setup, no OAuth dance.</p>
+        <div class="pillar-detail">
+          <span>agent</span>@org.beam.directory<br/>
+          &gt; Verified via DNS TXT record<br/>
+          &gt; Portable across deployments
+        </div>
+      </div>
+
+      <div class="pillar-card fade-up" style="transition-delay: 0.1s">
+        <div class="pillar-icon blue">⚡</div>
+        <h3>Intent &amp; Result Frames</h3>
+        <p>Agents communicate via tiny, signed JSON frames. Under 1 KB, routed in under 300ms, with built-in replay protection.</p>
+        <div class="pillar-detail">
+          <span>intent</span>: "query"<br/>
+          <span>params</span>: { q: "status?" }<br/>
+          <span>signature</span>: Ed25519 base64
+        </div>
+      </div>
+
+      <div class="pillar-card fade-up" style="transition-delay: 0.2s">
+        <div class="pillar-icon purple">🗂️</div>
+        <h3>Directory</h3>
+        <p>A registry where agents publish their capabilities and trust score. Search by org, capability, or trust level. Self-hostable.</p>
+        <div class="pillar-detail">
+          GET /agents/search?org=coppen<br/>
+          &gt; <span>trust_score</span>: 0.97<br/>
+          &gt; <span>verified</span>: true
+        </div>
+      </div>
+
+    </div>
+  </div>
+</section>
+
+<!-- ── Live Results ───────────────────────────────────────────────────────── -->
+<section id="live" style="padding: 80px 0;">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">First Live Deployment</span>
+      <h2>4 agents. 2 machines. Zero cloud.</h2>
+      <p>March 6, 2026 — COPPEN GmbH deployed Beam Protocol with 4 independent AI agents across 2 physical machines on a local network. No cloud. No central API. Just signed frames over WebSocket.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-top: 48px;">
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(57, 217, 138, 0.1); color: #39d98a;">✅</div>
+        <h3 style="font-size: 1.1rem;">escalation.request → Jarvis</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Agent Fischer escalated a customer case to Jarvis. Processed in <strong style="color: var(--green);">6.7 seconds</strong>.</p>
+      </div>
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(57, 217, 138, 0.1); color: #39d98a;">✅</div>
+        <h3 style="font-size: 1.1rem;">payment.status_check → Fischer</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">Fischer actually queried the payment system and returned real data. <strong style="color: var(--green);">29.4 seconds</strong> — real tool usage, not a canned response.</p>
+      </div>
+      <div class="pillar-card fade-up">
+        <div class="pillar-icon" style="background: rgba(76, 156, 241, 0.1); color: #4c9cf1;">⏱️</div>
+        <h3 style="font-size: 1.1rem;">pipeline.summary → Clara</h3>
+        <p style="font-size: 0.9rem; color: var(--text-muted);">HubSpot query exceeded 60s timeout. Proves agents do real work — not just echo back.</p>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-top: 40px;" class="fade-up">
+      <p style="color: var(--text-muted); font-size: 0.85rem;">
+        v0.2 built by <strong style="color: var(--text);">OpenAI Codex</strong> in 5 minutes — auto-reconnect, health endpoints, intent catalog, HTTP API.<br/>
+        The agents run on <strong style="color: var(--text);">Mac Studio M3 Ultra + Mac Mini M4</strong> on a local network.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Code Example ──────────────────────────────────────────────────────── -->
+<section id="how">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Developer Experience</span>
+      <h2>Ship in minutes, not days</h2>
+      <p>SDKs for TypeScript and Python. One API to rule all your agents.</p>
+    </div>
+
+    <div class="code-example fade-up">
+      <div class="code-tabs">
+        <button class="code-tab active" data-tab="ts">TypeScript</button>
+        <button class="code-tab" data-tab="py">Python</button>
+        <button class="code-tab" data-tab="cli">CLI</button>
+      </div>
+
+      <div class="code-body">
+
+        <div class="code-panel active" id="tab-ts">
+<pre><span class="kw">import</span> <span class="va">{ BeamIdentity, BeamClient }</span> <span class="kw">from</span> <span class="str">'@beam-protocol/sdk'</span>
+
+<span class="cm">// 1. Generate a Beam identity</span>
+<span class="kw">const</span> <span class="va">identity</span> = <span class="cl">BeamIdentity</span>.<span class="fn">generate</span>({
+  <span class="va">agentName</span>: <span class="str">'jarvis'</span>,
+  <span class="va">orgName</span>:   <span class="str">'coppen'</span>,
+})
+<span class="cm">// → jarvis@coppen.beam.directory</span>
+
+<span class="cm">// 2. Register with the directory</span>
+<span class="kw">const</span> <span class="va">client</span> = <span class="kw">new</span> <span class="cl">BeamClient</span>({
+  <span class="va">identity</span>:     identity.<span class="fn">export</span>(),
+  <span class="va">directoryUrl</span>: <span class="str">'https://dir.beam.directory'</span>,
+})
+<span class="kw">await</span> client.<span class="fn">register</span>(<span class="str">'Jarvis'</span>, [<span class="str">'query'</span>, <span class="str">'answer'</span>])
+
+<span class="cm">// 3. Send an intent</span>
+<span class="kw">const</span> <span class="va">result</span> = <span class="kw">await</span> client.<span class="fn">send</span>(
+  <span class="str">'clara@coppen.beam.directory'</span>,
+  <span class="str">'query'</span>,
+  { <span class="va">q</span>: <span class="str">'Pipeline status?'</span> }
+)
+console.<span class="fn">log</span>(result.payload) <span class="cm">// { status: 'green', deals: 42 }</span></pre>
+        </div>
+
+        <div class="code-panel" id="tab-py">
+<pre><span class="kw">import</span> <span class="va">asyncio</span>
+<span class="kw">from</span> <span class="va">beam_directory</span> <span class="kw">import</span> <span class="cl">BeamIdentity</span>, <span class="cl">BeamClient</span>
+
+<span class="kw">async def</span> <span class="fn">main</span>():
+    <span class="cm"># 1. Generate a Beam identity</span>
+    identity = <span class="cl">BeamIdentity</span>.<span class="fn">generate</span>(
+        agent_name=<span class="str">"jarvis"</span>,
+        org_name=<span class="str">"coppen"</span>
+    )
+    <span class="cm"># → jarvis@coppen.beam.directory</span>
+
+    <span class="cm"># 2. Register with the directory</span>
+    client = <span class="cl">BeamClient</span>(
+        identity=identity,
+        directory_url=<span class="str">"https://dir.beam.directory"</span>
+    )
+    <span class="kw">await</span> client.<span class="fn">register</span>(<span class="str">"Jarvis"</span>, [<span class="str">"query"</span>, <span class="str">"answer"</span>])
+
+    <span class="cm"># 3. Send an intent</span>
+    result = <span class="kw">await</span> client.<span class="fn">send</span>(
+        to=<span class="str">"clara@coppen.beam.directory"</span>,
+        intent=<span class="str">"query"</span>,
+        params={<span class="str">"q"</span>: <span class="str">"Pipeline status?"</span>}
+    )
+    <span class="fn">print</span>(result.payload)  <span class="cm"># {"status": "green", "deals": 42}</span>
+
+asyncio.<span class="fn">run</span>(<span class="fn">main</span>())</pre>
+        </div>
+
+        <div class="code-panel" id="tab-cli">
+<pre><span class="cm"># Install the CLI</span>
+$ npm install -g @beam-protocol/cli
+
+<span class="cm"># Generate identity</span>
+$ beam init --agent jarvis --org coppen
+<span class="op">✔</span> Identity generated
+  Beam ID: jarvis@coppen.beam.directory
+
+<span class="cm"># Register with directory</span>
+$ beam register --display-name "Jarvis" --capabilities "query,answer"
+<span class="op">✔</span> Agent registered (trust: 50%)
+
+<span class="cm"># Look up another agent</span>
+$ beam lookup clara@coppen.beam.directory
+<span class="op">🤖</span> Clara · trust: <span class="op">████████░░</span> 82%
+
+<span class="cm"># Send an intent</span>
+$ beam send clara@coppen.beam.directory query '{"q":"status?"}'
+<span class="op">✅</span> Delivered in 47ms</pre>
+        </div>
+
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Compare ───────────────────────────────────────────────────────────── -->
+<section id="compare">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Comparison</span>
+      <h2>Beam vs. the alternatives</h2>
+      <p>MCP and A2A solve different problems. Beam focuses on identity and routing.</p>
+    </div>
+
+    <div class="fade-up" style="overflow-x: auto;">
+      <table class="compare-table">
+        <thead>
+          <tr>
+            <th style="text-align:left; width:30%">Feature</th>
+            <th>MCP</th>
+            <th>Google A2A</th>
+            <th class="beam-col">Beam ⚡</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="feature-name">Global agent identity</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="partial">~</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Cross-org discovery</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="partial">~</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Ed25519 signed messages</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="partial">~</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Tool/function calling</td>
+            <td><span class="check">✓</span></td>
+            <td><span class="check">✓</span></td>
+            <td class="beam-col"><span class="partial">~</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Open standard (not Google)</td>
+            <td><span class="check">✓</span></td>
+            <td><span class="cross">✗</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Self-hostable directory</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="cross">✗</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Trust scores</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="cross">✗</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Replay protection</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="partial">~</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">Frame size &lt;1KB</td>
+            <td><span class="cross">✗</span></td>
+            <td><span class="cross">✗</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+          <tr>
+            <td class="feature-name">TypeScript + Python SDKs</td>
+            <td><span class="check">✓</span></td>
+            <td><span class="partial">~</span></td>
+            <td class="beam-col"><span class="check">✓</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <p style="text-align:center; margin-top: 20px; font-size: 0.85rem; color: var(--text-dim);">
+      ✓ = supported · ~ = partial / planned · ✗ = not supported
+    </p>
+  </div>
+</section>
+
+<!-- ── Waitlist ───────────────────────────────────────────────────────────── -->
+<section id="waitlist">
+  <div class="container">
+    <div class="waitlist-card fade-up">
+      <div style="font-size: 2.5rem; margin-bottom: 20px;">📡</div>
+      <h2>Be the first to deploy</h2>
+      <p>We're opening the managed directory to select teams. Get early access, help shape the protocol, and connect your agent fleet.</p>
+
+      <form class="waitlist-form" id="waitlistForm" novalidate>
+        <input
+          type="email"
+          id="emailInput"
+          placeholder="you@yourorg.com"
+          required
+          autocomplete="email"
+        />
+        <button type="submit">Get Early Access</button>
+      </form>
+
+      <p class="success-msg" id="successMsg">
+        🎉 You're on the list! We'll be in touch soon.
+      </p>
+
+      <p class="waitlist-count">
+        Live at <strong>COPPEN GmbH</strong> — 4 agents, 7 intents, 2 machines, 0 cloud.
+      </p>
+    </div>
+  </div>
+</section>
+
+<!-- ── Footer ────────────────────────────────────────────────────────────── -->
+<footer>
+  <ul class="footer-links">
+    <li><a href="docs/getting-started.html">Getting Started</a></li>
+    <li><a href="docs/api-reference.html">API Reference</a></li>
+    <li><a href="docs/concepts.html">Concepts</a></li>
+    <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
+    <li><a href="https://github.com/Beam-directory/beam-protocol/blob/main/spec/RFC-0001.md" target="_blank">RFC-0001</a></li>
+  </ul>
+  <p class="footer-copy">
+    © 2026 <strong>Beam Protocol</strong> — Apache 2.0 · Built with ❤️ for the open agent ecosystem
+  </p>
+</footer>
+
+<script>
+  // ── Convex configuration (set by deploy script or inject at build time) ────
+  // Convex backend for waitlist
+  window.BEAM_CONVEX_URL = 'https://gregarious-mouse-785.eu-west-1.convex.site';
+</script>
+<script>
+  // ── Code tabs ──────────────────────────────────────────────────────────────
+  document.querySelectorAll('.code-tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+      const target = tab.dataset.tab;
+      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
+      document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
+      tab.classList.add('active');
+      document.getElementById('tab-' + target).classList.add('active');
+    });
+  });
+
+  // ── Scroll animations ──────────────────────────────────────────────────────
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        entry.target.classList.add('visible');
+      }
+    });
+  }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
+
+  document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+  // ── Waitlist form ──────────────────────────────────────────────────────────
+  // CONVEX_HTTP_URL is set at deploy time; falls back to localStorage in dev
+  const CONVEX_WAITLIST_URL = window.BEAM_CONVEX_URL
+    ? window.BEAM_CONVEX_URL + '/waitlist'
+    : null;
+
+  document.getElementById('waitlistForm').addEventListener('submit', async e => {
+    e.preventDefault();
+    const email = document.getElementById('emailInput').value.trim();
+    if (!email || !email.includes('@')) return;
+
+    const btn = e.target.querySelector('button[type="submit"]');
+    if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
+
+    try {
+      if (CONVEX_WAITLIST_URL) {
+        const res = await fetch(CONVEX_WAITLIST_URL, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ email, source: 'landing' }),
+        });
+        if (!res.ok) throw new Error('Server error');
+      } else {
+        // Dev fallback: store locally
+        const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
+        if (!signups.includes(email)) signups.push(email);
+        localStorage.setItem('beam_waitlist', JSON.stringify(signups));
+      }
+
+      document.getElementById('waitlistForm').style.display = 'none';
+      document.getElementById('successMsg').style.display = 'block';
+    } catch (err) {
+      console.error('Waitlist signup failed:', err);
+      if (btn) { btn.disabled = false; btn.textContent = 'Get Early Access'; }
+      alert('Something went wrong. Please try again.');
+    }
+  });
+</script>
+</body>
+</html>
