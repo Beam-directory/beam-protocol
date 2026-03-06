@@ -94,7 +94,9 @@
   </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
+  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" /></noscript>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -110,7 +112,7 @@
       --border-light: #F0F0F2;
       --text: #18181B;
       --text-secondary: #52525B;
-      --text-muted: #A1A1AA;
+      --text-muted: #71717A;
       --green: #22C55E;
       --green-bg: rgba(34, 197, 94, 0.08);
       --blue: #3B82F6;
@@ -273,9 +275,9 @@
     }
     .beam-id-box .icon { font-size: 1.3rem; }
     .beam-id-box .agent { color: var(--accent); font-weight: 600; }
-    .beam-id-box .at { color: var(--text-muted); }
+    .beam-id-box .at { color: var(--text-secondary); }
     .beam-id-box .org { color: var(--text); font-weight: 500; }
-    .beam-id-box .domain { color: var(--text-muted); }
+    .beam-id-box .domain { color: var(--text-secondary); }
     .beam-id-box .label {
       font-family: var(--font-sans);
       font-size: 0.7rem;
@@ -611,6 +613,7 @@
 </nav>
 
 <!-- ── Hero ──────────────────────────────────────────────── -->
+<main>
 <section id="hero">
   <div class="hero-glow"></div>
   <div class="container">
@@ -947,6 +950,7 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
   </div>
 </section>
 
+</main>
 <!-- ── Footer ──────────────────────────────────────────────── -->
 <footer>
   <ul class="footer-links">
