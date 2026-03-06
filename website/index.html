@@ -50,6 +50,48 @@
     "dateModified": "2026-03-06"
   }
   </script>
+
+  <!-- FAQ Schema for rich results -->
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "What is Beam Protocol?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Beam Protocol is an open communication protocol for AI agents — like SMTP for email, but for agent-to-agent communication. It provides globally unique Beam IDs, Ed25519-signed messages, and a discoverable directory."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How is Beam different from MCP?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "MCP (Model Context Protocol) connects AI agents to tools and functions. Beam connects AI agents to each other. They are complementary: MCP handles agent-to-tool, Beam handles agent-to-agent communication across organizational boundaries."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "How is Beam different from Google A2A?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Beam Protocol is fully open source (Apache 2.0) and vendor-neutral, while Google A2A is a Google-controlled specification. Beam offers self-hostable directories, Ed25519 cryptographic signatures, and built-in replay protection."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is Beam Protocol production-ready?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Beam Protocol has been live in production since March 2026 at COPPEN GmbH, with 4 AI agents communicating across 2 physical machines. The fastest end-to-end intent took 6.7 seconds."
+        }
+      }
+    ]
+  }
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />

@@ -19,64 +19,7 @@
   <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#F75C03" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
-  <style>
-    :root {
-      --accent: #F75C03; --bg: #0a0a0f; --bg-card: #111118;
-      --border: #1e1e2e; --text: #e8e8f0; --text-muted: #7070a0;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --font-sans: 'Inter', system-ui, sans-serif;
-    }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.7; }
-    .layout { display: flex; min-height: 100vh; }
-    nav.sidebar {
-      width: 260px; flex-shrink: 0;
-      background: var(--bg-card); border-right: 1px solid var(--border);
-      padding: 32px 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
-    }
-    nav.sidebar .logo { font-weight: 700; color: var(--text); margin-bottom: 32px; font-size: 1rem; }
-    nav.sidebar .logo span { color: var(--accent); }
-    nav.sidebar ul { list-style: none; }
-    nav.sidebar li { margin-bottom: 4px; }
-    nav.sidebar a {
-      display: block; padding: 7px 12px; border-radius: 8px;
-      color: var(--text-muted); text-decoration: none; font-size: 0.9rem;
-      transition: background 0.15s, color 0.15s;
-    }
-    nav.sidebar a:hover, nav.sidebar a.active { background: rgba(247,92,3,0.1); color: var(--accent); }
-    nav.sidebar .section-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #3a3a5c; padding: 16px 12px 6px; }
-    main { flex: 1; max-width: 780px; padding: 64px 48px; }
-    h1 { font-size: 2.2rem; margin-bottom: 8px; }
-    h2 { font-size: 1.4rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-    h3 { font-size: 1.1rem; margin: 32px 0 12px; color: var(--accent); }
-    p { margin-bottom: 16px; color: var(--text-muted); }
-    strong { color: var(--text); }
-    a { color: var(--accent); }
-    code {
-      font-family: var(--font-mono); font-size: 0.85em;
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 4px; padding: 2px 6px; color: #c792ea;
-    }
-    pre {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 12px; padding: 24px; overflow-x: auto;
-      font-family: var(--font-mono); font-size: 0.875rem;
-      line-height: 1.75; margin: 16px 0 24px; color: var(--text);
-    }
-    pre code { background: none; border: none; padding: 0; color: inherit; }
-    blockquote {
-      border-left: 3px solid var(--accent); padding: 12px 20px;
-      background: rgba(247,92,3,0.06); border-radius: 0 8px 8px 0;
-      margin: 16px 0;
-    }
-    blockquote p { color: var(--text-muted); margin: 0; }
-    .breadcrumb { font-size: 0.8rem; color: #3a3a5c; margin-bottom: 24px; }
-    .breadcrumb a { color: var(--text-muted); }
-    @media (max-width: 768px) {
-      nav.sidebar { display: none; }
-      main { padding: 40px 24px; }
-    }
-  </style>
+  <link rel="stylesheet" href="docs.css" />
 </head>
 <body>
 <div class="layout">
@@ -211,7 +154,7 @@ const stored = JSON.parse(readFileSync('.beam/identity.json', 'utf8'))
 const restored = BeamIdentity.fromData(stored)</code></pre>
 
     <h2>Next steps</h2>
-    <ul style="padding-left:20px; color: var(--text-muted); line-height: 2;">
+    <ul>
       <li><a href="concepts.html">Concepts</a> — Beam IDs, Frames, Trust Scores</li>
       <li><a href="api-reference.html">API Reference</a> — Directory REST API</li>
       <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a> — source code + examples</li>

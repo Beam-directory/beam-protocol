@@ -19,77 +19,7 @@
   <meta name="robots" content="index, follow" />
   <meta name="theme-color" content="#F75C03" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
-  <style>
-    :root {
-      --accent: #F75C03; --bg: #0a0a0f; --bg-card: #111118;
-      --border: #1e1e2e; --text: #e8e8f0; --text-muted: #7070a0;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --font-sans: 'Inter', system-ui, sans-serif;
-      --green: #39d98a;
-    }
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body { font-family: var(--font-sans); background: var(--bg); color: var(--text); line-height: 1.7; }
-    .layout { display: flex; min-height: 100vh; }
-    nav.sidebar {
-      width: 260px; flex-shrink: 0;
-      background: var(--bg-card); border-right: 1px solid var(--border);
-      padding: 32px 20px; position: sticky; top: 0; height: 100vh; overflow-y: auto;
-    }
-    nav.sidebar .logo { font-weight: 700; color: var(--text); margin-bottom: 32px; font-size: 1rem; }
-    nav.sidebar .logo span { color: var(--accent); }
-    nav.sidebar ul { list-style: none; }
-    nav.sidebar li { margin-bottom: 4px; }
-    nav.sidebar a {
-      display: block; padding: 7px 12px; border-radius: 8px;
-      color: var(--text-muted); text-decoration: none; font-size: 0.9rem;
-      transition: background 0.15s, color 0.15s;
-    }
-    nav.sidebar a:hover, nav.sidebar a.active { background: rgba(247,92,3,0.1); color: var(--accent); }
-    nav.sidebar .section-label { font-size: 0.7rem; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; color: #3a3a5c; padding: 16px 12px 6px; }
-    main { flex: 1; max-width: 860px; padding: 64px 48px; }
-    h1 { font-size: 2.2rem; margin-bottom: 8px; }
-    h2 { font-size: 1.4rem; margin: 48px 0 16px; padding-bottom: 8px; border-bottom: 1px solid var(--border); }
-    h3 { font-size: 1.05rem; margin: 28px 0 10px; }
-    p { margin-bottom: 16px; color: var(--text-muted); }
-    strong { color: var(--text); }
-    a { color: var(--accent); }
-    code {
-      font-family: var(--font-mono); font-size: 0.85em;
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 4px; padding: 2px 6px; color: #c792ea;
-    }
-    pre {
-      background: var(--bg-card); border: 1px solid var(--border);
-      border-radius: 12px; padding: 24px; overflow-x: auto;
-      font-family: var(--font-mono); font-size: 0.875rem;
-      line-height: 1.75; margin: 12px 0 24px; color: var(--text);
-    }
-    pre code { background: none; border: none; padding: 0; color: inherit; }
-    blockquote {
-      border-left: 3px solid var(--accent); padding: 12px 20px;
-      background: rgba(247,92,3,0.06); border-radius: 0 8px 8px 0;
-      margin: 16px 0;
-    }
-    blockquote p { color: var(--text-muted); margin: 0; }
-    table { width: 100%; border-collapse: collapse; margin: 12px 0 24px; font-size: 0.9rem; }
-    th { text-align: left; padding: 10px 14px; background: var(--bg-card); color: var(--text-muted); font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.06em; border-bottom: 1px solid var(--border); }
-    td { padding: 10px 14px; border-bottom: 1px solid rgba(30,30,46,0.6); color: var(--text-muted); vertical-align: top; }
-    td strong, td code { color: var(--text); }
-    .method-badge {
-      display: inline-block; padding: 3px 10px; border-radius: 6px;
-      font-family: var(--font-mono); font-size: 0.78rem; font-weight: 700;
-      margin-right: 12px;
-    }
-    .get  { background: rgba(57,217,138,0.12); color: var(--green); }
-    .post { background: rgba(247,92,3,0.12);    color: var(--accent); }
-    .endpoint-path { font-family: var(--font-mono); font-size: 1rem; color: var(--text); }
-    .breadcrumb { font-size: 0.8rem; color: #3a3a5c; margin-bottom: 24px; }
-    .breadcrumb a { color: var(--text-muted); }
-    @media (max-width: 768px) {
-      nav.sidebar { display: none; }
-      main { padding: 40px 24px; }
-    }
-  </style>
+  <link rel="stylesheet" href="docs.css" />
 </head>
 <body>
 <div class="layout">
