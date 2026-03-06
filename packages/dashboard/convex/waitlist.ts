@@ -93,3 +93,11 @@ export const handleWaitlistSignup = httpAction(async (ctx, request) => {
 
   return new Response(JSON.stringify(result), { status: 200, headers });
 });
+
+export const deleteWaitlistEntry = mutation({
+  args: { id: v.id("waitlist") },
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.id);
+    return { status: "deleted" };
+  },
+});

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createPrivateKey, sign } from 'node:crypto'
 import type { IntentFrame, ResultFrame, BeamIdString } from './types.js'
 import { BeamIdentity } from './identity.js'
 
@@ -10,7 +10,7 @@ export function createIntentFrame(
     intent: string
     from: BeamIdString
     to: BeamIdString
-    params?: Record<string, unknown>
+    payload?: Record<string, unknown>
   },
   identity: BeamIdentity
 ): IntentFrame {
@@ -19,11 +19,29 @@ export function createIntentFrame(
     intent: options.intent,
     from: options.from,
     to: options.to,
-    params: options.params ?? {},
+    payload: options.payload ?? {},
     nonce: randomUUID(),
     timestamp: new Date().toISOString()
   }
-  frame.signature = identity.sign(canonicalizeFrame(frame as unknown as Record<string, unknown>))
+  return signFrame(frame, identity.export().privateKeyBase64)
+}
+
+export function signFrame(frame: IntentFrame, privateKeyBase64: string): IntentFrame {
+  const signedPayload = JSON.stringify({
+    type: 'intent',
+    from: frame.from,
+    to: frame.to,
+    intent: frame.intent,
+    payload: frame.payload,
+    timestamp: frame.timestamp,
+    nonce: frame.nonce,
+  })
+  const privateKey = createPrivateKey({
+    key: Buffer.from(privateKeyBase64, 'base64'),
+    format: 'der',
+    type: 'pkcs8',
+  })
+  frame.signature = sign(null, Buffer.from(signedPayload, 'utf8'), privateKey).toString('base64')
   return frame
 }
 
@@ -71,8 +89,8 @@ export function validateIntentFrame(
   }
   if (typeof f['nonce'] !== 'string' || !f['nonce']) return { valid: false, error: 'Missing nonce' }
   if (typeof f['timestamp'] !== 'string') return { valid: false, error: 'Missing timestamp' }
-  if (!f['params'] || typeof f['params'] !== 'object' || Array.isArray(f['params'])) {
-    return { valid: false, error: 'Params must be an object' }
+  if (!f['payload'] || typeof f['payload'] !== 'object' || Array.isArray(f['payload'])) {
+    return { valid: false, error: 'Payload must be an object' }
   }
 
   const size = Buffer.byteLength(JSON.stringify(frame), 'utf8')
@@ -87,8 +105,16 @@ export function validateIntentFrame(
   }
 
   if (typeof f['signature'] !== 'string') return { valid: false, error: 'Missing signature' }
-  const { signature, ...unsigned } = f
-  if (!BeamIdentity.verify(canonicalizeFrame(unsigned), signature as string, senderPublicKey)) {
+  const signedPayload = JSON.stringify({
+    type: 'intent',
+    from: f['from'],
+    to: f['to'],
+    intent: f['intent'],
+    payload: f['payload'],
+    timestamp: f['timestamp'],
+    nonce: f['nonce'],
+  })
+  if (!BeamIdentity.verify(signedPayload, f['signature'] as string, senderPublicKey)) {
     return { valid: false, error: 'Signature verification failed' }
   }
 

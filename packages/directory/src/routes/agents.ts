@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest } from '../types.js'
+import { seedAclsFromCatalog } from '../acl.js'
 import {
   registerAgent,
   getAgent,
@@ -143,6 +144,7 @@ export function agentsRouter(db: Database): Hono {
 
     try {
       const agent = registerAgent(db, request)
+      seedAclsFromCatalog(db)
       return c.json(serializeAgent(agent), 201)
     } catch (err) {
       console.error('Registration error:', err)

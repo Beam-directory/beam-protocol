@@ -124,9 +124,10 @@ function loadIdentity() {
 }
 
 function formatIntentAsMessage(frame) {
+  const payload = frame.payload || frame.params || {}
   return `[Beam Intent from ${frame.from}]\n` +
     `Intent: ${frame.intent}\n` +
-    `Params: ${JSON.stringify(frame.params || {}, null, 2)}\n\n` +
+    `Payload: ${JSON.stringify(payload, null, 2)}\n\n` +
     'Bitte bearbeite diesen Intent und antworte mit dem Ergebnis.'
 }
 

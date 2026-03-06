@@ -1,6 +1,6 @@
 import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
-import { createIntentFrame, createResultFrame, validateIntentFrame } from './frames.js'
+import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import type {
   BeamClientConfig,
   BeamIdString,
@@ -196,13 +196,11 @@ export class BeamClient {
   async send(
     to: BeamIdString,
     intent: string,
-    params?: Record<string, unknown>,
+    payload?: Record<string, unknown>,
     timeoutMs = 30_000
   ): Promise<ResultFrame> {
-    const frame = createIntentFrame(
-      { intent, from: this._identity.beamId, to, params },
-      this._identity
-    )
+    const frame = createIntentFrame({ intent, from: this._identity.beamId, to, payload }, this._identity)
+    signFrame(frame, this._identity.export().privateKeyBase64)
 
     if (this._ws && this._wsConnected) {
       return this._sendViaWebSocket(frame, timeoutMs)

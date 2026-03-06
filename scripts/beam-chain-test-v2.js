@@ -1,105 +1,187 @@
 #!/usr/bin/env node
 
-import { BeamClient } from '../packages/sdk-typescript/dist/client.js'
-import { BeamIdentity } from '../packages/sdk-typescript/dist/identity.js'
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
+import { randomUUID, createPrivateKey, sign } from 'node:crypto'
 
 const DIRECTORY_URL = process.env.BEAM_DIRECTORY_URL || 'http://localhost:3100'
-const TIMEOUT_MS = Number(process.env.BEAM_TEST_TIMEOUT || '60000')
+const IDENTITIES_PATH = process.env.BEAM_IDENTITIES || resolve(
+  process.env.HOME || '',
+  '.openclaw/workspace/secrets/beam-identities.json'
+)
 
-const testCases = [
-  {
-    intent: 'escalation.request',
-    to: 'jarvis',
-    params: {
-      caseId: 'CASE-2401',
-      reason: 'Customer requested executive escalation',
-      urgency: 'high',
-      customerName: 'Acme GmbH',
-    },
-  },
-  {
-    intent: 'payment.status_check',
-    to: 'fischer',
-    params: {
-      projectId: 'PRJ-7788',
-      invoiceNumber: 'INV-2026-1042',
-      customerName: 'Nova AG',
-    },
-  },
-  {
-    intent: 'sales.pipeline_summary',
-    to: 'clara',
-    params: {
-      timeRange: '30d',
-      owner: 'jarvis',
-    },
-  },
-]
+function buildFrame({ from, to, intent, payload, nonce = randomUUID() }) {
+  return {
+    v: '1',
+    from,
+    to,
+    intent,
+    payload,
+    nonce,
+    timestamp: new Date().toISOString(),
+  }
+}
 
-function printTable(rows) {
-  console.log('intent\ttarget\tsuccess\tlatencyMs\tmessage')
-  for (const row of rows) {
-    console.log(`${row.intent}\t${row.to}\t${row.success ? 'yes' : 'no'}\t${row.latencyMs}\t${row.message}`)
+function signIntentFrame(frame, privateKeyBase64) {
+  const privateKey = createPrivateKey({
+    key: Buffer.from(privateKeyBase64, 'base64'),
+    format: 'der',
+    type: 'pkcs8',
+  })
+
+  const signedPayload = JSON.stringify({
+    type: 'intent',
+    from: frame.from,
+    to: frame.to,
+    intent: frame.intent,
+    payload: frame.payload,
+    timestamp: frame.timestamp,
+    nonce: frame.nonce,
+  })
+
+  frame.signature = sign(null, Buffer.from(signedPayload, 'utf8'), privateKey).toString('base64')
+  return frame
+}
+
+async function sendFrame(frame) {
+  const started = Date.now()
+  const res = await fetch(`${DIRECTORY_URL.replace(/\/$/, '')}/intents/send`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(frame),
+  })
+
+  const body = await res.json().catch(() => ({}))
+  return {
+    ok: res.ok,
+    status: res.status,
+    ms: Date.now() - started,
+    body,
+  }
+}
+
+function printResults(results) {
+  console.log('test\tsuccess\tstatus\tlatencyMs\tmessage')
+  for (const row of results) {
+    console.log(`${row.name}\t${row.success ? 'yes' : 'no'}\t${row.status}\t${row.ms}\t${row.message}`)
   }
 }
 
 async function main() {
-  if (!Number.isFinite(TIMEOUT_MS) || TIMEOUT_MS <= 0) {
-    throw new Error('BEAM_TEST_TIMEOUT must be a positive number')
+  const identities = JSON.parse(readFileSync(IDENTITIES_PATH, 'utf8'))
+  const clara = identities.clara
+  const fischer = identities.fischer
+
+  if (!clara || !fischer) {
+    throw new Error('Missing clara/fischer identities in beam-identities.json')
   }
-
-  const uniqueName = `orchestrator-${Date.now()}`
-  const identity = BeamIdentity.generate({
-    agentName: uniqueName,
-    orgName: 'coppen',
-  }).export()
-
-  const client = new BeamClient({
-    identity,
-    directoryUrl: DIRECTORY_URL,
-  })
 
   const results = []
 
-  try {
-    await client.register('Beam v0.2 Test Orchestrator', ['test', 'orchestration'])
-    await client.connect()
+  // 1) Valid signed intent -> should succeed
+  const validFrame = signIntentFrame(buildFrame({
+    from: 'clara@coppen.beam.directory',
+    to: 'jarvis@coppen.beam.directory',
+    intent: 'escalation.request',
+    payload: {
+      caseId: 'CASE-SEC-001',
+      reason: 'Security test valid intent',
+      urgency: 'high',
+    },
+  }), clara.privateKeyBase64)
+  const validRes = await sendFrame(validFrame)
+  results.push({
+    name: 'valid_signed_intent',
+    success: validRes.ok && validRes.body?.success === true,
+    status: validRes.status,
+    ms: validRes.ms,
+    message: validRes.ok ? 'ok' : String(validRes.body?.error || 'failed'),
+  })
 
-    for (const testCase of testCases) {
-      const started = Date.now()
-      try {
-        const response = await client.send(
-          `${testCase.to}@coppen.beam.directory`,
-          testCase.intent,
-          testCase.params,
-          TIMEOUT_MS
-        )
+  // 2) Tampered payload (wrong signature) -> should be rejected
+  const tamperedFrame = signIntentFrame(buildFrame({
+    from: 'clara@coppen.beam.directory',
+    to: 'jarvis@coppen.beam.directory',
+    intent: 'escalation.request',
+    payload: {
+      caseId: 'CASE-SEC-002',
+      reason: 'Original payload',
+      urgency: 'low',
+    },
+  }), clara.privateKeyBase64)
+  tamperedFrame.payload.reason = 'Tampered after signing'
+  const tamperedRes = await sendFrame(tamperedFrame)
+  results.push({
+    name: 'tampered_signature',
+    success: !tamperedRes.ok,
+    status: tamperedRes.status,
+    ms: tamperedRes.ms,
+    message: String(tamperedRes.body?.error || 'unexpected_success'),
+  })
 
-        results.push({
-          intent: testCase.intent,
-          to: testCase.to,
-          success: Boolean(response?.success),
-          latencyMs: Date.now() - started,
-          message: response?.success
-            ? 'ok'
-            : (response?.error || 'unknown_error'),
-        })
-      } catch (err) {
-        results.push({
-          intent: testCase.intent,
-          to: testCase.to,
-          success: false,
-          latencyMs: Date.now() - started,
-          message: err instanceof Error ? err.message : String(err),
-        })
-      }
-    }
-  } finally {
-    client.disconnect()
-  }
+  // 3) Unauthorized sender (no ACL) -> should be rejected
+  const unauthorizedFrame = signIntentFrame(buildFrame({
+    from: 'fischer@coppen.beam.directory',
+    to: 'jarvis@coppen.beam.directory',
+    intent: 'payment.status_check',
+    payload: {
+      projectId: 'PRJ-SEC-003',
+      invoiceNumber: 'INV-SEC-003',
+      customerName: 'Unauthorized Test',
+    },
+  }), fischer.privateKeyBase64)
+  const unauthorizedRes = await sendFrame(unauthorizedFrame)
+  results.push({
+    name: 'unauthorized_acl',
+    success: !unauthorizedRes.ok,
+    status: unauthorizedRes.status,
+    ms: unauthorizedRes.ms,
+    message: String(unauthorizedRes.body?.error || 'unexpected_success'),
+  })
 
-  console.log('\nBeam Chain Test v2 Results')
-  printTable(results)
+  // 4) Invalid payload schema -> should be rejected
+  const invalidPayloadFrame = signIntentFrame(buildFrame({
+    from: 'clara@coppen.beam.directory',
+    to: 'jarvis@coppen.beam.directory',
+    intent: 'escalation.request',
+    payload: {
+      reason: 'Missing required caseId',
+      urgency: 'critical',
+    },
+  }), clara.privateKeyBase64)
+  const invalidPayloadRes = await sendFrame(invalidPayloadFrame)
+  results.push({
+    name: 'invalid_payload_schema',
+    success: !invalidPayloadRes.ok,
+    status: invalidPayloadRes.status,
+    ms: invalidPayloadRes.ms,
+    message: String(invalidPayloadRes.body?.error || 'unexpected_success'),
+  })
+
+  // 5) Replay with same nonce -> second should fail
+  const replayNonce = randomUUID()
+  const replayFrame = signIntentFrame(buildFrame({
+    from: 'clara@coppen.beam.directory',
+    to: 'jarvis@coppen.beam.directory',
+    intent: 'agent.ping',
+    payload: {
+      message: 'Replay protection test',
+    },
+    nonce: replayNonce,
+  }), clara.privateKeyBase64)
+
+  const replayFirst = await sendFrame(replayFrame)
+  const replaySecond = await sendFrame(replayFrame)
+  results.push({
+    name: 'replay_protection',
+    success: replayFirst.ok && !replaySecond.ok,
+    status: replaySecond.status,
+    ms: replayFirst.ms + replaySecond.ms,
+    message: String(replaySecond.body?.error || 'unexpected_success'),
+  })
+
+  console.log('\nBeam Chain Security Test v2 Results')
+  printResults(results)
 
   const passed = results.filter((r) => r.success).length
   console.log(`\nSummary: ${passed}/${results.length} passed`)
