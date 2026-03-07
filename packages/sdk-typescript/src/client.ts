@@ -257,6 +257,14 @@ export class BeamClient {
    * console.log(reply.message) // Natural language response
    * console.log(reply.structured) // Optional structured data
    */
+  /**
+   * Start a multi-turn conversation thread.
+   * Returns a Thread object with a `say()` method for follow-ups.
+   */
+  thread(to: BeamIdString, options?: { language?: string; timeoutMs?: number }): BeamThread {
+    return new BeamThread(this, to, options)
+  }
+
   async talk(
     to: BeamIdString,
     message: string,
@@ -264,8 +272,9 @@ export class BeamClient {
       context?: Record<string, unknown>
       language?: string
       timeoutMs?: number
+      threadId?: string
     }
-  ): Promise<{ message: string; structured?: Record<string, unknown>; raw: ResultFrame }> {
+  ): Promise<{ message: string; structured?: Record<string, unknown>; threadId?: string; raw: ResultFrame }> {
     if (!message || message.length === 0) {
       throw new Error('Message must be non-empty')
     }
@@ -278,17 +287,19 @@ export class BeamClient {
     }
     if (options?.context) payload['context'] = options.context
     if (options?.language) payload['language'] = options.language
+    if (options?.threadId) payload['threadId'] = options.threadId
 
     const result = await this.send(
       to,
       'conversation.message',
       payload,
-      options?.timeoutMs ?? 60_000 // Longer default for NL (LLM processing)
+      options?.timeoutMs ?? 60_000
     )
 
     return {
       message: (result.payload?.['message'] as string) ?? '',
       structured: result.payload?.['structured'] as Record<string, unknown> | undefined,
+      threadId: (result.payload?.['threadId'] as string) ?? options?.threadId,
       raw: result,
     }
   }
@@ -330,7 +341,6 @@ export class BeamClient {
   disconnect(): void {
     if (this._ws) {
       this._wsConnected = false
-      // Reject all pending results before closing
       for (const [nonce, pending] of this._pendingResults) {
         clearTimeout(pending.timer)
         pending.reject(new Error('Client disconnected'))
@@ -339,5 +349,46 @@ export class BeamClient {
       this._ws.close()
       this._ws = null
     }
+  }
+}
+
+/**
+ * A multi-turn conversation thread between two agents.
+ *
+ * @example
+ * const chat = client.thread('clara@coppen.beam.directory')
+ * const r1 = await chat.say('Was weißt du über Chris?')
+ * const r2 = await chat.say('Und seine Pipeline?')  // keeps context
+ */
+export class BeamThread {
+  readonly threadId: string
+  private readonly _client: BeamClient
+  private readonly _to: BeamIdString
+  private readonly _language?: string
+  private readonly _timeoutMs: number
+
+  constructor(
+    client: BeamClient,
+    to: BeamIdString,
+    options?: { language?: string; timeoutMs?: number }
+  ) {
+    this._client = client
+    this._to = to
+    this._language = options?.language
+    this._timeoutMs = options?.timeoutMs ?? 60_000
+    this.threadId = crypto.randomUUID()
+  }
+
+  async say(
+    message: string,
+    context?: Record<string, unknown>
+  ): Promise<{ message: string; structured?: Record<string, unknown> }> {
+    const result = await this._client.talk(this._to, message, {
+      threadId: this.threadId,
+      context,
+      language: this._language,
+      timeoutMs: this._timeoutMs,
+    })
+    return { message: result.message, structured: result.structured }
   }
 }

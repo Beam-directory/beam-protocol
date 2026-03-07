@@ -1,6 +1,6 @@
 export { BeamIdentity } from './identity.js'
 export { BeamDirectory, BeamDirectoryError } from './directory.js'
-export { BeamClient } from './client.js'
+export { BeamClient, BeamThread } from './client.js'
 export {
   createIntentFrame,
   createResultFrame,

@@ -1,6 +1,6 @@
 {
-  "name": "@beam-protocol/sdk",
-  "version": "0.1.0",
+  "name": "beam-protocol-sdk",
+  "version": "0.2.0",
   "description": "TypeScript SDK for the Beam Protocol \u2014 Agent-to-Agent communication",
   "type": "module",
   "main": "./dist/index.js",
@@ -30,9 +30,6 @@
     "node": ">=18.0.0"
   },
   "license": "Apache-2.0",
-  "publishConfig": {
-    "access": "public"
-  },
   "files": [
     "dist",
     "README.md",

@@ -760,6 +760,41 @@
   </div>
 </section>
 
+<!-- ── Natural Language ────────────────────────────────────── -->
+<section id="natural-language" style="padding: 80px 0; background: linear-gradient(135deg, #1a0a00 0%, #0a0a0f 100%);">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">NEW — Natural Language</span>
+      <h2 style="background: linear-gradient(135deg, #F75C03, #ff9a56); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Agents don't need schemas. They just talk.</h2>
+      <p>Beam v0.2 introduces <code style="background: rgba(247,92,3,0.15); padding: 2px 8px; border-radius: 4px; color: #F75C03;">conversation.message</code> — agents communicate in natural language. No pre-agreed schemas. No integration work.</p>
+    </div>
+
+    <div style="max-width: 680px; margin: 0 auto; background: rgba(255,255,255,0.03); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; font-family: 'SF Mono', monospace; font-size: 14px; line-height: 1.7;" class="fade-up">
+      <div style="color: #888; margin-bottom: 16px;">// Real test — March 7, 2026</div>
+      <div style="color: #F75C03; font-weight: 600;">Jarvis → Clara:</div>
+      <div style="color: #e0e0e0; padding-left: 16px; margin-bottom: 12px;">"Hey Clara, was weißt du über Christopher Schnorrenberg?<br/>Deals, Volumen, letzte Aktivität bitte."</div>
+      <div style="color: #4ade80; font-weight: 600;">Clara → Jarvis <span style="color: #666; font-weight: 400;">(7.2s)</span>:</div>
+      <div style="color: #e0e0e0; padding-left: 16px;">"400 Deals, €5.8M Gesamtvolumen. Letzte Aktivität: heute.<br/>Top Deal: Irfan Sahillioglu — €88.213."</div>
+      <div style="color: #666; margin-top: 16px; font-size: 12px;">Clara used her real HubSpot tools to answer. No schema required.</div>
+    </div>
+
+    <div style="text-align: center; margin-top: 40px;" class="fade-up">
+      <div style="display: inline-flex; gap: 16px; flex-wrap: wrap; justify-content: center;">
+        <code style="background: rgba(247,92,3,0.1); border: 1px solid rgba(247,92,3,0.3); padding: 12px 20px; border-radius: 8px; color: #F75C03; font-size: 14px;">npm install beam-protocol-sdk</code>
+        <code style="background: rgba(247,92,3,0.1); border: 1px solid rgba(247,92,3,0.3); padding: 12px 20px; border-radius: 8px; color: #F75C03; font-size: 14px;">pip install beam-directory</code>
+      </div>
+    </div>
+
+    <div style="max-width: 520px; margin: 32px auto 0; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 24px; font-family: 'SF Mono', monospace; font-size: 13px;" class="fade-up">
+      <div style="color: #888;">// One line of code:</div>
+      <div style="color: #e0e0e0;"><span style="color: #c084fc;">const</span> reply = <span style="color: #c084fc;">await</span> client.<span style="color: #F75C03;">talk</span>(</div>
+      <div style="color: #4ade80; padding-left: 24px;">'clara@coppen.beam.directory',</div>
+      <div style="color: #4ade80; padding-left: 24px;">'Was weißt du über Chris?'</div>
+      <div style="color: #e0e0e0;">)</div>
+    </div>
+  </div>
+</section>
+
 <!-- ── Security ───────────────────────────────────────────── -->
 <section id="security" style="padding: 80px 0;">
   <div class="container">

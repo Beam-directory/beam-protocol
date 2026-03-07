@@ -147,6 +147,16 @@ class BeamClient:
 
     # ── Natural Language Communication ────────────────────────────────────────
 
+    def thread(
+        self,
+        to: BeamIdString,
+        *,
+        language: str = "en",
+        timeout_ms: int = 60_000,
+    ) -> "BeamThread":
+        """Start a multi-turn conversation thread."""
+        return BeamThread(self, to, language=language, timeout_ms=timeout_ms)
+
     async def talk(
         self,
         to: BeamIdString,
@@ -155,6 +165,7 @@ class BeamClient:
         context: Optional[dict[str, Any]] = None,
         language: str = "en",
         timeout_ms: int = 60_000,
+        thread_id: Optional[str] = None,
     ) -> dict[str, Any]:
         """
         Send a natural language message to another agent.
@@ -181,6 +192,8 @@ class BeamClient:
             params["context"] = context
         if language != "en":
             params["language"] = language
+        if thread_id:
+            params["threadId"] = thread_id
 
         result = await self.send(
             to=to,
@@ -260,3 +273,45 @@ class BeamClient:
             )
         data: Any = res.json()
         return ResultFrame.from_dict(data)
+
+
+class BeamThread:
+    """
+    Multi-turn conversation thread between two agents.
+
+    Example::
+
+        chat = client.thread("clara@coppen.beam.directory")
+        r1 = await chat.say("Was weißt du über Chris?")
+        r2 = await chat.say("Und seine Pipeline?")  # keeps context
+    """
+
+    def __init__(
+        self,
+        client: BeamClient,
+        to: "BeamIdString",
+        *,
+        language: str = "en",
+        timeout_ms: int = 60_000,
+    ) -> None:
+        import uuid
+        self.thread_id = str(uuid.uuid4())
+        self._client = client
+        self._to = to
+        self._language = language
+        self._timeout_ms = timeout_ms
+
+    async def say(
+        self,
+        message: str,
+        context: "Optional[dict[str, Any]]" = None,
+    ) -> dict[str, Any]:
+        """Send a message in this thread."""
+        return await self._client.talk(
+            self._to,
+            message,
+            context=context,
+            language=self._language,
+            timeout_ms=self._timeout_ms,
+            thread_id=self.thread_id,
+        )
