@@ -1,49 +1,92 @@
 <h1 align="center">⚡ Beam Protocol</h1>
 
 <p align="center">
-  <strong>The open communication protocol for AI agents.</strong><br/>
-  <em>Das offene Kommunikationsprotokoll für KI-Agenten.</em>
+  <strong>SMTP for AI Agents.</strong><br/>
+  Give every agent a global address. Let them talk.
 </p>
 
 <p align="center">
   <a href="https://beam.directory">🌐 beam.directory</a> ·
-  <a href="./LICENSE">Apache-2.0</a> ·
-  <a href="./spec/RFC-0001.md">RFC 0001</a> ·
-  <a href="./VISION.md">Vision</a> ·
-  <a href="#quick-start">Quick Start</a>
+  <a href="./spec/RFC-0001.md">📄 RFC 0001</a> ·
+  <a href="#quick-start">🚀 Quick Start</a> ·
+  <a href="./VISION.md">📖 Vision</a> ·
+  <a href="./LICENSE">Apache-2.0</a>
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/status-alpha-orange" alt="Status: Alpha" />
   <img src="https://img.shields.io/github/license/Beam-directory/beam-protocol" alt="License" />
   <img src="https://img.shields.io/badge/tests-57%20passing-brightgreen" alt="Tests" />
+  <img src="https://img.shields.io/badge/agents_live-4-blue" alt="4 Agents Live" />
+</p>
+
+<br/>
+
+<p align="center">
+  <img src="./beam-hero-light.png" alt="Beam Protocol" width="700"/>
 </p>
 
 ---
 
-## What is Beam?
+## The Problem
 
-**Beam Protocol is SMTP for AI agents.** It defines how AI agents discover, authenticate, and exchange structured messages across organizational boundaries.
+AI agents are everywhere — customer service bots, scheduling assistants, invoice processors, orchestration systems. **But they can't talk to each other.**
 
-- **Beam-ID** — A globally unique, cryptographically secured agent identity (`agent@org.beam.directory`)
-- **Intent/Result Frames** — A compact, signed message format (<1 KB, <300 ms)
-- **Directory** — A central registry for agent discovery, verification, and trust scoring
+There's no standard address format. No shared authentication. No discovery mechanism. Every integration is a custom API, a webhook, a workaround.
 
-### The Problem
-
-AI agents are everywhere — customer service bots, scheduling assistants, invoice processors, orchestration systems. But they can't talk to each other across organizational boundaries. There's no standard for agent-to-agent communication.
-
-MCP solves Agent ↔ Tool. **Beam solves Agent ↔ Agent.**
+**MCP solved Agent ↔ Tool. Beam solves Agent ↔ Agent.**
 
 ---
 
-## Was ist Beam?
+## The Solution
 
-**Beam Protocol ist SMTP für KI-Agenten.** Es definiert, wie KI-Agenten sich gegenseitig finden, authentifizieren und strukturierte Nachrichten über Organisationsgrenzen hinweg austauschen.
+Beam Protocol gives every AI agent three things:
 
-- **Beam-ID** — Eine global eindeutige, kryptographisch gesicherte Agent-Identität
-- **Intent/Result Frames** — Ein kompaktes, signiertes Nachrichtenformat (<1 KB, <300 ms)
-- **Directory** — Ein zentrales Register für Agent-Suche, Verifizierung und Trust Scoring
+### 🪪 A Global Address (Beam-ID)
+```
+jarvis@coppen.beam.directory
+clara@coppen.beam.directory
+```
+Human-readable. Cryptographically verifiable. Works across organizations.
+
+### ⚡ Structured Messages (Intent Frames)
+```json
+{
+  "intent": "task.delegate",
+  "from": "jarvis@coppen.beam.directory",
+  "to": "clara@coppen.beam.directory",
+  "payload": { "task": "Get customer profile", "name": "Chris" },
+  "nonce": "a7f3...",
+  "signature": "Ed25519..."
+}
+```
+Typed. Signed. Under 1 KB. Delivered in milliseconds.
+
+### 🗂️ A Discovery Registry (Directory)
+Agents register their capabilities. Other agents find them. No hardcoded URLs. No API keys to exchange.
+
+---
+
+## Live in Production
+
+Beam Protocol isn't a whitepaper. It's running right now.
+
+| Metric | Value |
+|---|---|
+| **Agents connected** | 4 |
+| **Intent types** | 7 |
+| **Avg round-trip** | 6.7s |
+| **Frame size** | < 1 KB |
+| **Uptime** | 24/7 since March 2026 |
+| **Signing** | Ed25519 |
+| **Cloud dependencies** | 0 |
+
+```
+Jarvis   ──── task.delegate ────►  Clara
+  (Chief of Staff)                   (Sales Intelligence)
+         ◄──── result.success ────
+                                     "50 deals, €1.6M volume"
+```
 
 ---
 
@@ -59,39 +102,19 @@ npm install @beam-protocol/sdk
 pip install beam-directory
 ```
 
-### Create an Agent Identity
+### Create an Identity
 
 ```typescript
 import { BeamIdentity } from '@beam-protocol/sdk'
 
 const agent = BeamIdentity.generate({
   agentName: 'my-agent',
-  orgName: 'my-company'
+  orgName: 'acme'
 })
-
-console.log(agent.beamId)
-// → my-agent@my-company.beam.directory
+// → my-agent@acme.beam.directory
 ```
 
-### Register with the Directory
-
-```typescript
-import { BeamDirectory } from '@beam-protocol/sdk'
-
-const directory = new BeamDirectory({
-  baseUrl: 'http://localhost:3100'
-})
-
-await directory.register({
-  beamId: agent.beamId,
-  displayName: 'My Agent',
-  capabilities: ['scheduling', 'notifications'],
-  publicKey: agent.publicKeyBase64,
-  org: 'my-company'
-})
-```
-
-### Send an Intent
+### Send a Message
 
 ```typescript
 import { BeamClient } from '@beam-protocol/sdk'
@@ -104,27 +127,32 @@ const client = new BeamClient({
 await client.connect()
 
 const result = await client.send(
-  'other-agent@other-company.beam.directory',
+  'other-agent@partner.beam.directory',
   'query.status',
   { detail: 'full' }
 )
 
 console.log(result.payload)
+// → { status: 'online', version: '1.0.0' }
 ```
 
-### Receive Intents
+### Receive Messages
 
 ```typescript
 client.on('query.status', (frame, respond) => {
   respond({
     success: true,
-    payload: {
-      status: 'online',
-      version: '1.0.0',
-      uptime: 99.9
-    }
+    payload: { status: 'online', uptime: 99.9 }
   })
 })
+```
+
+### Run the Directory
+
+```bash
+cd packages/directory
+npm install && npm start
+# → Beam Directory running on http://localhost:3100
 ```
 
 ---
@@ -132,121 +160,140 @@ client.on('query.status', (frame, respond) => {
 ## Architecture
 
 ```
-┌──────────────┐         ┌──────────────────┐         ┌──────────────┐
-│   Agent A    │◄──WSS──►│  Beam Directory   │◄──WSS──►│   Agent B    │
-│              │         │                  │         │              │
-│ Ed25519 Keys │         │ - Registration   │         │ Ed25519 Keys │
-│ Beam SDK     │         │ - Lookup/Search  │         │ Beam SDK     │
-│              │         │ - Trust Scores   │         │              │
-│  Intent ────►│────────►│ - Intent Routing │────────►│◄──── Intent  │
-│  ◄──── Result│◄────────│ - Nonce Dedup    │◄────────│Result ────►  │
-└──────────────┘         └──────────────────┘         └──────────────┘
+┌──────────────┐                                      ┌──────────────┐
+│   Agent A    │           ┌──────────────┐            │   Agent B    │
+│              │◄── WSS ──►│   Directory   │◄── WSS ──►│              │
+│ Ed25519 Keys │           │              │            │ Ed25519 Keys │
+│ Beam SDK     │           │ • Register   │            │ Beam SDK     │
+│              │           │ • Discover   │            │              │
+│  Intent ────►│──────────►│ • Route      │───────────►│◄── Intent    │
+│  ◄── Result  │◄──────────│ • Verify     │◄───────────│ Result ──►   │
+└──────────────┘           │ • Trust      │            └──────────────┘
+                           └──────────────┘
 ```
+
+### How It Works
+
+1. **Agent generates Ed25519 keypair** → gets a Beam-ID
+2. **Agent registers with Directory** → publishes capabilities
+3. **Agent A sends Intent Frame to Agent B** → signed, routed via Directory
+4. **Agent B processes and responds** → Result Frame, also signed
+5. **Directory tracks trust scores** → uptime, response rate, org verification
 
 ### Key Concepts
 
-| Concept | Description |
+| Concept | What it is |
 |---|---|
-| **Beam-ID** | `agent@org.beam.directory` — Ed25519 key pair, DID-compatible |
-| **Intent Frame** | Signed JSON request: intent, from, to, params, nonce, timestamp, signature |
-| **Result Frame** | Signed JSON response: success/error, payload, nonce, latency, signature |
-| **Directory** | Central registry with agent lookup, search, heartbeat, trust scoring |
-| **Trust Score** | 0.0–1.0 based on org verification (0.3), uptime (0.3), response rate (0.2), account age (0.2) |
+| **Beam-ID** | `agent@org.beam.directory` — your agent's address |
+| **Intent Frame** | Signed request: intent type + payload + crypto |
+| **Result Frame** | Signed response: success/error + payload + latency |
+| **Directory** | Registry for discovery, routing, trust scoring |
+| **Trust Score** | 0.0–1.0 based on verification, uptime, response quality |
+
+---
+
+## Why Not Just Use HTTP?
+
+| | HTTP/REST | Beam Protocol |
+|---|---|---|
+| **Identity** | API keys, OAuth tokens | Ed25519 keypair (Beam-ID) |
+| **Discovery** | Hardcoded URLs | Directory lookup |
+| **Auth** | Per-integration setup | Built-in signatures |
+| **Message format** | Freeform JSON | Typed Intent Frames |
+| **Replay protection** | DIY | Nonce + timestamp built-in |
+| **Trust** | None | Scored (0.0–1.0) |
+| **Multi-org** | API key per partner | Beam-ID works everywhere |
+
+---
+
+## Beam vs. Others
+
+| | MCP | Google A2A | AgenticMail | **Beam** |
+|---|---|---|---|---|
+| **Solves** | Agent ↔ Tool | Agent ↔ Agent | Agent ↔ World | **Agent ↔ Agent** |
+| **Identity** | None | Google IAM | Email address | **Ed25519 + DID** |
+| **Open Source** | ✅ | ❌ | ✅ | **✅** |
+| **Vendor lock-in** | No | Google | No | **No** |
+| **Message format** | JSON-RPC | Custom | SMTP/Email | **Intent Frames** |
+| **Transport** | stdio/SSE | HTTP | SMTP | **WebSocket + HTTP** |
+| **Trust model** | None | IAM Roles | SPF/DKIM | **Trust Scores** |
+| **Self-hostable** | N/A | No | Yes | **Yes** |
+| **Latency** | Local | ~100ms | Seconds | **< 300ms** |
 
 ---
 
 ## Packages
 
-| Package | Description | Path | Tests |
-|---|---|---|---|
-| `@beam-protocol/sdk` | TypeScript SDK — BeamClient, BeamIdentity, BeamDirectory, Frames | `packages/sdk-typescript/` | 17/17 ✅ |
-| `beam-directory` | Python SDK — BeamClient, BeamIdentity, frames, crypto | `packages/sdk-python/` | 40/40 ✅ |
-| `@beam-protocol/directory` | Reference Directory Server — Hono + SQLite | `packages/directory/` | — |
-| `beam-cli` | CLI Tool — register, send, lookup, search | `packages/cli/` | — |
-
----
-
-## Run the Directory Server
-
-```bash
-cd packages/directory
-npm install
-npm start
-# → Beam Directory running on http://localhost:3100
-```
-
-## Run the Example
-
-```bash
-# Start the directory first, then:
-npx tsx examples/coppen-registration.ts
-```
+| Package | Description | Status |
+|---|---|---|
+| [`@beam-protocol/sdk`](./packages/sdk-typescript/) | TypeScript SDK — BeamClient, BeamIdentity, Frames | 17/17 tests ✅ |
+| [`beam-directory`](./packages/sdk-python/) | Python SDK — BeamClient, BeamIdentity, crypto | 40/40 tests ✅ |
+| [`@beam-protocol/directory`](./packages/directory/) | Reference Directory Server (Hono + SQLite) | Running ✅ |
+| [`beam-cli`](./packages/cli/) | CLI — `beam register`, `beam send`, `beam lookup` | Working ✅ |
+| [`beam-dashboard`](./packages/dashboard/) | Web Dashboard for monitoring | Preview |
 
 ---
 
 ## Specification
 
-The full protocol specification is available at [`spec/RFC-0001.md`](./spec/RFC-0001.md).
+The full protocol spec: [`spec/RFC-0001.md`](./spec/RFC-0001.md)
 
-It covers:
-- Beam Identity (Beam-ID) format and cryptographic operations
-- Intent Frame and Result Frame schemas
-- Directory Protocol (registration, lookup, search, heartbeat)
-- Transport bindings (WebSocket primary, HTTP fallback)
-- Security model (Ed25519 signatures, replay prevention, TLS)
-- Trust model (organization verification, capability declaration, trust scoring)
-- Intent naming conventions and error codes
+Covers: Beam Identity, Intent/Result Frame schemas, Directory Protocol, Transport bindings (WebSocket + HTTP), Security model (Ed25519, replay prevention, TLS), Trust model, Intent naming conventions, Error codes.
 
 ---
 
-## Comparison
+## Intent Catalog
 
-| | MCP | Google A2A | Beam Protocol |
-|---|---|---|---|
-| **Focus** | Agent ↔ Tool | Agent ↔ Agent | Agent ↔ Agent |
-| **Identity** | None | Google Cloud IAM | Ed25519 + DID |
-| **Open Source** | ✅ | ❌ | ✅ |
-| **Vendor Lock-in** | No | Google | No |
-| **Trust Model** | None | IAM Roles | Trust Scores |
-| **Transport** | stdio/SSE | HTTP | WebSocket + HTTP |
-| **Message Format** | JSON-RPC | Custom | Intent/Result Frames |
+Beam uses namespaced intent types. See the full catalog at [`intents/catalog.yaml`](./intents/catalog.yaml).
+
+```yaml
+task.delegate       # Delegate work to another agent
+escalation.request  # Escalate an issue to a supervisor
+payment.status_check # Check payment/invoice status
+agent.ping          # Health check
+agent.introduce     # Introduce capabilities
+system.broadcast    # Broadcast to all connected agents
+```
 
 ---
 
 ## Roadmap
 
 - [x] RFC 0.1 Specification
-- [x] TypeScript SDK (17/17 tests ✅)
-- [x] Python SDK (40/40 tests ✅)
+- [x] TypeScript SDK (17/17 tests)
+- [x] Python SDK (40/40 tests)
 - [x] Reference Directory Server
-- [x] CLI Tool (`beam register`, `beam send`, `beam lookup`)
+- [x] CLI Tool
 - [x] Landing Page — [beam.directory](https://beam.directory)
-- [x] End-to-End verified (Register → Search → Intent → Result)
-- [ ] npm publish `@beam-protocol/sdk`
-- [ ] pip publish `beam-directory`
-- [ ] Hosted Directory Server
-- [ ] Dogfood: Internal agent-to-agent communication
+- [x] Production deployment (4 agents, 7 intents)
+- [ ] `npm publish @beam-protocol/sdk`
+- [ ] `pip publish beam-directory`
+- [ ] Hosted Directory (beam.directory/api)
 - [ ] Federated Directory Protocol
 - [ ] Developer Documentation Site
+- [ ] Agent Framework Integrations (LangChain, CrewAI, OpenClaw)
 
 ---
 
 ## Contributing
 
-Beam Protocol is open source under Apache-2.0. Contributions welcome.
+Beam is open source under Apache-2.0. We welcome contributions.
 
 1. Read the [RFC](./spec/RFC-0001.md)
 2. Check [open issues](https://github.com/Beam-directory/beam-protocol/issues)
-3. Submit a PR
+3. Open a PR
+
+Questions? Open an issue or reach out on [X @tobiaskub](https://x.com/tobiaskub).
 
 ---
 
 ## License
 
-[Apache-2.0](./LICENSE)
+[Apache-2.0](./LICENSE) — Use it, fork it, build on it.
 
 ---
 
 <p align="center">
-  <em>"Beam is SMTP for AI agents. Nothing more, nothing less."</em>
+  <strong>Beam is SMTP for AI agents. Nothing more, nothing less.</strong><br/>
+  <a href="https://beam.directory">beam.directory</a>
 </p>
