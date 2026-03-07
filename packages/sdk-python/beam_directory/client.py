@@ -145,6 +145,94 @@ class BeamClient:
                 latency=int((time.time() - start) * 1000),
             )
 
+    # ── Natural Language Communication ────────────────────────────────────────
+
+    async def talk(
+        self,
+        to: BeamIdString,
+        message: str,
+        *,
+        context: Optional[dict[str, Any]] = None,
+        language: str = "en",
+        timeout_ms: int = 60_000,
+    ) -> dict[str, Any]:
+        """
+        Send a natural language message to another agent.
+
+        The receiving agent uses its LLM to interpret and respond.
+        Returns a dict with 'message' (str), 'structured' (optional dict),
+        and 'raw' (ResultFrame).
+
+        Example::
+
+            reply = await client.talk(
+                "clara@coppen.beam.directory",
+                "Was weißt du über Chris Schnorrenberg?"
+            )
+            print(reply["message"])  # Natural language response
+        """
+        if not message:
+            raise ValueError("Message must be non-empty")
+        if len(message) > 32768:
+            raise ValueError("Message exceeds maximum length of 32768 characters")
+
+        params: dict[str, Any] = {"message": message}
+        if context:
+            params["context"] = context
+        if language != "en":
+            params["language"] = language
+
+        result = await self.send(
+            to=to,
+            intent="conversation.message",
+            params=params,
+            timeout_ms=timeout_ms,
+        )
+
+        return {
+            "message": result.payload.get("message", "") if result.payload else "",
+            "structured": result.payload.get("structured") if result.payload else None,
+            "raw": result,
+        }
+
+    def on_talk(
+        self,
+        handler: Callable[
+            [str, BeamIdString, IntentFrame],
+            Coroutine[Any, Any, tuple[str, Optional[dict[str, Any]]]],
+        ],
+    ) -> None:
+        """
+        Register a natural language message handler.
+
+        The handler receives (message, from_id, frame) and must return
+        (reply_message, optional_structured_data).
+
+        Example::
+
+            async def handle_talk(message, from_id, frame):
+                answer = await my_llm.generate(message)
+                return answer, {"confidence": 0.95}
+
+            client.on_talk(handle_talk)
+        """
+        async def _wrapper(frame: IntentFrame) -> ResultFrame:
+            msg = frame.params.get("message", "") if frame.params else ""
+            start = time.time()
+            reply_msg, structured = await handler(msg, frame.from_id, frame)
+            latency = int((time.time() - start) * 1000)
+            payload: dict[str, Any] = {"message": reply_msg}
+            if structured:
+                payload["structured"] = structured
+            return create_result_frame(
+                success=True,
+                nonce=frame.nonce,
+                payload=payload,
+                latency=latency,
+            )
+
+        self._intent_handlers["conversation.message"] = _wrapper
+
     # ── Private ────────────────────────────────────────────────────────────────
 
     async def _send_via_http(

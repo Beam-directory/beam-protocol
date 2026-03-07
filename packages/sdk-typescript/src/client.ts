@@ -245,6 +245,88 @@ export class BeamClient {
     return this
   }
 
+  /**
+   * Send a natural language message to another agent.
+   * The receiving agent uses its LLM to interpret and respond.
+   *
+   * @example
+   * const reply = await client.talk(
+   *   'clara@coppen.beam.directory',
+   *   'Was weißt du über Chris Schnorrenberg?'
+   * )
+   * console.log(reply.message) // Natural language response
+   * console.log(reply.structured) // Optional structured data
+   */
+  async talk(
+    to: BeamIdString,
+    message: string,
+    options?: {
+      context?: Record<string, unknown>
+      language?: string
+      timeoutMs?: number
+    }
+  ): Promise<{ message: string; structured?: Record<string, unknown>; raw: ResultFrame }> {
+    if (!message || message.length === 0) {
+      throw new Error('Message must be non-empty')
+    }
+    if (message.length > 32768) {
+      throw new Error('Message exceeds maximum length of 32768 characters')
+    }
+
+    const payload: Record<string, unknown> = {
+      message,
+    }
+    if (options?.context) payload['context'] = options.context
+    if (options?.language) payload['language'] = options.language
+
+    const result = await this.send(
+      to,
+      'conversation.message',
+      payload,
+      options?.timeoutMs ?? 60_000 // Longer default for NL (LLM processing)
+    )
+
+    return {
+      message: (result.payload?.['message'] as string) ?? '',
+      structured: result.payload?.['structured'] as Record<string, unknown> | undefined,
+      raw: result,
+    }
+  }
+
+  /**
+   * Register a natural language handler.
+   * Convenience wrapper that listens for conversation.message intents.
+   *
+   * @example
+   * client.onTalk(async (message, from, respond) => {
+   *   const answer = await myLLM.generate(message)
+   *   respond(answer)
+   * })
+   */
+  onTalk(
+    handler: (
+      message: string,
+      from: BeamIdString,
+      respond: (reply: string, structured?: Record<string, unknown>) => void,
+      frame: IntentFrame
+    ) => void | Promise<void>
+  ): this {
+    this.on('conversation.message', (frame, rawRespond) => {
+      const message = (frame.payload?.['message'] as string) ?? ''
+      const respond = (reply: string, structured?: Record<string, unknown>) => {
+        rawRespond({
+          success: true,
+          payload: {
+            message: reply,
+            ...(structured ? { structured } : {}),
+          },
+        })
+      }
+      return handler(message, frame.from, respond, frame)
+    })
+    return this
+  }
+
   disconnect(): void {
     if (this._ws) {
       this._wsConnected = false

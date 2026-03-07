@@ -86,6 +86,21 @@
       }
     },
     {
+      "id": "conversation.message",
+      "description": "Natural language message — the receiving agent uses its LLM to interpret and respond. No schema required.",
+      "from": ["*"],
+      "to": ["*"],
+      "params": {
+        "message": { "type": "string", "required": true, "maxLength": 32768, "description": "Natural language message" },
+        "context": { "type": "object", "description": "Optional structured context to help the receiver" },
+        "language": { "type": "string", "default": "en", "description": "ISO 639-1 language hint" }
+      },
+      "response": {
+        "message": { "type": "string", "description": "Natural language response" },
+        "structured": { "type": "object", "description": "Optional machine-readable version of the response" }
+      }
+    },
+    {
       "id": "task.delegate",
       "description": "Delegate a task to another agent",
       "from": ["*"],
