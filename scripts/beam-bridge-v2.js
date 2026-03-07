@@ -7,12 +7,12 @@ import { resolve } from 'node:path'
 
 const BEAM_AGENT = process.env.BEAM_AGENT || 'jarvis'
 const DIRECTORY_URL = process.env.BEAM_DIRECTORY_URL || 'http://localhost:3100'
-const OPENCLAW_PORT = Number(process.env.OPENCLAW_PORT || '18789')
+const OPENCLAW_PORT = Number(process.env.OPENCLAW_PORT || '3000')
 const OPENCLAW_TOKEN = process.env.OPENCLAW_TOKEN || ''
 const HEALTH_PORT = Number(process.env.HEALTH_PORT || String(OPENCLAW_PORT + 1000))
 const IDENTITIES_PATH = process.env.BEAM_IDENTITIES || resolve(
   process.env.HOME || '',
-  '.openclaw/workspace/secrets/beam-identities.json'
+  '.beam/identities.json'
 )
 const DB_PATH = resolve(process.cwd(), 'beam-intents.db')
 
