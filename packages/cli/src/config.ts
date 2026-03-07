@@ -37,4 +37,4 @@ export function saveConfig(config: BeamConfig, cwd = process.cwd()): void {
   writeFileSync(getConfigPath(cwd), JSON.stringify(config, null, 2), 'utf8')
 }
 
-export const DEFAULT_DIRECTORY_URL = process.env['BEAM_DIRECTORY_URL'] ?? 'http://localhost:3100'
+export const DEFAULT_DIRECTORY_URL = process.env['BEAM_DIRECTORY_URL'] ?? 'https://api.beam.directory'

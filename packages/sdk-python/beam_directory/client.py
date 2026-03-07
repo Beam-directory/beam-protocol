@@ -38,7 +38,7 @@ class BeamClient:
     Usage::
 
         identity = BeamIdentity.generate("jarvis", "coppen")
-        client = BeamClient(identity=identity, directory_url="http://localhost:3100")
+        client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
 
         await client.register("Jarvis", ["query", "answer"])
         result = await client.send(

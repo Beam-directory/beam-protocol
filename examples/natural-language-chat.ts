@@ -9,7 +9,7 @@
 import { BeamIdentity, BeamClient } from '@beam-protocol/sdk'
 
 async function main() {
-  const directoryUrl = 'http://localhost:3100'
+  const directoryUrl = 'https://api.beam.directory'
 
   // ── Agent A: Jarvis (asks questions) ─────────────────────────────────────
 

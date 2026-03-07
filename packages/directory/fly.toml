@@ -1,4 +1,4 @@
-app = "beam-directory"
+app = "beam-protocol"
 primary_region = "fra"
 
 [build]

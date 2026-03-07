@@ -70,7 +70,7 @@ console.log(identity.beamId)
 
 const client = new BeamClient({
   identity:     identity.export(),
-  directoryUrl: 'http://localhost:3100',
+  directoryUrl: 'https://api.beam.directory',
 })
 
 const record = await client.register('My Agent', ['query', 'answer'])
@@ -113,7 +113,7 @@ async def main():
     print(identity.beam_id)
     # → myagent@myorg.beam.directory
 
-    client = BeamClient(identity=identity, directory_url='http://localhost:3100')
+    client = BeamClient(identity=identity, directory_url='https://api.beam.directory')
     await client.register('My Agent', ['query', 'answer'])
 
     result = await client.send(

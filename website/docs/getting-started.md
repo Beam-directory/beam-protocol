@@ -49,7 +49,7 @@ import { BeamClient } from '@beam-protocol/sdk'
 
 const client = new BeamClient({
   identity:     identity.export(),
-  directoryUrl: 'http://localhost:3100',
+  directoryUrl: 'https://api.beam.directory',
 })
 
 const record = await client.register('My Agent', ['query', 'answer'])
@@ -112,7 +112,7 @@ import asyncio
 from beam_directory import BeamClient
 
 async def main():
-    client = BeamClient(identity=identity, directory_url='http://localhost:3100')
+    client = BeamClient(identity=identity, directory_url='https://api.beam.directory')
     await client.register('My Agent', ['query', 'answer'])
 
     result = await client.send(

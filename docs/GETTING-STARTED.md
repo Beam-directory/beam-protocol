@@ -41,7 +41,7 @@ console.log(`I am: ${identity.beamId}`)
 // Connect to the directory
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'http://localhost:3100'
+  directoryUrl: 'https://api.beam.directory'
 })
 
 await client.connect()
@@ -71,7 +71,7 @@ const identity = BeamIdentity.generate({
 
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'http://localhost:3100'
+  directoryUrl: 'https://api.beam.directory'
 })
 
 await client.connect()
@@ -133,7 +133,7 @@ identity = BeamIdentity.generate(
 
 client = BeamClient(
     identity=identity.export(),
-    directory_url="http://localhost:3100"
+    directory_url="https://api.beam.directory"
 )
 
 await client.connect()

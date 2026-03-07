@@ -150,7 +150,7 @@ import { BeamClient } from '@beam-protocol/sdk'
 
 const client = new BeamClient({
   identity: agent.export(),
-  directoryUrl: 'http://localhost:3100'
+  directoryUrl: 'https://api.beam.directory'
 })
 
 await client.connect()

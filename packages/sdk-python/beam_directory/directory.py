@@ -29,7 +29,7 @@ class BeamDirectory:
 
     Usage::
 
-        dir = BeamDirectory(DirectoryConfig(base_url="http://localhost:3100"))
+        dir = BeamDirectory(DirectoryConfig(base_url="https://api.beam.directory"))
         record = await dir.register(registration)
         agent  = await dir.lookup("jarvis@coppen.beam.directory")
         agents = await dir.search(AgentSearchQuery(org="coppen"))

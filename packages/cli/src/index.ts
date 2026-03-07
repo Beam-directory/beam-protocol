@@ -23,7 +23,7 @@ program
   .description('Generate a new Beam identity (writes .beam/identity.json)')
   .requiredOption('-a, --agent <name>', 'Agent name (e.g. jarvis)')
   .requiredOption('-o, --org <name>', 'Organisation name (e.g. coppen)')
-  .option('-d, --directory <url>', 'Directory server URL', process.env['BEAM_DIRECTORY_URL'] ?? 'http://localhost:3100')
+  .option('-d, --directory <url>', 'Directory server URL', process.env['BEAM_DIRECTORY_URL'] ?? 'https://api.beam.directory')
   .option('-f, --force', 'Overwrite existing identity')
   .action(async (opts: { agent: string; org: string; directory?: string; force?: boolean }) => {
     await cmdInit(opts)
