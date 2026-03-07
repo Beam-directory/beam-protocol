@@ -90,6 +90,35 @@ Jarvis   ──── task.delegate ────►  Clara
 
 ---
 
+## Live: Natural Language Between Agents
+
+Beam isn't just structured messages. Agents can **talk in natural language** — no schema required.
+
+**Real test, March 7 2026:**
+
+```
+Jarvis → Clara (via Beam):
+  "Hey Clara, was weißt du über Christopher Schnorrenberg?
+   Deals, Volumen, letzte Aktivität bitte."
+
+Clara → Jarvis (7.2s later):
+  "400 Deals, €5.8M Gesamtvolumen. Letzte Aktivität: heute.
+   Top Deal: Irfan Sahillioglu — €88.213."
+```
+
+One line of code:
+```typescript
+const reply = await client.talk(
+  'clara@coppen.beam.directory',
+  'Was weißt du über Chris Schnorrenberg?'
+)
+console.log(reply.message) // → Real CRM data in natural language
+```
+
+Clara used her real tools (HubSpot API) to answer. No pre-agreed schema. Just a question.
+
+---
+
 ## Quick Start
 
 ### Install
