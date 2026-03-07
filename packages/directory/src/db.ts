@@ -46,6 +46,18 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_intent_acls_target_intent
       ON intent_acls(target_beam_id, intent_type);
+
+    CREATE TABLE IF NOT EXISTS waitlist (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      email TEXT NOT NULL,
+      source TEXT,
+      company TEXT,
+      agent_count INTEGER,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
+      ON waitlist(created_at DESC);
   `)
 }
 

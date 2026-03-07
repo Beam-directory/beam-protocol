@@ -1034,9 +1034,6 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
 </footer>
 
 <script>
-  window.BEAM_CONVEX_URL = 'https://gregarious-mouse-785.eu-west-1.convex.site';
-</script>
-<script>
   // Code tabs
   document.querySelectorAll('.code-tab').forEach(tab => {
     tab.addEventListener('click', () => {
@@ -1057,9 +1054,7 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
   document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
 
   // Waitlist form
-  const CONVEX_WAITLIST_URL = window.BEAM_CONVEX_URL
-    ? window.BEAM_CONVEX_URL + '/waitlist'
-    : null;
+  const WAITLIST_API_URL = 'https://api.beam.directory/waitlist';
 
   document.getElementById('waitlistForm').addEventListener('submit', async e => {
     e.preventDefault();
@@ -1068,18 +1063,13 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
     const btn = e.target.querySelector('button[type="submit"]');
     if (btn) { btn.disabled = true; btn.textContent = 'Joining…'; }
     try {
-      if (CONVEX_WAITLIST_URL) {
-        const res = await fetch(CONVEX_WAITLIST_URL, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ email, source: 'landing' }),
-        });
-        if (!res.ok) throw new Error('Server error');
-      } else {
-        const signups = JSON.parse(localStorage.getItem('beam_waitlist') || '[]');
-        if (!signups.includes(email)) signups.push(email);
-        localStorage.setItem('beam_waitlist', JSON.stringify(signups));
-      }
+      const res = await fetch(WAITLIST_API_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email, source: 'landing-page' }),
+      });
+      if (!res.ok) throw new Error('Server error');
+
       document.getElementById('waitlistForm').style.display = 'none';
       document.getElementById('successMsg').style.display = 'block';
     } catch (err) {

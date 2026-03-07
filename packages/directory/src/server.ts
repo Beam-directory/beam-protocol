@@ -14,6 +14,23 @@ import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
+const BEAM_DIRECTORY_ORIGIN = 'https://beam.directory'
+
+type WaitlistSignupInput = {
+  email: string
+  source: string | null
+  company: string | null
+  agentCount: number | null
+}
+
+type WaitlistRow = {
+  id: number
+  email: string
+  source: string | null
+  company: string | null
+  agent_count: number | null
+  created_at: string
+}
 
 function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
   return {
@@ -34,9 +51,9 @@ export function createApp(db: Database): Hono {
   seedAclsFromCatalog(db)
 
   app.use('*', cors({
-    origin: '*',
+    origin: (origin) => origin === BEAM_DIRECTORY_ORIGIN ? origin : '*',
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization'],
+    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key'],
   }))
 
   // List all agents with connection status (before sub-router to avoid conflict)
@@ -112,6 +129,111 @@ export function createApp(db: Database): Hono {
     } catch (err) {
       console.error('Delete ACL error:', err)
       return c.json({ error: 'Failed to delete ACL entry', errorCode: 'ACL_ERROR' }, 500)
+    }
+  })
+
+  app.post('/waitlist', async (c) => {
+    c.header('Access-Control-Allow-Origin', BEAM_DIRECTORY_ORIGIN)
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const email = String(raw.email ?? '').trim().toLowerCase()
+    const source = typeof raw.source === 'string' && raw.source.trim().length > 0
+      ? raw.source.trim()
+      : null
+    const company = typeof raw.company === 'string' && raw.company.trim().length > 0
+      ? raw.company.trim()
+      : null
+
+    let agentCount: number | null = null
+    if (raw.agentCount !== undefined && raw.agentCount !== null && raw.agentCount !== '') {
+      const parsedAgentCount = Number(raw.agentCount)
+      if (!Number.isInteger(parsedAgentCount) || parsedAgentCount < 0) {
+        return c.json({ error: 'agentCount must be a non-negative integer', errorCode: 'INVALID_AGENT_COUNT' }, 400)
+      }
+      agentCount = parsedAgentCount
+    }
+
+    if (!email || !email.includes('@')) {
+      return c.json({ error: 'A valid email is required', errorCode: 'INVALID_EMAIL' }, 400)
+    }
+
+    const signup: WaitlistSignupInput = {
+      email,
+      source,
+      company,
+      agentCount,
+    }
+
+    const createdAt = new Date().toISOString()
+
+    try {
+      const result = db.prepare(`
+        INSERT INTO waitlist (email, source, company, agent_count, created_at)
+        VALUES (?, ?, ?, ?, ?)
+      `).run(signup.email, signup.source, signup.company, signup.agentCount, createdAt)
+
+      console.log(
+        `[waitlist] new signup email=${signup.email} source=${signup.source ?? '-'} company=${signup.company ?? '-'} agentCount=${signup.agentCount ?? '-'} createdAt=${createdAt}`
+      )
+
+      return c.json({
+        id: Number(result.lastInsertRowid),
+        email: signup.email,
+        source: signup.source,
+        company: signup.company,
+        agentCount: signup.agentCount,
+        createdAt,
+      }, 201)
+    } catch (err) {
+      console.error('Waitlist signup error:', err)
+      return c.json({ error: 'Failed to save waitlist signup', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/waitlist', (c) => {
+    const adminKey = process.env['BEAM_ADMIN_KEY']
+    if (!adminKey) {
+      console.error('BEAM_ADMIN_KEY is not configured')
+      return c.json({ error: 'Admin access unavailable', errorCode: 'ADMIN_NOT_CONFIGURED' }, 503)
+    }
+
+    const providedKey = c.req.header('X-Admin-Key')
+    if (providedKey !== adminKey) {
+      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    try {
+      const rows = db.prepare(`
+        SELECT id, email, source, company, agent_count, created_at
+        FROM waitlist
+        ORDER BY created_at DESC, id DESC
+      `).all() as WaitlistRow[]
+
+      return c.json({
+        signups: rows.map((row) => ({
+          id: row.id,
+          email: row.email,
+          source: row.source,
+          company: row.company,
+          agentCount: row.agent_count,
+          createdAt: row.created_at,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('List waitlist error:', err)
+      return c.json({ error: 'Failed to list waitlist signups', errorCode: 'DB_ERROR' }, 500)
     }
   })
 
