@@ -32,6 +32,27 @@ export interface IntentAclRow {
   created_at: string
 }
 
+export interface IntentLogRow {
+  id: number
+  nonce: string
+  from_beam_id: string
+  to_beam_id: string
+  intent_type: string
+  requested_at: string
+  completed_at: string | null
+  round_trip_latency_ms: number | null
+  status: string
+  error_code: string | null
+}
+
+export interface TrustScoreRow {
+  id: number
+  source_beam_id: string
+  target_beam_id: string
+  score: number
+  last_updated: string
+}
+
 export interface ResultFrame {
   v: '1'
   success: boolean

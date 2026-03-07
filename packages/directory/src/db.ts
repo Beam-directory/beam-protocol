@@ -1,6 +1,6 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type { AgentRow, RegisterRequest } from './types.js'
+import type { AgentRow, IntentFrame, IntentLogRow, RegisterRequest, TrustScoreRow } from './types.js'
 
 export function createDatabase(dbPath = './beam-directory.db'): DB {
   const db = new Database(dbPath)
@@ -46,6 +46,41 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_intent_acls_target_intent
       ON intent_acls(target_beam_id, intent_type);
+
+    CREATE TABLE IF NOT EXISTS intent_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nonce TEXT NOT NULL UNIQUE,
+      from_beam_id TEXT NOT NULL,
+      to_beam_id TEXT NOT NULL,
+      intent_type TEXT NOT NULL,
+      requested_at TEXT NOT NULL,
+      completed_at TEXT,
+      round_trip_latency_ms INTEGER,
+      status TEXT NOT NULL DEFAULT 'pending',
+      error_code TEXT,
+      FOREIGN KEY (from_beam_id) REFERENCES agents(beam_id),
+      FOREIGN KEY (to_beam_id) REFERENCES agents(beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_intent_log_requested_at
+      ON intent_log(requested_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_intent_log_from_to
+      ON intent_log(from_beam_id, to_beam_id);
+
+    CREATE TABLE IF NOT EXISTS trust_scores (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_beam_id TEXT NOT NULL,
+      target_beam_id TEXT NOT NULL,
+      score REAL NOT NULL,
+      last_updated TEXT NOT NULL,
+      FOREIGN KEY (source_beam_id) REFERENCES agents(beam_id),
+      FOREIGN KEY (target_beam_id) REFERENCES agents(beam_id),
+      UNIQUE(source_beam_id, target_beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_trust_scores_updated
+      ON trust_scores(last_updated DESC);
   `)
 }
 
@@ -229,4 +264,124 @@ export function calculateTrustScore(db: DB, beamId: string): number {
   }
 
   return Math.min(1.0, Math.round(score * 100) / 100)
+}
+
+export function logIntentStart(db: DB, frame: IntentFrame): void {
+  db.prepare(`
+    INSERT INTO intent_log (
+      nonce,
+      from_beam_id,
+      to_beam_id,
+      intent_type,
+      requested_at,
+      status
+    ) VALUES (?, ?, ?, ?, ?, 'pending')
+    ON CONFLICT(nonce) DO UPDATE SET
+      from_beam_id = excluded.from_beam_id,
+      to_beam_id = excluded.to_beam_id,
+      intent_type = excluded.intent_type,
+      requested_at = excluded.requested_at,
+      status = 'pending',
+      completed_at = NULL,
+      round_trip_latency_ms = NULL,
+      error_code = NULL
+  `).run(
+    frame.nonce,
+    frame.from,
+    frame.to,
+    frame.intent,
+    frame.timestamp
+  )
+}
+
+export function finalizeIntentLog(
+  db: DB,
+  input: {
+    nonce: string
+    fromBeamId: string
+    toBeamId: string
+    success: boolean
+    latencyMs: number | null
+    errorCode?: string
+  }
+): void {
+  const completedAt = new Date().toISOString()
+  const status = input.success ? 'success' : 'error'
+
+  db.prepare(`
+    UPDATE intent_log
+    SET completed_at = ?,
+        round_trip_latency_ms = ?,
+        status = ?,
+        error_code = ?
+    WHERE nonce = ?
+  `).run(
+    completedAt,
+    input.latencyMs,
+    status,
+    input.errorCode ?? null,
+    input.nonce
+  )
+
+  updatePairTrustScore(db, input)
+}
+
+export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
+  const safeLimit = Math.max(1, Math.min(200, Math.trunc(limit) || 50))
+  return db.prepare(`
+    SELECT *
+    FROM intent_log
+    ORDER BY requested_at DESC
+    LIMIT ?
+  `).all(safeLimit) as IntentLogRow[]
+}
+
+export function listTrustScores(db: DB): TrustScoreRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM trust_scores
+    ORDER BY last_updated DESC, score DESC
+  `).all() as TrustScoreRow[]
+}
+
+function updatePairTrustScore(
+  db: DB,
+  input: {
+    fromBeamId: string
+    toBeamId: string
+    success: boolean
+    latencyMs: number | null
+    errorCode?: string
+  }
+): void {
+  const sender = getAgent(db, input.fromBeamId)
+  const recipient = getAgent(db, input.toBeamId)
+  const existing = db.prepare(`
+    SELECT score
+    FROM trust_scores
+    WHERE source_beam_id = ? AND target_beam_id = ?
+  `).get(input.fromBeamId, input.toBeamId) as { score: number } | undefined
+
+  const base = ((sender?.trust_score ?? 0.5) + (recipient?.trust_score ?? 0.5)) / 2
+  const latencyPenalty = input.latencyMs === null ? 0 : Math.min(input.latencyMs, 60_000) / 60_000 * 0.15
+  const signal = input.success
+    ? Math.max(0.55, 0.95 - latencyPenalty)
+    : input.errorCode === 'OFFLINE' || input.errorCode === 'TIMEOUT'
+      ? 0.3
+      : 0.15
+  const targetScore = clampScore(base * 0.6 + signal * 0.4)
+  const nextScore = clampScore((existing?.score ?? base) * 0.7 + targetScore * 0.3)
+  const lastUpdated = new Date().toISOString()
+
+  db.prepare(`
+    INSERT INTO trust_scores (source_beam_id, target_beam_id, score, last_updated)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(source_beam_id, target_beam_id) DO UPDATE SET
+      score = excluded.score,
+      last_updated = excluded.last_updated
+  `).run(input.fromBeamId, input.toBeamId, nextScore, lastUpdated)
+}
+
+function clampScore(score: number): number {
+  return Math.max(0, Math.min(1, Math.round(score * 100) / 100))
 }

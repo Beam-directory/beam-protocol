@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
-import { getAgent, recordNonce, updateLastSeen } from './db.js'
+import { finalizeIntentLog, getAgent, logIntentStart, recordNonce, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
@@ -13,6 +13,10 @@ const REPLAY_WINDOW_MS = 5 * 60 * 1000
 const connections = new Map<string, WebSocket>()
 
 const pendingResults = new Map<string, {
+  db: Database
+  fromBeamId: string
+  toBeamId: string
+  startedAtMs: number
   resolve: (frame: ResultFrame) => void
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
@@ -106,12 +110,22 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
 
   enforceSecurityChecks(db, prepared, sender.public_key)
 
+  logIntentStart(db, prepared)
+
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
     throw new RelayError('OFFLINE', `Agent ${prepared.to} is not currently connected`)
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, timeoutMs)
+  const resultPromise = createResultWaiter(db, prepared, timeoutMs)
 
   try {
     sendJson(recipientWs, {
@@ -121,6 +135,14 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
     })
   } catch (err) {
     clearPendingResult(prepared.nonce)
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'DELIVERY_FAILED',
+    })
     throw new RelayError('DELIVERY_FAILED', err instanceof Error ? err.message : 'Failed to relay intent')
   }
 
@@ -220,8 +242,18 @@ async function handleIntent(
     return
   }
 
+  logIntentStart(db, prepared)
+
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
@@ -231,7 +263,7 @@ async function handleIntent(
     return
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, 30_000)
+  const resultPromise = createResultWaiter(db, prepared, 30_000)
 
   sendJson(recipientWs, {
     type: 'intent',
@@ -366,21 +398,48 @@ function handleResult(frame: ResultFrame): void {
 
   clearTimeout(pending.timeout)
   pendingResults.delete(frame.nonce)
+  finalizeIntentLog(pending.db, {
+    nonce: frame.nonce,
+    fromBeamId: pending.fromBeamId,
+    toBeamId: pending.toBeamId,
+    success: frame.success,
+    latencyMs: typeof frame.latency === 'number' ? frame.latency : Math.max(0, Date.now() - pending.startedAtMs),
+    errorCode: frame.success ? undefined : (frame.errorCode ?? 'RESULT_ERROR'),
+  })
   pending.resolve(frame)
 }
 
-function createResultWaiter(nonce: string, timeoutMs: number): Promise<ResultFrame> {
-  if (pendingResults.has(nonce)) {
-    clearPendingResult(nonce)
+function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number): Promise<ResultFrame> {
+  if (pendingResults.has(frame.nonce)) {
+    clearPendingResult(frame.nonce)
   }
+
+  const startedAtMs = new Date(frame.timestamp).getTime()
+  const safeStartedAtMs = Number.isNaN(startedAtMs) ? Date.now() : startedAtMs
 
   return new Promise<ResultFrame>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingResults.delete(nonce)
+      pendingResults.delete(frame.nonce)
+      finalizeIntentLog(db, {
+        nonce: frame.nonce,
+        fromBeamId: frame.from,
+        toBeamId: frame.to,
+        success: false,
+        latencyMs: Math.max(0, Date.now() - safeStartedAtMs),
+        errorCode: 'TIMEOUT',
+      })
       reject(new RelayError('TIMEOUT', `Intent timed out waiting for result (${timeoutMs}ms)`))
     }, timeoutMs)
 
-    pendingResults.set(nonce, { resolve, reject, timeout })
+    pendingResults.set(frame.nonce, {
+      db,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      startedAtMs: safeStartedAtMs,
+      resolve,
+      reject,
+      timeout,
+    })
   })
 }
 
