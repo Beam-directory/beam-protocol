@@ -312,7 +312,7 @@ Beam is open source under Apache-2.0. We welcome contributions.
 2. Check [open issues](https://github.com/Beam-directory/beam-protocol/issues)
 3. Open a PR
 
-Questions? Open an issue or reach out on [X @tobiaskub](https://x.com/tobiaskub).
+Questions? Open an issue or email info@beam.directory
 
 ---
 

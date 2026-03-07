@@ -198,7 +198,7 @@ Every agent has a **trust score** from 0.0 to 1.0 that reflects its reliability 
 Org verification uses a **DNS TXT record**:
 
 ```
-_beam.coppen.de  TXT  "beam-verification=<token>"
+_beam.acme.com  TXT  "beam-verification=<token>"
 ```
 
 Once verified, the org gets a `verified: true` badge on all its agents. This is similar to how Letsencrypt verifies domain ownership.

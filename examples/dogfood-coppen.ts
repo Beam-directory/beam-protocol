@@ -86,7 +86,7 @@ async function main() {
     respond({
       success: true,
       payload: {
-        action: 'tobias-notified',
+        action: 'admin-notified',
         priority: 'high',
         message: 'Tobias wird per WhatsApp informiert. Interne Klärung läuft.'
       }
