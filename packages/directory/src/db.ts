@@ -876,7 +876,8 @@ export function getLatestDomainVerification(db: DB, beamId: string): DomainVerif
 }
 
 export function updateDomainVerificationStatus(db: DB, id: number, status: string): DomainVerificationRow | null {
-  db.prepare('UPDATE domain_verifications SET status = ? WHERE id = ?').run(status, id)
+  const verifiedAt = status === 'verified' ? nowIso() : null
+  db.prepare('UPDATE domain_verifications SET status = ?, verified_at = ? WHERE id = ?').run(status, verifiedAt, id)
   const row = db.prepare('SELECT * FROM domain_verifications WHERE id = ?').get(id) as DomainVerificationRow | undefined
   return row ?? null
 }
@@ -884,7 +885,8 @@ export function updateDomainVerificationStatus(db: DB, id: number, status: strin
 export function markAgentDomainVerified(db: DB, beamId: string): AgentRow | null {
   db.prepare(`
     UPDATE agents
-    SET verification_tier = 'verified',
+    SET verified = 1,
+        verification_tier = 'verified',
         flagged = 0
     WHERE beam_id = ?
   `).run(beamId)

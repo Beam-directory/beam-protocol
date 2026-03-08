@@ -201,6 +201,7 @@ export interface DomainVerificationRow {
   challenge_token: string
   status: string
   created_at: number
+  verified_at: string | null
 }
 
 export interface AgentKeyRow {
