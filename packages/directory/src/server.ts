@@ -36,10 +36,12 @@ type WaitlistRow = {
 }
 
 function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
+  const { email_token: _emailToken, ...agent } = row
   return {
-    ...row,
+    ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1,
+    email_verified: row.email_verified === 1,
     connected: connectedSet.has(row.beam_id),
   }
 }

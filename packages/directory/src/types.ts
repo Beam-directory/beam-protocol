@@ -3,12 +3,19 @@ export type BeamIdString = string
 
 export interface AgentRecord {
   beam_id: string
-  org: string
+  org: string | null
   display_name: string
   capabilities: string[]  // parsed array
   public_key: string      // SPKI DER base64
   trust_score: number     // 0.0-1.0
   verified: number        // 0 or 1 (SQLite boolean)
+  email: string | null
+  description: string | null
+  logo_url: string | null
+  website: string | null
+  verification_tier: 'basic' | 'verified' | 'business' | 'enterprise'
+  email_verified: number
+  email_token: string | null
   created_at: string      // ISO 8601
   last_seen: string       // ISO 8601
 }
@@ -70,7 +77,8 @@ export interface RegisterRequest {
   displayName: string
   capabilities: string[]
   publicKey: string
-  org: string
+  org?: string | null
+  email?: string | null
 }
 
 export interface OrgRow {
@@ -100,14 +108,43 @@ export interface OrgAgentRow {
 // AgentRow represents a raw row from the SQLite agents table
 export interface AgentRow {
   beam_id: string
-  org: string
+  org: string | null
   display_name: string
   capabilities: string  // JSON string
   public_key: string
   trust_score: number
   verified: number
+  email: string | null
+  description: string | null
+  logo_url: string | null
+  website: string | null
+  verification_tier: 'basic' | 'verified' | 'business' | 'enterprise'
+  email_verified: number
+  email_token: string | null
   created_at: string
   last_seen: string
+}
+
+export interface VerificationTokenRow {
+  token: string
+  beam_id: string
+  email: string
+  created_at: number
+  expires_at: number
+}
+
+export interface AgentBrowseResult {
+  rows: AgentRow[]
+  total: number
+  page: number
+  limit: number
+}
+
+export interface AgentStats {
+  total_agents: number
+  verified_agents: number
+  total_intents: number
+  avg_response_ms: number
 }
 
 export interface WsMessage {

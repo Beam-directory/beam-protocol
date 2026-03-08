@@ -8,20 +8,23 @@
     "build": "tsc",
     "dev": "node --watch --experimental-vm-modules dist/index.js",
     "start": "node dist/index.js",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
   },
   "dependencies": {
     "@hono/node-server": "^1.9.0",
     "ajv": "^8.17.1",
     "better-sqlite3": "^11.0.0",
     "hono": "^4.1.0",
+    "nodemailer": "^6.10.1",
     "ws": "^8.16.0"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.8",
     "@types/node": "^20.11.0",
     "@types/ws": "^8.5.10",
-    "typescript": "^5.3.3"
+    "typescript": "^5.3.3",
+    "vitest": "^1.6.1"
   },
   "engines": { "node": ">=18.0.0" },
   "license": "Apache-2.0"
