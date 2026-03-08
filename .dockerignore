@@ -1,0 +1,21 @@
+# Dependency folders are installed inside the image.
+node_modules
+packages/*/node_modules
+
+# Build output is produced in the builder stage.
+dist
+packages/*/dist
+
+# Git metadata and local tooling caches are not needed in the image context.
+.git
+.github
+.DS_Store
+npm-debug.log*
+
+# Tests and docs do not participate in the directory service build.
+coverage
+packages/*/tests
+spec
+examples
+website
+
