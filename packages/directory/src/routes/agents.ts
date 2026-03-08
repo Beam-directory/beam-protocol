@@ -239,6 +239,10 @@ export function agentsRouter(db: Database): Hono {
       }, 400)
     }
 
+    // Visibility: 'public' or 'unlisted' (default: unlisted for privacy)
+    const requestedVisibility = typeof raw.visibility === 'string' ? raw.visibility.trim().toLowerCase() : 'unlisted'
+    const visibility = requestedVisibility === 'public' ? 'public' : 'unlisted'
+
     const request: RegisterRequest = {
       beamId,
       org,
@@ -251,6 +255,7 @@ export function agentsRouter(db: Database): Hono {
       description,
       logoUrl: cleanedLogoUrl,
       verificationTier: (requestedTier as VerificationTier | undefined) ?? (emailVerified ? 'verified' : 'basic'),
+      visibility,
     }
 
     try {
@@ -404,6 +409,53 @@ export function agentsRouter(db: Database): Hono {
     } catch (err) {
       console.error('Heartbeat error:', err)
       return c.json({ error: 'Heartbeat failed', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  // Toggle visibility (requires signed request or admin key)
+  router.patch('/:beamId/visibility', async (c) => {
+    const beamId = decodeURIComponent(c.req.param('beamId'))
+    if (!BEAM_ID_RE.test(beamId)) {
+      return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    const agent = getAgent(db, beamId)
+    if (!agent) {
+      return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown>
+    try {
+      body = (await c.req.json()) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    const newVisibility = typeof body.visibility === 'string' ? body.visibility.trim().toLowerCase() : ''
+    if (newVisibility !== 'public' && newVisibility !== 'unlisted') {
+      return c.json({ error: 'visibility must be "public" or "unlisted"', errorCode: 'INVALID_VISIBILITY' }, 400)
+    }
+
+    // Auth: verify Ed25519 signature or admin key
+    const signature = typeof body.signature === 'string' ? body.signature : ''
+    const adminKey = c.req.header('x-admin-key') ?? ''
+    const isAdmin = adminKey === process.env.BEAM_ADMIN_KEY
+
+    if (!isAdmin) {
+      const { verifyPayload } = await import('../crypto.js')
+      const payload = { beamId, visibility: newVisibility, timestamp: body.timestamp }
+      if (!signature || !verifyPayload(payload, signature, agent.public_key)) {
+        return c.json({ error: 'Invalid signature or missing admin key', errorCode: 'UNAUTHORIZED' }, 401)
+      }
+    }
+
+    try {
+      db.prepare('UPDATE agents SET visibility = ? WHERE beam_id = ?').run(newVisibility, beamId)
+      const updated = getAgent(db, beamId) as AgentRow
+      return c.json({ ...serializeAgent(updated), visibility: newVisibility })
+    } catch (err) {
+      console.error('Visibility update error:', err)
+      return c.json({ error: 'Failed to update visibility', errorCode: 'DB_ERROR' }, 500)
     }
   })
 

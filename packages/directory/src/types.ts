@@ -142,6 +142,7 @@ export interface RegisterRequest {
   description?: string | null
   logoUrl?: string | null
   verificationTier?: VerificationTier
+  visibility?: 'public' | 'unlisted'
 }
 
 export interface OrgRow {
@@ -184,6 +185,7 @@ export interface AgentRow {
   trust_score: number
   verified: number
   flagged: number
+  visibility: 'public' | 'unlisted'
   created_at: string
   last_seen: string
 }

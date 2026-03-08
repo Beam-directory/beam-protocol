@@ -759,11 +759,14 @@ export function createApp(db: Database): Hono {
     }
 
     try {
-      const rows = db.prepare('SELECT * FROM agents ORDER BY beam_id ASC').all() as AgentRow[]
+      const includeUnlisted = c.req.query('includeUnlisted') === 'true' && !requireAdmin(c)
+      const publicRows = db.prepare("SELECT * FROM agents WHERE visibility = 'public' ORDER BY trust_score DESC, beam_id ASC").all() as AgentRow[]
+      const totalCount = (db.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number }).cnt
       const connected = new Set(getConnectedBeamIds())
       return c.json({
-        agents: rows.map((row) => serializeAgent(row, connected)),
-        total: rows.length,
+        agents: publicRows.map((row) => serializeAgent(row, connected)),
+        total: totalCount,
+        listed: publicRows.length,
       })
     } catch (err) {
       console.error('List agents error:', err)

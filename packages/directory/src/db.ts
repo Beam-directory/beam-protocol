@@ -338,6 +338,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'email_token', 'TEXT')
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'agents', 'visibility', "TEXT NOT NULL DEFAULT 'unlisted'")
 
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
@@ -533,6 +534,8 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const verified = verificationTier !== 'basic' || emailVerified === 1 ? 1 : 0
   const emailToken = normalizedEmail ? (emailChanged ? null : existing?.email_token ?? null) : null
 
+  const visibility = data.visibility ?? existing?.visibility ?? 'unlisted'
+
   if (existing) {
     db.prepare(`
       UPDATE agents
@@ -548,6 +551,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           logo_url = ?,
           verified = ?,
           email_token = ?,
+          visibility = ?,
           last_seen = ?
       WHERE beam_id = ?
     `).run(
@@ -563,6 +567,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.logoUrl ?? null,
       verified,
       emailToken,
+      visibility,
       now,
       data.beamId,
     )
@@ -584,10 +589,11 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         verification_tier,
         flagged,
         email_token,
+        visibility,
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
@@ -602,6 +608,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       verified,
       verificationTier,
       emailToken,
+      visibility,
       now,
       now,
     )
@@ -812,6 +819,9 @@ export function searchAgents(
 ): AgentRow[] {
   const params: Array<string | number> = []
   const conditions: string[] = []
+
+  // Only show public agents in search results
+  conditions.push("visibility = 'public'")
 
   if (query.personal === true) {
     conditions.push('personal = 1')
