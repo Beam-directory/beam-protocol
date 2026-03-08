@@ -685,6 +685,40 @@ export function createVerificationToken(
   }
 }
 
+export function verifyAgentEmailToken(db: DB, token: string): AgentRow | null {
+  const tokenRow = db.prepare(`
+    SELECT token, beam_id, email, expires_at
+    FROM verification_tokens
+    WHERE token = ?
+  `).get(token) as { token: string; beam_id: string; email: string; expires_at: number } | undefined
+
+  if (!tokenRow) {
+    return null
+  }
+
+  if (tokenRow.expires_at < nowMs()) {
+    db.prepare('DELETE FROM verification_tokens WHERE token = ?').run(token)
+    return null
+  }
+
+  const agent = getAgent(db, tokenRow.beam_id)
+  if (!agent || agent.email !== tokenRow.email) {
+    db.prepare('DELETE FROM verification_tokens WHERE token = ?').run(token)
+    return null
+  }
+
+  db.prepare(`
+    UPDATE agents
+    SET email_verified = 1,
+        verified = 1,
+        email_token = NULL
+    WHERE beam_id = ?
+  `).run(tokenRow.beam_id)
+
+  db.prepare('DELETE FROM verification_tokens WHERE token = ?').run(token)
+  return getAgent(db, tokenRow.beam_id)
+}
+
 export function findAgentByHandle(db: DB, handle: string): AgentRow | null {
   const rows = db.prepare(`
     SELECT *
