@@ -19,6 +19,7 @@ import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
+import { authRouter } from './routes/auth.js'
 import { verificationRouter } from './routes/verify.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
@@ -826,6 +827,7 @@ export function createApp(db: Database): Hono {
   app.route('/federation', federationRouter(db))
   app.route('/billing', billingRouter(db))
   app.route('/shield', shieldRouter(db))
+  app.route('/auth', authRouter(db))
   app.route('/keys', revokedKeysRouter(db))
 
   app.post('/acl', async (c) => {
