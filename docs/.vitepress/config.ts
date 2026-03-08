@@ -14,7 +14,9 @@ export default defineConfig({
     sidebar: [
       { text: 'Guide', items: [
         { text: 'Getting Started', link: '/guide/getting-started' },
-        { text: 'DID:beam', link: '/guide/did' },
+        { text: 'Vision', link: '/guide/vision' },
+        { text: 'Use Cases', link: '/guide/use-cases' },
+        { text: 'DID Identity', link: '/guide/did' },
         { text: 'Verification', link: '/guide/verification' },
         { text: 'Federation', link: '/guide/federation' },
         { text: 'Consumer IDs', link: '/guide/consumer-ids' },

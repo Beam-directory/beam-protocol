@@ -1,79 +1,183 @@
-# DID:beam
+# DID Identity
 
-`did:beam` is the decentralized identifier layer for Beam identities.
+Every Beam-ID automatically maps to a W3C Decentralized Identifier (DID).
 
-It gives a Beam agent a portable, verifiable identity document that can be resolved outside of a single application session while still mapping cleanly back to a Beam ID.
+## Format
 
-## Why Beam has a DID layer
+```
+Beam-ID:  tobias@beam.directory
+DID:      did:beam:tobias
 
-Beam IDs are great for routing and discovery, but a DID document adds a standards-friendly identity envelope around the same agent.
+Beam-ID:  booking@lufthansa.beam.directory
+DID:      did:beam:lufthansa:booking
 
-That lets Beam expose:
-
-- a stable DID for the agent
-- a machine-readable verification method
-- authentication and assertion relationships
-- service endpoints for resolution
-- credential issuance and verification flows
-
-## DID formats
-
-Beam currently supports three useful formats:
-
-- Personal DID: `did:beam:alice`
-- Organization DID: `did:beam:acme:assistant`
-- Key-based DID: `did:beam:z...`
-
-In practice, organization agents usually map to `did:beam:org:agent`, while consumer-style Beam IDs map to the shorter personal format.
-
-## What a DID document contains
-
-A Beam DID document includes:
-
-- `id`
-- `alsoKnownAs` pointing back to the Beam ID
-- an `Ed25519VerificationKey2020` verification method
-- `authentication`, `assertionMethod`, `capabilityInvocation`, and `capabilityDelegation`
-- a resolver service endpoint
-
-This is enough for other systems to resolve the agent and verify its public key material.
-
-## TypeScript example
-
-```ts
-import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
-
-const identity = BeamIdentity.generate({ agentName: 'assistant', orgName: 'acme' })
-const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })
-const didDocument = client.did.create()
+Beam-ID:  jarvis@coppen.beam.directory
+DID:      did:beam:coppen:jarvis
 ```
 
-You can also resolve a DID from the directory:
+### Rules
 
-```ts
-const resolved = await client.did.resolve('did:beam:acme:assistant')
+| Beam-ID Type | DID Format | Example |
+|-------------|-----------|---------|
+| Personal | `did:beam:{name}` | `did:beam:tobias` |
+| Organization | `did:beam:{org}:{name}` | `did:beam:lufthansa:booking` |
+| Key-based | `did:beam:z6Mk...` | For anonymous/key-only agents |
+
+## DID Document
+
+Every registered agent gets a DID Document that follows the [W3C DID v1.1 specification](https://www.w3.org/TR/did-core/).
+
+### Resolve a DID
+
+```bash
+curl https://api.beam.directory/agents/did/did:beam:coppen:jarvis
 ```
 
-## Verifiable credentials
+### Response
 
-The v0.5.0 TypeScript SDK also exposes credential helpers for Beam-issued assertions such as:
-
-- email credentials
-- domain credentials
-- business credentials
-
-Those credentials can be verified locally before you trust an external claim.
-
-```ts
-const vc = await client.credentials.issueDomainVC(client.beamId, 'acme.example')
-const ok = client.credentials.verify(vc)
+```json
+{
+  "@context": [
+    "https://www.w3.org/ns/did/v1",
+    "https://w3id.org/security/suites/ed25519-2020/v1"
+  ],
+  "id": "did:beam:coppen:jarvis",
+  "alsoKnownAs": ["jarvis@coppen.beam.directory"],
+  "verificationMethod": [{
+    "id": "did:beam:coppen:jarvis#key-1",
+    "type": "Ed25519VerificationKey2020",
+    "controller": "did:beam:coppen:jarvis",
+    "publicKeyMultibase": "z6MkrvPsTYcb..."
+  }],
+  "authentication": ["did:beam:coppen:jarvis#key-1"],
+  "assertionMethod": ["did:beam:coppen:jarvis#key-1"],
+  "capabilityInvocation": ["did:beam:coppen:jarvis#key-1"],
+  "capabilityDelegation": ["did:beam:coppen:jarvis#key-1"],
+  "service": [{
+    "id": "did:beam:coppen:jarvis#directory",
+    "type": "BeamDirectoryService",
+    "serviceEndpoint": "https://beam.directory/agents/jarvis@coppen.beam.directory"
+  }]
+}
 ```
 
-## Relationship to Beam IDs
+## Architecture
 
-Think of the two layers like this:
+### Three-Layer Identity Stack
 
-- Beam ID: routing and directory lookup
-- DID: portable identity document and credential anchor
+```
+Layer 0: Network     — Beam Directory (discovery, relay)
+Layer 1: Keys        — Ed25519 keypair (cryptographic identity)
+Layer 2: Identity    — Beam-ID + DID Document (human-readable + machine-verifiable)
+Layer 3: Trust       — Verification tiers + trust scores (reputation)
+```
 
-Most application code still starts with a Beam ID, but the DID layer becomes important when you need portable verification or credential-based trust.
+### No Blockchain
+
+Beam uses:
+- **Ed25519 keys** for cryptographic identity
+- **DNS TXT records** as fallback verification
+- **W3C Verifiable Credentials** for attestations
+- **Directory federation** for decentralization
+
+No blockchain, no tokens, no gas fees. Just cryptography and federation.
+
+## Verifiable Credentials
+
+The directory issues W3C Verifiable Credentials for each verification:
+
+### Email Verification VC
+
+```json
+{
+  "@context": ["https://www.w3.org/2018/credentials/v1"],
+  "type": ["VerifiableCredential", "EmailVerificationCredential"],
+  "issuer": "did:beam:beam:directory",
+  "credentialSubject": {
+    "id": "did:beam:coppen:jarvis",
+    "email": "jarvis@coppen.de",
+    "verified": true
+  }
+}
+```
+
+### Domain Verification VC
+
+Issued after DNS TXT record verification:
+
+```json
+{
+  "type": ["VerifiableCredential", "DomainVerificationCredential"],
+  "credentialSubject": {
+    "id": "did:beam:coppen:jarvis",
+    "domain": "coppen.de",
+    "verificationMethod": "dns-txt"
+  }
+}
+```
+
+### Business Verification VC
+
+Issued after business registry verification:
+
+```json
+{
+  "type": ["VerifiableCredential", "BusinessVerificationCredential"],
+  "credentialSubject": {
+    "id": "did:beam:lufthansa:booking",
+    "registryCountry": "DE",
+    "registryId": "HRB 107033",
+    "legalName": "Deutsche Lufthansa AG"
+  }
+}
+```
+
+## SDK Usage
+
+### TypeScript
+
+```typescript
+import { BeamIdentity } from 'beam-protocol-sdk'
+
+// Create identity (generates Ed25519 keypair + DID)
+const identity = BeamIdentity.create({
+  agentName: 'my-agent',
+  orgName: 'acme'
+})
+
+console.log(identity.beamId)  // my-agent@acme.beam.directory
+console.log(identity.did)     // did:beam:acme:my-agent
+
+// Export/import for persistence
+const exported = identity.export()
+const restored = BeamIdentity.fromExport(exported)
+
+// Encrypted export
+const encrypted = await identity.exportEncrypted('my-password')
+const decrypted = await BeamIdentity.importEncrypted(encrypted, 'my-password')
+
+// Recovery phrase (BIP-39)
+const phrase = identity.toRecoveryPhrase()
+const recovered = BeamIdentity.fromRecoveryPhrase(phrase)
+```
+
+### Python
+
+```python
+from beam_directory import BeamIdentity
+
+identity = BeamIdentity.create(agent_name="my-agent", org_name="acme")
+print(identity.beam_id)  # my-agent@acme.beam.directory
+print(identity.did)      # did:beam:acme:my-agent
+```
+
+## Well-Known DID
+
+The directory itself has a DID:
+
+```bash
+curl https://api.beam.directory/agents/.well-known/did.json
+# → did:beam:beam:directory
+```
+
+This DID is the issuer for all Verifiable Credentials.
