@@ -249,5 +249,40 @@ export function billingRouter(db: DB) {
 </div></body></html>`)
   })
 
+  // S3: Usage metering endpoint
+  app.get('/usage/:beamId', async (c) => {
+    const beamId = c.req.param('beamId')
+    if (!BEAM_ID_RE.test(beamId)) return c.json({ error: 'Invalid beam_id' }, 400)
+
+    const agent = getAgent(db, beamId)
+    if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+    const period = c.req.query('period') || new Date().toISOString().slice(0, 7) // YYYY-MM
+    const usage = db.prepare(
+      'SELECT intent_count, encrypted_count, direct_count, relayed_count FROM usage_metering WHERE beam_id = ? AND period = ?'
+    ).get(beamId, period) as { intent_count: number; encrypted_count: number; direct_count: number; relayed_count: number } | undefined
+
+    // Plan limits
+    const planLimits: Record<string, { daily: number; overage: number }> = {
+      free: { daily: 100, overage: 0 },
+      pro: { daily: 10_000, overage: 0.001 },
+      business: { daily: 100_000, overage: 0.0005 },
+      enterprise: { daily: Infinity, overage: 0 },
+    }
+    const plan = agent.plan || 'free'
+    const limits = planLimits[plan] ?? planLimits.free
+
+    return c.json({
+      beamId,
+      period,
+      plan,
+      usage: usage ?? { intent_count: 0, encrypted_count: 0, direct_count: 0, relayed_count: 0 },
+      limits: {
+        dailyIntents: limits.daily,
+        overagePricePerIntent: limits.overage,
+      },
+    })
+  })
+
   return app
 }

@@ -360,6 +360,18 @@ function initSchema(db: DB): void {
       count INTEGER NOT NULL DEFAULT 1,
       window_start INTEGER NOT NULL
     );
+
+    CREATE TABLE IF NOT EXISTS usage_metering (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL,
+      period TEXT NOT NULL,
+      intent_count INTEGER NOT NULL DEFAULT 0,
+      encrypted_count INTEGER NOT NULL DEFAULT 0,
+      direct_count INTEGER NOT NULL DEFAULT 0,
+      relayed_count INTEGER NOT NULL DEFAULT 0,
+      UNIQUE(beam_id, period)
+    );
+    CREATE INDEX IF NOT EXISTS idx_usage_beam_period ON usage_metering(beam_id, period);
   `)
 
   ensureColumn(db, 'agents', 'email', 'TEXT')
@@ -371,6 +383,12 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agents', 'visibility', "TEXT NOT NULL DEFAULT 'unlisted'")
   ensureColumn(db, 'agents', 'shield_config', 'TEXT')
+  // S4: P2P HTTP direct delivery endpoint
+  ensureColumn(db, 'agents', 'http_endpoint', 'TEXT')
+  // S5: E2E encryption public key (X25519)
+  ensureColumn(db, 'agents', 'dh_public_key', 'TEXT')
+  // S3: Billing plan tier
+  ensureColumn(db, 'agents', 'plan', "TEXT NOT NULL DEFAULT 'free'")
 
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
@@ -584,6 +602,8 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           verified = ?,
           email_token = ?,
           visibility = ?,
+          http_endpoint = ?,
+          dh_public_key = ?,
           last_seen = ?
       WHERE beam_id = ?
     `).run(
@@ -600,6 +620,8 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       verified,
       emailToken,
       visibility,
+      data.httpEndpoint ?? existing?.http_endpoint ?? null,
+      data.dhPublicKey ?? existing?.dh_public_key ?? null,
       now,
       data.beamId,
     )
@@ -622,10 +644,12 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         flagged,
         email_token,
         visibility,
+        http_endpoint,
+        dh_public_key,
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
@@ -641,6 +665,8 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       verificationTier,
       emailToken,
       visibility,
+      data.httpEndpoint ?? null,
+      data.dhPublicKey ?? null,
       now,
       now,
     )

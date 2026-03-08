@@ -1003,6 +1003,52 @@ export function createApp(db: Database): Hono {
     }
 
     try {
+      // S4: Check if recipient has HTTP endpoint for direct delivery
+      const recipientAgent = db.prepare('SELECT http_endpoint, dh_public_key FROM agents WHERE beam_id = ?').get(frame.to) as { http_endpoint: string | null; dh_public_key: string | null } | undefined
+      if (recipientAgent?.http_endpoint) {
+        try {
+          const directResponse = await fetch(recipientAgent.http_endpoint, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-Beam-Sender': frame.from,
+              'X-Beam-Signature': frame.signature ?? '',
+              'X-Beam-Nonce': frame.nonce ?? '',
+              'X-Beam-Timestamp': frame.timestamp ?? new Date().toISOString(),
+            },
+            body: JSON.stringify({
+              intent: frame.intent,
+              from: frame.from,
+              payload: frame.payload,
+              nonce: frame.nonce,
+              timestamp: frame.timestamp,
+            }),
+            signal: AbortSignal.timeout(30_000),
+          })
+          if (directResponse.ok) {
+            const directResult = await directResponse.json() as Record<string, unknown>
+            // Log as direct delivery
+            db.prepare(
+              `INSERT OR REPLACE INTO usage_metering (beam_id, period, intent_count, direct_count)
+               VALUES (?, ?, COALESCE((SELECT intent_count FROM usage_metering WHERE beam_id = ? AND period = ?), 0) + 1,
+                       COALESCE((SELECT direct_count FROM usage_metering WHERE beam_id = ? AND period = ?), 0) + 1)`
+            ).run(frame.from, new Date().toISOString().slice(0, 7), frame.from, new Date().toISOString().slice(0, 7), frame.from, new Date().toISOString().slice(0, 7))
+            return c.json({ ...directResult, delivery: 'direct' })
+          }
+          // Direct delivery failed — fall through to WebSocket relay
+        } catch {
+          // Direct delivery error — fall through to WebSocket relay
+        }
+      }
+
+      // Meter relayed intent
+      const period = new Date().toISOString().slice(0, 7)
+      db.prepare(
+        `INSERT INTO usage_metering (beam_id, period, intent_count, relayed_count)
+         VALUES (?, ?, 1, 1)
+         ON CONFLICT(beam_id, period) DO UPDATE SET intent_count = intent_count + 1, relayed_count = relayed_count + 1`
+      ).run(frame.from, period)
+
       const result = await relayIntentFromHttp(db, frame, 60_000)
       return c.json(result)
     } catch (err) {

@@ -143,6 +143,10 @@ export interface RegisterRequest {
   logoUrl?: string | null
   verificationTier?: VerificationTier
   visibility?: 'public' | 'unlisted'
+  // S4: P2P HTTP direct delivery endpoint
+  httpEndpoint?: string | null
+  // S5: E2E encryption key (X25519)
+  dhPublicKey?: string | null
 }
 
 export interface OrgRow {
@@ -186,6 +190,10 @@ export interface AgentRow {
   verified: number
   flagged: number
   visibility: 'public' | 'unlisted'
+  shield_config: string | null
+  http_endpoint: string | null
+  dh_public_key: string | null
+  plan: 'free' | 'pro' | 'business' | 'enterprise'
   created_at: string
   last_seen: string
 }

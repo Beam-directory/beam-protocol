@@ -255,6 +255,24 @@ export function agentsRouter(db: Database): Hono {
     const requestedVisibility = typeof raw.visibility === 'string' ? raw.visibility.trim().toLowerCase() : 'unlisted'
     const visibility = requestedVisibility === 'public' ? 'public' : 'unlisted'
 
+    // S4: Parse HTTP endpoint for P2P direct delivery
+    let httpEndpoint: string | null = null
+    const rawEndpoint = typeof raw.httpEndpoint === 'string' ? raw.httpEndpoint.trim() : typeof raw.http_endpoint === 'string' ? raw.http_endpoint.trim() : null
+    if (rawEndpoint) {
+      try {
+        const endpointUrl = new URL(rawEndpoint)
+        if (endpointUrl.protocol !== 'https:') return c.json({ error: 'httpEndpoint must use HTTPS', errorCode: 'INVALID_HTTP_ENDPOINT' }, 400)
+        httpEndpoint = rawEndpoint
+      } catch {
+        return c.json({ error: 'httpEndpoint must be a valid HTTPS URL', errorCode: 'INVALID_HTTP_ENDPOINT' }, 400)
+      }
+    }
+
+    // S5: Parse DH public key for E2E encryption (X25519)
+    const dhPublicKey = typeof raw.dhPublicKey === 'string' ? raw.dhPublicKey.trim()
+      : typeof raw.dh_public_key === 'string' ? raw.dh_public_key.trim()
+      : null
+
     const request: RegisterRequest = {
       beamId,
       org,
@@ -268,6 +286,8 @@ export function agentsRouter(db: Database): Hono {
       logoUrl: cleanedLogoUrl,
       verificationTier: (requestedTier as VerificationTier | undefined) ?? (emailVerified ? 'verified' : 'basic'),
       visibility,
+      httpEndpoint,
+      dhPublicKey,
     }
 
     try {
@@ -469,6 +489,83 @@ export function agentsRouter(db: Database): Hono {
       console.error('Visibility update error:', err)
       return c.json({ error: 'Failed to update visibility', errorCode: 'DB_ERROR' }, 500)
     }
+  })
+
+  // S4+S5: Update httpEndpoint and/or dhPublicKey
+  router.patch('/:beamId/config', async (c) => {
+    const beamId = c.req.param('beamId')
+    if (!BEAM_ID_RE.test(beamId)) return c.json({ error: 'Invalid beam_id' }, 400)
+
+    const agent = getAgent(db, beamId)
+    if (!agent) return c.json({ error: 'Agent not found' }, 404)
+
+    let body: Record<string, unknown>
+    try {
+      body = (await c.req.json()) as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'Invalid JSON body' }, 400)
+    }
+
+    // Auth: admin key or Ed25519 signature
+    const adminKey = c.req.header('x-admin-key') ?? ''
+    const isAdmin = adminKey === process.env.BEAM_ADMIN_KEY
+
+    if (!isAdmin) {
+      const { verifyPayload } = await import('../crypto.js')
+      const signature = typeof body.signature === 'string' ? body.signature : ''
+      const payload = { beamId, action: 'config', timestamp: body.timestamp }
+      if (!signature || !verifyPayload(payload, signature, agent.public_key)) {
+        return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+      }
+    }
+
+    const updates: string[] = []
+    const params: unknown[] = []
+
+    // S4: HTTP endpoint
+    if ('httpEndpoint' in body || 'http_endpoint' in body) {
+      const endpoint = String(body.httpEndpoint ?? body.http_endpoint ?? '').trim()
+      if (endpoint) {
+        try {
+          const u = new URL(endpoint)
+          if (u.protocol !== 'https:') return c.json({ error: 'httpEndpoint must use HTTPS' }, 400)
+        } catch {
+          return c.json({ error: 'Invalid httpEndpoint URL' }, 400)
+        }
+      }
+      updates.push('http_endpoint = ?')
+      params.push(endpoint || null)
+    }
+
+    // S5: DH public key for E2E
+    if ('dhPublicKey' in body || 'dh_public_key' in body) {
+      const dhKey = String(body.dhPublicKey ?? body.dh_public_key ?? '').trim()
+      updates.push('dh_public_key = ?')
+      params.push(dhKey || null)
+    }
+
+    if (updates.length === 0) return c.json({ error: 'No config fields to update' }, 400)
+
+    params.push(beamId)
+    db.prepare(`UPDATE agents SET ${updates.join(', ')} WHERE beam_id = ?`).run(...params)
+    const updated = getAgent(db, beamId)!
+    return c.json({
+      beamId,
+      httpEndpoint: updated.http_endpoint,
+      dhPublicKey: updated.dh_public_key,
+    })
+  })
+
+  // S5: Generate X25519 keypair (utility endpoint for agents)
+  router.post('/keypair/x25519', async (c) => {
+    const { generateX25519KeyPair } = await import('../shield/encryption.js')
+    const pair = generateX25519KeyPair()
+    return c.json({
+      publicKey: pair.publicKey,
+      privateKey: pair.privateKey,
+      algorithm: 'x25519',
+      note: 'Store privateKey securely. Register publicKey as dhPublicKey on your agent.',
+    })
   })
 
   return router
