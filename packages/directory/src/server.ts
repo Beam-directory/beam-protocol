@@ -778,14 +778,11 @@ export function createApp(db: Database): Hono {
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
   app.route('/agents', reportsRouter(db))
-  app.route('/agents', credentialsRouter(db))
+  app.route('/agents', credentialsRouter())
   app.route('/agents', didRouter(db))
   app.route('/federation', federationRouter(db))
   app.route('/billing', billingRouter(db))
   app.route('/keys', revokedKeysRouter(db))
-  app.route('/credentials', credentialsRouter())
-  app.route('/federation', federationRouter(db))
-  app.route('/', didRouter(db))
 
   app.post('/acl', async (c) => {
     let body: unknown
