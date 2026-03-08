@@ -1,211 +1,134 @@
-import { useQuery } from 'convex/react'
-import { api } from '../../convex/_generated/api'
-import {
-  LineChart,
-  Line,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
-import { Zap, CheckCircle, XCircle, Clock } from 'lucide-react'
-import { formatRelativeTime, formatLatency, truncateBeamId } from '../lib/utils'
-import { useMemo } from 'react'
+import { useEffect, useRef, useState } from 'react'
+import { Radio } from 'lucide-react'
+import { ApiError, connectIntentFeed, directoryApi, type RecentIntent } from '../lib/api'
+import { cn, formatDateTime, formatLatency, truncateBeamId } from '../lib/utils'
 
 export default function IntentsPage() {
-  const result = useQuery(api.intents.getIntentLog, { limit: 100 })
-  const intents = result?.items ?? []
+  const [intents, setIntents] = useState<RecentIntent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [socketState, setSocketState] = useState<'connecting' | 'live' | 'offline'>('connecting')
+  const socketRef = useRef<WebSocket | null>(null)
 
-  // Build latency series for last 20 intents (reversed = oldest first)
-  const latencySeries = useMemo(() => {
-    return [...intents]
-      .reverse()
-      .filter(i => i.latencyMs !== undefined)
-      .slice(-20)
-      .map((i, idx) => ({
-        idx: idx + 1,
-        latency: i.latencyMs ?? 0,
-        label: `#${idx + 1}`,
-      }))
-  }, [intents])
+  useEffect(() => {
+    let cancelled = false
+    let reconnectTimer: number | null = null
 
-  const successRate = useMemo(() => {
-    if (intents.length === 0) return null
-    const ok = intents.filter(i => i.success).length
-    return Math.round((ok / intents.length) * 100)
-  }, [intents])
+    async function loadInitial() {
+      try {
+        setLoading(true)
+        const response = await directoryApi.getRecentIntents(50)
+        if (!cancelled) {
+          setIntents(response.intents)
+          setError(null)
+        }
+      } catch (err) {
+        if (!cancelled) {
+          setError(err instanceof ApiError ? err.message : 'Failed to load intents')
+        }
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
 
-  const avgLatency = useMemo(() => {
-    const withLatency = intents.filter(i => i.latencyMs !== undefined)
-    if (withLatency.length === 0) return null
-    return Math.round(withLatency.reduce((s, i) => s + (i.latencyMs ?? 0), 0) / withLatency.length)
-  }, [intents])
+    function connect() {
+      setSocketState('connecting')
+      socketRef.current?.close()
+      socketRef.current = connectIntentFeed({
+        onOpen: () => setSocketState('live'),
+        onClose: () => {
+          setSocketState('offline')
+          if (!cancelled) {
+            reconnectTimer = window.setTimeout(connect, 2500)
+          }
+        },
+        onError: () => setSocketState('offline'),
+        onMessage: (message) => {
+          if (message.type !== 'intent_feed' || !message.entry) return
+          const entry = message.entry
+          setIntents((current) => {
+            const index = current.findIndex((currentEntry) => currentEntry.nonce === entry.nonce)
+            if (index >= 0) {
+              const updated = [...current]
+              updated[index] = entry
+              return updated.sort((left, right) => new Date(right.timestamp).getTime() - new Date(left.timestamp).getTime())
+            }
+            return [entry, ...current].slice(0, 75)
+          })
+        },
+      })
+    }
+
+    void loadInitial()
+    connect()
+
+    return () => {
+      cancelled = true
+      if (reconnectTimer) window.clearTimeout(reconnectTimer)
+      socketRef.current?.close()
+    }
+  }, [])
 
   return (
-    <div className="p-5 space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-base font-bold text-text tracking-tight">Intent Log</h1>
-          <p className="text-xs text-text-muted mt-0.5 font-mono">
-            Live updates · last {intents.length} intents
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Intents</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Live intent feed over the real `/ws` endpoint.</p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-text-muted">
-          <span className="w-1.5 h-1.5 rounded-full bg-signal-green animate-pulse-slow" />
-          LIVE
+        <div className="inline-flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1.5 text-sm dark:border-slate-800">
+          <Radio size={14} className={cn(socketState === 'live' ? 'text-emerald-500' : socketState === 'connecting' ? 'text-amber-500' : 'text-red-500')} />
+          <span className="capitalize">{socketState}</span>
         </div>
-      </div>
+      </section>
 
-      {/* Stats row */}
-      <div className="grid grid-cols-3 gap-3">
-        <div className="stat-card">
-          <span className="stat-label">Total (shown)</span>
-          <span className="stat-value font-mono">{intents.length}</span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Success Rate</span>
-          <span className="stat-value font-mono" style={{ color: successRate !== null && successRate < 80 ? '#f75c5c' : '#39d98a' }}>
-            {successRate !== null ? `${successRate}%` : '—'}
-          </span>
-        </div>
-        <div className="stat-card">
-          <span className="stat-label">Avg Latency</span>
-          <span className="stat-value font-mono">{avgLatency !== null ? formatLatency(avgLatency) : '—'}</span>
-        </div>
-      </div>
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
 
-      {/* Latency chart */}
-      {latencySeries.length > 1 && (
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Clock size={13} className="text-signal-purple" />
-            <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
-              Latency Trend (last {latencySeries.length})
-            </span>
-          </div>
-          <ResponsiveContainer width="100%" height={100}>
-            <LineChart data={latencySeries}>
-              <XAxis
-                dataKey="label"
-                tick={{ fill: '#7070a0', fontSize: 10, fontFamily: 'JetBrains Mono' }}
-                axisLine={false}
-                tickLine={false}
-              />
-              <YAxis
-                tick={{ fill: '#7070a0', fontSize: 10, fontFamily: 'JetBrains Mono' }}
-                axisLine={false}
-                tickLine={false}
-                width={35}
-                tickFormatter={(v) => `${v}ms`}
-              />
-              <Tooltip
-                contentStyle={{
-                  background: '#111118',
-                  border: '1px solid #1e1e2e',
-                  borderRadius: 6,
-                  fontSize: 12,
-                  fontFamily: 'JetBrains Mono',
-                }}
-                formatter={(v: number) => [`${v}ms`, 'Latency']}
-                cursor={{ stroke: 'rgba(247,92,3,0.2)' }}
-              />
-              <Line
-                type="monotone"
-                dataKey="latency"
-                stroke="#F75C03"
-                strokeWidth={1.5}
-                dot={false}
-                activeDot={{ r: 3, fill: '#F75C03' }}
-              />
-            </LineChart>
-          </ResponsiveContainer>
-        </div>
-      )}
-
-      {/* Intent table */}
-      <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest w-8">
-                OK
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                From
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                To
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Intent
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Latency
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Time
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {result === undefined ? (
+      <section className="panel overflow-hidden p-0">
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-sm">
+            <thead className="bg-slate-50 dark:bg-slate-950">
               <tr>
-                <td colSpan={6} className="table-cell py-8 text-center text-text-dim font-mono text-xs">
-                  Loading…
-                </td>
+                <th className="table-head">Intent</th>
+                <th className="table-head">From</th>
+                <th className="table-head">To</th>
+                <th className="table-head">Status</th>
+                <th className="table-head">Latency</th>
+                <th className="table-head">Requested</th>
               </tr>
-            ) : intents.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="table-cell py-8 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Zap size={24} className="text-text-dim" />
-                    <span className="text-xs text-text-dim font-mono">No intents logged yet</span>
-                  </div>
-                </td>
-              </tr>
-            ) : (
-              intents.map(intent => (
-                <tr key={intent._id} className="table-row">
-                  <td className="table-cell">
-                    {intent.success ? (
-                      <CheckCircle size={13} className="text-signal-green" />
-                    ) : (
-                      <XCircle size={13} className="text-signal-red" />
-                    )}
-                  </td>
-                  <td className="table-cell">
-                    <span className="font-mono text-xs text-text-muted" title={intent.fromBeamId}>
-                      {truncateBeamId(intent.fromBeamId, 24)}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    <span className="font-mono text-xs text-text-muted" title={intent.toBeamId}>
-                      {truncateBeamId(intent.toBeamId, 24)}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    <span className="badge-orange font-mono">{intent.intent}</span>
-                    {intent.errorCode && (
-                      <span className="badge-red ml-1 font-mono">{intent.errorCode}</span>
-                    )}
-                  </td>
-                  <td className="table-cell">
-                    <span className="font-mono text-xs text-text-muted">
-                      {formatLatency(intent.latencyMs)}
-                    </span>
-                  </td>
-                  <td className="table-cell">
-                    <span className="font-mono text-xs text-text-muted">
-                      {formatRelativeTime(intent.timestamp)}
-                    </span>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {loading ? (
+                <tr><td className="table-cell" colSpan={6}>Loading intent history…</td></tr>
+              ) : intents.length === 0 ? (
+                <tr><td className="table-cell" colSpan={6}>No intent activity yet.</td></tr>
+              ) : (
+                intents.map((intent) => (
+                  <tr key={intent.nonce} className="border-t border-slate-200 dark:border-slate-800">
+                    <td className="table-cell font-medium">{intent.intentType}</td>
+                    <td className="table-cell">{truncateBeamId(intent.from, 28)}</td>
+                    <td className="table-cell">{truncateBeamId(intent.to, 28)}</td>
+                    <td className="table-cell">
+                      <span className={cn(
+                        'rounded-full px-2 py-1 text-xs font-medium capitalize',
+                        intent.status === 'success'
+                          ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+                          : intent.status === 'pending'
+                            ? 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+                            : 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
+                      )}>
+                        {intent.status}
+                      </span>
+                    </td>
+                    <td className="table-cell">{formatLatency(intent.roundTripLatencyMs)}</td>
+                    <td className="table-cell">{formatDateTime(intent.timestamp)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   )
 }
