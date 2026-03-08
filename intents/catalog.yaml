@@ -1,105 +1,260 @@
 {
   "intents": [
     {
-      "id": "escalation.request",
-      "description": "Agent escalates a case to another agent",
-      "from": ["fischer", "clara", "james"],
-      "to": ["jarvis"],
+      "id": "conversation.message",
+      "description": "Natural language message \u2014 the receiving agent uses its LLM to interpret and respond.",
+      "from": [
+        "*"
+      ],
+      "to": [
+        "*"
+      ],
       "params": {
-        "caseId": { "type": "string", "required": true },
-        "reason": { "type": "string", "required": true },
-        "urgency": { "type": "string", "enum": ["low", "medium", "high", "critical"] },
-        "customerName": { "type": "string" }
+        "message": {
+          "type": "string",
+          "required": true
+        },
+        "context": {
+          "type": "object"
+        },
+        "language": {
+          "type": "string"
+        }
       },
       "response": {
-        "action": { "type": "string" },
-        "nextSteps": { "type": "string" }
+        "message": {
+          "type": "string"
+        },
+        "structured": {
+          "type": "object"
+        }
+      }
+    },
+    {
+      "id": "escalation.request",
+      "description": "Agent escalates a case to another agent",
+      "from": [
+        "fischer",
+        "clara",
+        "james"
+      ],
+      "to": [
+        "jarvis"
+      ],
+      "params": {
+        "caseId": {
+          "type": "string",
+          "required": true
+        },
+        "reason": {
+          "type": "string",
+          "required": true
+        },
+        "urgency": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high",
+            "critical"
+          ]
+        },
+        "customerName": {
+          "type": "string"
+        }
+      },
+      "response": {
+        "action": {
+          "type": "string"
+        },
+        "nextSteps": {
+          "type": "string"
+        }
       }
     },
     {
       "id": "payment.status_check",
       "description": "Check payment status for a project/invoice",
-      "from": ["clara", "jarvis", "james"],
-      "to": ["fischer"],
+      "from": [
+        "clara",
+        "jarvis",
+        "james"
+      ],
+      "to": [
+        "fischer"
+      ],
       "params": {
-        "projectId": { "type": "string" },
-        "invoiceNumber": { "type": "string" },
-        "customerName": { "type": "string" }
+        "projectId": {
+          "type": "string"
+        },
+        "invoiceNumber": {
+          "type": "string"
+        },
+        "customerName": {
+          "type": "string"
+        }
       },
       "response": {
-        "status": { "type": "string", "enum": ["paid", "partial", "overdue", "unknown"] },
-        "amount": { "type": "number" },
-        "details": { "type": "string" }
+        "status": {
+          "type": "string",
+          "enum": [
+            "paid",
+            "partial",
+            "overdue",
+            "unknown"
+          ]
+        },
+        "amount": {
+          "type": "number"
+        },
+        "details": {
+          "type": "string"
+        }
       }
     },
     {
       "id": "sales.pipeline_summary",
       "description": "Get sales pipeline overview",
-      "from": ["jarvis", "fischer", "james"],
-      "to": ["clara"],
+      "from": [
+        "jarvis",
+        "fischer",
+        "james"
+      ],
+      "to": [
+        "clara"
+      ],
       "params": {
-        "timeRange": { "type": "string", "default": "30d" },
-        "owner": { "type": "string" }
+        "timeRange": {
+          "type": "string",
+          "default": "30d"
+        },
+        "owner": {
+          "type": "string"
+        }
       },
       "response": {
-        "totalDeals": { "type": "number" },
-        "totalValue": { "type": "number" },
-        "summary": { "type": "string" }
+        "totalDeals": {
+          "type": "number"
+        },
+        "totalValue": {
+          "type": "number"
+        },
+        "summary": {
+          "type": "string"
+        }
       }
     },
     {
       "id": "system.broadcast",
       "description": "System-wide announcement to all agents",
-      "from": ["jarvis"],
-      "to": ["*"],
+      "from": [
+        "jarvis"
+      ],
+      "to": [
+        "*"
+      ],
       "params": {
-        "message": { "type": "string", "required": true },
-        "priority": { "type": "string", "enum": ["info", "warning", "critical"] }
+        "message": {
+          "type": "string",
+          "required": true
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "info",
+            "warning",
+            "critical"
+          ]
+        }
       },
       "response": {
-        "acknowledged": { "type": "boolean" }
+        "acknowledged": {
+          "type": "boolean"
+        }
       }
     },
     {
       "id": "agent.ping",
       "description": "Health check / keepalive between agents",
-      "from": ["*"],
-      "to": ["*"],
+      "from": [
+        "*"
+      ],
+      "to": [
+        "*"
+      ],
       "params": {
-        "message": { "type": "string" }
+        "message": {
+          "type": "string"
+        }
       },
       "response": {
-        "status": { "type": "string" },
-        "uptime": { "type": "number" }
+        "status": {
+          "type": "string"
+        },
+        "uptime": {
+          "type": "number"
+        }
       }
     },
     {
       "id": "agent.introduce",
       "description": "Ask an agent to introduce itself",
-      "from": ["*"],
-      "to": ["*"],
+      "from": [
+        "*"
+      ],
+      "to": [
+        "*"
+      ],
       "params": {
-        "question": { "type": "string" }
+        "question": {
+          "type": "string"
+        }
       },
       "response": {
-        "agentResponse": { "type": "string" }
+        "agentResponse": {
+          "type": "string"
+        }
       }
     },
     {
       "id": "task.delegate",
       "description": "Delegate a task to another agent",
-      "from": ["*"],
-      "to": ["*"],
+      "from": [
+        "*"
+      ],
+      "to": [
+        "*"
+      ],
       "params": {
-        "task": { "type": "string", "required": true },
-        "context": { "type": "string" },
-        "deadline": { "type": "string" },
-        "priority": { "type": "string", "enum": ["low", "medium", "high"] }
+        "task": {
+          "type": "string",
+          "required": true
+        },
+        "context": {
+          "type": "string"
+        },
+        "deadline": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "string",
+          "enum": [
+            "low",
+            "medium",
+            "high"
+          ]
+        }
       },
       "response": {
-        "accepted": { "type": "boolean" },
-        "estimatedCompletion": { "type": "string" },
-        "result": { "type": "string" }
+        "accepted": {
+          "type": "boolean"
+        },
+        "estimatedCompletion": {
+          "type": "string"
+        },
+        "result": {
+          "type": "string"
+        }
       }
     }
   ]

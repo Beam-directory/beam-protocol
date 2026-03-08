@@ -125,6 +125,12 @@ function loadIdentity() {
 
 function formatIntentAsMessage(frame) {
   const payload = frame.payload || frame.params || {}
+
+  // Natural language: just forward the message directly
+  if (frame.intent === 'conversation.message' && payload.message) {
+    return `[Beam Nachricht von ${frame.from}]\n\n${payload.message}`
+  }
+
   return `[Beam Intent from ${frame.from}]\n` +
     `Intent: ${frame.intent}\n` +
     `Payload: ${JSON.stringify(payload, null, 2)}\n\n` +
@@ -197,13 +203,12 @@ function setupIntentHandler(client) {
       const response = await forwardToOpenClaw(formatIntentAsMessage(frame))
       success = true
 
+      const isConversation = frame.intent === 'conversation.message'
       respond({
         success: true,
-        payload: {
-          agentResponse: response,
-          processedBy: BEAM_AGENT,
-          processedAt: new Date().toISOString(),
-        },
+        payload: isConversation
+          ? { message: response, processedBy: BEAM_AGENT }
+          : { agentResponse: response, processedBy: BEAM_AGENT, processedAt: new Date().toISOString() },
       })
     } catch (err) {
       error = err instanceof Error ? err.message : String(err)

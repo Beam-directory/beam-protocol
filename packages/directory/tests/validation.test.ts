@@ -4,6 +4,7 @@ import { knownIntentTypes, validateIntentPayload } from '../src/validation.js'
 const validPayloads: Record<string, Record<string, unknown>> = {
   'agent.introduce': { question: 'Who are you?' },
   'agent.ping': { message: 'Still alive?' },
+  'conversation.message': { message: 'Hello there', context: {}, language: 'en' },
   'escalation.request': {
     caseId: 'CASE-123',
     reason: 'Need supervisor approval',
