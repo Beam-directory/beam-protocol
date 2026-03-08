@@ -9,14 +9,14 @@ import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
-import { credentialsRouter } from './routes/credentials.js'
-import { didRouter } from './routes/did.js'
+import { federationRouter } from './routes/federation.js'
 import { orgsRouter } from './routes/orgs.js'
 import { reportsRouter } from './routes/reports.js'
 import { verificationRouter } from './routes/verify.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
-import { listRecentIntentLogs, listTrustScores } from './db.js'
+import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores } from './db.js'
+import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -72,6 +72,34 @@ function requireAdmin(c: Context): { ok: true; key: string } | Response {
   }
 
   return { ok: true, key: suppliedKey }
+}
+
+function hasFederationAuth(c: Context): boolean {
+  if (c.req.header('x-beam-mtls-verified') === 'true') {
+    return true
+  }
+
+  const secret = getFederationSharedSecret()
+  return Boolean(secret) && c.req.header('x-beam-federation-secret') === secret
+}
+
+function requireDirectoryAdmin(db: Database, c: Context): { ok: true; actor: string } | Response {
+  const admin = requireAdmin(c)
+  if (!(admin instanceof Response)) {
+    return { ok: true, actor: 'admin-key' }
+  }
+
+  const userId = c.req.header('x-directory-user') ?? c.req.query('user') ?? ''
+  if (!userId) {
+    return admin
+  }
+
+  const role = getDirectoryRole(db, userId, getLocalDirectoryUrl())
+  if (role?.role === 'admin') {
+    return { ok: true, actor: userId }
+  }
+
+  return admin
 }
 
 function tableExists(db: Database, tableName: string): boolean {
@@ -549,7 +577,16 @@ export function createApp(db: Database): Hono {
   app.use('*', cors({
     origin: (origin) => origin === BEAM_DIRECTORY_ORIGIN ? origin : '*',
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-    allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key'],
+    allowHeaders: [
+      'Content-Type',
+      'Authorization',
+      'X-Admin-Key',
+      'X-Directory-User',
+      'X-Beam-Federation-Secret',
+      'X-Beam-Source-Directory',
+      'X-Beam-Hop-Count',
+      'X-Beam-mTLS-Verified',
+    ],
   }))
 
   app.get('/dashboard', (c) => {
@@ -668,8 +705,45 @@ export function createApp(db: Database): Hono {
     }
   })
 
+  app.get('/admin/audit', (c) => {
+    const auth = requireDirectoryAdmin(db, c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const limit = Number.parseInt(c.req.query('limit') ?? '100', 10)
+
+    try {
+      const rows = listAuditLog(db, {
+        limit,
+        action: c.req.query('action') ?? undefined,
+        actor: c.req.query('actor') ?? undefined,
+        target: c.req.query('target') ?? undefined,
+      })
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        entries: rows.map((row) => ({
+          id: row.id,
+          action: row.action,
+          actor: row.actor,
+          target: row.target,
+          timestamp: row.timestamp,
+          details: row.details ? JSON.parse(row.details) as unknown : null,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('Admin audit error:', err)
+      return c.json({ error: 'Failed to load audit log', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   // List all agents with connection status (before sub-router to avoid conflict)
   app.get('/directory/agents', (c) => {
+    if (isPrivateDirectoryMode() && !hasFederationAuth(c) && requireAdmin(c) instanceof Response) {
+      return c.json({ error: 'Directory is private', errorCode: 'PRIVATE_DIRECTORY' }, 403)
+    }
+
     try {
       const rows = db.prepare('SELECT * FROM agents ORDER BY beam_id ASC').all() as AgentRow[]
       const connected = new Set(getConnectedBeamIds())
@@ -685,8 +759,7 @@ export function createApp(db: Database): Hono {
 
   app.route('/orgs', orgsRouter(db))
   app.route('/agents', agentsRouter(db))
-  app.route('/', didRouter(db))
-  app.route('/credentials', credentialsRouter())
+  app.route('/federation', federationRouter(db))
 
   app.post('/acl', async (c) => {
     let body: unknown

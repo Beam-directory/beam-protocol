@@ -1,8 +1,19 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type { AgentRow, IntentFrame, IntentLogRow, OrgAgentRow, OrgRow, RegisterRequest, TrustScoreRow } from './types.js'
-import type { DIDDocument } from './did.js'
-import { generateDIDDocument } from './did.js'
+import type {
+  AgentRow,
+  AuditLogRow,
+  DirectoryRoleRow,
+  DnsCacheRow,
+  FederatedAgentRow,
+  FederatedTrustRow,
+  IntentFrame,
+  IntentLogRow,
+  OrgAgentRow,
+  OrgRow,
+  RegisterRequest,
+  TrustScoreRow,
+} from './types.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -165,70 +176,77 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_trust_scores_updated
       ON trust_scores(last_updated DESC);
 
-    CREATE TABLE IF NOT EXISTS domain_verifications (
+    CREATE TABLE IF NOT EXISTS federation_peers (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      beam_id TEXT NOT NULL,
-      domain TEXT NOT NULL,
-      challenge_token TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      created_at INTEGER NOT NULL,
-      FOREIGN KEY (beam_id) REFERENCES agents(beam_id)
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_domain_verifications_beam
-      ON domain_verifications(beam_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_domain_verifications_status
-      ON domain_verifications(status, created_at DESC);
-
-    CREATE TABLE IF NOT EXISTS agent_keys (
-      id INTEGER PRIMARY KEY,
-      beam_id TEXT NOT NULL,
+      directory_url TEXT NOT NULL UNIQUE,
       public_key TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      revoked_at INTEGER,
-      FOREIGN KEY (beam_id) REFERENCES agents(beam_id)
+      trust_level REAL NOT NULL DEFAULT 0.5,
+      status TEXT NOT NULL DEFAULT 'active',
+      created_at TEXT NOT NULL,
+      last_seen TEXT,
+      synced_at TEXT
     );
 
-    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_keys_unique
-      ON agent_keys(beam_id, public_key);
-    CREATE INDEX IF NOT EXISTS idx_agent_keys_beam_revoked
-      ON agent_keys(beam_id, revoked_at);
-    CREATE INDEX IF NOT EXISTS idx_agent_keys_revoked
-      ON agent_keys(revoked_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_federation_peers_status
+      ON federation_peers(status, trust_level DESC);
 
-    CREATE TABLE IF NOT EXISTS delegations (
-      id INTEGER PRIMARY KEY,
-      grantor_beam_id TEXT NOT NULL,
-      grantee_beam_id TEXT NOT NULL,
-      scope TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
+    CREATE TABLE IF NOT EXISTS federated_agents (
+      beam_id TEXT PRIMARY KEY,
+      home_directory_url TEXT NOT NULL,
+      cached_document TEXT NOT NULL,
+      cached_at TEXT NOT NULL,
+      ttl INTEGER NOT NULL DEFAULT 300
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_federated_agents_home
+      ON federated_agents(home_directory_url, cached_at DESC);
+
+    CREATE TABLE IF NOT EXISTS directory_roles (
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')),
+      directory_url TEXT NOT NULL,
+      PRIMARY KEY (user_id, directory_url)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_directory_roles_role
+      ON directory_roles(role, directory_url);
+
+    CREATE TABLE IF NOT EXISTS audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      action TEXT NOT NULL,
+      actor TEXT NOT NULL,
+      target TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      details TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_audit_log_timestamp
+      ON audit_log(timestamp DESC);
+
+    CREATE TABLE IF NOT EXISTS dns_cache (
+      cache_key TEXT PRIMARY KEY,
+      record_type TEXT NOT NULL,
+      payload TEXT NOT NULL,
       expires_at INTEGER NOT NULL,
-      revoked INTEGER NOT NULL DEFAULT 0,
-      FOREIGN KEY (grantor_beam_id) REFERENCES agents(beam_id),
-      FOREIGN KEY (grantee_beam_id) REFERENCES agents(beam_id)
+      cached_at TEXT NOT NULL
     );
 
-    CREATE INDEX IF NOT EXISTS idx_delegations_grantor
-      ON delegations(grantor_beam_id, revoked, expires_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_delegations_grantee
-      ON delegations(grantee_beam_id, revoked, expires_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_dns_cache_expires
+      ON dns_cache(expires_at);
 
-    CREATE TABLE IF NOT EXISTS reports (
-      id INTEGER PRIMARY KEY,
-      reporter_beam_id TEXT NOT NULL,
-      target_beam_id TEXT NOT NULL,
-      reason TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      status TEXT NOT NULL DEFAULT 'pending',
-      FOREIGN KEY (reporter_beam_id) REFERENCES agents(beam_id),
-      FOREIGN KEY (target_beam_id) REFERENCES agents(beam_id),
-      UNIQUE(reporter_beam_id, target_beam_id)
+    CREATE TABLE IF NOT EXISTS federated_trust (
+      beam_id TEXT NOT NULL,
+      source_directory_url TEXT NOT NULL,
+      origin_directory_url TEXT NOT NULL,
+      asserted_trust REAL NOT NULL,
+      effective_trust REAL NOT NULL,
+      hop_count INTEGER NOT NULL DEFAULT 1,
+      asserted_at TEXT NOT NULL,
+      PRIMARY KEY (beam_id, source_directory_url, origin_directory_url)
     );
 
-    CREATE INDEX IF NOT EXISTS idx_reports_target_status
-      ON reports(target_beam_id, status, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_reports_reporter_target
-      ON reports(reporter_beam_id, target_beam_id);
+    CREATE INDEX IF NOT EXISTS idx_federated_trust_lookup
+      ON federated_trust(beam_id, asserted_at DESC, effective_trust DESC);
   `)
 
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'unverified'")
@@ -981,6 +999,219 @@ export function listTrustScores(db: DB): TrustScoreRow[] {
     FROM trust_scores
     ORDER BY last_updated DESC, score DESC
   `).all() as TrustScoreRow[]
+}
+
+export function upsertFederatedAgentCache(
+  db: DB,
+  input: {
+    beamId: string
+    homeDirectoryUrl: string
+    document: object
+    cachedAt?: string
+    ttl?: number
+  }
+): FederatedAgentRow {
+  const cachedAt = input.cachedAt ?? new Date().toISOString()
+  const ttl = Math.max(1, Math.trunc(input.ttl ?? 300))
+
+  db.prepare(`
+    INSERT INTO federated_agents (beam_id, home_directory_url, cached_document, cached_at, ttl)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(beam_id) DO UPDATE SET
+      home_directory_url = excluded.home_directory_url,
+      cached_document = excluded.cached_document,
+      cached_at = excluded.cached_at,
+      ttl = excluded.ttl
+  `).run(
+    input.beamId,
+    input.homeDirectoryUrl,
+    JSON.stringify(input.document),
+    cachedAt,
+    ttl
+  )
+
+  return db.prepare('SELECT * FROM federated_agents WHERE beam_id = ?').get(input.beamId) as FederatedAgentRow
+}
+
+export function getFederatedAgentCache(db: DB, beamId: string): FederatedAgentRow | null {
+  const row = db.prepare('SELECT * FROM federated_agents WHERE beam_id = ?').get(beamId) as FederatedAgentRow | undefined
+  return row ?? null
+}
+
+export function deleteFederatedAgentCache(db: DB, beamId: string): void {
+  db.prepare('DELETE FROM federated_agents WHERE beam_id = ?').run(beamId)
+}
+
+export function assignDirectoryRole(
+  db: DB,
+  input: { userId: string; role: DirectoryRoleRow['role']; directoryUrl: string }
+): DirectoryRoleRow {
+  db.prepare(`
+    INSERT INTO directory_roles (user_id, role, directory_url)
+    VALUES (?, ?, ?)
+    ON CONFLICT(user_id, directory_url) DO UPDATE SET
+      role = excluded.role
+  `).run(input.userId, input.role, input.directoryUrl)
+
+  return db.prepare(`
+    SELECT * FROM directory_roles
+    WHERE user_id = ? AND directory_url = ?
+  `).get(input.userId, input.directoryUrl) as DirectoryRoleRow
+}
+
+export function getDirectoryRole(db: DB, userId: string, directoryUrl: string): DirectoryRoleRow | null {
+  const row = db.prepare(`
+    SELECT * FROM directory_roles
+    WHERE user_id = ? AND directory_url = ?
+  `).get(userId, directoryUrl) as DirectoryRoleRow | undefined
+
+  return row ?? null
+}
+
+export function logAuditEvent(
+  db: DB,
+  input: { action: string; actor: string; target: string; details?: unknown; timestamp?: string }
+): AuditLogRow {
+  const timestamp = input.timestamp ?? new Date().toISOString()
+  const details = input.details === undefined ? null : JSON.stringify(input.details)
+
+  const result = db.prepare(`
+    INSERT INTO audit_log (action, actor, target, timestamp, details)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(input.action, input.actor, input.target, timestamp, details)
+
+  return db.prepare('SELECT * FROM audit_log WHERE id = ?').get(Number(result.lastInsertRowid)) as AuditLogRow
+}
+
+export function listAuditLog(
+  db: DB,
+  query: { limit?: number; action?: string; actor?: string; target?: string } = {}
+): AuditLogRow[] {
+  const limit = Math.max(1, Math.min(500, Math.trunc(query.limit ?? 100)))
+  const conditions: string[] = []
+  const params: string[] = []
+
+  if (query.action) {
+    conditions.push('action = ?')
+    params.push(query.action)
+  }
+
+  if (query.actor) {
+    conditions.push('actor = ?')
+    params.push(query.actor)
+  }
+
+  if (query.target) {
+    conditions.push('target = ?')
+    params.push(query.target)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  return db.prepare(`
+    SELECT *
+    FROM audit_log
+    ${where}
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ${limit}
+  `).all(...params) as AuditLogRow[]
+}
+
+export function getDnsCache(db: DB, cacheKey: string, recordType: string): DnsCacheRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM dns_cache
+    WHERE cache_key = ? AND record_type = ? AND expires_at > ?
+  `).get(cacheKey, recordType, Date.now()) as DnsCacheRow | undefined
+
+  return row ?? null
+}
+
+export function setDnsCache(
+  db: DB,
+  input: { cacheKey: string; recordType: string; payload: unknown; ttlSeconds: number }
+): DnsCacheRow {
+  const cachedAt = new Date().toISOString()
+  const ttlSeconds = Math.max(1, Math.trunc(input.ttlSeconds))
+  const expiresAt = Date.now() + ttlSeconds * 1000
+
+  db.prepare(`
+    INSERT INTO dns_cache (cache_key, record_type, payload, expires_at, cached_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(cache_key) DO UPDATE SET
+      record_type = excluded.record_type,
+      payload = excluded.payload,
+      expires_at = excluded.expires_at,
+      cached_at = excluded.cached_at
+  `).run(input.cacheKey, input.recordType, JSON.stringify(input.payload), expiresAt, cachedAt)
+
+  return db.prepare('SELECT * FROM dns_cache WHERE cache_key = ?').get(input.cacheKey) as DnsCacheRow
+}
+
+export function cleanExpiredDnsCache(db: DB): void {
+  db.prepare('DELETE FROM dns_cache WHERE expires_at <= ?').run(Date.now())
+}
+
+export function upsertFederatedTrust(
+  db: DB,
+  input: {
+    beamId: string
+    sourceDirectoryUrl: string
+    originDirectoryUrl: string
+    assertedTrust: number
+    effectiveTrust: number
+    hopCount: number
+    assertedAt?: string
+  }
+): FederatedTrustRow {
+  const assertedAt = input.assertedAt ?? new Date().toISOString()
+
+  db.prepare(`
+    INSERT INTO federated_trust (
+      beam_id,
+      source_directory_url,
+      origin_directory_url,
+      asserted_trust,
+      effective_trust,
+      hop_count,
+      asserted_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(beam_id, source_directory_url, origin_directory_url) DO UPDATE SET
+      asserted_trust = excluded.asserted_trust,
+      effective_trust = excluded.effective_trust,
+      hop_count = excluded.hop_count,
+      asserted_at = excluded.asserted_at
+  `).run(
+    input.beamId,
+    input.sourceDirectoryUrl,
+    input.originDirectoryUrl,
+    input.assertedTrust,
+    input.effectiveTrust,
+    input.hopCount,
+    assertedAt
+  )
+
+  return db.prepare(`
+    SELECT *
+    FROM federated_trust
+    WHERE beam_id = ? AND source_directory_url = ? AND origin_directory_url = ?
+  `).get(input.beamId, input.sourceDirectoryUrl, input.originDirectoryUrl) as FederatedTrustRow
+}
+
+export function listFederatedTrust(db: DB, beamId?: string): FederatedTrustRow[] {
+  if (beamId) {
+    return db.prepare(`
+      SELECT *
+      FROM federated_trust
+      WHERE beam_id = ?
+      ORDER BY asserted_at DESC, effective_trust DESC
+    `).all(beamId) as FederatedTrustRow[]
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM federated_trust
+    ORDER BY asserted_at DESC, effective_trust DESC
+  `).all() as FederatedTrustRow[]
 }
 
 function updatePairTrustScore(

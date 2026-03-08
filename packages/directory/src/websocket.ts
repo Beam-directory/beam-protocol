@@ -4,6 +4,14 @@ import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
 import { finalizeIntentLog, getAgent, hasActiveDelegation, logIntentStart, recordNonce, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
+import {
+  getCachedFederatedPublicKey,
+  getFederationRequestHeaders,
+  getLocalDirectoryUrl,
+  MAX_FEDERATION_HOPS,
+  queryPeerForAgent,
+  resolveAgentAcrossFederation,
+} from './federation.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { verifySignedPayload } from './crypto.js'
@@ -119,15 +127,28 @@ export function getConnectedBeamIds(): string[] {
     .map(([beamId]) => beamId)
 }
 
-export async function relayIntentFromHttp(db: Database, frame: IntentFrame, timeoutMs = 60_000): Promise<ResultFrame> {
+export async function relayIntentFromHttp(
+  db: Database,
+  frame: IntentFrame,
+  timeoutMs = 60_000,
+  options: { sourceDirectory?: string; hopCount?: number } = {}
+): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)
-  const sender = getAgent(db, prepared.from)
+  const sourceDirectory = options.sourceDirectory ?? getLocalDirectoryUrl()
+  const hopCount = options.hopCount ?? 0
 
-  if (!sender) {
+  if (hopCount > MAX_FEDERATION_HOPS) {
+    throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
+  }
+
+  const sender = getAgent(db, prepared.from)
+  const senderPublicKey = sender?.public_key ?? await resolveSenderPublicKey(db, prepared.from, sourceDirectory)
+
+  if (!senderPublicKey) {
     throw new RelayError('BAD_REQUEST', `Sender ${prepared.from} is not registered`)
   }
 
-  enforceSecurityChecks(db, prepared, sender.public_key)
+  enforceSecurityChecks(db, prepared, senderPublicKey)
 
   logIntentStart(db, prepared)
   broadcastIntentFeed({
@@ -141,6 +162,16 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
     status: 'pending',
     errorCode: null,
   })
+
+  const localRecipient = getAgent(db, prepared.to)
+  if (!localRecipient) {
+    const federatedResult = await relayIntentToFederatedPeer(db, prepared, timeoutMs, {
+      sourceDirectory,
+      hopCount,
+    })
+    updateLastSeen(db, prepared.from)
+    return federatedResult
+  }
 
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
@@ -172,7 +203,7 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
     sendJson(recipientWs, {
       type: 'intent',
       frame: prepared,
-      senderPublicKey: sender.public_key,
+      senderPublicKey,
     })
   } catch (err) {
     clearPendingResult(prepared.nonce)
@@ -299,6 +330,27 @@ async function handleIntent(
     errorCode: null,
   })
 
+  const localRecipient = getAgent(db, prepared.to)
+  if (!localRecipient) {
+    try {
+      const result = await relayIntentToFederatedPeer(db, prepared, 30_000, {
+        sourceDirectory: getLocalDirectoryUrl(),
+        hopCount: 0,
+      })
+      updateLastSeen(db, senderBeamId)
+      sendJson(senderWs, { type: 'result', frame: result })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Federated delivery failed'
+      sendJson(senderWs, {
+        type: 'error',
+        nonce: prepared.nonce,
+        errorCode: err instanceof RelayError ? err.code : 'DELIVERY_FAILED',
+        message,
+      })
+    }
+    return
+  }
+
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
     finalizeIntentLog(db, {
@@ -347,6 +399,104 @@ async function handleIntent(
     const message = err instanceof Error ? err.message : 'Delivery failed'
     sendJson(senderWs, { type: 'error', nonce: prepared.nonce, message })
   }
+}
+
+async function resolveSenderPublicKey(
+  db: Database,
+  beamId: string,
+  sourceDirectory: string
+): Promise<string | null> {
+  const local = getAgent(db, beamId)
+  if (local) {
+    return local.public_key
+  }
+
+  const cached = getCachedFederatedPublicKey(db, beamId)
+  if (cached) {
+    return cached
+  }
+
+  if (sourceDirectory && sourceDirectory !== getLocalDirectoryUrl()) {
+    const fromSource = await queryPeerForAgent(db, sourceDirectory, beamId, { localOnly: true })
+    const publicKey = fromSource?.agent.public_key ?? fromSource?.agent.publicKey
+    if (typeof publicKey === 'string' && publicKey.length > 0) {
+      return publicKey
+    }
+  }
+
+  const resolved = await resolveAgentAcrossFederation(db, beamId, { autoDiscover: false })
+  const publicKey = resolved?.agent.public_key ?? resolved?.agent.publicKey
+  return typeof publicKey === 'string' && publicKey.length > 0 ? publicKey : null
+}
+
+async function relayIntentToFederatedPeer(
+  db: Database,
+  frame: IntentFrame,
+  timeoutMs: number,
+  options: { sourceDirectory: string; hopCount: number }
+): Promise<ResultFrame> {
+  const resolved = await resolveAgentAcrossFederation(db, frame.to)
+  const peerUrl = resolved?.directoryUrl
+
+  if (!resolved || !peerUrl || peerUrl === getLocalDirectoryUrl()) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    throw new RelayError('OFFLINE', `Agent ${frame.to} is not available locally or through federation`)
+  }
+
+  const nextHopCount = options.hopCount + 1
+  if (nextHopCount > MAX_FEDERATION_HOPS) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'BAD_REQUEST',
+    })
+    throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
+  }
+
+  const startedAt = Date.now()
+  const response = await fetch(`${peerUrl}/federation/relay`, {
+    method: 'POST',
+    headers: getFederationRequestHeaders({
+      'Content-Type': 'application/json',
+      'X-Beam-Source-Directory': options.sourceDirectory,
+      'X-Beam-Hop-Count': String(nextHopCount),
+    }),
+    body: JSON.stringify(frame),
+  })
+
+  if (!response.ok) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: Date.now() - startedAt,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    throw new RelayError('DELIVERY_FAILED', `Federated relay failed with status ${response.status}`)
+  }
+
+  const result = await response.json() as ResultFrame
+  finalizeIntentLog(db, {
+    nonce: frame.nonce,
+    fromBeamId: frame.from,
+    toBeamId: frame.to,
+    success: result.success,
+    latencyMs: typeof result.latency === 'number' ? result.latency : Date.now() - startedAt,
+    errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
+  })
+
+  return result
 }
 
 function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
@@ -427,7 +577,8 @@ function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey
     throw new RelayError('BAD_REQUEST', 'Signature verification failed')
   }
 
-  if (!isIntentAllowed(db, {
+  const localTarget = getAgent(db, frame.to)
+  if (localTarget && !isIntentAllowed(db, {
     targetBeamId: frame.to,
     intentType: frame.intent,
     fromBeamId: frame.from,
