@@ -7,6 +7,11 @@ export interface AgentRecord {
   display_name: string
   capabilities: string[]  // parsed array
   public_key: string      // SPKI DER base64
+  email: string | null
+  email_verified: number
+  verification_tier: VerificationTier
+  description: string | null
+  logo_url: string | null
   trust_score: number     // 0.0-1.0
   verified: number        // 0 or 1 (SQLite boolean)
   email: string | null
@@ -19,6 +24,8 @@ export interface AgentRecord {
   created_at: string      // ISO 8601
   last_seen: string       // ISO 8601
 }
+
+export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
 
 export interface IntentFrame {
   v: '1'
@@ -77,8 +84,12 @@ export interface RegisterRequest {
   displayName: string
   capabilities: string[]
   publicKey: string
-  org?: string | null
+  org: string
   email?: string | null
+  emailVerified?: boolean
+  description?: string | null
+  logoUrl?: string | null
+  verificationTier?: VerificationTier
 }
 
 export interface OrgRow {
@@ -112,6 +123,11 @@ export interface AgentRow {
   display_name: string
   capabilities: string  // JSON string
   public_key: string
+  email: string | null
+  email_verified: number
+  verification_tier: VerificationTier
+  description: string | null
+  logo_url: string | null
   trust_score: number
   verified: number
   email: string | null
@@ -125,35 +141,30 @@ export interface AgentRow {
   last_seen: string
 }
 
-export interface VerificationTokenRow {
-  token: string
-  beam_id: string
-  email: string
-  created_at: number
-  expires_at: number
-}
-
-export interface AgentBrowseResult {
-  rows: AgentRow[]
-  total: number
-  page: number
-  limit: number
-}
-
-export interface AgentStats {
-  total_agents: number
-  verified_agents: number
-  total_intents: number
-  avg_response_ms: number
+export interface AgentIntentStats {
+  received: number
+  responded: number
+  avg_response_time_ms: number | null
 }
 
 export interface WsMessage {
-  type: 'intent' | 'result' | 'connected' | 'error' | 'delivered'
+  type: 'intent' | 'result' | 'connected' | 'error' | 'delivered' | 'feed_connected' | 'intent_feed'
   frame?: IntentFrame | ResultFrame
   nonce?: string
   message?: string
   beamId?: string
   senderPublicKey?: string
+  entry?: {
+    nonce: string
+    from: string
+    to: string
+    intentType: string
+    timestamp: string
+    completedAt?: string | null
+    roundTripLatencyMs?: number | null
+    status: string
+    errorCode?: string | null
+  }
 }
 
 export type WsClientMessage =

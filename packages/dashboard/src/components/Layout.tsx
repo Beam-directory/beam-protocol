@@ -1,79 +1,116 @@
-import { Outlet, NavLink, useLocation } from 'react-router-dom'
-import { Activity, Bot, Zap, Settings, Radio } from 'lucide-react'
-import clsx from 'clsx'
+import { useState } from 'react'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
+import { Activity, Bot, Menu, Moon, Radio, Settings, Sun, UserPlus, X, Zap } from 'lucide-react'
+import { cn } from '../lib/utils'
+import { useThemeMode } from '../lib/theme'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Overview', icon: Activity, exact: true },
   { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/register', label: 'Register', icon: UserPlus },
   { path: '/intents', label: 'Intents', icon: Zap },
   { path: '/settings', label: 'Settings', icon: Settings },
 ]
 
 export default function Layout() {
   const location = useLocation()
+  const [menuOpen, setMenuOpen] = useState(false)
+  const { theme, toggleTheme } = useThemeMode()
 
   return (
-    <div className="flex h-screen bg-bg overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-52 shrink-0 flex flex-col border-r border-border bg-bg-card">
-        {/* Logo */}
-        <div className="flex items-center gap-2.5 px-4 py-4 border-b border-border">
-          <div className="w-7 h-7 rounded flex items-center justify-center bg-accent/10 text-accent">
-            <Radio size={16} />
-          </div>
-          <div>
-            <div className="text-sm font-bold text-text tracking-tight">BEAM</div>
-            <div className="text-xs text-text-muted font-mono -mt-0.5">directory</div>
-          </div>
-        </div>
+    <div className="min-h-screen bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-50">
+      <div className="flex min-h-screen">
+        <div
+          className={cn(
+            'fixed inset-0 z-40 bg-slate-950/60 transition md:hidden',
+            menuOpen ? 'opacity-100' : 'pointer-events-none opacity-0',
+          )}
+          onClick={() => setMenuOpen(false)}
+        />
 
-        {/* Nav */}
-        <nav className="flex-1 p-2 flex flex-col gap-0.5">
-          {NAV_ITEMS.map(({ path, label, icon: Icon, exact }) => {
-            const active = exact ? location.pathname === path : location.pathname.startsWith(path)
-            return (
-              <NavLink
-                key={path}
-                to={path}
-                className={clsx(
-                  'flex items-center gap-2.5 px-3 py-2 rounded text-sm transition-colors',
-                  active
-                    ? 'bg-accent/10 text-accent font-medium'
-                    : 'text-text-muted hover:text-text hover:bg-bg-hover'
-                )}
-              >
-                <Icon size={15} className={active ? 'text-accent' : 'text-text-dim'} />
-                {label}
-              </NavLink>
-            )
-          })}
-        </nav>
-
-        {/* Bottom status */}
-        <div className="p-3 border-t border-border">
-          <div className="flex items-center gap-2 text-xs text-text-dim font-mono">
-            <span className="w-1.5 h-1.5 rounded-full bg-signal-green animate-pulse-slow" />
-            beam.directory
+        <aside
+          className={cn(
+            'fixed inset-y-0 left-0 z-50 flex w-72 max-w-[85vw] flex-col border-r border-slate-200 bg-white transition-transform dark:border-slate-800 dark:bg-slate-900 md:static md:w-64 md:max-w-none md:translate-x-0',
+            menuOpen ? 'translate-x-0' : '-translate-x-full',
+          )}
+        >
+          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-4 dark:border-slate-800">
+            <Link to="/" className="flex items-center gap-3" onClick={() => setMenuOpen(false)}>
+              <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-orange-500/10 text-orange-500">
+                <Radio size={18} />
+              </div>
+              <div>
+                <div className="text-sm font-semibold tracking-tight">Beam Dashboard</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">Directory API</div>
+              </div>
+            </Link>
+            <button
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50 md:hidden"
+              onClick={() => setMenuOpen(false)}
+              type="button"
+            >
+              <X size={18} />
+            </button>
           </div>
-        </div>
-      </aside>
 
-      {/* Main */}
-      <main className="flex-1 flex flex-col overflow-hidden">
-        {/* Topbar */}
-        <header className="h-10 flex items-center px-5 border-b border-border bg-bg-card shrink-0">
-          <div className="flex-1" />
-          <div className="flex items-center gap-4 text-xs text-text-dim font-mono">
-            <span className="text-text-muted">BEAM PROTOCOL</span>
-            <span>v0.1</span>
+          <nav className="flex-1 space-y-1 p-3">
+            {NAV_ITEMS.map(({ path, label, icon: Icon, exact }) => {
+              const active = exact ? location.pathname === path : location.pathname.startsWith(path)
+              return (
+                <NavLink
+                  key={path}
+                  to={path}
+                  onClick={() => setMenuOpen(false)}
+                  className={cn(
+                    'flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm transition',
+                    active
+                      ? 'bg-orange-500/10 font-medium text-orange-600 dark:text-orange-400'
+                      : 'text-slate-600 hover:bg-slate-100 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-slate-50',
+                  )}
+                >
+                  <Icon size={16} />
+                  <span>{label}</span>
+                </NavLink>
+              )
+            })}
+          </nav>
+
+          <div className="border-t border-slate-200 p-4 dark:border-slate-800">
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400">
+              <span className="h-2 w-2 rounded-full bg-emerald-500" />
+              live directory connection
+            </div>
           </div>
-        </header>
+        </aside>
 
-        {/* Page content */}
-        <div className="flex-1 overflow-y-auto">
-          <Outlet />
-        </div>
-      </main>
+        <main className="flex min-w-0 flex-1 flex-col">
+          <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-slate-200 bg-white/90 px-4 backdrop-blur dark:border-slate-800 dark:bg-slate-950/90 sm:px-6">
+            <button
+              className="rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-50 md:hidden"
+              onClick={() => setMenuOpen(true)}
+              type="button"
+            >
+              <Menu size={18} />
+            </button>
+            <div className="min-w-0 flex-1">
+              <div className="truncate text-sm font-semibold">Beam Protocol Dashboard v2</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">Connected to the real directory API</div>
+            </div>
+            <button
+              className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-600 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800"
+              onClick={toggleTheme}
+              type="button"
+            >
+              {theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />}
+              <span className="hidden sm:inline">{theme === 'dark' ? 'Light mode' : 'Dark mode'}</span>
+            </button>
+          </header>
+
+          <div className="flex-1 px-4 py-5 sm:px-6 lg:px-8">
+            <Outlet />
+          </div>
+        </main>
+      </div>
     </div>
   )
 }

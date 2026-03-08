@@ -1,16 +1,15 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import type {
-  AgentBrowseResult,
+  AgentIntentStats,
   AgentRow,
-  AgentStats,
   IntentFrame,
   IntentLogRow,
   OrgAgentRow,
   OrgRow,
   RegisterRequest,
   TrustScoreRow,
-  VerificationTokenRow,
+  VerificationTier,
 } from './types.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
@@ -62,6 +61,11 @@ function initSchema(db: DB): void {
       display_name TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       public_key TEXT NOT NULL,
+      email TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      verification_tier TEXT NOT NULL DEFAULT 'basic',
+      description TEXT,
+      logo_url TEXT,
       trust_score REAL NOT NULL DEFAULT 0.5,
       verified INTEGER NOT NULL DEFAULT 0,
       email TEXT,
@@ -159,124 +163,35 @@ function initSchema(db: DB): void {
       ON trust_scores(last_updated DESC);
   `)
 
-  migrateAgentsSchema(db)
+  ensureAgentColumns(db)
 }
 
-function getTableInfo(db: DB, tableName: string): Array<{ name: string; notnull: number }> {
-  return db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string; notnull: number }>
+function getTableColumns(db: DB, tableName: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return new Set(rows.map((row) => row.name))
 }
 
-function hasTable(db: DB, tableName: string): boolean {
-  const row = db.prepare(`
-    SELECT name
-    FROM sqlite_master
-    WHERE type = 'table' AND name = ?
-  `).get(tableName) as { name: string } | undefined
+function ensureAgentColumns(db: DB): void {
+  const columns = getTableColumns(db, 'agents')
 
-  return Boolean(row)
-}
-
-function hasColumn(db: DB, tableName: string, columnName: string): boolean {
-  return getTableInfo(db, tableName).some((column) => column.name === columnName)
-}
-
-function migrateAgentsSchema(db: DB): void {
-  if (!hasTable(db, 'agents')) {
-    return
+  if (!columns.has('email')) {
+    db.exec('ALTER TABLE agents ADD COLUMN email TEXT')
   }
 
-  const columns = getTableInfo(db, 'agents')
-  const orgColumn = columns.find((column) => column.name === 'org')
-
-  if (orgColumn?.notnull === 1) {
-    rebuildAgentsTable(db)
+  if (!columns.has('email_verified')) {
+    db.exec('ALTER TABLE agents ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0')
   }
 
-  const addColumnStatements = [
-    `ALTER TABLE agents ADD COLUMN email TEXT`,
-    `ALTER TABLE agents ADD COLUMN description TEXT`,
-    `ALTER TABLE agents ADD COLUMN logo_url TEXT`,
-    `ALTER TABLE agents ADD COLUMN website TEXT`,
-    `ALTER TABLE agents ADD COLUMN verification_tier TEXT NOT NULL DEFAULT 'basic' CHECK(verification_tier IN ('basic', 'verified', 'business', 'enterprise'))`,
-    `ALTER TABLE agents ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0`,
-    `ALTER TABLE agents ADD COLUMN email_token TEXT`,
-  ]
-
-  for (const statement of addColumnStatements) {
-    const columnName = statement.split(' ADD COLUMN ')[1]?.split(' ')[0]
-    if (!columnName || hasColumn(db, 'agents', columnName)) {
-      continue
-    }
-    db.exec(statement)
+  if (!columns.has('verification_tier')) {
+    db.exec("ALTER TABLE agents ADD COLUMN verification_tier TEXT NOT NULL DEFAULT 'basic'")
   }
 
-  db.exec(`
-    UPDATE agents
-    SET verification_tier = 'basic'
-    WHERE verification_tier IS NULL OR verification_tier = ''
-  `)
-}
+  if (!columns.has('description')) {
+    db.exec('ALTER TABLE agents ADD COLUMN description TEXT')
+  }
 
-function rebuildAgentsTable(db: DB): void {
-  db.pragma('foreign_keys = OFF')
-
-  const migrate = db.transaction(() => {
-    db.exec(`
-      CREATE TABLE agents__migrated (
-        beam_id TEXT PRIMARY KEY,
-        org TEXT,
-        display_name TEXT NOT NULL,
-        capabilities TEXT NOT NULL DEFAULT '[]',
-        public_key TEXT NOT NULL,
-        trust_score REAL NOT NULL DEFAULT 0.5,
-        verified INTEGER NOT NULL DEFAULT 0,
-        email TEXT,
-        description TEXT,
-        logo_url TEXT,
-        website TEXT,
-        verification_tier TEXT NOT NULL DEFAULT 'basic' CHECK(verification_tier IN ('basic', 'verified', 'business', 'enterprise')),
-        email_verified INTEGER NOT NULL DEFAULT 0,
-        email_token TEXT,
-        created_at TEXT NOT NULL,
-        last_seen TEXT NOT NULL
-      );
-
-      INSERT INTO agents__migrated (
-        beam_id,
-        org,
-        display_name,
-        capabilities,
-        public_key,
-        trust_score,
-        verified,
-        created_at,
-        last_seen
-      )
-      SELECT
-        beam_id,
-        org,
-        display_name,
-        capabilities,
-        public_key,
-        trust_score,
-        verified,
-        created_at,
-        last_seen
-      FROM agents;
-
-      DROP TABLE agents;
-      ALTER TABLE agents__migrated RENAME TO agents;
-      CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org);
-      CREATE INDEX IF NOT EXISTS idx_agents_trust ON agents(trust_score DESC);
-      CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC);
-      CREATE INDEX IF NOT EXISTS idx_agents_email_verified ON agents(email_verified, trust_score DESC);
-    `)
-  })
-
-  try {
-    migrate()
-  } finally {
-    db.pragma('foreign_keys = ON')
+  if (!columns.has('logo_url')) {
+    db.exec('ALTER TABLE agents ADD COLUMN logo_url TEXT')
   }
 }
 
@@ -410,6 +325,8 @@ function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
 export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const now = new Date().toISOString()
   const capabilitiesJson = JSON.stringify(data.capabilities)
+  const verified = data.verificationTier && data.verificationTier !== 'basic' ? 1 : 0
+  const verificationTier: VerificationTier = data.verificationTier ?? (data.emailVerified ? 'verified' : 'basic')
 
   const existing = getAgent(db, data.beamId)
   const normalizedEmail = data.email?.trim().toLowerCase() || null
@@ -431,7 +348,9 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           public_key = ?,
           email = ?,
           email_verified = ?,
-          email_token = ?,
+          verification_tier = ?,
+          description = ?,
+          logo_url = ?,
           verified = ?,
           last_seen = ?
       WHERE beam_id = ?
@@ -440,9 +359,11 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.displayName,
       capabilitiesJson,
       data.publicKey,
-      normalizedEmail,
-      emailVerified,
-      emailToken,
+      data.email ?? null,
+      data.emailVerified ? 1 : 0,
+      verificationTier,
+      data.description ?? null,
+      data.logoUrl ?? null,
       verified,
       now,
       data.beamId
@@ -455,25 +376,29 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         display_name,
         capabilities,
         public_key,
-        trust_score,
-        verified,
         email,
         email_verified,
-        email_token,
+        verification_tier,
+        description,
+        logo_url,
+        trust_score,
+        verified,
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, 0.3, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
+      data.email ?? null,
+      data.emailVerified ? 1 : 0,
+      verificationTier,
+      data.description ?? null,
+      data.logoUrl ?? null,
       verified,
-      normalizedEmail,
-      emailVerified,
-      emailToken,
       now,
       now
     )
@@ -861,6 +786,62 @@ export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
     ORDER BY requested_at DESC
     LIMIT ?
   `).all(safeLimit) as IntentLogRow[]
+}
+
+export function getAgentIntentStats(db: DB, beamId: string): AgentIntentStats {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS received,
+      SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS responded,
+      AVG(CASE WHEN status = 'success' THEN round_trip_latency_ms END) AS avg_response_time_ms
+    FROM intent_log
+    WHERE to_beam_id = ?
+  `).get(beamId) as {
+    received: number | null
+    responded: number | null
+    avg_response_time_ms: number | null
+  } | undefined
+
+  return {
+    received: row?.received ?? 0,
+    responded: row?.responded ?? 0,
+    avg_response_time_ms: row?.avg_response_time_ms == null ? null : Math.round(row.avg_response_time_ms),
+  }
+}
+
+export function getAgentDirectoryStats(db: DB): {
+  total_agents: number
+  verified_agents: number
+  intents_processed: number
+  avg_response_time_ms: number | null
+} {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total_agents,
+      SUM(CASE WHEN verified = 1 OR verification_tier != 'basic' THEN 1 ELSE 0 END) AS verified_agents,
+      (
+        SELECT COUNT(*)
+        FROM intent_log
+      ) AS intents_processed,
+      (
+        SELECT AVG(round_trip_latency_ms)
+        FROM intent_log
+        WHERE status = 'success' AND round_trip_latency_ms IS NOT NULL
+      ) AS avg_response_time_ms
+    FROM agents
+  `).get() as {
+    total_agents: number | null
+    verified_agents: number | null
+    intents_processed: number | null
+    avg_response_time_ms: number | null
+  } | undefined
+
+  return {
+    total_agents: row?.total_agents ?? 0,
+    verified_agents: row?.verified_agents ?? 0,
+    intents_processed: row?.intents_processed ?? 0,
+    avg_response_time_ms: row?.avg_response_time_ms == null ? null : Math.round(row.avg_response_time_ms),
+  }
 }
 
 export function listTrustScores(db: DB): TrustScoreRow[] {

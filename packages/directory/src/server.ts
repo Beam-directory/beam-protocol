@@ -915,6 +915,32 @@ export function createApp(db: Database): Hono {
     }
   })
 
+  app.get('/intents/recent', (c) => {
+    const limit = Number.parseInt(c.req.query('limit') ?? '50', 10)
+
+    try {
+      const rows = listRecentIntentLogs(db, limit)
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        intents: rows.map((row) => ({
+          nonce: row.nonce,
+          from: row.from_beam_id,
+          to: row.to_beam_id,
+          intentType: row.intent_type,
+          timestamp: row.requested_at,
+          completedAt: row.completed_at,
+          roundTripLatencyMs: row.round_trip_latency_ms,
+          status: row.status,
+          errorCode: row.error_code,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('Recent intents error:', err)
+      return c.json({ error: 'Failed to load recent intents', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   app.get('/health', (c) => {
     return c.json({
       status: 'ok',

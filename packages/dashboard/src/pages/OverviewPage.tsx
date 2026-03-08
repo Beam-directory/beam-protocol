@@ -1,257 +1,144 @@
-import { useQuery } from 'convex/react'
-import { api } from '../../convex/_generated/api'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-} from 'recharts'
-import { Activity, Bot, Zap, Clock, TrendingUp, Shield } from 'lucide-react'
-import { formatNumber, formatLatency } from '../lib/utils'
-
-const TRUST_COLORS = {
-  elite: '#39d98a',
-  high: '#4c9cf1',
-  medium: '#f7c603',
-  low: '#f75c5c',
-}
+import { useEffect, useState } from 'react'
+import { Activity, Bot, Clock3, ShieldCheck } from 'lucide-react'
+import { ApiError, directoryApi, type DirectoryStats, type RecentIntent } from '../lib/api'
+import { formatDateTime, formatLatency, formatNumber, truncateBeamId } from '../lib/utils'
 
 export default function OverviewPage() {
-  const stats = useQuery(api.intents.getGlobalStats)
+  const [stats, setStats] = useState<DirectoryStats | null>(null)
+  const [recentIntents, setRecentIntents] = useState<RecentIntent[]>([])
+  const [error, setError] = useState<string | null>(null)
+  const [loading, setLoading] = useState(true)
 
-  const intentVolumeData = stats
-    ? [
-        { period: '24h', intents: stats.intents24h },
-        { period: '7d', intents: stats.intents7d },
-        { period: '30d', intents: stats.intents30d },
-      ]
-    : []
+  useEffect(() => {
+    let cancelled = false
 
-  const trustData = stats
-    ? [
-        { name: 'Elite (75-100)', value: stats.trustDistribution.elite, color: TRUST_COLORS.elite },
-        { name: 'High (50-74)', value: stats.trustDistribution.high, color: TRUST_COLORS.high },
-        { name: 'Medium (25-49)', value: stats.trustDistribution.medium, color: TRUST_COLORS.medium },
-        { name: 'Low (0-24)', value: stats.trustDistribution.low, color: TRUST_COLORS.low },
-      ].filter(d => d.value > 0)
-    : []
+    async function load() {
+      try {
+        setLoading(true)
+        const [statsResponse, intentsResponse] = await Promise.all([
+          directoryApi.getAgentStats(),
+          directoryApi.getRecentIntents(6),
+        ])
 
-  const totalTrust = trustData.reduce((s, d) => s + d.value, 0)
+        if (cancelled) return
+        setStats(statsResponse)
+        setRecentIntents(intentsResponse.intents)
+        setError(null)
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof ApiError ? err.message : 'Failed to load dashboard overview')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
   return (
-    <div className="p-5 space-y-5 animate-fade-in">
-      {/* Page header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-base font-bold text-text tracking-tight">System Overview</h1>
-          <p className="text-xs text-text-muted mt-0.5 font-mono">Real-time network telemetry</p>
+          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Live network stats from the Beam Directory API.</p>
         </div>
-        <div className="flex items-center gap-2 text-xs font-mono text-text-muted">
-          <span className="w-1.5 h-1.5 rounded-full bg-signal-green animate-pulse-slow" />
-          LIVE
-        </div>
-      </div>
+        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      </section>
 
-      {/* KPI grid */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <StatCard
-          icon={<Bot size={14} className="text-signal-blue" />}
-          label="Active Agents"
-          value={stats ? formatNumber(stats.agentCount) : '—'}
-          sub="registered beam IDs"
-        />
-        <StatCard
-          icon={<Zap size={14} className="text-accent" />}
-          label="Intents / 24h"
-          value={stats ? formatNumber(stats.intents24h) : '—'}
-          sub={stats ? `${formatNumber(stats.intents7d)} this week` : ''}
-        />
-        <StatCard
-          icon={<Clock size={14} className="text-signal-purple" />}
-          label="Avg Latency"
-          value={stats ? formatLatency(stats.avgLatencyMs) : '—'}
-          sub="p50 round-trip"
-        />
-        <StatCard
-          icon={<Shield size={14} className="text-signal-green" />}
-          label="Orgs"
-          value={stats ? formatNumber(stats.orgCount) : '—'}
-          sub="registered organizations"
-        />
-      </div>
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <StatCard icon={Bot} label="Total agents" value={loading || !stats ? '—' : formatNumber(stats.total_agents)} />
+        <StatCard icon={ShieldCheck} label="Verified agents" value={loading || !stats ? '—' : formatNumber(stats.verified_agents)} />
+        <StatCard icon={Activity} label="Processed intents" value={loading || !stats ? '—' : formatNumber(stats.intents_processed)} />
+        <StatCard icon={Clock3} label="Avg response" value={loading || !stats ? '—' : formatLatency(stats.avg_response_time_ms)} />
+      </section>
 
-      {/* Charts row */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        {/* Intent volume bar chart */}
-        <div className="lg:col-span-2 bg-bg-card border border-border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <Activity size={13} className="text-accent" />
-            <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
-              Intent Volume
-            </span>
-          </div>
-          {intentVolumeData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={160}>
-              <BarChart data={intentVolumeData} barSize={32}>
-                <XAxis
-                  dataKey="period"
-                  tick={{ fill: '#7070a0', fontSize: 11, fontFamily: 'JetBrains Mono' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  tick={{ fill: '#7070a0', fontSize: 11, fontFamily: 'JetBrains Mono' }}
-                  axisLine={false}
-                  tickLine={false}
-                  width={30}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: '#111118',
-                    border: '1px solid #1e1e2e',
-                    borderRadius: 6,
-                    fontSize: 12,
-                    fontFamily: 'JetBrains Mono',
-                  }}
-                  labelStyle={{ color: '#7070a0' }}
-                  itemStyle={{ color: '#F75C03' }}
-                  cursor={{ fill: 'rgba(247,92,3,0.05)' }}
-                />
-                <Bar dataKey="intents" fill="#F75C03" radius={[3, 3, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <EmptyState label="No intent data yet" />
-          )}
-        </div>
-
-        {/* Trust distribution */}
-        <div className="bg-bg-card border border-border rounded-lg p-4">
-          <div className="flex items-center gap-2 mb-4">
-            <TrendingUp size={13} className="text-signal-green" />
-            <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
-              Trust Distribution
-            </span>
-          </div>
-          {totalTrust > 0 ? (
-            <>
-              <ResponsiveContainer width="100%" height={110}>
-                <PieChart>
-                  <Pie
-                    data={trustData}
-                    cx="50%"
-                    cy="50%"
-                    innerRadius={30}
-                    outerRadius={50}
-                    dataKey="value"
-                    strokeWidth={0}
-                  >
-                    {trustData.map((entry, i) => (
-                      <Cell key={i} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    contentStyle={{
-                      background: '#111118',
-                      border: '1px solid #1e1e2e',
-                      borderRadius: 6,
-                      fontSize: 12,
-                      fontFamily: 'JetBrains Mono',
-                    }}
-                  />
-                </PieChart>
-              </ResponsiveContainer>
-              <div className="space-y-1.5 mt-3">
-                {trustData.map((d) => (
-                  <div key={d.name} className="flex items-center gap-2">
-                    <span
-                      className="w-2 h-2 rounded-sm shrink-0"
-                      style={{ background: d.color }}
-                    />
-                    <span className="text-xs text-text-muted font-mono flex-1 truncate">{d.name}</span>
-                    <span className="text-xs font-mono text-text">{d.value}</span>
-                  </div>
-                ))}
+      <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+        <div className="panel">
+          <div className="panel-title">Verification coverage</div>
+          <div className="mt-5 space-y-4">
+            <div>
+              <div className="mb-2 flex items-center justify-between text-sm">
+                <span className="text-slate-600 dark:text-slate-300">Verified share</span>
+                <span className="font-medium">{stats && stats.total_agents > 0 ? `${Math.round((stats.verified_agents / stats.total_agents) * 100)}%` : '0%'}</span>
               </div>
-            </>
-          ) : (
-            <EmptyState label="No agents yet" />
-          )}
+              <div className="h-3 rounded-full bg-slate-200 dark:bg-slate-800">
+                <div
+                  className="h-3 rounded-full bg-blue-500 transition-all"
+                  style={{ width: `${stats && stats.total_agents > 0 ? (stats.verified_agents / stats.total_agents) * 100 : 0}%` }}
+                />
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-2">
+              <MiniStat label="Verified" value={stats ? formatNumber(stats.verified_agents) : '—'} />
+              <MiniStat label="Unverified" value={stats ? formatNumber(Math.max(stats.total_agents - stats.verified_agents, 0)) : '—'} />
+            </div>
+          </div>
         </div>
-      </div>
 
-      {/* Recent activity placeholder */}
-      <div className="bg-bg-card border border-border rounded-lg p-4">
-        <div className="flex items-center gap-2 mb-3">
-          <Activity size={13} className="text-signal-blue" />
-          <span className="text-xs font-mono text-text-muted uppercase tracking-widest">
-            System Status
-          </span>
+        <div className="panel">
+          <div className="panel-title">Latest intents</div>
+          <div className="mt-4 space-y-3">
+            {recentIntents.length === 0 ? (
+              <EmptyState label={loading ? 'Loading recent intents…' : 'No intents have been processed yet.'} />
+            ) : (
+              recentIntents.map((intent) => (
+                <div key={intent.nonce} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2 text-sm">
+                    <span className="rounded-full bg-orange-500/10 px-2 py-1 text-xs font-medium text-orange-600 dark:text-orange-300">
+                      {intent.intentType}
+                    </span>
+                    <span className="text-slate-500 dark:text-slate-400">{formatDateTime(intent.timestamp)}</span>
+                  </div>
+                  <div className="mt-2 grid gap-1 text-sm text-slate-600 dark:text-slate-300">
+                    <div>From {truncateBeamId(intent.from)}</div>
+                    <div>To {truncateBeamId(intent.to)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
         </div>
-        <div className="grid grid-cols-3 gap-4">
-          <StatusRow label="Directory" status="online" />
-          <StatusRow label="Intent Router" status="online" />
-          <StatusRow label="Convex Sync" status="online" />
-        </div>
-      </div>
+      </section>
     </div>
   )
 }
 
 function StatCard({
-  icon,
+  icon: Icon,
   label,
   value,
-  sub,
 }: {
-  icon: React.ReactNode
+  icon: typeof Bot
   label: string
   value: string
-  sub: string
 }) {
   return (
-    <div className="stat-card">
-      <div className="flex items-center gap-1.5">
-        {icon}
-        <span className="stat-label">{label}</span>
+    <div className="panel">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
+          <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
+        </div>
+        <div className="rounded-xl bg-orange-500/10 p-3 text-orange-500">
+          <Icon size={18} />
+        </div>
       </div>
-      <div className="stat-value">{value}</div>
-      <div className="stat-sub">{sub}</div>
     </div>
   )
 }
 
-function StatusRow({ label, status }: { label: string; status: 'online' | 'offline' | 'degraded' }) {
-  const colors = {
-    online: 'bg-signal-green',
-    offline: 'bg-signal-red',
-    degraded: 'bg-signal-yellow',
-  }
-  const labels = {
-    online: 'ONLINE',
-    offline: 'OFFLINE',
-    degraded: 'DEGRADED',
-  }
+function MiniStat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className={`w-1.5 h-1.5 rounded-full ${colors[status]}`} />
-      <span className="text-xs font-mono text-text-muted">{label}</span>
-      <span className={`text-xs font-mono ml-auto text-${status === 'online' ? 'signal-green' : 'signal-red'}`}>
-        {labels[status]}
-      </span>
+    <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-950">
+      <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
+      <div className="mt-1 text-xl font-semibold">{value}</div>
     </div>
   )
 }
 
 function EmptyState({ label }: { label: string }) {
-  return (
-    <div className="flex items-center justify-center h-24 text-xs text-text-dim font-mono">
-      {label}
-    </div>
-  )
+  return <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">{label}</div>
 }
