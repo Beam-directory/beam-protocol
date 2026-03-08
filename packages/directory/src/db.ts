@@ -25,7 +25,7 @@ import { generateDIDDocument, type DIDDocument } from './did.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
-export function createDatabase(dbPath = './beam-directory.db'): DB {
+export function createDatabase(dbPath = process.env.DB_PATH || './beam-directory.db'): DB {
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
   db.pragma('foreign_keys = ON')

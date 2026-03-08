@@ -1,6 +1,8 @@
 app = "beam-directory"
 primary_region = "fra"
 
+[build]
+
 [env]
   PORT = "3100"
 
@@ -16,3 +18,7 @@ primary_region = "fra"
   cpu_kind = "shared"
   cpus = 1
   memory_mb = 256
+
+[mounts]
+  source = "beam_data"
+  destination = "/data"

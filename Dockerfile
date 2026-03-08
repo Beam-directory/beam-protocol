@@ -28,6 +28,7 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3100
+ENV DB_PATH=/data/beam-directory.db
 
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
@@ -37,4 +38,3 @@ COPY --from=builder /app/packages/directory/dist ./packages/directory/dist
 EXPOSE 3100
 
 CMD ["node", "packages/directory/dist/index.js"]
-
