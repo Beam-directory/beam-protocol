@@ -9,6 +9,7 @@ import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
+import { businessVerificationRouter } from './routes/business-verify.js'
 import { credentialsRouter } from './routes/credentials.js'
 import { delegationsRouter } from './routes/delegations.js'
 import { didRouter } from './routes/did.js'
@@ -50,7 +51,7 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
     personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier === 'verified',
+    verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
     connected: connectedSet.has(row.beam_id),
@@ -772,6 +773,7 @@ export function createApp(db: Database): Hono {
   app.route('/orgs', orgsRouter(db))
   app.route('/agents', agentsRouter(db))
   app.route('/agents', verificationRouter(db))
+  app.route('/agents', businessVerificationRouter(db))
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
   app.route('/agents', reportsRouter(db))

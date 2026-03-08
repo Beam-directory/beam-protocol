@@ -29,7 +29,7 @@ function serializeAgent(row: AgentRow): object {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
     personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier === 'verified',
+    verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
   }
