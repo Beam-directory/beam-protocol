@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
-import { getAgent, recordNonce, updateLastSeen } from './db.js'
+import { getAgent, incrementAgentStat, recordNonce, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
@@ -16,6 +16,7 @@ const pendingResults = new Map<string, {
   resolve: (frame: ResultFrame) => void
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
+  expectedResponder: string
 }>()
 
 setInterval(() => {
@@ -111,7 +112,7 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
     throw new RelayError('OFFLINE', `Agent ${prepared.to} is not currently connected`)
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, timeoutMs)
+  const resultPromise = createResultWaiter(prepared.nonce, timeoutMs, prepared.to)
 
   try {
     sendJson(recipientWs, {
@@ -119,6 +120,7 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
       frame: prepared,
       senderPublicKey: sender.public_key,
     })
+    incrementAgentStat(db, prepared.to, 'intents_received')
   } catch (err) {
     clearPendingResult(prepared.nonce)
     throw new RelayError('DELIVERY_FAILED', err instanceof Error ? err.message : 'Failed to relay intent')
@@ -151,7 +153,7 @@ async function handleMessage(
   if (msg.type === 'intent') {
     await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame)
   } else if (msg.type === 'result') {
-    handleResult(msg.frame as ResultFrame)
+    handleResult(db, senderBeamId, senderWs, msg.frame as ResultFrame)
   } else {
     sendJson(senderWs, { type: 'error', message: `Unknown message type: ${msg.type}` })
   }
@@ -231,13 +233,14 @@ async function handleIntent(
     return
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, 30_000)
+  const resultPromise = createResultWaiter(prepared.nonce, 30_000, prepared.to)
 
   sendJson(recipientWs, {
     type: 'intent',
     frame: prepared,
     senderPublicKey: senderAgent.public_key,
   })
+  incrementAgentStat(db, prepared.to, 'intents_received')
 
   updateLastSeen(db, senderBeamId)
 
@@ -354,7 +357,32 @@ function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string
   }
 }
 
-function handleResult(frame: ResultFrame): void {
+function verifyResultSignature(frame: ResultFrame, senderPublicKeyBase64: string): boolean {
+  try {
+    const publicKey = createPublicKey({
+      key: Buffer.from(senderPublicKeyBase64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    })
+
+    const { signature, ...unsignedFrame } = frame
+    return verify(
+      null,
+      Buffer.from(canonicalizeFrame(unsignedFrame as Record<string, unknown>), 'utf8'),
+      publicKey,
+      Buffer.from(signature ?? '', 'base64')
+    )
+  } catch {
+    return false
+  }
+}
+
+function handleResult(
+  db: Database,
+  senderBeamId: string,
+  senderWs: WebSocket,
+  frame: ResultFrame
+): void {
   if (!frame || typeof frame.nonce !== 'string') {
     return
   }
@@ -364,12 +392,35 @@ function handleResult(frame: ResultFrame): void {
     return
   }
 
+  if (pending.expectedResponder !== senderBeamId) {
+    sendJson(senderWs, {
+      type: 'error',
+      nonce: frame.nonce,
+      errorCode: 'FORBIDDEN',
+      message: `Only ${pending.expectedResponder} can respond to nonce ${frame.nonce}`,
+    })
+    return
+  }
+
+  const senderAgent = getAgent(db, senderBeamId)
+  if (!senderAgent || !verifyResultSignature(frame, senderAgent.public_key)) {
+    sendJson(senderWs, {
+      type: 'error',
+      nonce: frame.nonce,
+      errorCode: 'INVALID_RESULT',
+      message: 'Result signature verification failed',
+    })
+    return
+  }
+
   clearTimeout(pending.timeout)
   pendingResults.delete(frame.nonce)
+  incrementAgentStat(db, senderBeamId, 'intents_responded')
+  updateLastSeen(db, senderBeamId)
   pending.resolve(frame)
 }
 
-function createResultWaiter(nonce: string, timeoutMs: number): Promise<ResultFrame> {
+function createResultWaiter(nonce: string, timeoutMs: number, expectedResponder: string): Promise<ResultFrame> {
   if (pendingResults.has(nonce)) {
     clearPendingResult(nonce)
   }
@@ -380,7 +431,7 @@ function createResultWaiter(nonce: string, timeoutMs: number): Promise<ResultFra
       reject(new RelayError('TIMEOUT', `Intent timed out waiting for result (${timeoutMs}ms)`))
     }, timeoutMs)
 
-    pendingResults.set(nonce, { resolve, reject, timeout })
+    pendingResults.set(nonce, { resolve, reject, timeout, expectedResponder })
   })
 }
 
@@ -389,6 +440,22 @@ function clearPendingResult(nonce: string): void {
   if (!pending) return
   clearTimeout(pending.timeout)
   pendingResults.delete(nonce)
+}
+
+function canonicalizeFrame(frame: Record<string, unknown>): string {
+  return JSON.stringify(deepSortKeys(frame))
+}
+
+function deepSortKeys(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(deepSortKeys)
+  if (value !== null && typeof value === 'object') {
+    const sorted: Record<string, unknown> = {}
+    for (const key of Object.keys(value as object).sort()) {
+      sorted[key] = deepSortKeys((value as Record<string, unknown>)[key])
+    }
+    return sorted
+  }
+  return value
 }
 
 function sendJson(ws: WebSocket, payload: object): void {

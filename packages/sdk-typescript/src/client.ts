@@ -2,11 +2,11 @@ import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
 import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import type {
+  AgentRecord,
   BeamClientConfig,
   BeamIdString,
   IntentFrame,
   ResultFrame,
-  AgentRecord
 } from './types.js'
 
 interface WebSocketLike {
@@ -37,11 +37,15 @@ interface PendingResult {
   timer: ReturnType<typeof setTimeout>
 }
 
+const INITIAL_RECONNECT_DELAY_MS = 1_000
+const MAX_RECONNECT_DELAY_MS = 30_000
+const MAX_RECONNECT_ATTEMPTS = 10
+const RECONNECT_FACTOR = 2
+
 async function openWebSocket(url: string): Promise<WebSocketLike> {
   if (typeof globalThis.WebSocket !== 'undefined') {
     return new (globalThis.WebSocket as new (url: string) => WebSocketLike)(url)
   }
-  // Node 18-20: use ws package
   const { default: WS } = await import('ws')
   return new WS(url) as unknown as WebSocketLike
 }
@@ -50,8 +54,15 @@ export class BeamClient {
   private readonly _identity: BeamIdentity
   private readonly _directory: BeamDirectory
   private readonly _directoryUrl: string
+  private readonly _autoReconnect: boolean
+  private readonly _onDisconnect?: () => void
+  private readonly _onReconnect?: () => void
   private _ws: WebSocketLike | null = null
   private _wsConnected = false
+  private _isConnecting = false
+  private _manualDisconnect = false
+  private _reconnectAttempts = 0
+  private _reconnectTimer: ReturnType<typeof setTimeout> | null = null
   private readonly _pendingResults = new Map<string, PendingResult>()
   private readonly _intentHandlers = new Map<string, IntentHandler>()
 
@@ -59,6 +70,9 @@ export class BeamClient {
     this._identity = BeamIdentity.fromData(config.identity)
     this._directoryUrl = config.directoryUrl
     this._directory = new BeamDirectory({ baseUrl: config.directoryUrl })
+    this._autoReconnect = config.autoReconnect ?? true
+    this._onDisconnect = config.onDisconnect
+    this._onReconnect = config.onReconnect
   }
 
   get beamId(): BeamIdString {
@@ -78,25 +92,79 @@ export class BeamClient {
       displayName,
       capabilities,
       publicKey: this._identity.publicKeyBase64,
-      org: parsed.org
+      org: parsed.org,
     })
   }
 
   async connect(): Promise<void> {
     if (this._ws && this._wsConnected) return
+    if (this._isConnecting) {
+      return new Promise<void>((resolve, reject) => {
+        const startedAt = Date.now()
+        const poll = () => {
+          if (this._wsConnected) {
+            resolve()
+            return
+          }
+          if (!this._isConnecting) {
+            reject(new Error('WebSocket connection failed'))
+            return
+          }
+          if (Date.now() - startedAt > 30_000) {
+            reject(new Error('Timed out waiting for WebSocket connection'))
+            return
+          }
+          setTimeout(poll, 50)
+        }
+        poll()
+      })
+    }
 
-    // Convert http(s) scheme to ws(s) and append /ws path with beamId query param
-    const wsUrl = this._directoryUrl
+    this._manualDisconnect = false
+    this._clearReconnectTimer()
+    await this._openConnection(false)
+  }
+
+  private _getWebSocketUrl(): string {
+    return this._directoryUrl
       .replace(/^http:\/\//, 'ws://')
       .replace(/^https:\/\//, 'wss://')
       .replace(/\/$/, '') + `/ws?beamId=${encodeURIComponent(this._identity.beamId)}`
+  }
 
-    return new Promise<void>((resolve, reject) => {
-      openWebSocket(wsUrl).then((ws) => {
+  private async _openConnection(isReconnect: boolean): Promise<void> {
+    this._isConnecting = true
+    const wsUrl = this._getWebSocketUrl()
+
+    try {
+      const ws = await openWebSocket(wsUrl)
+      await new Promise<void>((resolve, reject) => {
+        let settled = false
+        const previousHandleMessage = this._handleMessage.bind(this)
+
+        const finishResolve = () => {
+          if (settled) return
+          settled = true
+          this._handleMessage = previousHandleMessage
+          this._isConnecting = false
+          this._wsConnected = true
+          this._reconnectAttempts = 0
+          resolve()
+        }
+
+        const finishReject = (error: Error) => {
+          if (settled) return
+          settled = true
+          this._handleMessage = previousHandleMessage
+          this._isConnecting = false
+          this._wsConnected = false
+          this._ws = null
+          reject(error)
+        }
+
         this._ws = ws
 
         ws.onopen = () => {
-          // Wait for the server's connected message before resolving
         }
 
         ws.onmessage = (event) => {
@@ -104,40 +172,93 @@ export class BeamClient {
         }
 
         ws.onclose = () => {
-          this._wsConnected = false
-          this._ws = null
-          // Reject all pending results
-          for (const [nonce, pending] of this._pendingResults) {
-            clearTimeout(pending.timer)
-            pending.reject(new Error('WebSocket connection closed'))
-            this._pendingResults.delete(nonce)
+          const wasConnected = this._wsConnected || settled
+          this._handleSocketClose(wasConnected)
+          if (!settled) {
+            finishReject(new Error('WebSocket connection closed before handshake completed'))
           }
         }
 
         ws.onerror = (event) => {
-          if (!this._wsConnected) {
-            reject(new Error(`WebSocket connection error: ${String(event)}`))
+          if (!settled) {
+            finishReject(new Error(`WebSocket connection error: ${String(event)}`))
           }
         }
 
-        // We resolve after receiving the 'connected' message
-        const originalHandleMessage = this._handleMessage.bind(this)
         this._handleMessage = (data: string) => {
           try {
-            const msg = JSON.parse(data) as { type: string; beamId?: string }
+            const msg = JSON.parse(data) as { type: string }
             if (msg.type === 'connected') {
-              this._wsConnected = true
-              this._handleMessage = originalHandleMessage
-              resolve()
+              finishResolve()
               return
             }
           } catch {
-            // ignore parse errors during connect phase
           }
-          originalHandleMessage(data)
+          previousHandleMessage(data)
         }
-      }).catch(reject)
-    })
+      })
+
+      if (isReconnect) {
+        this._onReconnect?.()
+      }
+    } catch (error) {
+      this._isConnecting = false
+      this._wsConnected = false
+      this._ws = null
+      if (isReconnect) {
+        this._scheduleReconnect()
+      }
+      throw error
+    }
+  }
+
+  private _handleSocketClose(wasConnected: boolean): void {
+    this._wsConnected = false
+    this._isConnecting = false
+    this._ws = null
+
+    for (const [nonce, pending] of this._pendingResults) {
+      clearTimeout(pending.timer)
+      pending.reject(new Error('WebSocket connection closed'))
+      this._pendingResults.delete(nonce)
+    }
+
+    if (wasConnected) {
+      this._onDisconnect?.()
+    }
+
+    if (!this._manualDisconnect && this._autoReconnect) {
+      this._scheduleReconnect()
+    }
+  }
+
+  private _scheduleReconnect(): void {
+    if (this._reconnectTimer || this._isConnecting || this._manualDisconnect || !this._autoReconnect) {
+      return
+    }
+    if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      return
+    }
+
+    const delay = Math.min(
+      INITIAL_RECONNECT_DELAY_MS * (RECONNECT_FACTOR ** this._reconnectAttempts),
+      MAX_RECONNECT_DELAY_MS
+    )
+    this._reconnectAttempts += 1
+
+    this._reconnectTimer = setTimeout(() => {
+      this._reconnectTimer = null
+      void this._openConnection(true).catch(() => {
+        this._scheduleReconnect()
+      })
+    }, delay)
+  }
+
+  private _clearReconnectTimer(): void {
+    if (this._reconnectTimer) {
+      clearTimeout(this._reconnectTimer)
+      this._reconnectTimer = null
+    }
   }
 
   private _handleMessage(data: string): void {
@@ -188,7 +309,6 @@ export class BeamClient {
       }
 
       Promise.resolve(handler(frame, respond)).catch(() => {
-        // Swallow handler errors to avoid unhandled rejections
       })
     }
   }
@@ -222,7 +342,7 @@ export class BeamClient {
       } catch (err) {
         clearTimeout(timer)
         this._pendingResults.delete(frame.nonce)
-        reject(err)
+        reject(err instanceof Error ? err : new Error(String(err)))
       }
     })
   }
@@ -232,7 +352,7 @@ export class BeamClient {
     const res = await fetch(`${baseUrl}/intents`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(frame)
+      body: JSON.stringify(frame),
     })
     if (!res.ok) {
       throw new Error(`HTTP intent delivery failed: ${res.status} ${res.statusText}`)
@@ -246,9 +366,11 @@ export class BeamClient {
   }
 
   disconnect(): void {
+    this._manualDisconnect = true
+    this._clearReconnectTimer()
+
     if (this._ws) {
       this._wsConnected = false
-      // Reject all pending results before closing
       for (const [nonce, pending] of this._pendingResults) {
         clearTimeout(pending.timer)
         pending.reject(new Error('Client disconnected'))

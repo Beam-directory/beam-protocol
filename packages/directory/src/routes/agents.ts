@@ -3,15 +3,12 @@ import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import {
-  registerAgent,
   getAgent,
+  recomputeTrustScore,
+  registerAgent,
   searchAgents,
   updateLastSeen,
 } from '../db.js'
-
-// ---------------------------------------------------------------------------
-// Rate limiter
-// ---------------------------------------------------------------------------
 
 const requests = new Map<string, { count: number; resetAt: number }>()
 
@@ -27,17 +24,12 @@ function checkRateLimit(ip: string, limit = 60): boolean {
   return true
 }
 
-// Periodically prune stale entries to avoid unbounded memory growth
 setInterval(() => {
   const now = Date.now()
   for (const [key, entry] of requests.entries()) {
     if (now > entry.resetAt) requests.delete(key)
   }
 }, 5 * 60_000)
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
 
 const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 
@@ -57,16 +49,9 @@ function getClientIp(req: Request): string {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Router factory
-// ---------------------------------------------------------------------------
-
 export function agentsRouter(db: Database): Hono {
   const router = new Hono()
 
-  // -------------------------------------------------------------------------
-  // POST /agents/register
-  // -------------------------------------------------------------------------
   router.post('/register', async (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip, 30)) {
@@ -80,17 +65,12 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
     }
 
-    if (
-      typeof body !== 'object' ||
-      body === null ||
-      Array.isArray(body)
-    ) {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
     }
 
     const raw = body as Record<string, unknown>
 
-    // Validate beamId
     if (typeof raw['beamId'] !== 'string' || !BEAM_ID_RE.test(raw['beamId'])) {
       return c.json({
         error: 'beamId must match pattern agent@org.beam.directory (lowercase alphanumeric, hyphens, underscores)',
@@ -98,35 +78,26 @@ export function agentsRouter(db: Database): Hono {
       }, 400)
     }
 
-    // Validate publicKey
     if (typeof raw['publicKey'] !== 'string' || raw['publicKey'].trim().length === 0) {
       return c.json({ error: 'publicKey must be a non-empty string', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
     }
 
-    // Validate capabilities
-    if (
-      !Array.isArray(raw['capabilities']) ||
-      !(raw['capabilities'] as unknown[]).every((c) => typeof c === 'string')
-    ) {
+    if (!Array.isArray(raw['capabilities']) || !(raw['capabilities'] as unknown[]).every((capability) => typeof capability === 'string')) {
       return c.json({ error: 'capabilities must be an array of strings', errorCode: 'INVALID_CAPABILITIES' }, 400)
     }
 
-    // Validate displayName
     if (typeof raw['displayName'] !== 'string' || raw['displayName'].trim().length === 0) {
       return c.json({ error: 'displayName must be a non-empty string', errorCode: 'INVALID_DISPLAY_NAME' }, 400)
     }
 
-    // Validate org
     if (typeof raw['org'] !== 'string' || raw['org'].trim().length === 0) {
       return c.json({ error: 'org must be a non-empty string', errorCode: 'INVALID_ORG' }, 400)
     }
 
     const beamId = raw['beamId'] as string
     const org = raw['org'] as string
-
-    // Ensure org in beamId matches provided org
-    const orgFromId = beamId.split('@')[1]  // e.g. "acme.beam.directory"
-    const orgSlug = orgFromId?.split('.')[0] // e.g. "acme"
+    const orgFromId = beamId.split('@')[1]
+    const orgSlug = orgFromId?.split('.')[0]
     if (orgSlug !== org) {
       return c.json({
         error: `org field (${org}) does not match org extracted from beamId (${orgSlug ?? 'unknown'})`,
@@ -152,9 +123,6 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // -------------------------------------------------------------------------
-  // GET /agents/search
-  // -------------------------------------------------------------------------
   router.get('/search', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
@@ -167,13 +135,13 @@ export function agentsRouter(db: Database): Hono {
     const limitParam = c.req.query('limit')
 
     const capabilities = capabilitiesParam
-      ? capabilitiesParam.split(',').map((s) => s.trim()).filter(Boolean)
+      ? capabilitiesParam.split(',').map((value) => value.trim()).filter(Boolean)
       : undefined
 
     let minTrustScore: number | undefined
     if (minTrustScoreParam !== undefined) {
       const parsed = parseFloat(minTrustScoreParam)
-      if (isNaN(parsed) || parsed < 0 || parsed > 1) {
+      if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
         return c.json({ error: 'minTrustScore must be a number between 0 and 1', errorCode: 'INVALID_PARAM' }, 400)
       }
       minTrustScore = parsed
@@ -182,7 +150,7 @@ export function agentsRouter(db: Database): Hono {
     let limit: number | undefined
     if (limitParam !== undefined) {
       const parsed = parseInt(limitParam, 10)
-      if (isNaN(parsed) || parsed < 1) {
+      if (Number.isNaN(parsed) || parsed < 1) {
         return c.json({ error: 'limit must be a positive integer', errorCode: 'INVALID_PARAM' }, 400)
       }
       limit = parsed
@@ -202,27 +170,26 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // -------------------------------------------------------------------------
-  // GET /agents/:beamId
-  // -------------------------------------------------------------------------
   router.get('/:beamId', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
       return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
     }
 
-    const rawId = c.req.param('beamId')
-    const beamId = decodeURIComponent(rawId)
+    const beamId = decodeURIComponent(c.req.param('beamId'))
 
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
 
     try {
-      const agent = getAgent(db, beamId)
-      if (!agent) {
+      const existing = getAgent(db, beamId)
+      if (!existing) {
         return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
       }
+
+      recomputeTrustScore(db, beamId)
+      const agent = getAgent(db, beamId) as AgentRow
       return c.json(serializeAgent(agent))
     } catch (err) {
       console.error('Get agent error:', err)
@@ -230,17 +197,13 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // -------------------------------------------------------------------------
-  // POST /agents/:beamId/heartbeat
-  // -------------------------------------------------------------------------
   router.post('/:beamId/heartbeat', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
       return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
     }
 
-    const rawId = c.req.param('beamId')
-    const beamId = decodeURIComponent(rawId)
+    const beamId = decodeURIComponent(c.req.param('beamId'))
 
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
