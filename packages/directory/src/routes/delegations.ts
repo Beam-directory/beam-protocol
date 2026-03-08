@@ -3,8 +3,7 @@ import type { Database } from 'better-sqlite3'
 import type { DelegationRow } from '../types.js'
 import { createDelegation, getAgent, listActiveDelegations, revokeDelegation } from '../db.js'
 import { verifyPayload } from '../crypto.js'
-
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
+import { BEAM_ID_RE } from '../validation.js'
 
 function serializeDelegation(row: DelegationRow): object {
   return {

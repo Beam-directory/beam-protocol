@@ -131,7 +131,71 @@ describe('directory agent enhancements', () => {
 
     expect(response.status).toBe(201)
     const body = await response.json() as Record<string, unknown>
-    expect(body['org']).toBeNull()
+    expect(body['org']).toBe('personal')
+    expect(body['personal']).toBe(true)
+    expect(body['did']).toBe('did:beam:alice')
+
+    const searchResponse = await app.request('http://localhost/agents/search?org=personal')
+    expect(searchResponse.status).toBe(200)
+    const searchBody = await searchResponse.json() as { agents: Array<Record<string, unknown>>; total: number }
+    expect(searchBody.total).toBe(1)
+    expect(searchBody.agents[0]?.beam_id).toBe('alice@beam.directory')
+  })
+
+  it('defaults generated Beam IDs to personal when org and email are absent', async () => {
+    const identity = createIdentity()
+    const response = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        displayName: 'Alice Example',
+        capabilities: ['assistant'],
+        publicKey: identity.publicKeyBase64,
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    const body = await response.json() as Record<string, unknown>
+    expect(body['beam_id']).toBe('alice-example@beam.directory')
+    expect(body['org']).toBe('personal')
+    expect(body['personal']).toBe(true)
+  })
+
+  it('rate limits registration requests by IP', async () => {
+    for (let index = 0; index < 10; index += 1) {
+      const identity = createIdentity()
+      const response = await app.request('http://localhost/agents/register', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-forwarded-for': '203.0.113.10',
+        },
+        body: JSON.stringify({
+          beamId: `limited-${index}@beam.directory`,
+          displayName: `Limited ${index}`,
+          capabilities: ['assistant'],
+          publicKey: identity.publicKeyBase64,
+        }),
+      })
+
+      expect(response.status).toBe(201)
+    }
+
+    const blocked = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-forwarded-for': '203.0.113.10',
+      },
+      body: JSON.stringify({
+        beamId: 'limited-overflow@beam.directory',
+        displayName: 'Limited Overflow',
+        capabilities: ['assistant'],
+        publicKey: createIdentity().publicKeyBase64,
+      }),
+    })
+
+    expect(blocked.status).toBe(429)
   })
 
   it('updates agent profile fields with Ed25519 signature auth', async () => {

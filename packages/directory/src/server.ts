@@ -17,6 +17,7 @@ import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayInt
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
+import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -44,6 +45,7 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
   return {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
+    personal: row.personal === 1,
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
@@ -592,6 +594,8 @@ export function createApp(db: Database): Hono {
       'X-Beam-mTLS-Verified',
     ],
   }))
+
+  app.use('*', createRateLimitMiddleware())
 
   app.get('/dashboard', (c) => {
     const auth = requireAdmin(c)

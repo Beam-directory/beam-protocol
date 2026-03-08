@@ -1,9 +1,10 @@
-// Beam ID string format: agent@org.beam.directory
+// Beam ID string format: agent@org.beam.directory or agent@beam.directory
 export type BeamIdString = string
 
 export interface AgentRecord {
   beam_id: string
   org: string | null
+  personal: number
   display_name: string
   capabilities: string[]
   public_key: string
@@ -134,7 +135,8 @@ export interface RegisterRequest {
   displayName: string
   capabilities: string[]
   publicKey: string
-  org: string
+  org?: string | null
+  personal?: boolean
   email?: string | null
   emailVerified?: boolean
   description?: string | null
@@ -169,6 +171,7 @@ export interface OrgAgentRow {
 export interface AgentRow {
   beam_id: string
   org: string | null
+  personal: number
   display_name: string
   capabilities: string
   public_key: string
