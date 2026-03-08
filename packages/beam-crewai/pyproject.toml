@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "beam-crewai"
-version = "0.5.0"
+version = "0.5.1"
 description = "CrewAI integration for Beam Protocol"
 readme = "README.md"
 requires-python = ">=3.10"
