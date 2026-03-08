@@ -17,6 +17,7 @@
     "better-sqlite3": "^11.0.0",
     "hono": "^4.1.0",
     "nodemailer": "^6.10.1",
+    "stripe": "^20.4.1",
     "ws": "^8.16.0"
   },
   "devDependencies": {
@@ -25,9 +26,6 @@
     "@types/ws": "^8.5.10",
     "typescript": "^5.3.3",
     "vitest": "^1.6.1"
-  },
-  "engines": {
-    "node": ">=18.0.0"
   },
   "engines": {
     "node": ">=18.0.0"
