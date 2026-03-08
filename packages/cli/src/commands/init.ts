@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamIdentity } from '@beam-protocol/sdk'
+import { BeamIdentity } from 'beam-protocol-sdk'
 import { configExists, saveConfig, DEFAULT_DIRECTORY_URL } from '../config.js'
 
 interface InitOptions {

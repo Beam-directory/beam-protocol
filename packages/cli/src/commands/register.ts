@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamClient, BeamIdentity } from '@beam-protocol/sdk'
+import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 import { loadConfig } from '../config.js'
 
 interface RegisterOptions {

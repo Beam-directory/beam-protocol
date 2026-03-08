@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamDirectory } from '@beam-protocol/sdk'
+import { BeamDirectory } from 'beam-protocol-sdk'
 import { loadConfig } from '../config.js'
 
 interface SearchOptions {
