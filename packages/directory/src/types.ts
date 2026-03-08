@@ -32,6 +32,21 @@ export interface IntentAclRow {
   created_at: string
 }
 
+export interface AgentStatsRow {
+  beam_id: string
+  intents_received: number
+  intents_responded: number
+}
+
+export interface OrganizationRow {
+  id: string
+  name: string
+  display_name: string
+  verified: number
+  created_at: string
+  contact_email: string | null
+}
+
 export interface ResultFrame {
   v: '1'
   success: boolean

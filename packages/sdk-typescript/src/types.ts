@@ -8,8 +8,8 @@ export interface BeamIdentityConfig {
 
 export interface BeamIdentityData {
   beamId: BeamIdString
-  publicKeyBase64: string   // SPKI DER, base64
-  privateKeyBase64: string  // PKCS8 DER, base64
+  publicKeyBase64: string
+  privateKeyBase64: string
 }
 
 export interface IntentFrame {
@@ -18,9 +18,9 @@ export interface IntentFrame {
   from: BeamIdString
   to: BeamIdString
   payload: Record<string, unknown>
-  nonce: string      // UUID v4
-  timestamp: string  // ISO 8601
-  signature?: string // Ed25519 base64, set after signing
+  nonce: string
+  timestamp: string
+  signature?: string
 }
 
 export interface ResultFrame {
@@ -29,22 +29,22 @@ export interface ResultFrame {
   payload?: Record<string, unknown>
   error?: string
   errorCode?: string
-  nonce: string      // from IntentFrame
-  timestamp: string  // ISO 8601
-  latency?: number   // ms
-  signature?: string // Ed25519 base64
+  nonce: string
+  timestamp: string
+  latency?: number
+  signature?: string
 }
 
 export interface AgentRegistration {
   beamId: BeamIdString
   displayName: string
   capabilities: string[]
-  publicKey: string  // SPKI DER base64
+  publicKey: string
   org: string
 }
 
 export interface AgentRecord extends AgentRegistration {
-  trustScore: number  // 0.0-1.0
+  trustScore: number
   verified: boolean
   createdAt: string
   lastSeen: string
@@ -58,6 +58,9 @@ export interface DirectoryConfig {
 export interface BeamClientConfig {
   identity: BeamIdentityData
   directoryUrl: string
+  autoReconnect?: boolean
+  onDisconnect?: () => void
+  onReconnect?: () => void
 }
 
 export interface AgentSearchQuery {

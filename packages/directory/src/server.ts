@@ -8,6 +8,7 @@ import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
+import { orgsRouter } from './routes/orgs.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import type { AgentRow, IntentFrame } from './types.js'
@@ -55,6 +56,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.route('/agents', agentsRouter(db))
+  app.route('/orgs', orgsRouter(db))
 
   app.post('/acl', async (c) => {
     let body: unknown
