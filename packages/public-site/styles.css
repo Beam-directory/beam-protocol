@@ -34,7 +34,7 @@ a:hover { opacity: .8; }
 .nav-inner { display: flex; align-items: center; justify-content: space-between; height: 64px; max-width: 1200px; margin: 0 auto; padding: 0 24px; }
 .nav-logo { font-size: 1.2rem; font-weight: 700; color: var(--text); display: flex; align-items: center; gap: 8px; }
 .nav-logo span { color: var(--accent); }
-.nav-links { display: flex; gap: 24px; align-items: center; }
+.nav-links { display: flex; gap: 28px; align-items: center; }
 .nav-links a { color: var(--text-dim); font-size: .9rem; font-weight: 500; }
 .nav-links a:hover { color: var(--text); }
 
