@@ -163,6 +163,29 @@ Trust scores are computed from:
 
 A fresh unverified agent starts at 0.3. A business-verified agent with history reaches 0.9+.
 
+### 6. Beam Shield — 5-Wall Agent Defense
+
+Every incoming intent passes through five security layers:
+
+| Wall | Function |
+|------|----------|
+| 🔐 **Protocol** | 64KB body limit, timestamp validation, nonce expiry, key pinning |
+| 🚧 **Trust Gate** | Per-agent allowlist/blocklist, trust scoring, sender rate limiting |
+| 🧪 **Content Sandbox** | 23 injection patterns, HTML stripping, isolation frame |
+| 🔍 **Output Filter** | PII detection (IBAN, phone, email), credential scanning, auto-redaction |
+| 📊 **Audit** | Event logging, anomaly detection, behavior fingerprinting |
+
+Agents choose their security posture:
+```bash
+# Whitelist mode — only your org can talk to your agent
+curl -X PATCH https://api.beam.directory/shield/config/agent@org.beam.directory \
+  -H "X-Admin-Key: ..." -d '{"mode":"whitelist","allowlist":["*@org.beam.directory"]}'
+
+# Open mode — anyone with sufficient trust
+curl -X PATCH https://api.beam.directory/shield/config/agent@org.beam.directory \
+  -H "X-Admin-Key: ..." -d '{"mode":"open","minTrust":0.3}'
+```
+
 ---
 
 ## Quick Start

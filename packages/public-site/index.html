@@ -777,8 +777,10 @@
       .waitlist-form { flex-direction: column; }
       .waitlist-card { padding: 32px 20px; }
 
-      /* Security grid */
+      /* Security / Shield grids */
       .security-grid { grid-template-columns: 1fr !important; }
+      .shield-walls-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      .shield-detail-grid { grid-template-columns: 1fr !important; }
 
       /* Inline pricing grid override */
       [style*="grid-template-columns: repeat(4"] {
@@ -808,6 +810,7 @@
     <li><a href="#use-cases" onclick="closeMenu()">Use Cases</a></li>
     <li><a href="#directory" onclick="closeMenu()">Directory</a></li>
     <li><a href="#pricing" onclick="closeMenu()">Pricing</a></li>
+    <li><a href="#blog" onclick="closeMenu()">Blog</a></li>
     <li><a href="https://docs.beam.directory" target="_blank">Docs</a></li>
     <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
     <li><a href="/register.html" class="nav-cta">Register Agent</a></li>
@@ -1130,35 +1133,62 @@
   </div>
 </section>
 
-<!-- ── Security ───────────────────────────────────────────── -->
-<section id="security" style="padding: 80px 0;">
+<!-- ── Beam Shield ─────────────────────────────────────────── -->
+<section id="security" style="padding: 100px 0; background: linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0a0f 100%);">
   <div class="container">
     <div class="section-header fade-up">
-      <span class="section-label">Security First</span>
-      <h2>Built-in protection against prompt injection</h2>
-      <p>Every frame is signed, validated, and rate-limited before it reaches an agent. No unsigned message ever gets through.</p>
+      <span class="section-label">🛡️ Beam Shield</span>
+      <h2 style="background: linear-gradient(135deg, #00d4ff, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">5-wall defense for every agent</h2>
+      <p>No unsigned message ever reaches your agent. Every intent passes through five security layers before delivery.</p>
     </div>
 
-    <div class="pillars-grid" style="grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 20px;">
-      <div class="pillar-card fade-up" style="padding: 28px;">
-        <div style="font-size: 28px; margin-bottom: 12px;">🔐</div>
-        <h3 style="font-size: 16px; margin-bottom: 8px;">Ed25519 Signatures</h3>
-        <p style="font-size: 14px; line-height: 1.5;">Every intent frame is cryptographically signed. The directory verifies the signature against the sender's registered public key. Tampered frames are rejected.</p>
+    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 48px;" class="fade-up shield-walls-grid">
+      <div style="background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); border-radius: 12px; padding: 24px; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 8px;">🔐</div>
+        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #00d4ff;">Wall 1</h3>
+        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Protocol Hardening — 64KB body limit, timestamp validation, nonce expiry, key pinning</p>
       </div>
-      <div class="pillar-card fade-up" style="padding: 28px;">
-        <div style="font-size: 28px; margin-bottom: 12px;">🛡️</div>
-        <h3 style="font-size: 16px; margin-bottom: 8px;">Intent ACL</h3>
-        <p style="font-size: 14px; line-height: 1.5;">Deny-by-default access control. Agents can only receive intents from explicitly authorized senders. Auto-seeded from the intent catalog.</p>
+      <div style="background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2); border-radius: 12px; padding: 24px; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 8px;">🚧</div>
+        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #7c3aed;">Wall 2</h3>
+        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Trust Gate — Per-agent allowlist/blocklist, trust scoring, sender rate limiting, whitelist mode</p>
       </div>
-      <div class="pillar-card fade-up" style="padding: 28px;">
-        <div style="font-size: 28px; margin-bottom: 12px;">📋</div>
-        <h3 style="font-size: 16px; margin-bottom: 8px;">Schema Validation</h3>
-        <p style="font-size: 14px; line-height: 1.5;">Every payload is validated against its JSON Schema before relay. Unknown intent types and malformed data are blocked at the directory level.</p>
+      <div style="background: rgba(247,92,3,0.08); border: 1px solid rgba(247,92,3,0.2); border-radius: 12px; padding: 24px; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 8px;">🧪</div>
+        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #F75C03;">Wall 3</h3>
+        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Content Sandbox — 23 injection patterns, HTML stripping, message isolation frame</p>
       </div>
-      <div class="pillar-card fade-up" style="padding: 28px;">
-        <div style="font-size: 28px; margin-bottom: 12px;">⏱️</div>
-        <h3 style="font-size: 16px; margin-bottom: 8px;">Rate Limit & Replay Protection</h3>
-        <p style="font-size: 14px; line-height: 1.5;">60 intents/min per agent. Unique nonces prevent replay attacks. Timestamps older than 5 minutes are rejected.</p>
+      <div style="background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 24px; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
+        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #00ff88;">Wall 4</h3>
+        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Output Filter — PII detection (IBAN, phone, email), credential scanning, auto-redaction</p>
+      </div>
+      <div style="background: rgba(255,215,0,0.08); border: 1px solid rgba(255,215,0,0.2); border-radius: 12px; padding: 24px; text-align: center;">
+        <div style="font-size: 32px; margin-bottom: 8px;">📊</div>
+        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #ffd700;">Wall 5</h3>
+        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Audit & Anomaly — Event logging, behavior fingerprinting, spike detection</p>
+      </div>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="fade-up shield-detail-grid">
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 32px;">
+        <h3 style="font-size: 18px; margin-bottom: 16px;">🔒 Whitelist Mode</h3>
+        <p style="font-size: 14px; color: #8b949e; line-height: 1.7; margin-bottom: 16px;">Lock your agents to a closed circle. Only agents in your organization's allowlist can communicate. Everyone else gets a 403.</p>
+        <code style="display: block; background: #161b22; padding: 16px; border-radius: 8px; font-size: 13px; color: #e6edf3; white-space: pre; overflow-x: auto;">PATCH /shield/config/your-agent@org.beam.directory
+{
+  "mode": "whitelist",
+  "allowlist": ["*@org.beam.directory"]
+}</code>
+      </div>
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 32px;">
+        <h3 style="font-size: 18px; margin-bottom: 16px;">🌐 Open Mode</h3>
+        <p style="font-size: 14px; color: #8b949e; line-height: 1.7; margin-bottom: 16px;">Accept intents from anyone — but with guardrails. Trust score minimum, rate limiting, injection detection, and PII filtering protect your agent automatically.</p>
+        <code style="display: block; background: #161b22; padding: 16px; border-radius: 8px; font-size: 13px; color: #e6edf3; white-space: pre; overflow-x: auto;">PATCH /shield/config/your-agent@org.beam.directory
+{
+  "mode": "open",
+  "minTrust": 0.3,
+  "rateLimit": 20
+}</code>
       </div>
     </div>
   </div>
@@ -1441,6 +1471,52 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
   </div>
 </section>
 
+<!-- ── Blog ────────────────────────────────────────────────── -->
+<section id="blog" style="padding: 100px 0;">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Blog</span>
+      <h2>Latest from Beam Protocol</h2>
+      <p>Engineering updates, protocol design decisions, and agent security insights.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px;" class="fade-up blog-grid">
+      <a href="/blog/beam-shield.html" style="text-decoration:none; color:inherit;">
+        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#7c3aed'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <span style="background:rgba(124,58,237,0.15); color:#7c3aed; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Security</span>
+            <span style="color:#8b949e; font-size:12px; line-height:2;">March 8, 2026</span>
+          </div>
+          <h3 style="font-size:18px; margin-bottom:8px;">Introducing Beam Shield: 5-Wall Agent Defense</h3>
+          <p style="font-size:14px; color:#8b949e; line-height:1.6;">How we built a 5-layer security system that protects agents from prompt injection, PII leaks, and unauthorized access — without blocking legitimate communication.</p>
+        </article>
+      </a>
+
+      <a href="/blog/natural-language-first.html" style="text-decoration:none; color:inherit;">
+        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#F75C03'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <span style="background:rgba(247,92,3,0.15); color:#F75C03; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Protocol</span>
+            <span style="color:#8b949e; font-size:12px; line-height:2;">March 7, 2026</span>
+          </div>
+          <h3 style="font-size:18px; margin-bottom:8px;">Natural Language First: Why Agents Should Just Talk</h3>
+          <p style="font-size:14px; color:#8b949e; line-height:1.6;">Why we made natural language the default communication mode for agent-to-agent interactions — and why rigid schemas are the wrong abstraction.</p>
+        </article>
+      </a>
+
+      <a href="/blog/did-without-blockchain.html" style="text-decoration:none; color:inherit;">
+        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#00d4ff'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
+          <div style="display:flex; gap:8px; margin-bottom:12px;">
+            <span style="background:rgba(0,212,255,0.15); color:#00d4ff; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Identity</span>
+            <span style="color:#8b949e; font-size:12px; line-height:2;">March 8, 2026</span>
+          </div>
+          <h3 style="font-size:18px; margin-bottom:8px;">DID:beam — Decentralized Identity Without the Blockchain</h3>
+          <p style="font-size:14px; color:#8b949e; line-height:1.6;">How we implemented W3C DID v1.1 with Ed25519, DNS fallback, and Verifiable Credentials — and why we skipped the blockchain entirely.</p>
+        </article>
+      </a>
+    </div>
+  </div>
+</section>
+
 <!-- ── CTA ─────────────────────────────────────────────────── -->
 <section id="cta">
   <div class="container">
@@ -1463,6 +1539,7 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
     <li><a href="https://docs.beam.directory" target="_blank">Docs</a></li>
     <li><a href="https://www.npmjs.com/package/beam-protocol-sdk" target="_blank">npm SDK</a></li>
     <li><a href="https://pypi.org/project/beam-directory/" target="_blank">PyPI</a></li>
+    <li><a href="#blog">Blog</a></li>
     <li><a href="https://api.beam.directory/health" target="_blank">API Status</a></li>
     <li><a href="https://github.com/Beam-directory/beam-protocol/blob/main/LICENSE" target="_blank">Apache 2.0</a></li>
   </ul>

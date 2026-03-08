@@ -31,6 +31,7 @@ export default defineConfig({
       ]},
       { text: 'Security', items: [
         { text: 'Overview', link: '/security/overview' },
+        { text: 'Beam Shield', link: '/security/beam-shield' },
         { text: 'Threat Model', link: '/security/threat-model' }
       ]}
     ],
