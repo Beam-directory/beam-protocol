@@ -170,6 +170,18 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'public_key must be a non-empty string', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
     }
 
+    // K5 FIX: Validate that publicKey is a valid Ed25519 SPKI-encoded key
+    try {
+      const { createPublicKey } = await import('node:crypto')
+      createPublicKey({
+        key: Buffer.from(publicKey, 'base64'),
+        format: 'der',
+        type: 'spki',
+      })
+    } catch {
+      return c.json({ error: 'Invalid Ed25519 public key — must be base64-encoded SPKI/DER format', errorCode: 'INVALID_PUBLIC_KEY_FORMAT' }, 400)
+    }
+
     const description = typeof raw.description === 'string' && raw.description.trim()
       ? raw.description.trim()
       : null

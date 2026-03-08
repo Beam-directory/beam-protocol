@@ -80,6 +80,11 @@ export function shieldRouter(db: Database): Hono {
       const payload = { action: 'shield', beamId, nonce: nonceHeader }
       const valid = verifyPayload(payload, sigHeader, agentRow.public_key)
       if (!valid) return c.json({ error: 'Invalid signature', errorCode: 'INVALID_SIGNATURE' }, 403)
+
+      // K1 FIX: Record nonce to prevent replay attacks
+      const existingNonce = db.prepare('SELECT nonce FROM nonces WHERE nonce = ?').get(nonceHeader)
+      if (existingNonce) return c.json({ error: 'Nonce already used', errorCode: 'NONCE_REPLAY' }, 409)
+      db.prepare('INSERT INTO nonces (nonce, beam_id, created_at) VALUES (?, ?, ?)').run(nonceHeader, beamId, new Date().toISOString())
     }
 
     // Validate agent exists

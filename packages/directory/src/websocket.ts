@@ -611,15 +611,18 @@ function enforceReplayProtection(db: Database, frame: IntentFrame): void {
 }
 
 function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string): boolean {
-  const signedPayload = JSON.stringify({
-    type: 'intent',
+  // K4 FIX: Pass object directly to verifyPayload, not JSON.stringify'd string.
+  // verifyPayload() calls canonicalizeJson() internally which handles deterministic serialization.
+  // Previously: JSON.stringify → string → canonicalizeJson(string) = double-encoded.
+  const signedPayload = {
+    type: 'intent' as const,
     from: frame.from,
     to: frame.to,
     intent: frame.intent,
     payload: frame.payload,
     timestamp: frame.timestamp,
     nonce: frame.nonce,
-  })
+  }
 
   return verifyPayload(signedPayload, frame.signature ?? '', senderPublicKeyBase64)
 }

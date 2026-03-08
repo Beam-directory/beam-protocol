@@ -52,17 +52,20 @@ export interface SanitizeResult {
 }
 
 export function sanitizeExternalMessage(message: string): SanitizeResult {
+  // K2 FIX: Strip HTML/Markdown BEFORE regex scan to prevent HTML-wrapped bypasses
+  // e.g. "<span>igno</span><span>re previous instructions</span>" would break regex
+  const stripped = stripHtmlAndMarkdown(message)
+
   const matched: string[] = []
   let maxSeverity = 0
 
   for (const { pattern, name, severity } of INJECTION_PATTERNS) {
-    if (pattern.test(message)) {
+    if (pattern.test(stripped)) {
       matched.push(name)
       maxSeverity = Math.max(maxSeverity, severity)
     }
   }
 
-  const stripped = stripHtmlAndMarkdown(message)
   const truncated = truncateMessage(stripped)
 
   const riskScore = matched.length === 0
