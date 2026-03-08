@@ -757,6 +757,10 @@
       .beam-id-box .label { font-size: 0.6rem; padding: 2px 6px; }
       .hero-glow { width: 400px; height: 300px; }
 
+      /* Vision + Use Cases grids */
+      .vision-grid { grid-template-columns: 1fr !important; }
+      .use-cases-grid { grid-template-columns: 1fr !important; }
+
       /* Agent directory grid */
       #agent-grid, [id="agent-grid"] {
         grid-template-columns: 1fr !important;
@@ -801,6 +805,7 @@
   </a>
   <ul class="nav-links" id="navLinks">
     <li><a href="#pillars" onclick="closeMenu()">How it works</a></li>
+    <li><a href="#use-cases" onclick="closeMenu()">Use Cases</a></li>
     <li><a href="#directory" onclick="closeMenu()">Directory</a></li>
     <li><a href="#pricing" onclick="closeMenu()">Pricing</a></li>
     <li><a href="https://docs.beam.directory" target="_blank">Docs</a></li>
@@ -920,6 +925,133 @@
           › Real-time status via WebSocket
         </div>
       </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── Vision ─────────────────────────────────────────────── -->
+<section id="vision" style="padding: 100px 0; background: linear-gradient(135deg, #0a0a0f 0%, #1a0800 50%, #0a0a0f 100%);">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">The Vision</span>
+      <h2>Every interaction will be agent-mediated.</h2>
+      <p style="max-width: 640px; margin: 0 auto;">You won't book flights. You won't order food. You won't fill out forms. You won't wait on hold. Your agent will — by talking to other agents.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 48px;" class="vision-grid fade-up">
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
+        <div style="font-size: 1.6rem; margin-bottom: 10px;">📅</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Today</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">47 tabs, 3 forms, 2 phone calls, 45 minutes — just to book a flight and hotel.</div>
+      </div>
+      <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 14px; padding: 28px;">
+        <div style="font-size: 1.6rem; margin-bottom: 10px;">⚡</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">2027</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">"Book Barcelona next Friday." Your agent talks to Lufthansa, Allianz, and your calendar. Done in 4 seconds.</div>
+      </div>
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
+        <div style="font-size: 1.6rem; margin-bottom: 10px;">🤖</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">2030+</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">You mention you're hungry. Food arrives. Your robot picks up the delivery. You never opened an app.</div>
+      </div>
+    </div>
+
+    <div style="text-align: center; margin-bottom: 12px;" class="fade-up">
+      <a href="https://github.com/Beam-directory/beam-protocol/blob/main/VISION.md" target="_blank" style="color: var(--accent); font-size: 0.9rem; text-decoration: none; border-bottom: 1px solid rgba(247,92,3,0.3);">Read the full Vision Document →</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── Use Cases ──────────────────────────────────────────── -->
+<section id="use-cases" style="padding: 100px 0;">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Use Cases</span>
+      <h2>One sentence. Any service. Seconds.</h2>
+      <p style="max-width: 580px; margin: 0 auto;">Every use case follows the same pattern: you say what you want, your agent handles the rest — by talking to verified agents across company boundaries.</p>
+    </div>
+
+    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="use-cases-grid fade-up">
+
+      <!-- Travel -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">🛫</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Travel & Booking</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Fly me to Tokyo, business class, and book the Park Hyatt."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          your-agent → booking@lufthansa 🟢<br/>
+          → hotels@hyatt 🔵<br/>
+          → insurance@allianz 🟢<br/>
+          → calendar updated ✅
+        </div>
+      </div>
+
+      <!-- Food -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">🍕</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Food & Delivery</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Order what I usually get from that Thai place."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          your-agent → kitchen@somtum 🔵<br/>
+          → courier@speedbike 🟢<br/>
+          → payment handled, ETA 22min ✅
+        </div>
+      </div>
+
+      <!-- Healthcare -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">🏥</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Healthcare</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"I need a dermatologist appointment this week."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          your-agent → scheduling@hautarzt-mitte 🔵<br/>
+          → insurance@tk 🟢 (coverage confirmed)<br/>
+          → pharmacy@aponeo 🔵 (refill ready) ✅
+        </div>
+      </div>
+
+      <!-- Home Services -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">🏠</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Home & Services</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"The kitchen light keeps flickering."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          your-agent → 3 electricians (compare quotes)<br/>
+          → meister@blitz-elektro 🟢 (best match)<br/>
+          → smart-lock: temp access granted ✅
+        </div>
+      </div>
+
+      <!-- B2B -->
+      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">💼</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">B2B Procurement</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"We need 500 solar panels in Bad Dürkheim by March 20."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          procurement@coppen 🟢 → 8 supplier agents<br/>
+          → best-price@solarwatt 🟢 (€149k, 5 days)<br/>
+          → logistics@dhl 🟢 → finance@coppen ✅
+        </div>
+      </div>
+
+      <!-- Robots -->
+      <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
+        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent);"></div>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">🤖</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Physical Agents (2030+)</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Go pick up my package from the lobby."</p>
+        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
+          your-robot → building@parkview 🟢 (elevator)<br/>
+          → delivery-bot@dhl 🟢 (handoff)<br/>
+          → package at your door ✅
+        </div>
+      </div>
+
     </div>
   </div>
 </section>
