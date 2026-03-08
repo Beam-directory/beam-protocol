@@ -1,1 +1,13 @@
-{"name":"beam-protocol-docs","private":true,"scripts":{"dev":"vitepress dev","build":"vitepress build","preview":"vitepress preview"},"devDependencies":{"vitepress":"^1.6.0"}}
+{
+  "name": "beam-protocol-docs",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
+  },
+  "devDependencies": {
+    "vitepress": "^1.6.0"
+  }
+}
