@@ -840,7 +840,6 @@ export function createApp(db: Database): Hono {
   })
 
   app.post('/waitlist', async (c) => {
-    c.header('Access-Control-Allow-Origin', BEAM_DIRECTORY_ORIGIN)
 
     let body: unknown
     try {
