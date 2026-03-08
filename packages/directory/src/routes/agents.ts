@@ -2,6 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
+import { toBeamDID } from '../did.js'
 import {
   registerAgent,
   getAgent,
@@ -44,6 +45,7 @@ const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 function serializeAgent(row: AgentRow): object {
   return {
     ...row,
+    did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1,
   }

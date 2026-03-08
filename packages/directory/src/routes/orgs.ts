@@ -4,6 +4,7 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, OrgAgentRow, OrgRow, RegisterRequest } from '../types.js'
+import { toBeamDID } from '../did.js'
 import {
   buildBeamDomain,
   createOrg,
@@ -90,6 +91,7 @@ function serializeOrg(row: OrgRow): object {
 function serializeOrgAgent(row: OrgAgentRow & Partial<AgentRow>): object {
   return {
     beamId: row.beam_id,
+    did: toBeamDID(row.beam_id),
     agentName: row.agent_name,
     displayName: row.display_name,
     org: row.org_name,
@@ -263,6 +265,7 @@ export function orgsRouter(db: Database): Hono {
       seedAclsFromCatalog(db)
       return c.json({
         beamId,
+        did: toBeamDID(beamId),
         displayName: agent.display_name,
         org: agent.org,
         capabilities,
