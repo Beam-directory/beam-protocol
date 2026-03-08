@@ -9,7 +9,7 @@ export interface AgentRecord {
   public_key: string
   trust_score: number
   verified: number
-  verification_tier: string
+  verification_tier: VerificationTier
   flagged: number
   created_at: string
   last_seen: string
@@ -175,14 +175,20 @@ export interface AgentRow {
   email: string | null
   email_verified: number
   verification_tier: VerificationTier
+  email_token: string | null
   description: string | null
   logo_url: string | null
   trust_score: number
   verified: number
-  verification_tier: string
   flagged: number
   created_at: string
   last_seen: string
+}
+
+export interface AgentIntentStats {
+  received: number
+  responded: number
+  avg_response_time_ms: number | null
 }
 
 export interface DomainVerificationRow {

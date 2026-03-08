@@ -1,10 +1,12 @@
-import { createPublicKey, randomBytes, verify } from 'node:crypto'
+import { randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { toBeamDID } from '../did.js'
+import { sendAgentVerificationEmail } from '../email.js'
 import {
+  createVerificationToken,
   getAgent,
   getAgentDirectoryStats,
   getAgentIntentStats,
@@ -84,7 +86,7 @@ function buildBeamId(baseName: string, org: string, db: Database): string {
 function serializeAgent(row: AgentRow): object {
   const { email_token: _emailToken, ...agent } = row
   return {
-    ...row,
+    ...agent,
     did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1 || row.verification_tier === 'verified',

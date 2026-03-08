@@ -2,7 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { DelegationRow } from '../types.js'
 import { createDelegation, getAgent, listActiveDelegations, revokeDelegation } from '../db.js'
-import { verifySignedPayload } from '../crypto.js'
+import { verifyPayload } from '../crypto.js'
 
 const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 
@@ -70,7 +70,7 @@ export function delegationsRouter(db: Database): Hono {
       expires_at: expiresAt,
     })
 
-    if (!verifySignedPayload(grantor.public_key, payload, signature)) {
+    if (!verifyPayload(payload, signature, grantor.public_key)) {
       return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
 
@@ -131,7 +131,7 @@ export function delegationsRouter(db: Database): Hono {
       delegation_id: id,
     })
 
-    if (!verifySignedPayload(grantor.public_key, payload, signature)) {
+    if (!verifyPayload(payload, signature, grantor.public_key)) {
       return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
 

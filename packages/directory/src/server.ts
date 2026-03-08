@@ -52,8 +52,12 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
 }
 
 function loadIntentCatalog(): unknown {
-  const raw = readFileSync(catalogPath, 'utf8')
-  return JSON.parse(raw)
+  try {
+    const raw = readFileSync(catalogPath, 'utf8')
+    return JSON.parse(raw)
+  } catch {
+    return { intents: [] }
+  }
 }
 
 function getAdminKeyFromRequest(c: Context): string {

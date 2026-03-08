@@ -18,9 +18,13 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../catalog.yaml')
 
 function loadCatalogIntents(): CatalogIntent[] {
-  const raw = readFileSync(catalogPath, 'utf8')
-  const parsed = JSON.parse(raw) as CatalogFile
-  return Array.isArray(parsed.intents) ? parsed.intents : []
+  try {
+    const raw = readFileSync(catalogPath, 'utf8')
+    const parsed = JSON.parse(raw) as CatalogFile
+    return Array.isArray(parsed.intents) ? parsed.intents : []
+  } catch {
+    return []
+  }
 }
 
 export function createAcl(db: Database, input: {

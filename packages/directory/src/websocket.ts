@@ -14,7 +14,7 @@ import {
 } from './federation.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
-import { verifySignedPayload } from './crypto.js'
+import { verifyPayload } from './crypto.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
@@ -621,7 +621,7 @@ function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string
     nonce: frame.nonce,
   })
 
-  return verifySignedPayload(senderPublicKeyBase64, signedPayload, frame.signature ?? '')
+  return verifyPayload(signedPayload, frame.signature ?? '', senderPublicKeyBase64)
 }
 
 function handleResult(frame: ResultFrame): void {

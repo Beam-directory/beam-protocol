@@ -22,8 +22,9 @@ function normalizeDomain(value: string): string {
 }
 
 function serializeAgent(row: AgentRow): object {
+  const { email_token: _emailToken, ...agent } = row
   return {
-    ...row,
+    ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,

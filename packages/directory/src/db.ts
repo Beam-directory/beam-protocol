@@ -1,8 +1,13 @@
+import { randomBytes } from 'node:crypto'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import type {
+  AgentIntentStats,
+  AgentKeyRow,
   AgentRow,
   AuditLogRow,
+  DelegationRow,
+  DomainVerificationRow,
   DirectoryRoleRow,
   DnsCacheRow,
   FederatedAgentRow,
@@ -11,9 +16,12 @@ import type {
   IntentLogRow,
   OrgAgentRow,
   OrgRow,
+  ReportRow,
   RegisterRequest,
   TrustScoreRow,
+  VerificationTier,
 } from './types.js'
+import { generateDIDDocument, type DIDDocument } from './did.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -66,17 +74,11 @@ function initSchema(db: DB): void {
       public_key TEXT NOT NULL,
       email TEXT,
       email_verified INTEGER NOT NULL DEFAULT 0,
-      verification_tier TEXT NOT NULL DEFAULT 'basic',
       description TEXT,
       logo_url TEXT,
       trust_score REAL NOT NULL DEFAULT 0.5,
       verified INTEGER NOT NULL DEFAULT 0,
-      email TEXT,
-      description TEXT,
-      logo_url TEXT,
-      website TEXT,
       verification_tier TEXT NOT NULL DEFAULT 'basic' CHECK(verification_tier IN ('basic', 'verified', 'business', 'enterprise')),
-      email_verified INTEGER NOT NULL DEFAULT 0,
       email_token TEXT,
       created_at TEXT NOT NULL,
       last_seen TEXT NOT NULL
@@ -247,15 +249,67 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_federated_trust_lookup
       ON federated_trust(beam_id, asserted_at DESC, effective_trust DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_keys (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      revoked_at INTEGER,
+      UNIQUE(beam_id, public_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_agent_keys_beam_id ON agent_keys(beam_id);
+
+    CREATE TABLE IF NOT EXISTS domain_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      challenge_token TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at TEXT NOT NULL,
+      verified_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_domain_verifications_beam_id ON domain_verifications(beam_id);
+
+    CREATE TABLE IF NOT EXISTS delegations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      grantor_beam_id TEXT NOT NULL,
+      grantee_beam_id TEXT NOT NULL,
+      scope TEXT NOT NULL DEFAULT '[]',
+      created_at TEXT NOT NULL,
+      expires_at TEXT,
+      revoked INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_delegations_grantor ON delegations(grantor_beam_id);
+    CREATE INDEX IF NOT EXISTS idx_delegations_grantee ON delegations(grantee_beam_id);
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      reporter_beam_id TEXT NOT NULL,
+      target_beam_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open'
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_beam_id);
   `)
 
-  ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'unverified'")
+  ensureColumn(db, 'agents', 'email', 'TEXT')
+  ensureColumn(db, 'agents', 'email_verified', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'agents', 'description', 'TEXT')
+  ensureColumn(db, 'agents', 'logo_url', 'TEXT')
+  ensureColumn(db, 'agents', 'email_token', 'TEXT')
+  ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
 
   db.prepare(`
     UPDATE agents
     SET verification_tier = CASE
-      WHEN verification_tier IS NULL OR verification_tier = '' THEN 'unverified'
+      WHEN verification_tier IS NULL OR verification_tier = '' OR verification_tier = 'unverified' THEN 'basic'
       ELSE verification_tier
     END
   `).run()
@@ -430,19 +484,16 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const now = nowIso()
   const createdAtMs = nowMs()
   const capabilitiesJson = JSON.stringify(data.capabilities)
-  const verified = data.verificationTier && data.verificationTier !== 'basic' ? 1 : 0
-  const verificationTier: VerificationTier = data.verificationTier ?? (data.emailVerified ? 'verified' : 'basic')
 
   const existing = getAgent(db, data.beamId)
   const normalizedEmail = data.email?.trim().toLowerCase() || null
   const emailChanged = normalizedEmail !== (existing?.email ?? null)
   const emailVerified = normalizedEmail
-    ? (emailChanged ? 0 : existing?.email_verified ?? 0)
+    ? (data.emailVerified ? 1 : emailChanged ? 0 : existing?.email_verified ?? 0)
     : 0
-  const verified = normalizedEmail
-    ? (emailChanged ? 0 : existing?.verified ?? 0)
-    : 0
-  const emailToken = emailChanged ? null : existing?.email_token ?? null
+  const verificationTier: VerificationTier = data.verificationTier ?? (emailVerified === 1 ? 'verified' : 'basic')
+  const verified = verificationTier !== 'basic' || emailVerified === 1 ? 1 : 0
+  const emailToken = normalizedEmail ? (emailChanged ? null : existing?.email_token ?? null) : null
 
   if (existing) {
     db.prepare(`
@@ -457,6 +508,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           description = ?,
           logo_url = ?,
           verified = ?,
+          email_token = ?,
           last_seen = ?
       WHERE beam_id = ?
     `).run(
@@ -464,12 +516,13 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.displayName,
       capabilitiesJson,
       data.publicKey,
-      data.email ?? null,
-      data.emailVerified ? 1 : 0,
+      normalizedEmail,
+      emailVerified,
       verificationTier,
       data.description ?? null,
       data.logoUrl ?? null,
       verified,
+      emailToken,
       now,
       data.beamId,
     )
@@ -481,26 +534,32 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         display_name,
         capabilities,
         public_key,
+        email,
+        email_verified,
+        description,
+        logo_url,
         trust_score,
         verified,
         verification_tier,
         flagged,
+        email_token,
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, 0.3, 0, 'unverified', 0, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
-      data.email ?? null,
-      data.emailVerified ? 1 : 0,
-      verificationTier,
+      normalizedEmail,
+      emailVerified,
       data.description ?? null,
       data.logoUrl ?? null,
       verified,
+      verificationTier,
+      emailToken,
       now,
       now,
     )
@@ -520,6 +579,101 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
 export function getAgent(db: DB, beamId: string): AgentRow | null {
   const row = db.prepare('SELECT * FROM agents WHERE beam_id = ?').get(beamId) as AgentRow | undefined
   return row ?? null
+}
+
+export function setAgentEmailToken(db: DB, beamId: string, token: string | null): AgentRow | null {
+  db.prepare(`
+    UPDATE agents
+    SET email_token = ?,
+        email_verified = CASE WHEN ? IS NULL THEN email_verified ELSE 0 END
+    WHERE beam_id = ?
+  `).run(token, token, beamId)
+
+  return getAgent(db, beamId)
+}
+
+export function updateAgentProfile(
+  db: DB,
+  beamId: string,
+  updates: {
+    displayName?: string
+    capabilities?: string[]
+    email?: string | null
+    emailVerified?: boolean
+    verificationTier?: VerificationTier
+    description?: string | null
+    logoUrl?: string | null
+  },
+): AgentRow | null {
+  const existing = getAgent(db, beamId)
+  if (!existing) {
+    return null
+  }
+
+  const normalizedEmail = updates.email === undefined
+    ? existing.email
+    : updates.email?.trim().toLowerCase() || null
+  const emailChanged = normalizedEmail !== existing.email
+  const emailVerified = normalizedEmail
+    ? (updates.emailVerified === true ? 1 : emailChanged ? 0 : existing.email_verified)
+    : 0
+  const verificationTier = updates.verificationTier ?? existing.verification_tier
+  const verified = verificationTier !== 'basic' || emailVerified === 1 ? 1 : 0
+  const capabilities = updates.capabilities === undefined ? existing.capabilities : JSON.stringify(updates.capabilities)
+  const emailToken = normalizedEmail ? (emailChanged ? null : existing.email_token) : null
+
+  db.prepare(`
+    UPDATE agents
+    SET display_name = ?,
+        capabilities = ?,
+        email = ?,
+        email_verified = ?,
+        verification_tier = ?,
+        description = ?,
+        logo_url = ?,
+        verified = ?,
+        email_token = ?,
+        last_seen = ?
+    WHERE beam_id = ?
+  `).run(
+    updates.displayName ?? existing.display_name,
+    capabilities,
+    normalizedEmail,
+    emailVerified,
+    verificationTier,
+    updates.description === undefined ? existing.description : updates.description,
+    updates.logoUrl === undefined ? existing.logo_url : updates.logoUrl,
+    verified,
+    emailToken,
+    nowIso(),
+    beamId,
+  )
+
+  const score = calculateTrustScore(db, beamId)
+  db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, beamId)
+  return getAgent(db, beamId)
+}
+
+export function createVerificationToken(
+  db: DB,
+  input: { token?: string; beam_id: string; email: string; expires_at: number },
+): { token: string; beam_id: string; email: string; created_at: number; expires_at: number } {
+  const token = input.token ?? randomBytes(24).toString('hex')
+  const createdAt = nowMs()
+
+  db.prepare('DELETE FROM verification_tokens WHERE beam_id = ?').run(input.beam_id)
+  db.prepare(`
+    INSERT INTO verification_tokens (token, beam_id, email, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(token, input.beam_id, input.email, createdAt, input.expires_at)
+
+  return {
+    token,
+    beam_id: input.beam_id,
+    email: input.email,
+    created_at: createdAt,
+    expires_at: input.expires_at,
+  }
 }
 
 export function findAgentByHandle(db: DB, handle: string): AgentRow | null {

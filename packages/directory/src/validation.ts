@@ -34,9 +34,13 @@ const ajv = new AjvCtor({ allErrors: true, strict: false })
 const validators = new Map<string, ValidateFunction>()
 
 function loadCatalog(): CatalogIntent[] {
-  const raw = readFileSync(catalogPath, 'utf8')
-  const parsed = JSON.parse(raw) as CatalogFile
-  return Array.isArray(parsed.intents) ? parsed.intents : []
+  try {
+    const raw = readFileSync(catalogPath, 'utf8')
+    const parsed = JSON.parse(raw) as CatalogFile
+    return Array.isArray(parsed.intents) ? parsed.intents : []
+  } catch {
+    return []
+  }
 }
 
 function buildIntentSchema(intent: CatalogIntent): Record<string, unknown> {

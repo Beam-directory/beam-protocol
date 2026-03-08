@@ -2,13 +2,14 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentKeyRow, AgentRow } from '../types.js'
 import { getAgent, listRevokedAgentKeys, rotateAgentKey } from '../db.js'
-import { verifySignedPayload } from '../crypto.js'
+import { verifyPayload } from '../crypto.js'
 
 const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 
 function serializeAgent(row: AgentRow): object {
+  const { email_token: _emailToken, ...agent } = row
   return {
-    ...row,
+    ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,
@@ -63,7 +64,7 @@ export function agentKeysRouter(db: Database): Hono {
       return c.json({ error: 'new_public_key must differ from the current key', errorCode: 'NOOP_ROTATION' }, 400)
     }
 
-    if (!verifySignedPayload(agent.public_key, newPublicKey, rotationProof)) {
+    if (!verifyPayload(newPublicKey, rotationProof, agent.public_key)) {
       return c.json({ error: 'rotation_proof is invalid', errorCode: 'INVALID_ROTATION_PROOF' }, 400)
     }
 
