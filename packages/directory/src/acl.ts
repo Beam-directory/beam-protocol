@@ -15,7 +15,7 @@ interface CatalogFile {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
+const catalogPath = resolve(__dirname, '../catalog.yaml')
 
 function loadCatalogIntents(): CatalogIntent[] {
   const raw = readFileSync(catalogPath, 'utf8')
