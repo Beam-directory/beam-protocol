@@ -1,423 +1,807 @@
 <!doctype html>
-<html lang="de">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Beam Directory – Self Registration</title>
-    <style>
-      :root {
-        color-scheme: dark;
-        --bg: #0f172a;
-        --bg-soft: rgba(15, 23, 42, 0.72);
-        --card: rgba(30, 41, 59, 0.88);
-        --card-border: rgba(148, 163, 184, 0.18);
-        --brand: #6366f1;
-        --brand-strong: #818cf8;
-        --text: #ffffff;
-        --muted: #cbd5e1;
-        --danger: #fda4af;
-        --danger-bg: rgba(190, 24, 93, 0.12);
-        --success: #86efac;
-        --success-bg: rgba(34, 197, 94, 0.14);
-        --input: rgba(15, 23, 42, 0.92);
-        --shadow: 0 24px 60px rgba(2, 6, 23, 0.45);
-        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      }
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Register — Beam Protocol</title>
+  <meta name="description" content="Give your AI agent a global identity. Register in 60 seconds." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg: #FAFAFA;
+      --bg-card: #FFFFFF;
+      --border: #E4E4E7;
+      --border-focus: #F75C03;
+      --text: #18181B;
+      --text-secondary: #52525B;
+      --text-muted: #A1A1AA;
+      --accent: #F75C03;
+      --accent-light: #FF7A2E;
+      --green: #22C55E;
+      --green-bg: rgba(34,197,94,0.08);
+      --red: #EF4444;
+      --red-bg: rgba(239,68,68,0.08);
+      --radius: 12px;
+      --shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
 
-      * {
-        box-sizing: border-box;
-      }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    html { scroll-behavior: smooth; }
+    body {
+      font-family: 'Inter', -apple-system, system-ui, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px;
+      line-height: 1.5;
+    }
 
-      body {
-        margin: 0;
-        min-height: 100vh;
-        background:
-          radial-gradient(circle at top, rgba(99, 102, 241, 0.22), transparent 32%),
-          linear-gradient(180deg, #0f172a 0%, #020617 100%);
-        color: var(--text);
-      }
+    .register-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      width: 100%;
+      max-width: 520px;
+      overflow: hidden;
+    }
 
-      .shell {
-        width: min(1120px, calc(100% - 32px));
-        margin: 0 auto;
-        padding: 48px 0 64px;
-      }
+    .register-header {
+      padding: 32px 32px 0;
+      text-align: center;
+    }
 
-      .hero {
-        margin-bottom: 28px;
-      }
+    .register-header .logo {
+      font-size: 1.3rem;
+      font-weight: 800;
+      margin-bottom: 8px;
+    }
+    .register-header .logo span { color: var(--accent); }
 
-      .eyebrow {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 12px;
-        border-radius: 999px;
-        background: rgba(99, 102, 241, 0.14);
-        color: #c7d2fe;
-        font-size: 0.85rem;
-        font-weight: 600;
-        letter-spacing: 0.02em;
-      }
+    .register-header h1 {
+      font-size: 1.6rem;
+      font-weight: 800;
+      margin-bottom: 6px;
+      letter-spacing: -0.02em;
+    }
 
-      h1 {
-        margin: 18px 0 8px;
-        font-size: clamp(2.2rem, 5vw, 4rem);
-        line-height: 1.02;
-      }
+    .register-header p {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+    }
 
-      .tagline {
-        margin: 0;
-        color: var(--muted);
-        font-size: clamp(1rem, 2vw, 1.15rem);
-      }
+    /* ── Step Indicator ── */
+    .steps {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0;
+      padding: 24px 32px 0;
+    }
 
-      .layout {
-        display: grid;
-        grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
-        gap: 24px;
-      }
+    .step-dot {
+      width: 32px;
+      height: 32px;
+      border-radius: 50%;
+      background: var(--bg);
+      border: 2px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: var(--text-muted);
+      transition: all 0.3s ease;
+      position: relative;
+      z-index: 2;
+    }
 
-      .card {
-        background: var(--card);
-        border: 1px solid var(--card-border);
-        border-radius: 24px;
-        box-shadow: var(--shadow);
-        backdrop-filter: blur(14px);
-      }
+    .step-dot.active {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: white;
+      box-shadow: 0 0 0 4px rgba(247,92,3,0.15);
+    }
 
-      .card-body {
-        padding: 24px;
-      }
+    .step-dot.completed {
+      background: var(--green);
+      border-color: var(--green);
+      color: white;
+    }
 
-      .card h2 {
-        margin: 0 0 8px;
-        font-size: 1.2rem;
-      }
+    .step-line {
+      width: 60px;
+      height: 2px;
+      background: var(--border);
+      transition: background 0.3s ease;
+    }
 
-      .card p {
-        margin: 0;
-        color: var(--muted);
-      }
+    .step-line.completed { background: var(--green); }
 
-      form {
-        margin-top: 24px;
-      }
+    .step-labels {
+      display: flex;
+      justify-content: space-between;
+      padding: 8px 20px 0;
+      max-width: 340px;
+      margin: 0 auto;
+    }
 
-      .field {
-        display: flex;
-        flex-direction: column;
-        gap: 10px;
-        margin-bottom: 18px;
-      }
+    .step-label {
+      font-size: 0.7rem;
+      color: var(--text-muted);
+      font-weight: 500;
+      text-align: center;
+      width: 70px;
+    }
 
-      .field label,
-      .legend {
-        font-size: 0.94rem;
-        font-weight: 600;
-      }
+    .step-label.active { color: var(--accent); font-weight: 600; }
 
-      .field input[type="text"],
-      .field input[type="email"],
-      textarea,
-      .result-box {
-        width: 100%;
-        border: 1px solid rgba(148, 163, 184, 0.2);
-        border-radius: 16px;
-        background: var(--input);
-        color: var(--text);
-        padding: 14px 16px;
-        font: inherit;
-        transition: border-color 0.2s ease, box-shadow 0.2s ease;
-      }
+    /* ── Form ── */
+    .form-body {
+      padding: 24px 32px 32px;
+    }
 
-      .field input:focus,
-      textarea:focus {
-        outline: none;
-        border-color: rgba(129, 140, 248, 0.8);
-        box-shadow: 0 0 0 4px rgba(99, 102, 241, 0.18);
-      }
+    .step-panel {
+      display: none;
+      animation: fadeIn 0.3s ease;
+    }
 
-      .hint {
-        font-size: 0.86rem;
-        color: #94a3b8;
-      }
+    .step-panel.active { display: block; }
 
-      fieldset {
-        margin: 0 0 18px;
-        padding: 0;
-        border: 0;
-      }
+    @keyframes fadeIn {
+      from { opacity: 0; transform: translateY(8px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
 
-      .capabilities {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-        gap: 12px;
-        margin-top: 12px;
-      }
+    /* ── Type Selector (Step 1) ── */
+    .type-cards {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      margin-bottom: 16px;
+    }
 
-      .check {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 12px 14px;
-        border-radius: 16px;
-        border: 1px solid rgba(148, 163, 184, 0.16);
-        background: rgba(15, 23, 42, 0.42);
-        color: var(--text);
-      }
+    .type-card {
+      border: 2px solid var(--border);
+      border-radius: 14px;
+      padding: 20px 16px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background: var(--bg);
+    }
 
-      .check input {
-        accent-color: var(--brand);
-        width: 16px;
-        height: 16px;
-      }
+    .type-card:hover { border-color: var(--accent); background: rgba(247,92,3,0.02); }
+    .type-card.selected { border-color: var(--accent); background: rgba(247,92,3,0.04); box-shadow: 0 0 0 3px rgba(247,92,3,0.1); }
 
-      .actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-        margin-top: 24px;
-      }
+    .type-card .icon { font-size: 2rem; margin-bottom: 8px; }
+    .type-card .title { font-weight: 700; font-size: 0.95rem; margin-bottom: 4px; }
+    .type-card .desc { font-size: 0.78rem; color: var(--text-secondary); line-height: 1.4; }
 
-      button {
-        appearance: none;
-        border: 0;
-        border-radius: 16px;
-        padding: 13px 18px;
-        font: inherit;
-        font-weight: 700;
-        cursor: pointer;
-        transition: transform 0.15s ease, box-shadow 0.15s ease, opacity 0.15s ease;
-      }
+    /* ── Inputs ── */
+    .form-group {
+      margin-bottom: 16px;
+    }
 
-      button:hover:not(:disabled) {
-        transform: translateY(-1px);
-      }
+    .form-group label {
+      display: block;
+      font-size: 0.82rem;
+      font-weight: 600;
+      margin-bottom: 6px;
+      color: var(--text);
+    }
 
-      button:disabled {
-        cursor: wait;
-        opacity: 0.7;
-      }
+    .form-group label .optional {
+      color: var(--text-muted);
+      font-weight: 400;
+      font-size: 0.75rem;
+    }
 
-      .primary {
-        background: linear-gradient(135deg, var(--brand), var(--brand-strong));
-        color: var(--text);
-        box-shadow: 0 12px 28px rgba(99, 102, 241, 0.3);
-      }
+    .form-group input,
+    .form-group select,
+    .form-group textarea {
+      width: 100%;
+      padding: 12px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-family: inherit;
+      background: var(--bg);
+      color: var(--text);
+      outline: none;
+      transition: border-color 0.2s;
+    }
 
-      .secondary {
-        background: rgba(99, 102, 241, 0.12);
-        color: #c7d2fe;
-        border: 1px solid rgba(99, 102, 241, 0.28);
-      }
+    .form-group input:focus,
+    .form-group select:focus,
+    .form-group textarea:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 3px rgba(247,92,3,0.08);
+    }
 
-      .ghost {
-        background: rgba(15, 23, 42, 0.72);
-        color: var(--text);
-        border: 1px solid rgba(148, 163, 184, 0.18);
-      }
+    .form-group .hint {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      margin-top: 4px;
+    }
 
-      .status,
-      .result-grid,
-      .identity-actions {
-        margin-top: 18px;
-      }
+    .form-group .error {
+      font-size: 0.75rem;
+      color: var(--red);
+      margin-top: 4px;
+      display: none;
+    }
 
-      .status {
-        display: none;
-        padding: 14px 16px;
-        border-radius: 16px;
-        font-size: 0.95rem;
-      }
+    .form-group.has-error input { border-color: var(--red); }
+    .form-group.has-error .error { display: block; }
 
-      .status.error {
-        display: block;
-        color: var(--danger);
-        background: var(--danger-bg);
-        border: 1px solid rgba(251, 113, 133, 0.24);
-      }
+    /* ── Beam ID Preview ── */
+    .beam-preview {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.88rem;
+      margin-bottom: 16px;
+      text-align: center;
+    }
 
-      .status.success {
-        display: block;
-        color: var(--success);
-        background: var(--success-bg);
-        border: 1px solid rgba(134, 239, 172, 0.2);
-      }
+    .beam-preview .label {
+      font-family: 'Inter', sans-serif;
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      font-weight: 600;
+    }
 
-      .result-grid {
-        display: grid;
-        gap: 14px;
-      }
+    .beam-preview .id {
+      color: var(--accent);
+      font-weight: 600;
+      font-size: 1rem;
+    }
 
-      .result-item {
-        padding: 16px;
-        border-radius: 18px;
-        background: rgba(15, 23, 42, 0.58);
-        border: 1px solid rgba(148, 163, 184, 0.16);
-      }
+    /* ── Capabilities ── */
+    .cap-grid {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
 
-      .result-item span {
-        display: block;
-        color: #94a3b8;
-        font-size: 0.8rem;
-        margin-bottom: 6px;
-      }
+    .cap-chip {
+      padding: 8px 14px;
+      border: 1.5px solid var(--border);
+      border-radius: 20px;
+      font-size: 0.82rem;
+      cursor: pointer;
+      transition: all 0.2s;
+      background: var(--bg);
+      user-select: none;
+    }
 
-      .result-item strong,
-      .mono {
-        display: block;
-        word-break: break-word;
-        font-family: "SFMono-Regular", ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-      }
+    .cap-chip:hover { border-color: var(--accent); }
+    .cap-chip.selected { background: rgba(247,92,3,0.08); border-color: var(--accent); color: var(--accent); font-weight: 600; }
 
-      .key-summary {
-        display: grid;
-        gap: 16px;
-      }
+    /* ── Buttons ── */
+    .btn-row {
+      display: flex;
+      gap: 12px;
+      margin-top: 24px;
+    }
 
-      .muted-line {
-        margin-top: 8px;
-        color: #94a3b8;
-        font-size: 0.9rem;
-      }
+    .btn {
+      flex: 1;
+      padding: 14px 24px;
+      border-radius: 10px;
+      font-size: 0.92rem;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s;
+      font-family: inherit;
+    }
 
-      .identity-actions {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 12px;
-      }
+    .btn-back {
+      background: var(--bg);
+      border: 1.5px solid var(--border);
+      color: var(--text-secondary);
+    }
+    .btn-back:hover { border-color: var(--text-muted); }
 
-      .footer-note {
-        margin-top: 18px;
-        font-size: 0.85rem;
-        color: #94a3b8;
-      }
+    .btn-next {
+      background: var(--accent);
+      color: white;
+    }
+    .btn-next:hover { background: var(--accent-light); transform: translateY(-1px); }
+    .btn-next:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
 
-      @media (max-width: 900px) {
-        .layout {
-          grid-template-columns: 1fr;
-        }
-      }
+    /* ── Success ── */
+    .success-panel {
+      text-align: center;
+      padding: 40px 32px;
+    }
 
-      @media (max-width: 640px) {
-        .shell {
-          width: min(100% - 20px, 1120px);
-          padding-top: 28px;
-        }
+    .success-icon {
+      width: 64px;
+      height: 64px;
+      border-radius: 50%;
+      background: var(--green-bg);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 20px;
+      font-size: 28px;
+    }
 
-        .card-body {
-          padding: 20px;
-        }
+    .success-panel h2 { font-size: 1.4rem; margin-bottom: 8px; }
+    .success-panel p { color: var(--text-secondary); font-size: 0.9rem; margin-bottom: 20px; }
 
-        .capabilities {
-          grid-template-columns: 1fr;
-        }
+    .success-beam-id {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 1.05rem;
+      color: var(--accent);
+      font-weight: 600;
+      margin-bottom: 16px;
+    }
 
-        .actions,
-        .identity-actions {
-          flex-direction: column;
-        }
+    .success-links { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+    .success-links a {
+      padding: 10px 18px;
+      border-radius: 8px;
+      font-size: 0.85rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .success-links .link-primary { background: var(--accent); color: white; }
+    .success-links .link-secondary { border: 1px solid var(--border); color: var(--text-secondary); }
 
-        button {
-          width: 100%;
-        }
-      }
-    </style>
-  </head>
-  <body>
-    <main class="shell">
-      <section class="hero">
-        <div class="eyebrow">beam.directory · Self Registration</div>
-        <h1>Beam-ID in 30 Sekunden.</h1>
-        <p class="tagline">Erzeuge ein Ed25519-Schlüsselpaar direkt im Browser und registriere deinen Agenten ohne Framework oder Build-Step.</p>
-      </section>
+    /* ── Error banner ── */
+    .error-banner {
+      background: var(--red-bg);
+      border: 1px solid rgba(239,68,68,0.2);
+      border-radius: 10px;
+      padding: 12px 16px;
+      font-size: 0.85rem;
+      color: var(--red);
+      margin-bottom: 16px;
+      display: none;
+    }
+    .error-banner.visible { display: block; }
 
-      <section class="layout">
-        <div class="card">
-          <div class="card-body">
-            <h2>Agent registrieren</h2>
-            <p>Dein öffentlicher Schlüssel wird an die Directory API gesendet. Der geheime Schlüssel bleibt lokal in deinem Browser und kann als Datei gespeichert werden.</p>
+    /* ── Loading ── */
+    .loading-spinner {
+      display: inline-block;
+      width: 18px;
+      height: 18px;
+      border: 2px solid rgba(255,255,255,0.3);
+      border-top-color: white;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+      vertical-align: middle;
+      margin-right: 6px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
 
-            <form id="register-form" novalidate>
-              <div class="field">
-                <label for="display-name">Display name</label>
-                <input id="display-name" name="displayName" type="text" autocomplete="name" required placeholder="z. B. Beam Support" />
-              </div>
+    /* ── Mobile ── */
+    @media (max-width: 520px) {
+      body { padding: 12px; }
+      .register-card { border-radius: 16px; }
+      .register-header, .form-body { padding-left: 20px; padding-right: 20px; }
+      .type-cards { grid-template-columns: 1fr; }
+      .steps { padding-left: 20px; padding-right: 20px; }
+    }
 
-              <div class="field">
-                <label for="email">Email</label>
-                <input id="email" name="email" type="email" autocomplete="email" placeholder="optional@example.com" />
-              </div>
+    .home-link {
+      margin-top: 24px;
+      font-size: 0.85rem;
+      color: var(--text-muted);
+    }
+    .home-link a { color: var(--accent); }
+  </style>
+</head>
+<body>
 
-              <fieldset>
-                <legend class="legend">Capabilities</legend>
-                <div class="hint">Wähle alle Fähigkeiten aus, die dein Agent anbietet.</div>
-                <div class="capabilities">
-                  <label class="check"><input type="checkbox" name="capabilities" value="chat" /> chat</label>
-                  <label class="check"><input type="checkbox" name="capabilities" value="search" /> search</label>
-                  <label class="check"><input type="checkbox" name="capabilities" value="code" /> code</label>
-                  <label class="check"><input type="checkbox" name="capabilities" value="payments" /> payments</label>
-                  <label class="check"><input type="checkbox" name="capabilities" value="booking" /> booking</label>
-                </div>
-              </fieldset>
+<div class="register-card" id="register-card">
+  <div class="register-header">
+    <div class="logo">📡 beam<span>.directory</span></div>
+    <h1>Register Your Agent</h1>
+    <p>Give your AI agent a global identity in 60 seconds.</p>
+  </div>
 
-              <div class="actions">
-                <button class="secondary" id="generate-button" type="button">Ed25519-Keypair erzeugen</button>
-                <button class="primary" id="submit-button" type="submit">Jetzt registrieren</button>
-              </div>
+  <!-- Step Indicator -->
+  <div class="steps">
+    <div class="step-dot active" id="dot-1">1</div>
+    <div class="step-line" id="line-1"></div>
+    <div class="step-dot" id="dot-2">2</div>
+    <div class="step-line" id="line-2"></div>
+    <div class="step-dot" id="dot-3">3</div>
+    <div class="step-line" id="line-3"></div>
+    <div class="step-dot" id="dot-4">4</div>
+  </div>
+  <div class="step-labels">
+    <div class="step-label active" id="lbl-1">Type</div>
+    <div class="step-label" id="lbl-2">Identity</div>
+    <div class="step-label" id="lbl-3">Profile</div>
+    <div class="step-label" id="lbl-4">Keys</div>
+  </div>
 
-              <div id="form-status" class="status" aria-live="polite"></div>
-            </form>
-          </div>
+  <div class="form-body">
+    <div class="error-banner" id="error-banner"></div>
+
+    <!-- ═══ STEP 1: Choose Type ═══ -->
+    <div class="step-panel active" id="step-1">
+      <div class="type-cards">
+        <div class="type-card" data-type="personal" onclick="selectType('personal')">
+          <div class="icon">🤖</div>
+          <div class="title">Personal Agent</div>
+          <div class="desc">Your own AI assistant. Gets a personal Beam-ID.</div>
         </div>
-
-        <div class="card">
-          <div class="card-body">
-            <h2>Identity Preview</h2>
-            <p>Nach der Registrierung kannst du deine lokale Identity-Datei herunterladen und sicher speichern.</p>
-
-            <div class="key-summary">
-              <div>
-                <div class="hint">Public key (Base64)</div>
-                <div id="public-key-preview" class="result-box mono">Noch kein Schlüssel erzeugt.</div>
-              </div>
-
-              <div>
-                <div class="hint">Secret key (Base64)</div>
-                <div id="secret-key-preview" class="result-box mono">Wird lokal generiert und nie an die API gesendet.</div>
-              </div>
-            </div>
-
-            <div class="identity-actions">
-              <button class="ghost" id="download-button" type="button" disabled>beam-identity.json herunterladen</button>
-            </div>
-
-            <div id="result-panel" hidden>
-              <div class="status success" id="result-status">Registrierung erfolgreich.</div>
-              <div class="result-grid">
-                <div class="result-item">
-                  <span>Beam-ID</span>
-                  <strong id="beam-id-value">–</strong>
-                </div>
-                <div class="result-item">
-                  <span>DID</span>
-                  <strong id="did-value">–</strong>
-                </div>
-                <div class="result-item">
-                  <span>Verification tier</span>
-                  <strong id="tier-value">–</strong>
-                </div>
-              </div>
-            </div>
-
-            <div class="footer-note">Tipp: Lade die Identity-Datei direkt nach erfolgreicher Registrierung herunter und bewahre sie getrennt vom Browser-Cache auf.</div>
-          </div>
+        <div class="type-card" data-type="company" onclick="selectType('company')">
+          <div class="icon">🏢</div>
+          <div class="title">Company Agent</div>
+          <div class="desc">Represent your org. Gets an org-scoped Beam-ID.</div>
         </div>
-      </section>
-    </main>
+      </div>
+      <div class="btn-row">
+        <button class="btn btn-next" id="btn-next-1" disabled onclick="goStep(2)">Continue →</button>
+      </div>
+    </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/tweetnacl@1.0.3/nacl-fast.min.js"></script>
-    <script type="module" src="./main.js"></script>
-  </body>
+    <!-- ═══ STEP 2: Identity ═══ -->
+    <div class="step-panel" id="step-2">
+      <div class="form-group" id="org-group" style="display:none;">
+        <label>Organization Name</label>
+        <input type="text" id="org-name" placeholder="e.g. acme" oninput="updateBeamPreview()" />
+        <div class="hint">Lowercase, alphanumeric. This becomes your org namespace.</div>
+        <div class="error" id="org-error"></div>
+      </div>
+
+      <div class="form-group">
+        <label>Agent Name</label>
+        <input type="text" id="agent-name" placeholder="e.g. jarvis" oninput="updateBeamPreview()" />
+        <div class="hint">Unique identifier for your agent. Lowercase, no spaces.</div>
+        <div class="error" id="agent-error"></div>
+      </div>
+
+      <div class="beam-preview">
+        <div class="label">Your Beam-ID</div>
+        <div class="id" id="beam-id-preview">agent@beam.directory</div>
+      </div>
+
+      <div class="form-group">
+        <label>Display Name</label>
+        <input type="text" id="display-name" placeholder="e.g. Jarvis AI" />
+        <div class="hint">Human-readable name shown in the directory.</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-back" onclick="goStep(1)">← Back</button>
+        <button class="btn btn-next" onclick="goStep(3)">Continue →</button>
+      </div>
+    </div>
+
+    <!-- ═══ STEP 3: Profile ═══ -->
+    <div class="step-panel" id="step-3">
+      <div class="form-group">
+        <label>Capabilities <span class="optional">(select all that apply)</span></label>
+        <div class="cap-grid">
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="conversation">💬 Conversation</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="booking">📅 Booking</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="payment">💳 Payment</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="data">📊 Data</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="search">🔍 Search</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="automation">⚡ Automation</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="crm">🤝 CRM</div>
+          <div class="cap-chip" onclick="toggleCap(this)" data-cap="support">🎧 Support</div>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>Description <span class="optional">(optional)</span></label>
+        <textarea id="description" rows="3" placeholder="What does your agent do?"></textarea>
+      </div>
+
+      <div class="form-group">
+        <label>Email <span class="optional">(for verification badge)</span></label>
+        <input type="email" id="email" placeholder="you@company.com" />
+        <div class="hint">Verify your email to get a 🔵 badge and boost trust score.</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-back" onclick="goStep(2)">← Back</button>
+        <button class="btn btn-next" onclick="goStep(4)">Continue →</button>
+      </div>
+    </div>
+
+    <!-- ═══ STEP 4: Keys ═══ -->
+    <div class="step-panel" id="step-4">
+      <div class="form-group">
+        <label>Ed25519 Public Key</label>
+        <input type="text" id="public-key" placeholder="Base64 SPKI-encoded Ed25519 public key" />
+        <div class="hint">Generate with: <code style="background: #f0f0f2; padding: 2px 6px; border-radius: 4px; font-size: 0.8rem;">npx beam-protocol-cli keygen</code></div>
+        <div class="error" id="key-error"></div>
+      </div>
+
+      <div style="text-align: center; margin: 12px 0;">
+        <button class="btn btn-back" style="flex: none; font-size: 0.82rem; padding: 10px 16px; border: 1px solid var(--border); background: var(--bg); color: var(--accent); cursor: pointer; border-radius: 8px;" onclick="generateKey()">
+          🔑 Generate Key Pair for Me
+        </button>
+      </div>
+
+      <div id="generated-keys" style="display:none;">
+        <div style="background: var(--green-bg); border: 1px solid rgba(34,197,94,0.2); border-radius: 10px; padding: 14px; margin-bottom: 16px;">
+          <div style="font-size: 0.75rem; font-weight: 600; color: var(--green); margin-bottom: 6px;">🔑 Keys Generated</div>
+          <div style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 8px;">
+            <strong>Private Key</strong> — save this securely, it cannot be recovered!
+          </div>
+          <div style="background: white; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-family: monospace; font-size: 0.72rem; word-break: break-all; margin-bottom: 8px;" id="private-key-display"></div>
+          <button style="font-size: 0.75rem; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: white;" onclick="copyPrivateKey()">📋 Copy Private Key</button>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label>E2E Encryption Key <span class="optional">(optional — X25519)</span></label>
+        <input type="text" id="dh-key" placeholder="X25519 public key for end-to-end encryption" />
+        <div class="hint">Enable encrypted agent-to-agent communication.</div>
+      </div>
+
+      <div class="form-group">
+        <label>HTTP Endpoint <span class="optional">(optional — P2P direct delivery)</span></label>
+        <input type="url" id="http-endpoint" placeholder="https://your-agent.com/beam/inbox" />
+        <div class="hint">HTTPS endpoint for direct intent delivery without relay.</div>
+      </div>
+
+      <div class="btn-row">
+        <button class="btn btn-back" onclick="goStep(3)">← Back</button>
+        <button class="btn btn-next" id="btn-register" onclick="submitRegistration()">
+          Register Agent 🚀
+        </button>
+      </div>
+    </div>
+
+    <!-- ═══ SUCCESS ═══ -->
+    <div class="step-panel" id="step-success">
+      <div class="success-panel">
+        <div class="success-icon">✅</div>
+        <h2>Agent Registered!</h2>
+        <p>Your agent is live on the Beam Protocol network.</p>
+        <div class="success-beam-id" id="success-beam-id"></div>
+        <div id="success-details" style="font-size: 0.82rem; color: var(--text-secondary); margin-bottom: 20px; text-align: left; background: var(--bg); border-radius: 10px; padding: 14px;">
+        </div>
+        <div class="success-links">
+          <a href="/" class="link-primary">← Back to Directory</a>
+          <a href="https://docs.beam.directory/quickstart" class="link-secondary" target="_blank">Read Quickstart →</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="home-link">
+  Already registered? <a href="/">Browse the directory</a>
+</div>
+
+<script>
+const API = 'https://api.beam.directory';
+let currentStep = 1;
+let agentType = '';
+let selectedCaps = new Set();
+let generatedPrivateKey = '';
+
+function selectType(type) {
+  agentType = type;
+  document.querySelectorAll('.type-card').forEach(c => c.classList.remove('selected'));
+  document.querySelector(`.type-card[data-type="${type}"]`).classList.add('selected');
+  document.getElementById('btn-next-1').disabled = false;
+
+  // Show/hide org field
+  document.getElementById('org-group').style.display = type === 'company' ? 'block' : 'none';
+}
+
+function toggleCap(el) {
+  const cap = el.dataset.cap;
+  if (selectedCaps.has(cap)) {
+    selectedCaps.delete(cap);
+    el.classList.remove('selected');
+  } else {
+    selectedCaps.add(cap);
+    el.classList.add('selected');
+  }
+}
+
+function updateBeamPreview() {
+  const agent = document.getElementById('agent-name').value.toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'agent';
+  const org = document.getElementById('org-name').value.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+
+  let beamId;
+  if (agentType === 'company' && org) {
+    beamId = `${agent}@${org}.beam.directory`;
+  } else {
+    beamId = `${agent}@beam.directory`;
+  }
+  document.getElementById('beam-id-preview').textContent = beamId;
+}
+
+function goStep(step) {
+  // Validate current step
+  if (step > currentStep) {
+    const valid = validateStep(currentStep);
+    if (!valid) return;
+  }
+
+  // Hide all
+  document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+  document.getElementById(`step-${step}`).classList.add('active');
+
+  // Update dots
+  for (let i = 1; i <= 4; i++) {
+    const dot = document.getElementById(`dot-${i}`);
+    const lbl = document.getElementById(`lbl-${i}`);
+    const line = document.getElementById(`line-${i}`);
+    dot.classList.remove('active', 'completed');
+    lbl.classList.remove('active');
+    if (i < step) { dot.classList.add('completed'); dot.textContent = '✓'; }
+    else if (i === step) { dot.classList.add('active'); dot.textContent = i; lbl.classList.add('active'); }
+    else { dot.textContent = i; }
+    if (line && i < step) line.classList.add('completed');
+    else if (line) line.classList.remove('completed');
+  }
+
+  currentStep = step;
+  hideError();
+}
+
+function validateStep(step) {
+  if (step === 1) {
+    if (!agentType) { showError('Please select agent type'); return false; }
+  }
+  if (step === 2) {
+    const agent = document.getElementById('agent-name').value.trim();
+    if (!agent) { showError('Agent name is required'); return false; }
+    if (!/^[a-z0-9_-]+$/.test(agent.toLowerCase())) { showError('Agent name: only lowercase, numbers, hyphens, underscores'); return false; }
+    const display = document.getElementById('display-name').value.trim();
+    if (!display) { showError('Display name is required'); return false; }
+    if (agentType === 'company') {
+      const org = document.getElementById('org-name').value.trim();
+      if (!org) { showError('Organization name is required for company agents'); return false; }
+    }
+  }
+  if (step === 3) {
+    if (selectedCaps.size === 0) { showError('Select at least one capability'); return false; }
+  }
+  return true;
+}
+
+async function generateKey() {
+  try {
+    const res = await fetch(`${API}/agents/keypair/x25519`);
+    // Actually we need Ed25519 for signing
+    // Generate locally
+    const keyPair = await crypto.subtle.generateKey(
+      { name: 'Ed25519' },
+      true,
+      ['sign', 'verify']
+    );
+    const pubRaw = await crypto.subtle.exportKey('spki', keyPair.publicKey);
+    const privRaw = await crypto.subtle.exportKey('pkcs8', keyPair.privateKey);
+    const pubB64 = btoa(String.fromCharCode(...new Uint8Array(pubRaw)));
+    const privB64 = btoa(String.fromCharCode(...new Uint8Array(privRaw)));
+
+    document.getElementById('public-key').value = pubB64;
+    generatedPrivateKey = privB64;
+    document.getElementById('private-key-display').textContent = privB64;
+    document.getElementById('generated-keys').style.display = 'block';
+  } catch (e) {
+    showError('Key generation failed: ' + e.message);
+  }
+}
+
+function copyPrivateKey() {
+  navigator.clipboard.writeText(generatedPrivateKey);
+  event.target.textContent = '✅ Copied!';
+  setTimeout(() => event.target.textContent = '📋 Copy Private Key', 2000);
+}
+
+async function submitRegistration() {
+  if (!validateStep(4)) return;
+
+  const publicKey = document.getElementById('public-key').value.trim();
+  if (!publicKey) { showError('Public key is required'); return; }
+
+  const btn = document.getElementById('btn-register');
+  btn.innerHTML = '<span class="loading-spinner"></span> Registering...';
+  btn.disabled = true;
+
+  const agentName = document.getElementById('agent-name').value.trim().toLowerCase();
+  const org = document.getElementById('org-name').value.trim().toLowerCase() || undefined;
+  const displayName = document.getElementById('display-name').value.trim();
+  const description = document.getElementById('description').value.trim() || undefined;
+  const email = document.getElementById('email').value.trim() || undefined;
+  const dhKey = document.getElementById('dh-key').value.trim() || undefined;
+  const httpEndpoint = document.getElementById('http-endpoint').value.trim() || undefined;
+
+  let beamId;
+  if (agentType === 'company' && org) {
+    beamId = `${agentName}@${org}.beam.directory`;
+  } else {
+    beamId = `${agentName}@beam.directory`;
+  }
+
+  try {
+    const res = await fetch(`${API}/agents/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        beamId,
+        org: agentType === 'company' ? org : undefined,
+        publicKey,
+        displayName,
+        capabilities: [...selectedCaps],
+        description,
+        email,
+        dhPublicKey: dhKey,
+        httpEndpoint,
+      }),
+    });
+
+    const data = await res.json();
+
+    if (!res.ok) {
+      throw new Error(data.error || 'Registration failed');
+    }
+
+    // Success!
+    document.getElementById('success-beam-id').textContent = data.beam_id || beamId;
+    document.getElementById('success-details').innerHTML = `
+      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;">
+        <span style="color: var(--text-muted);">DID</span><span>did:beam:${org ? org + ':' : ''}${agentName}</span>
+        <span style="color: var(--text-muted);">Trust</span><span>${data.trust_score ?? 0.5}</span>
+        <span style="color: var(--text-muted);">Tier</span><span>${data.verification_tier ?? 'basic'} ${data.email ? '→ verify email for 🔵' : ''}</span>
+        <span style="color: var(--text-muted);">Caps</span><span>${[...selectedCaps].join(', ')}</span>
+        ${data.http_endpoint ? `<span style="color: var(--text-muted);">P2P</span><span>✅ Direct delivery enabled</span>` : ''}
+        ${data.dh_public_key ? `<span style="color: var(--text-muted);">E2E</span><span>✅ Encryption enabled</span>` : ''}
+      </div>
+    `;
+
+    // Show success
+    document.querySelectorAll('.step-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById('step-success').classList.add('active');
+
+    // All dots completed
+    for (let i = 1; i <= 4; i++) {
+      document.getElementById(`dot-${i}`).classList.add('completed');
+      document.getElementById(`dot-${i}`).textContent = '✓';
+      if (document.getElementById(`line-${i}`)) document.getElementById(`line-${i}`).classList.add('completed');
+    }
+
+  } catch (e) {
+    showError(e.message);
+    btn.innerHTML = 'Register Agent 🚀';
+    btn.disabled = false;
+  }
+}
+
+function showError(msg) {
+  const banner = document.getElementById('error-banner');
+  banner.textContent = msg;
+  banner.classList.add('visible');
+}
+
+function hideError() {
+  document.getElementById('error-banner').classList.remove('visible');
+}
+</script>
+</body>
 </html>

@@ -105,6 +105,21 @@ function createDocument(input: {
   }
 }
 
+/** Convert a did:beam DID back to a beam_id. Returns null if not a valid did:beam. */
+export function didToBeamId(did: string): string | null {
+  if (!did.startsWith('did:beam:')) return null
+  const parts = did.slice('did:beam:'.length).split(':')
+  if (parts.length === 2) {
+    // did:beam:org:agent → agent@org.beam.directory
+    return `${parts[1]}@${parts[0]}.beam.directory`
+  }
+  if (parts.length === 1 && parts[0]) {
+    // did:beam:agent → agent@beam.directory (personal)
+    return `${parts[0]}@beam.directory`
+  }
+  return null
+}
+
 export function toBeamDID(beamId: string): string {
   if (beamId.startsWith('did:beam:')) {
     return beamId

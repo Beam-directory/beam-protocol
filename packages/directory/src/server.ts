@@ -23,7 +23,7 @@ import { verificationRouter } from './routes/verify.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
-import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores } from './db.js'
+import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import type { AgentRow, IntentFrame } from './types.js'
@@ -800,6 +800,29 @@ export function createApp(db: Database): Hono {
   app.route('/agents', reportsRouter(db))
   app.route('/agents', credentialsRouter())
   app.route('/agents', didRouter(db))
+
+  // Top-level DID resolution for W3C compliance: /did/did:beam:*
+  app.get('/did/:didString{.+}', async (c) => {
+    const didString = c.req.param('didString')
+
+    // First check stored DID documents
+    const stored = getDIDDocument(db, didString)
+    if (stored) return c.json(stored)
+
+    // On-demand generation: convert DID → beam_id → lookup agent → generate
+    const { toBeamDID, generateDIDDocument, didToBeamId } = await import('./did.js')
+    const beamId = didToBeamId(didString)
+    if (beamId) {
+      const agent = getAgent(db, beamId)
+      if (agent) {
+        const newDoc = generateDIDDocument(agent)
+        upsertDIDDocument(db, newDoc)
+        return c.json(newDoc)
+      }
+    }
+
+    return c.json({ error: 'Not found', errorCode: 'NOT_FOUND' }, 404)
+  })
   app.route('/federation', federationRouter(db))
   app.route('/billing', billingRouter(db))
   app.route('/shield', shieldRouter(db))

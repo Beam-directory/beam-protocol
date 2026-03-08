@@ -779,13 +779,45 @@
 
       /* Security / Shield grids */
       .security-grid { grid-template-columns: 1fr !important; }
-      .shield-walls-grid { grid-template-columns: repeat(2, 1fr) !important; }
+      .shield-walls-grid { grid-template-columns: 1fr !important; }
       .shield-detail-grid { grid-template-columns: 1fr !important; }
 
-      /* Inline pricing grid override */
-      [style*="grid-template-columns: repeat(4"] {
+      /* Prevent ALL children from overflowing on mobile */
+      .shield-detail-grid > div,
+      .shield-detail-grid pre,
+      .shield-detail-grid code {
+        max-width: calc(100vw - 48px) !important;
+        overflow-x: auto !important;
+        word-break: break-word;
+      }
+
+      /* Code examples in How section */
+      .code-example, .code-panel, .code-tabs {
+        max-width: calc(100vw - 48px) !important;
+        overflow-x: auto !important;
+      }
+
+      /* Font size minimum for mobile readability */
+      .shield-walls-grid p,
+      .shield-detail-grid p,
+      .cap-tag { font-size: 13px !important; }
+
+      /* Compare table scroll */
+      .compare-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+      /* Blog cards */
+      [style*="grid-template-columns: repeat(3"] {
         grid-template-columns: 1fr !important;
       }
+
+      /* Inline pricing grid override */
+      [style*="grid-template-columns: repeat(4"],
+      [style*="grid-template-columns: repeat(5"] {
+        grid-template-columns: 1fr !important;
+      }
+
+      /* How section steps */
+      .how-steps { grid-template-columns: 1fr !important; }
     }
 
     @media (max-width: 480px) {
