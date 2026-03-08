@@ -41,3 +41,4 @@ export type {
   CredentialSubject,
   Proof,
 } from './did.js'
+export * from './key-management.js'
