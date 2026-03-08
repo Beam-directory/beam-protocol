@@ -10,6 +10,7 @@ import type {
 function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
   return {
     beamId: (raw.beamId ?? raw.beam_id) as AgentRecord['beamId'],
+    did: (raw.did ?? '') as string,
     displayName: (raw.displayName ?? raw.display_name ?? '') as string,
     capabilities: (raw.capabilities ?? []) as string[],
     publicKey: (raw.publicKey ?? raw.public_key ?? '') as string,
