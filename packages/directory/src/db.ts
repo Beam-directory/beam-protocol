@@ -315,6 +315,20 @@ function initSchema(db: DB): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_reports_target ON reports(target_beam_id);
+
+    CREATE TABLE IF NOT EXISTS billing (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL UNIQUE,
+      stripe_customer_id TEXT,
+      stripe_subscription_id TEXT,
+      tier TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'active',
+      current_period_end TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_billing_beam_id ON billing(beam_id);
   `)
 
   ensureColumn(db, 'agents', 'email', 'TEXT')

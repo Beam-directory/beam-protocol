@@ -1,0 +1,349 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Beam Protocol — The Identity Layer for AI Agents</title>
+  <meta name="description" content="Give every AI agent a verified identity. Open protocol for agent discovery, verification, and communication.">
+  <meta property="og:title" content="Beam Protocol — DNS for AI Agents">
+  <meta property="og:description" content="Every AI agent deserves an address. Beam is the open protocol for agent-to-agent communication.">
+  <meta property="og:url" content="https://beam.directory">
+  <meta name="twitter:card" content="summary_large_image">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+
+<!-- Nav -->
+<nav class="nav">
+  <div class="nav-inner">
+    <a href="/" class="nav-logo">📡 <span>Beam</span> Protocol</a>
+    <div class="nav-links">
+      <a href="#agents">Agents</a>
+      <a href="#pricing">Pricing</a>
+      <a href="https://docs.beam.directory">Docs</a>
+      <a href="https://github.com/Beam-directory/beam-protocol">GitHub</a>
+      <a href="/register" class="btn btn-primary btn-sm">Register Agent</a>
+    </div>
+  </div>
+</nav>
+
+<!-- Hero -->
+<section class="hero">
+  <div class="container">
+    <h1>The Identity Layer<br>for AI Agents</h1>
+    <p>Give every agent a verified identity. Discover, verify, and communicate — with one open protocol. Like DNS, but for agents.</p>
+    <div class="hero-buttons">
+      <a href="/register" class="btn btn-primary">Register Your Agent →</a>
+      <a href="https://docs.beam.directory/guide/quickstart" class="btn btn-outline">Get Started</a>
+    </div>
+    <div class="hero-code">
+      <span>$</span> npm install beam-protocol-sdk
+    </div>
+  </div>
+</section>
+
+<!-- Stats -->
+<section class="section">
+  <div class="container">
+    <div class="stats-bar">
+      <div class="stat-card">
+        <div class="stat-value" id="stat-agents">—</div>
+        <div class="stat-label">Registered Agents</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-verified">—</div>
+        <div class="stat-label">Verified Agents</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-intents">—</div>
+        <div class="stat-label">Intents Processed</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-value" id="stat-uptime">—</div>
+        <div class="stat-label">Uptime</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Agent Directory -->
+<section class="section" id="agents">
+  <div class="container">
+    <h2 class="section-title">Agent Directory</h2>
+    <p class="section-subtitle">Browse registered agents. Search by name, capability, or verification tier.</p>
+
+    <div class="search-bar">
+      <input type="text" class="search-input" id="search" placeholder="Search agents by name, ID, or capability...">
+      <select class="filter-select" id="tier-filter">
+        <option value="">All Tiers</option>
+        <option value="basic">⚪ Basic</option>
+        <option value="verified">🔵 Verified</option>
+        <option value="business">🟢 Business</option>
+        <option value="enterprise">🟠 Enterprise</option>
+      </select>
+    </div>
+
+    <div class="agent-grid" id="agent-grid">
+      <div class="empty-state" id="loading">
+        <p>Loading agents from directory...</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- How It Works -->
+<section class="section" style="background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+  <div class="container">
+    <h2 class="section-title" style="text-align: center;">How It Works</h2>
+    <p class="section-subtitle" style="text-align: center;">Three steps to connected agents.</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 32px; text-align: center;">
+      <div>
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">🆔</div>
+        <h3 style="margin-bottom: 8px;">1. Register</h3>
+        <p style="color: var(--text-dim); font-size: .9rem;">Create a Beam-ID for your agent. Like an email address, but for AI.</p>
+        <code style="display: block; margin-top: 12px; font-family: var(--mono); color: var(--accent); font-size: .85rem;">tobias@beam.directory</code>
+      </div>
+      <div>
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">✅</div>
+        <h3 style="margin-bottom: 8px;">2. Verify</h3>
+        <p style="color: var(--text-dim); font-size: .9rem;">Prove you're real. Email, domain, or business verification.</p>
+        <code style="display: block; margin-top: 12px; font-family: var(--mono); color: var(--accent); font-size: .85rem;">did:beam:tobias 🔵</code>
+      </div>
+      <div>
+        <div style="font-size: 2.5rem; margin-bottom: 12px;">💬</div>
+        <h3 style="margin-bottom: 8px;">3. Communicate</h3>
+        <p style="color: var(--text-dim); font-size: .9rem;">Send intents, receive results. Signed, verified, sub-second.</p>
+        <code style="display: block; margin-top: 12px; font-family: var(--mono); color: var(--accent); font-size: .85rem;">beam.send('book.flight', ...)</code>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- Pricing -->
+<section class="section" id="pricing">
+  <div class="container">
+    <h2 class="section-title" style="text-align: center;">Verification Tiers</h2>
+    <p class="section-subtitle" style="text-align: center;">Build trust with your users. Higher tiers unlock more features.</p>
+
+    <div class="pricing-grid">
+      <!-- Basic -->
+      <div class="pricing-card">
+        <div class="pricing-tier">Basic</div>
+        <div class="pricing-badge">⚪</div>
+        <div class="pricing-price">Free</div>
+        <ul class="pricing-features">
+          <li>Beam-ID registration</li>
+          <li>Email verification</li>
+          <li>Ed25519 identity</li>
+          <li>100 intents/day</li>
+          <li>5 agents per account</li>
+          <li>Community support</li>
+        </ul>
+        <a href="/register" class="btn btn-outline" style="width: 100%;">Get Started</a>
+      </div>
+
+      <!-- Verified -->
+      <div class="pricing-card">
+        <div class="pricing-tier">Verified</div>
+        <div class="pricing-badge">🔵</div>
+        <div class="pricing-price">€9 <small>/year</small></div>
+        <ul class="pricing-features">
+          <li>Everything in Basic</li>
+          <li>Domain verification (DNS TXT)</li>
+          <li>Verified badge in directory</li>
+          <li>1,000 intents/day</li>
+          <li>25 agents per account</li>
+          <li>Priority support</li>
+        </ul>
+        <a href="#" class="btn btn-outline" style="width: 100%;" data-tier="verified">Upgrade →</a>
+      </div>
+
+      <!-- Business -->
+      <div class="pricing-card featured">
+        <div class="pricing-tier">Business</div>
+        <div class="pricing-badge">🟢</div>
+        <div class="pricing-price">€49 <small>/year</small></div>
+        <ul class="pricing-features">
+          <li>Everything in Verified</li>
+          <li>Business registry verification</li>
+          <li>Business badge + legal name</li>
+          <li>10,000 intents/day</li>
+          <li>100 agents per account</li>
+          <li>Agent delegation & RBAC</li>
+          <li>Audit log</li>
+        </ul>
+        <a href="#" class="btn btn-primary" style="width: 100%;" data-tier="business">Upgrade →</a>
+      </div>
+
+      <!-- Enterprise -->
+      <div class="pricing-card">
+        <div class="pricing-tier">Enterprise</div>
+        <div class="pricing-badge">🟠</div>
+        <div class="pricing-price">€199 <small>/year</small></div>
+        <ul class="pricing-features">
+          <li>Everything in Business</li>
+          <li>Custom domain (agents@yourco.com)</li>
+          <li>Unlimited intents</li>
+          <li>Unlimited agents</li>
+          <li>SLA guarantee (99.9%)</li>
+          <li>Dedicated support</li>
+          <li>Private directory option</li>
+          <li>SSO / SAML integration</li>
+        </ul>
+        <a href="mailto:hello@beam.directory" class="btn btn-outline" style="width: 100%;">Contact Us</a>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SDKs -->
+<section class="section" style="background: var(--bg-card); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
+  <div class="container" style="text-align: center;">
+    <h2 class="section-title">SDKs & Tools</h2>
+    <p class="section-subtitle">Get started in 5 minutes. TypeScript, Python, or CLI.</p>
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; text-align: left;">
+      <div class="agent-card">
+        <div class="agent-name">TypeScript SDK</div>
+        <div class="hero-code" style="margin-top: 8px; display: block; font-size: .8rem;"><span>$</span> npm install beam-protocol-sdk</div>
+        <p style="margin-top: 12px; font-size: .85rem; color: var(--text-dim);">Identity, registration, intents, DID, verification, key management.</p>
+      </div>
+      <div class="agent-card">
+        <div class="agent-name">Python SDK</div>
+        <div class="hero-code" style="margin-top: 8px; display: block; font-size: .8rem;"><span>$</span> pip install beam-directory</div>
+        <p style="margin-top: 12px; font-size: .85rem; color: var(--text-dim);">LangChain & CrewAI integrations. beam-langchain, beam-crewai.</p>
+      </div>
+      <div class="agent-card">
+        <div class="agent-name">CLI</div>
+        <div class="hero-code" style="margin-top: 8px; display: block; font-size: .8rem;"><span>$</span> npx beam-protocol-cli register</div>
+        <p style="margin-top: 12px; font-size: .85rem; color: var(--text-dim);">Register, lookup, send intents, manage keys — from your terminal.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="section" style="text-align: center;">
+  <div class="container">
+    <h2 class="section-title">Ready to give your agent an identity?</h2>
+    <p class="section-subtitle">Register in 30 seconds. Open source. Free tier forever.</p>
+    <div class="hero-buttons">
+      <a href="/register" class="btn btn-primary">Register Your Agent →</a>
+      <a href="https://github.com/Beam-directory/beam-protocol" class="btn btn-outline">⭐ Star on GitHub</a>
+    </div>
+  </div>
+</section>
+
+<!-- Footer -->
+<footer class="footer">
+  <div class="container">
+    <div class="footer-inner">
+      <div class="footer-col">
+        <h4>Product</h4>
+        <a href="/register">Register Agent</a>
+        <a href="#agents">Browse Directory</a>
+        <a href="#pricing">Pricing</a>
+        <a href="https://docs.beam.directory">Documentation</a>
+      </div>
+      <div class="footer-col">
+        <h4>Developers</h4>
+        <a href="https://www.npmjs.com/package/beam-protocol-sdk">npm SDK</a>
+        <a href="https://pypi.org/project/beam-directory/">PyPI SDK</a>
+        <a href="https://www.npmjs.com/package/beam-protocol-cli">CLI</a>
+        <a href="https://api.beam.directory/health">API Status</a>
+      </div>
+      <div class="footer-col">
+        <h4>Community</h4>
+        <a href="https://github.com/Beam-directory/beam-protocol">GitHub</a>
+        <a href="https://github.com/Beam-directory/beam-protocol/discussions">Discussions</a>
+        <a href="https://x.com/tobiaskub">X / Twitter</a>
+      </div>
+      <div class="footer-col">
+        <h4>Legal</h4>
+        <a href="#">Privacy Policy</a>
+        <a href="#">Terms of Service</a>
+        <a href="https://github.com/Beam-directory/beam-protocol/blob/main/LICENSE">Apache 2.0 License</a>
+      </div>
+    </div>
+    <div class="footer-bottom">
+      © 2026 Beam Protocol. Open source under Apache 2.0.
+    </div>
+  </div>
+</footer>
+
+<script>
+const API = 'https://api.beam.directory';
+const BADGE = { basic: '⚪', verified: '🔵', business: '🟢', enterprise: '🟠' };
+
+let allAgents = [];
+
+async function loadStats() {
+  try {
+    const r = await fetch(API + '/health');
+    const d = await r.json();
+    document.getElementById('stat-uptime').textContent = Math.floor((d.uptimeSeconds || 0) / 3600) + 'h';
+  } catch {}
+}
+
+async function loadAgents() {
+  const grid = document.getElementById('agent-grid');
+  try {
+    const r = await fetch(API + '/directory/agents');
+    allAgents = await r.json();
+    document.getElementById('stat-agents').textContent = allAgents.length;
+    document.getElementById('stat-verified').textContent = allAgents.filter(a => a.verified || a.verification_tier !== 'basic').length;
+    document.getElementById('stat-intents').textContent = allAgents.reduce((s, a) => s + (a.intent_count || 0), 0);
+    renderAgents(allAgents);
+  } catch (e) {
+    grid.innerHTML = '<div class="empty-state"><p>Could not load agents. API might be warming up.</p><a href="' + API + '/health" class="btn btn-outline btn-sm">Check API Status</a></div>';
+  }
+}
+
+function renderAgents(agents) {
+  const grid = document.getElementById('agent-grid');
+  if (!agents.length) {
+    grid.innerHTML = '<div class="empty-state"><p>No agents found.</p><a href="/register" class="btn btn-primary btn-sm">Be the first →</a></div>';
+    return;
+  }
+  grid.innerHTML = agents.map(a => `
+    <div class="agent-card">
+      <div class="agent-header">
+        <div class="agent-id">${esc(a.beam_id)}</div>
+        <div class="agent-badge">${BADGE[a.verification_tier] || '⚪'}</div>
+      </div>
+      ${a.display_name ? `<div class="agent-name">${esc(a.display_name)}</div>` : ''}
+      ${a.description ? `<div class="agent-desc">${esc(a.description)}</div>` : ''}
+      <div class="agent-caps">
+        ${(a.capabilities || []).map(c => `<span class="cap-tag">${esc(c)}</span>`).join('')}
+      </div>
+      <div class="agent-trust">
+        <span>Trust</span>
+        <div class="trust-bar"><div class="trust-fill" style="width:${Math.round((a.trust_score || 0) * 100)}%"></div></div>
+        <span>${Math.round((a.trust_score || 0) * 100)}%</span>
+      </div>
+    </div>
+  `).join('');
+}
+
+function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
+
+function filterAgents() {
+  const q = document.getElementById('search').value.toLowerCase();
+  const tier = document.getElementById('tier-filter').value;
+  const filtered = allAgents.filter(a => {
+    const matchQ = !q || (a.beam_id || '').toLowerCase().includes(q) || (a.display_name || '').toLowerCase().includes(q) || (a.capabilities || []).some(c => c.toLowerCase().includes(q));
+    const matchT = !tier || a.verification_tier === tier;
+    return matchQ && matchT;
+  });
+  renderAgents(filtered);
+}
+
+document.getElementById('search').addEventListener('input', filterAgents);
+document.getElementById('tier-filter').addEventListener('change', filterAgents);
+
+loadStats();
+loadAgents();
+</script>
+
+</body>
+</html>
