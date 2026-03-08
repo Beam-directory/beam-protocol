@@ -2,11 +2,20 @@ import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
 import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import type {
+  AgentProfile,
+  AgentRecord,
   BeamClientConfig,
   BeamIdString,
+  BrowseFilters,
+  BrowseResult,
+  Delegation,
+  DirectoryStats,
+  DomainVerification,
   IntentFrame,
+  KeyRotationResult,
+  Report,
   ResultFrame,
-  AgentRecord
+  BeamIdentityData,
 } from './types.js'
 
 interface WebSocketLike {
@@ -41,13 +50,12 @@ async function openWebSocket(url: string): Promise<WebSocketLike> {
   if (typeof globalThis.WebSocket !== 'undefined') {
     return new (globalThis.WebSocket as new (url: string) => WebSocketLike)(url)
   }
-  // Node 18-20: use ws package
   const { default: WS } = await import('ws')
   return new WS(url) as unknown as WebSocketLike
 }
 
 export class BeamClient {
-  private readonly _identity: BeamIdentity
+  private _identity: BeamIdentity
   private readonly _directory: BeamDirectory
   private readonly _directoryUrl: string
   private _ws: WebSocketLike | null = null
@@ -78,14 +86,48 @@ export class BeamClient {
       displayName,
       capabilities,
       publicKey: this._identity.publicKeyBase64,
-      org: parsed.org
+      org: parsed.org,
     })
+  }
+
+  async updateProfile(fields: { description?: string; logo_url?: string; website?: string }): Promise<AgentProfile> {
+    return this._directory.updateProfile(this._identity.beamId, fields)
+  }
+
+  async verifyDomain(domain: string): Promise<DomainVerification> {
+    return this._directory.verifyDomain(this._identity.beamId, domain)
+  }
+
+  async checkDomainVerification(): Promise<DomainVerification> {
+    return this._directory.checkDomainVerification(this._identity.beamId)
+  }
+
+  async rotateKeys(newKeyPair: BeamIdentity | BeamIdentityData): Promise<KeyRotationResult> {
+    const identity = newKeyPair instanceof BeamIdentity ? newKeyPair : BeamIdentity.fromData(newKeyPair)
+    const result = await this._directory.rotateKeys(this._identity.beamId, identity.publicKeyBase64)
+    this._identity = identity
+    return result
+  }
+
+  async browse(page = 1, filters: BrowseFilters = {}): Promise<BrowseResult> {
+    return this._directory.browse(page, filters)
+  }
+
+  async getStats(): Promise<DirectoryStats> {
+    return this._directory.getStats()
+  }
+
+  async delegate(targetBeamId: string, scope: string, expiresIn?: number): Promise<Delegation> {
+    return this._directory.delegate(this._identity.beamId, targetBeamId as BeamIdString, scope, expiresIn)
+  }
+
+  async report(targetBeamId: string, reason: string): Promise<Report> {
+    return this._directory.report(this._identity.beamId, targetBeamId as BeamIdString, reason)
   }
 
   async connect(): Promise<void> {
     if (this._ws && this._wsConnected) return
 
-    // Convert http(s) scheme to ws(s) and append /ws path with beamId query param
     const wsUrl = this._directoryUrl
       .replace(/^http:\/\//, 'ws://')
       .replace(/^https:\/\//, 'wss://')
@@ -96,7 +138,6 @@ export class BeamClient {
         this._ws = ws
 
         ws.onopen = () => {
-          // Wait for the server's connected message before resolving
         }
 
         ws.onmessage = (event) => {
@@ -106,7 +147,6 @@ export class BeamClient {
         ws.onclose = () => {
           this._wsConnected = false
           this._ws = null
-          // Reject all pending results
           for (const [nonce, pending] of this._pendingResults) {
             clearTimeout(pending.timer)
             pending.reject(new Error('WebSocket connection closed'))
@@ -120,7 +160,6 @@ export class BeamClient {
           }
         }
 
-        // We resolve after receiving the 'connected' message
         const originalHandleMessage = this._handleMessage.bind(this)
         this._handleMessage = (data: string) => {
           try {
@@ -132,7 +171,6 @@ export class BeamClient {
               return
             }
           } catch {
-            // ignore parse errors during connect phase
           }
           originalHandleMessage(data)
         }
@@ -157,40 +195,49 @@ export class BeamClient {
         this._pendingResults.delete(frame.nonce)
         pending.resolve(frame)
       }
-    } else if (msg['type'] === 'intent') {
-      const frame = msg['frame'] as IntentFrame | undefined
-      const senderPublicKey = msg['senderPublicKey'] as string | undefined
-      if (!frame || !senderPublicKey) return
-
-      const validation = validateIntentFrame(frame, senderPublicKey)
-      if (!validation.valid) return
-
-      const handler = this._intentHandlers.get(frame.intent) ?? this._intentHandlers.get('*')
-      if (!handler) return
-
-      const startTime = Date.now()
-      const respond = (options: {
-        success: boolean
-        payload?: Record<string, unknown>
-        error?: string
-        errorCode?: string
-        latency?: number
-      }): ResultFrame => {
-        const latency = options.latency ?? (Date.now() - startTime)
-        const resultFrame = createResultFrame(
-          { ...options, nonce: frame.nonce, latency },
-          this._identity
-        )
-        if (this._ws && this._wsConnected) {
-          this._ws.send(JSON.stringify({ type: 'result', frame: resultFrame }))
-        }
-        return resultFrame
-      }
-
-      Promise.resolve(handler(frame, respond)).catch(() => {
-        // Swallow handler errors to avoid unhandled rejections
-      })
+      return
     }
+
+    if (msg['type'] !== 'intent') {
+      return
+    }
+
+    const frame = msg['frame'] as IntentFrame | undefined
+    const senderPublicKey = msg['senderPublicKey'] as string | undefined
+    if (!frame || !senderPublicKey) return
+
+    const validation = validateIntentFrame(frame, senderPublicKey)
+    if (!validation.valid) return
+
+    const handler = this._intentHandlers.get(frame.intent) ?? this._intentHandlers.get('*')
+    if (!handler) return
+
+    const startTime = Date.now()
+    const respond = (options: {
+      success: boolean
+      payload?: Record<string, unknown>
+      error?: string
+      errorCode?: string
+      latency?: number
+    }): ResultFrame => {
+      const latency = options.latency ?? (Date.now() - startTime)
+      const resultFrame = createResultFrame(
+        { ...options, nonce: frame.nonce, latency },
+        this._identity
+      )
+      if (this._ws && this._wsConnected) {
+        this._ws.send(JSON.stringify({ type: 'result', frame: resultFrame }))
+      }
+      return resultFrame
+    }
+
+    Promise.resolve(handler(frame, respond)).catch((error) => {
+      respond({
+        success: false,
+        error: error instanceof Error ? error.message : 'Unhandled intent error',
+        errorCode: 'INTENT_HANDLER_ERROR',
+      })
+    })
   }
 
   async send(
@@ -222,14 +269,14 @@ export class BeamClient {
       } catch (err) {
         clearTimeout(timer)
         this._pendingResults.delete(frame.nonce)
-        reject(err)
+        reject(err as Error)
       }
     })
   }
 
   private async _sendViaHttp(frame: IntentFrame): Promise<ResultFrame> {
     const baseUrl = this._directoryUrl.replace(/\/$/, '')
-    const res = await fetch(`${baseUrl}/intents`, {
+    const res = await fetch(`${baseUrl}/intents/send`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(frame)
@@ -245,22 +292,6 @@ export class BeamClient {
     return this
   }
 
-  /**
-   * Send a natural language message to another agent.
-   * The receiving agent uses its LLM to interpret and respond.
-   *
-   * @example
-   * const reply = await client.talk(
-   *   'clara@coppen.beam.directory',
-   *   'Was weißt du über Chris Schnorrenberg?'
-   * )
-   * console.log(reply.message) // Natural language response
-   * console.log(reply.structured) // Optional structured data
-   */
-  /**
-   * Start a multi-turn conversation thread.
-   * Returns a Thread object with a `say()` method for follow-ups.
-   */
   thread(to: BeamIdString, options?: { language?: string; timeoutMs?: number }): BeamThread {
     return new BeamThread(this, to, options)
   }
@@ -282,9 +313,7 @@ export class BeamClient {
       throw new Error('Message exceeds maximum length of 32768 characters')
     }
 
-    const payload: Record<string, unknown> = {
-      message,
-    }
+    const payload: Record<string, unknown> = { message }
     if (options?.context) payload['context'] = options.context
     if (options?.language) payload['language'] = options.language
     if (options?.threadId) payload['threadId'] = options.threadId
@@ -304,16 +333,6 @@ export class BeamClient {
     }
   }
 
-  /**
-   * Register a natural language handler.
-   * Convenience wrapper that listens for conversation.message intents.
-   *
-   * @example
-   * client.onTalk(async (message, from, respond) => {
-   *   const answer = await myLLM.generate(message)
-   *   respond(answer)
-   * })
-   */
   onTalk(
     handler: (
       message: string,
@@ -352,14 +371,6 @@ export class BeamClient {
   }
 }
 
-/**
- * A multi-turn conversation thread between two agents.
- *
- * @example
- * const chat = client.thread('clara@coppen.beam.directory')
- * const r1 = await chat.say('Was weißt du über Chris?')
- * const r2 = await chat.say('Und seine Pipeline?')  // keeps context
- */
 export class BeamThread {
   readonly threadId: string
   private readonly _client: BeamClient
@@ -376,7 +387,7 @@ export class BeamThread {
     this._to = to
     this._language = options?.language
     this._timeoutMs = options?.timeoutMs ?? 60_000
-    this.threadId = crypto.randomUUID()
+    this.threadId = BeamIdentity.generateNonce()
   }
 
   async say(

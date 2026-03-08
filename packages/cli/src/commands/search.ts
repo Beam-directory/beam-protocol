@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import ora from 'ora'
 import { BeamDirectory } from '@beam-protocol/sdk'
-import { loadConfig } from '../config.js'
+import { resolveDirectoryUrl } from '../config.js'
 
 interface SearchOptions {
   org?: string
@@ -13,8 +13,7 @@ interface SearchOptions {
 }
 
 export async function cmdSearch(options: SearchOptions): Promise<void> {
-  const config = loadConfig()
-  const directoryUrl = options.directory ?? config.directoryUrl
+  const directoryUrl = resolveDirectoryUrl(options.directory)
 
   const query = {
     org: options.org,
@@ -57,9 +56,7 @@ export async function cmdSearch(options: SearchOptions): Promise<void> {
         ? chalk.dim(` [${agent.capabilities.join(', ')}]`)
         : ''
 
-      console.log(
-        `  ${verified} ${chalk.bold(agent.beamId)}${caps}`
-      )
+      console.log(`  ${verified} ${chalk.bold(agent.beamId)}${caps}`)
       console.log(
         `     ${chalk.dim(agent.displayName)} · Trust: ${getTrustColored(agent.trustScore, trustPct + '%')} · Last seen: ${formatRelative(agent.lastSeen)}`
       )

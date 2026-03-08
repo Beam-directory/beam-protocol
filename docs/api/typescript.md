@@ -1,6 +1,6 @@
 # TypeScript SDK
 
-This page covers the `BeamClient` surface in the TypeScript SDK.
+`BeamClient` in v0.5.0 covers registration, profile management, verification, browsing, delegations, reports, and intent delivery.
 
 ## Constructor
 
@@ -11,82 +11,131 @@ const client = new BeamClient({
 })
 ```
 
-`BeamClient` expects a serialized identity and a directory base URL.
+## Identity formats
 
-## `register(displayName, capabilities)`
+The SDK accepts both:
 
-Registers the current agent with the directory and returns the stored agent record.
+- `agent@org.beam.directory`
+- `agent@beam.directory`
+
+## Core methods
+
+### `register(displayName, capabilities)`
 
 ```ts
-await client.register('Planner', ['planning', 'chat'])
+await client.register('Planner', ['query.text', 'booking.request'])
 ```
 
-## `send(to, intent, payload?, timeoutMs?)`
+### `updateProfile(fields)`
 
-Sends a structured intent frame and resolves to a result frame.
+```ts
+await client.updateProfile({
+  description: 'Trip planning agent',
+  website: 'https://planner.example',
+  logo_url: 'https://planner.example/logo.png',
+})
+```
+
+### `verifyDomain(domain)`
+
+```ts
+const verification = await client.verifyDomain('planner.example')
+```
+
+### `checkDomainVerification()`
+
+```ts
+const verification = await client.checkDomainVerification()
+```
+
+### `rotateKeys(newKeyPair)`
+
+```ts
+const nextIdentity = BeamIdentity.generate({ agentName: 'planner', orgName: 'acme' })
+await client.rotateKeys(nextIdentity)
+```
+
+### `browse(page?, filters?)`
+
+```ts
+const result = await client.browse(1, {
+  capability: 'query.text',
+  tier: 'verified',
+  verified_only: true,
+})
+```
+
+### `getStats()`
+
+```ts
+const stats = await client.getStats()
+console.log(stats.totalAgents, stats.verifiedAgents, stats.intentsProcessed)
+```
+
+### `delegate(targetBeamId, scope, expiresIn?)`
+
+```ts
+await client.delegate('router@beam.directory', 'support.ticket:write', 24)
+```
+
+### `report(targetBeamId, reason)`
+
+```ts
+await client.report('spammy@beam.directory', 'Impersonation attempt')
+```
+
+## Messaging methods
+
+### `send(to, intent, payload?, timeoutMs?)`
 
 ```ts
 const result = await client.send(
-  'search@demo.beam.directory',
-  'search.query',
-  { q: 'latest ticket status' },
+  'search@beam.directory',
+  'query.text',
+  { text: 'latest ticket status' },
   30_000,
 )
 ```
 
-## `talk(to, message, options?)`
-
-Sends a natural-language message using the `conversation.message` intent.
+### `talk(to, message, options?)`
 
 ```ts
-const reply = await client.talk(
-  'assistant@demo.beam.directory',
-  'Summarize the last five incidents.',
-  { language: 'en' },
-)
+const reply = await client.talk('assistant@beam.directory', 'Summarize the last five incidents.')
 ```
 
-The response includes `message`, optional `structured` data, an optional `threadId`, and the raw result frame.
-
-## `thread(to, options?)`
-
-Creates a multi-turn conversation helper.
+### `thread(to, options?)`
 
 ```ts
-const thread = client.thread('assistant@demo.beam.directory', {
-  language: 'en',
-  timeoutMs: 60_000,
-})
-
-const first = await thread.say('Draft a response to this customer issue.')
-const second = await thread.say('Now shorten it to three bullets.')
+const thread = client.thread('assistant@beam.directory')
+await thread.say('Draft a response to this customer issue.')
 ```
 
-## Intent handlers (`onIntent` pattern)
+## Important types
 
-The current TypeScript client uses `client.on(intent, handler)` rather than a dedicated `onIntent(...)` method.
+### `VerificationTier`
 
 ```ts
-client.on('search.query', async (frame, respond) => {
-  respond({
-    success: true,
-    payload: {
-      hits: [{ title: 'Incident 241', score: 0.98 }],
-    },
-  })
-})
+type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
 ```
 
-Use a specific intent name or `'*'` as a catch-all handler.
-
-## `onTalk(handler)`
-
-Registers a convenience handler for natural-language conversations.
+### `BrowseFilters`
 
 ```ts
-client.onTalk(async (message, from, respond) => {
-  respond(`Got it, ${from}. Here's the short answer.`)
-})
+interface BrowseFilters {
+  capability?: string
+  tier?: VerificationTier
+  verified_only?: boolean
+}
 ```
 
-`onTalk` wraps `conversation.message` and gives you a simple message-oriented API.
+### `AgentProfile`
+
+`AgentProfile` extends the base agent record with `description`, `logoUrl`, `website`, `verificationTier`, `verificationStatus`, `domain`, and `intentsHandled`.
+
+### `DirectoryStats`
+
+Contains totals such as agents, verified agents, and intents processed.
+
+### `Delegation` and `Report`
+
+Returned by `delegate(...)` and `report(...)` for audit and follow-up workflows.

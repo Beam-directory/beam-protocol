@@ -1,13 +1,13 @@
 {
   "name": "beam-protocol-sdk",
-  "version": "0.2.0",
-  "description": "TypeScript SDK for the Beam Protocol \u2014 Agent-to-Agent communication",
+  "version": "0.5.0",
+  "description": "TypeScript SDK for the Beam Protocol — Agent-to-Agent communication",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },

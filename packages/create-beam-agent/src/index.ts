@@ -12,7 +12,7 @@ const valid = (value: string) => /^[a-z0-9_-]+$/.test(value)
 function renderPackageJson(name: string): string {
   return JSON.stringify({
     name,
-    version: '0.1.0',
+    version: '0.5.0',
     private: true,
     type: 'module',
     scripts: {
@@ -21,7 +21,7 @@ function renderPackageJson(name: string): string {
       start: 'node dist/index.js'
     },
     dependencies: {
-      'beam-protocol-sdk': '^0.2.0'
+      'beam-protocol-sdk': '^0.5.0'
     },
     devDependencies: {
       '@types/node': '^20.11.0',

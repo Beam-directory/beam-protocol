@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import asyncio
-import json
 import time
 from typing import Any, Callable, Coroutine, Optional
 
@@ -13,41 +12,27 @@ from .directory import BeamDirectory
 from .frames import create_intent_frame, create_result_frame
 from .identity import BeamIdentity
 from .types import (
+    AgentProfile,
     AgentRecord,
-    AgentRegistration,
-    AgentSearchQuery,
     BeamClientConfig,
     BeamIdString,
+    BrowseFilters,
+    BrowseResult,
+    Delegation,
+    DirectoryConfig,
+    DirectoryStats,
+    DomainVerification,
     IntentFrame,
+    KeyRotationResult,
+    Report,
     ResultFrame,
+    BeamIdentityData,
 )
 
-IntentHandler = Callable[
-    [IntentFrame],
-    Coroutine[Any, Any, ResultFrame],
-]
+IntentHandler = Callable[[IntentFrame], Coroutine[Any, Any, ResultFrame]]
 
 
 class BeamClient:
-    """
-    High-level Beam Protocol client.
-
-    Handles registration, intent sending (HTTP + WebSocket), and intent
-    receiving.
-
-    Usage::
-
-        identity = BeamIdentity.generate("jarvis", "coppen")
-        client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
-
-        await client.register("Jarvis", ["query", "answer"])
-        result = await client.send(
-            "other@org.beam.directory",
-            "greet",
-            {"message": "hello"}
-        )
-    """
-
     def __init__(
         self,
         identity: BeamIdentity,
@@ -55,21 +40,14 @@ class BeamClient:
     ) -> None:
         self._identity = identity
         self._directory_url = directory_url.rstrip("/")
-        self._directory = BeamDirectory(
-            config=__import__("beam_directory.types", fromlist=["DirectoryConfig"]).DirectoryConfig(
-                base_url=directory_url
-            )
-        )
+        self._directory = BeamDirectory(DirectoryConfig(base_url=directory_url))
         self._intent_handlers: dict[str, IntentHandler] = {}
         self._ws_task: Optional[asyncio.Task[None]] = None
 
     @classmethod
     def from_config(cls, config: BeamClientConfig) -> "BeamClient":
-        """Construct from a BeamClientConfig / serialised identity."""
         identity = BeamIdentity.from_data(config.identity)
         return cls(identity=identity, directory_url=config.directory_url)
-
-    # ── Properties ─────────────────────────────────────────────────────────────
 
     @property
     def beam_id(self) -> BeamIdString:
@@ -79,16 +57,137 @@ class BeamClient:
     def directory(self) -> BeamDirectory:
         return self._directory
 
-    # ── Registration ───────────────────────────────────────────────────────────
-
     async def register(
         self, display_name: str, capabilities: Optional[list[str]] = None
     ) -> AgentRecord:
-        """Register this agent with the directory."""
         reg = self._identity.to_registration(display_name, capabilities or [])
         return await self._directory.register(reg)
 
-    # ── Sending ────────────────────────────────────────────────────────────────
+    async def update_profile(
+        self,
+        fields: dict[str, Optional[str]],
+    ) -> AgentProfile:
+        data = await self._request(
+            "PATCH",
+            f"/agents/{self._identity.beam_id}/profile",
+            json=fields,
+        )
+        return AgentProfile.from_dict(data)
+
+    async def verify_domain(self, domain: str) -> DomainVerification:
+        data = await self._request(
+            "POST",
+            f"/agents/{self._identity.beam_id}/verify/domain",
+            json={"domain": domain},
+        )
+        return DomainVerification.from_dict(data, fallback_domain=domain)
+
+    async def check_domain_verification(self) -> DomainVerification:
+        data = await self._request(
+            "GET",
+            f"/agents/{self._identity.beam_id}/verify/domain",
+        )
+        return DomainVerification.from_dict(data)
+
+    async def rotate_keys(
+        self,
+        new_key_pair: BeamIdentity | BeamIdentityData,
+    ) -> KeyRotationResult:
+        identity = (
+            new_key_pair
+            if isinstance(new_key_pair, BeamIdentity)
+            else BeamIdentity.from_data(new_key_pair)
+        )
+        data = await self._request(
+            "POST",
+            f"/agents/{self._identity.beam_id}/keys/rotate",
+            json={"publicKey": identity.public_key_base64},
+        )
+        self._identity = identity
+        return KeyRotationResult.from_dict(
+            data,
+            beam_id=self._identity.beam_id,
+            public_key=self._identity.public_key_base64,
+        )
+
+    async def browse(
+        self,
+        page: int = 1,
+        filters: Optional[BrowseFilters] = None,
+    ) -> BrowseResult:
+        params = {"page": str(page), **(filters.to_params() if filters else {})}
+        try:
+            data = await self._request("GET", "/agents/browse", params=params)
+            agents = [
+                AgentProfile.from_dict(agent)
+                for agent in data.get("agents", [])
+                if isinstance(agent, dict)
+            ]
+            return BrowseResult(
+                page=data.get("page", page),
+                page_size=data.get("pageSize", data.get("page_size", len(agents))),
+                total=data.get("total", len(agents)),
+                agents=agents,
+            )
+        except httpx.HTTPStatusError as exc:
+            if exc.response.status_code != 404:
+                raise
+            search_query = None
+            if filters and filters.capability:
+                from .types import AgentSearchQuery
+
+                search_query = AgentSearchQuery(capabilities=[filters.capability])
+            agents = await self._directory.search(search_query)
+            filtered = [
+                AgentProfile.from_dict(
+                    {
+                        **agent.__dict__,
+                        "verificationTier": "verified" if agent.verified else "basic",
+                    }
+                )
+                for agent in agents
+                if not filters or not filters.verified_only or agent.verified
+            ]
+            return BrowseResult(
+                page=page,
+                page_size=len(filtered),
+                total=len(filtered),
+                agents=filtered,
+            )
+
+    async def get_stats(self) -> DirectoryStats:
+        data = await self._request("GET", "/stats")
+        return DirectoryStats.from_dict(data)
+
+    async def delegate(
+        self,
+        target_beam_id: str,
+        scope: str,
+        expires_in: Optional[int] = None,
+    ) -> Delegation:
+        data = await self._request(
+            "POST",
+            "/delegations",
+            json={
+                "sourceBeamId": self._identity.beam_id,
+                "targetBeamId": target_beam_id,
+                "scope": scope,
+                "expiresIn": expires_in,
+            },
+        )
+        return Delegation.from_dict(data)
+
+    async def report(self, target_beam_id: str, reason: str) -> Report:
+        data = await self._request(
+            "POST",
+            "/reports",
+            json={
+                "reporterBeamId": self._identity.beam_id,
+                "targetBeamId": target_beam_id,
+                "reason": reason,
+            },
+        )
+        return Report.from_dict(data)
 
     async def send(
         self,
@@ -97,12 +196,6 @@ class BeamClient:
         params: Optional[dict[str, Any]] = None,
         timeout_ms: int = 30_000,
     ) -> ResultFrame:
-        """
-        Send an intent to another agent.
-
-        Tries HTTP first (via directory routing endpoint), falls back to
-        a direct WebSocket connection if available.
-        """
         frame = create_intent_frame(
             intent=intent,
             from_id=self._identity.beam_id,
@@ -112,17 +205,14 @@ class BeamClient:
         )
         return await self._send_via_http(frame, timeout_ms)
 
-    # ── Intent handling ────────────────────────────────────────────────────────
-
     def on_intent(self, intent: str) -> Callable[[IntentHandler], IntentHandler]:
-        """Decorator to register an intent handler."""
         def decorator(fn: IntentHandler) -> IntentHandler:
             self._intent_handlers[intent] = fn
             return fn
+
         return decorator
 
     async def handle_intent(self, frame: IntentFrame) -> ResultFrame:
-        """Dispatch an incoming IntentFrame to the registered handler."""
         handler = self._intent_handlers.get(frame.intent)
         start = time.time()
         if handler is None:
@@ -134,18 +224,15 @@ class BeamClient:
                 latency=int((time.time() - start) * 1000),
             )
         try:
-            result = await handler(frame)
-            return result
+            return await handler(frame)
         except Exception as exc:
             return create_result_frame(
                 success=False,
                 nonce=frame.nonce,
                 error=str(exc),
-                error_code="HANDLER_ERROR",
+                error_code="INTENT_HANDLER_ERROR",
                 latency=int((time.time() - start) * 1000),
             )
-
-    # ── Natural Language Communication ────────────────────────────────────────
 
     def thread(
         self,
@@ -154,34 +241,17 @@ class BeamClient:
         language: str = "en",
         timeout_ms: int = 60_000,
     ) -> "BeamThread":
-        """Start a multi-turn conversation thread."""
         return BeamThread(self, to, language=language, timeout_ms=timeout_ms)
 
     async def talk(
         self,
         to: BeamIdString,
         message: str,
-        *,
         context: Optional[dict[str, Any]] = None,
         language: str = "en",
         timeout_ms: int = 60_000,
         thread_id: Optional[str] = None,
     ) -> dict[str, Any]:
-        """
-        Send a natural language message to another agent.
-
-        The receiving agent uses its LLM to interpret and respond.
-        Returns a dict with 'message' (str), 'structured' (optional dict),
-        and 'raw' (ResultFrame).
-
-        Example::
-
-            reply = await client.talk(
-                "clara@coppen.beam.directory",
-                "Was weißt du über Chris Schnorrenberg?"
-            )
-            print(reply["message"])  # Natural language response
-        """
         if not message:
             raise ValueError("Message must be non-empty")
         if len(message) > 32768:
@@ -205,6 +275,9 @@ class BeamClient:
         return {
             "message": result.payload.get("message", "") if result.payload else "",
             "structured": result.payload.get("structured") if result.payload else None,
+            "threadId": (
+                result.payload.get("threadId") if result.payload else thread_id
+            ),
             "raw": result,
         }
 
@@ -215,20 +288,6 @@ class BeamClient:
             Coroutine[Any, Any, tuple[str, Optional[dict[str, Any]]]],
         ],
     ) -> None:
-        """
-        Register a natural language message handler.
-
-        The handler receives (message, from_id, frame) and must return
-        (reply_message, optional_structured_data).
-
-        Example::
-
-            async def handle_talk(message, from_id, frame):
-                answer = await my_llm.generate(message)
-                return answer, {"confidence": 0.95}
-
-            client.on_talk(handle_talk)
-        """
         async def _wrapper(frame: IntentFrame) -> ResultFrame:
             msg = frame.params.get("message", "") if frame.params else ""
             start = time.time()
@@ -246,12 +305,32 @@ class BeamClient:
 
         self._intent_handlers["conversation.message"] = _wrapper
 
-    # ── Private ────────────────────────────────────────────────────────────────
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        params: Optional[dict[str, str]] = None,
+        json: Optional[dict[str, Any]] = None,
+    ) -> dict[str, Any]:
+        async with httpx.AsyncClient() as client:
+            response = await client.request(
+                method,
+                f"{self._directory_url}{path}",
+                params=params,
+                json=json,
+                headers={"Content-Type": "application/json"},
+                timeout=30.0,
+            )
+        response.raise_for_status()
+        body = response.json()
+        if not isinstance(body, dict):
+            raise ValueError("Expected object response from directory")
+        return body
 
     async def _send_via_http(
         self, frame: IntentFrame, timeout_ms: int
     ) -> ResultFrame:
-        """Route an intent via the directory's HTTP endpoint."""
         timeout = timeout_ms / 1000
         async with httpx.AsyncClient() as client:
             res = await client.post(
@@ -276,26 +355,15 @@ class BeamClient:
 
 
 class BeamThread:
-    """
-    Multi-turn conversation thread between two agents.
-
-    Example::
-
-        chat = client.thread("clara@coppen.beam.directory")
-        r1 = await chat.say("Was weißt du über Chris?")
-        r2 = await chat.say("Und seine Pipeline?")  # keeps context
-    """
-
     def __init__(
         self,
         client: BeamClient,
-        to: "BeamIdString",
+        to: BeamIdString,
         *,
         language: str = "en",
         timeout_ms: int = 60_000,
     ) -> None:
-        import uuid
-        self.thread_id = str(uuid.uuid4())
+        self.thread_id = BeamIdentity.generate_nonce()
         self._client = client
         self._to = to
         self._language = language
@@ -304,9 +372,8 @@ class BeamThread:
     async def say(
         self,
         message: str,
-        context: "Optional[dict[str, Any]]" = None,
+        context: Optional[dict[str, Any]] = None,
     ) -> dict[str, Any]:
-        """Send a message in this thread."""
         return await self._client.talk(
             self._to,
             message,

@@ -41,7 +41,7 @@ export async function cmdRegister(options: RegisterOptions): Promise<void> {
     console.log(chalk.dim('─'.repeat(40)))
     console.log(`${chalk.cyan('Beam ID:')}      ${chalk.bold(record.beamId)}`)
     console.log(`${chalk.cyan('Display:')}      ${record.displayName}`)
-    console.log(`${chalk.cyan('Org:')}          ${record.org}`)
+    console.log(`${chalk.cyan('Org:')}          ${record.org ?? chalk.dim('consumer')}`)
     console.log(`${chalk.cyan('Trust Score:')} ${(record.trustScore * 100).toFixed(0)}%`)
     console.log(`${chalk.cyan('Verified:')}     ${record.verified ? chalk.green('Yes ✓') : chalk.yellow('No')}`)
     if (record.capabilities.length > 0) {

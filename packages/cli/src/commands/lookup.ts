@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import ora from 'ora'
 import { BeamDirectory } from '@beam-protocol/sdk'
 import type { BeamIdString } from '@beam-protocol/sdk'
-import { loadConfig } from '../config.js'
+import { BEAM_ID_PATTERN, resolveDirectoryUrl } from '../config.js'
 
 interface LookupOptions {
   directory?: string
@@ -10,13 +10,11 @@ interface LookupOptions {
 }
 
 export async function cmdLookup(beamId: string, options: LookupOptions): Promise<void> {
-  const config = loadConfig()
-  const directoryUrl = options.directory ?? config.directoryUrl
+  const directoryUrl = resolveDirectoryUrl(options.directory)
 
-  // Validate beam ID format
-  if (!beamId.match(/^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/)) {
+  if (!BEAM_ID_PATTERN.test(beamId)) {
     console.error(chalk.red(`✖ Invalid Beam ID format: ${beamId}`))
-    console.error(chalk.dim('  Expected: agent@org.beam.directory'))
+    console.error(chalk.dim('  Expected: agent@beam.directory or agent@org.beam.directory'))
     process.exit(1)
   }
 
@@ -44,11 +42,11 @@ export async function cmdLookup(beamId: string, options: LookupOptions): Promise
     console.log(chalk.bold(`🤖 ${record.displayName}`))
     console.log(chalk.dim('─'.repeat(40)))
     console.log(`${chalk.cyan('Beam ID:')}      ${chalk.bold(record.beamId)}`)
-    console.log(`${chalk.cyan('Org:')}          ${record.org}`)
+    console.log(`${chalk.cyan('Org:')}          ${record.org ?? chalk.dim('consumer')}`)
     console.log(`${chalk.cyan('Trust Score:')} ${trustBar} ${(record.trustScore * 100).toFixed(0)}%`)
     console.log(`${chalk.cyan('Verified:')}     ${record.verified ? chalk.green('✓ Verified') : chalk.yellow('Unverified')}`)
     if (record.capabilities.length > 0) {
-      console.log(`${chalk.cyan('Capabilities:')} ${record.capabilities.map(c => chalk.blue(c)).join(', ')}`)
+      console.log(`${chalk.cyan('Capabilities:')} ${record.capabilities.map((capability: string) => chalk.blue(capability)).join(', ')}`)
     }
     console.log(`${chalk.cyan('Last Seen:')}   ${new Date(record.lastSeen).toLocaleString()}`)
     console.log(`${chalk.cyan('Registered:')}  ${new Date(record.createdAt).toLocaleString()}`)

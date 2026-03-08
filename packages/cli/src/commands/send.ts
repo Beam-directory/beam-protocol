@@ -2,7 +2,7 @@ import chalk from 'chalk'
 import ora from 'ora'
 import { BeamClient } from '@beam-protocol/sdk'
 import type { BeamIdString } from '@beam-protocol/sdk'
-import { loadConfig } from '../config.js'
+import { BEAM_ID_PATTERN, loadConfig } from '../config.js'
 
 interface SendOptions {
   directory?: string
@@ -20,14 +20,12 @@ export async function cmdSend(
   const directoryUrl = options.directory ?? config.directoryUrl
   const timeoutMs = options.timeout ? parseInt(options.timeout, 10) * 1000 : 10000
 
-  // Validate beam ID format
-  if (!to.match(/^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/)) {
+  if (!BEAM_ID_PATTERN.test(to)) {
     console.error(chalk.red(`✖ Invalid Beam ID: ${to}`))
-    console.error(chalk.dim('  Expected: agent@org.beam.directory'))
+    console.error(chalk.dim('  Expected: agent@beam.directory or agent@org.beam.directory'))
     process.exit(1)
   }
 
-  // Parse params
   let params: Record<string, unknown> = {}
   if (paramsJson) {
     try {
@@ -43,10 +41,7 @@ export async function cmdSend(
     }
   }
 
-  const spinner = ora(
-    `Sending ${chalk.bold(intent)} to ${chalk.bold(to)}...`
-  ).start()
-
+  const spinner = ora(`Sending ${chalk.bold(intent)} to ${chalk.bold(to)}...`).start()
   const startTime = Date.now()
 
   try {

@@ -22,23 +22,12 @@ from cryptography.hazmat.primitives.serialization import (
 
 from .types import AgentRegistration, BeamIdentityData, BeamIdString
 
-_BEAM_ID_PATTERN = re.compile(r"^([a-z0-9_-]+)@([a-z0-9_-]+)\.beam\.directory$")
+_AGENT_RE = re.compile(r"^[a-z0-9_-]+$")
+_CONSUMER_BEAM_ID_PATTERN = re.compile(r"^([a-z0-9_-]+)@beam\.directory$")
+_ORG_BEAM_ID_PATTERN = re.compile(r"^([a-z0-9_-]+)@([a-z0-9_-]+)\.beam\.directory$")
 
 
 class BeamIdentity:
-    """
-    A Beam identity wrapping an Ed25519 keypair.
-
-    Usage::
-
-        identity = BeamIdentity.generate(agent_name="jarvis", org_name="coppen")
-        data = identity.export()          # BeamIdentityData (serialisable)
-        identity2 = BeamIdentity.from_data(data)
-
-        sig = identity.sign("hello")
-        ok = BeamIdentity.verify("hello", sig, identity.public_key_base64)
-    """
-
     def __init__(
         self,
         beam_id: BeamIdString,
@@ -48,12 +37,9 @@ class BeamIdentity:
         self._beam_id = beam_id
         self._private_key = private_key
         self._public_key = public_key
-        # Cache base64 representations
         self._public_key_base64 = base64.b64encode(
             public_key.public_bytes(Encoding.DER, PublicFormat.SubjectPublicKeyInfo)
         ).decode()
-
-    # ── Properties ────────────────────────────────────────────────────────────
 
     @property
     def beam_id(self) -> BeamIdString:
@@ -61,27 +47,26 @@ class BeamIdentity:
 
     @property
     def public_key_base64(self) -> str:
-        """SPKI DER encoded public key, base64."""
         return self._public_key_base64
 
-    # ── Factory methods ────────────────────────────────────────────────────────
-
     @classmethod
-    def generate(cls, agent_name: str, org_name: str) -> "BeamIdentity":
-        """Generate a new Ed25519 keypair and derive a Beam ID."""
-        if not re.match(r"^[a-z0-9_-]+$", agent_name):
+    def generate(cls, agent_name: str, org_name: Optional[str] = None) -> "BeamIdentity":
+        if not _AGENT_RE.match(agent_name):
             raise ValueError("agent_name must match [a-z0-9_-]+")
-        if not re.match(r"^[a-z0-9_-]+$", org_name):
+        if org_name is not None and not _AGENT_RE.match(org_name):
             raise ValueError("org_name must match [a-z0-9_-]+")
 
         private_key = Ed25519PrivateKey.generate()
         public_key = private_key.public_key()
-        beam_id: BeamIdString = f"{agent_name}@{org_name}.beam.directory"
+        beam_id: BeamIdString
+        if org_name:
+            beam_id = f"{agent_name}@{org_name}.beam.directory"
+        else:
+            beam_id = f"{agent_name}@beam.directory"
         return cls(beam_id, private_key, public_key)
 
     @classmethod
     def from_data(cls, data: BeamIdentityData) -> "BeamIdentity":
-        """Reconstruct an identity from serialised key data."""
         private_key_bytes = base64.b64decode(data.private_key_base64)
         public_key_bytes = base64.b64decode(data.public_key_base64)
 
@@ -95,10 +80,7 @@ class BeamIdentity:
 
         return cls(data.beam_id, private_key, public_key)
 
-    # ── Serialisation ──────────────────────────────────────────────────────────
-
     def export(self) -> BeamIdentityData:
-        """Export identity data (including private key) for storage."""
         private_bytes = self._private_key.private_bytes(
             Encoding.DER, PrivateFormat.PKCS8, NoEncryption()
         )
@@ -108,16 +90,12 @@ class BeamIdentity:
             private_key_base64=base64.b64encode(private_bytes).decode(),
         )
 
-    # ── Signing & Verification ─────────────────────────────────────────────────
-
     def sign(self, data: str) -> str:
-        """Sign a string with the private key, return base64 signature."""
         signature = self._private_key.sign(data.encode("utf-8"))
         return base64.b64encode(signature).decode()
 
     @staticmethod
     def verify(data: str, signature_base64: str, public_key_base64: str) -> bool:
-        """Verify an Ed25519 signature. Returns False on any error."""
         try:
             public_key_bytes = base64.b64decode(public_key_base64)
             public_key = load_der_public_key(public_key_bytes)
@@ -129,19 +107,24 @@ class BeamIdentity:
         except Exception:
             return False
 
-    # ── Utilities ─────────────────────────────────────────────────────────────
-
     @staticmethod
     def parse_beam_id(beam_id: str) -> Optional[dict[str, str]]:
-        """Parse a Beam ID into agent + org parts. Returns None if invalid."""
-        m = _BEAM_ID_PATTERN.match(beam_id)
-        if not m:
-            return None
-        return {"agent": m.group(1), "org": m.group(2)}
+        consumer_match = _CONSUMER_BEAM_ID_PATTERN.match(beam_id)
+        if consumer_match:
+            return {"agent": consumer_match.group(1), "kind": "consumer"}
+
+        org_match = _ORG_BEAM_ID_PATTERN.match(beam_id)
+        if org_match:
+            return {
+                "agent": org_match.group(1),
+                "org": org_match.group(2),
+                "kind": "organization",
+            }
+
+        return None
 
     @staticmethod
     def generate_nonce() -> str:
-        """Generate a UUID v4 nonce for replay protection."""
         return str(uuid.uuid4())
 
     def to_registration(
@@ -149,7 +132,6 @@ class BeamIdentity:
         display_name: str,
         capabilities: Optional[list[str]] = None,
     ) -> AgentRegistration:
-        """Create an AgentRegistration from this identity."""
         parsed = self.parse_beam_id(self._beam_id)
         if not parsed:
             raise ValueError(f"Invalid Beam ID: {self._beam_id}")
@@ -158,7 +140,7 @@ class BeamIdentity:
             display_name=display_name,
             capabilities=capabilities or [],
             public_key=self._public_key_base64,
-            org=parsed["org"],
+            org=parsed.get("org"),
         )
 
     def __repr__(self) -> str:
