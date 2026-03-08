@@ -48,8 +48,14 @@ export function formatDateTime(value?: string | null): string {
 
 export function trustScoreColor(score: number): string {
   if (score < 0.3) return 'bg-red-500'
-  if (score < 0.7) return 'bg-amber-500'
+  if (score < 0.7) return 'bg-yellow-500'
   return 'bg-emerald-500'
+}
+
+export function trustScoreTextColor(score: number): string {
+  if (score < 0.3) return 'text-red-600 dark:text-red-400'
+  if (score < 0.7) return 'text-yellow-600 dark:text-yellow-400'
+  return 'text-emerald-600 dark:text-emerald-400'
 }
 
 export function trustScoreText(score: number): string {

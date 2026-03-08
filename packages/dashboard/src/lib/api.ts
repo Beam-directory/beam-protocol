@@ -188,9 +188,9 @@ export interface IntentFeedMessage {
   entry?: RecentIntent
 }
 
-const DEFAULT_DIRECTORY_URL = 'http://localhost:3100'
+const DEFAULT_DIRECTORY_URL = 'https://api.beam.directory'
 
-export const DIRECTORY_URL = (import.meta.env.VITE_DIRECTORY_URL || DEFAULT_DIRECTORY_URL).replace(/\/$/, '')
+export const DIRECTORY_URL = (import.meta.env.VITE_API_URL || DEFAULT_DIRECTORY_URL).replace(/\/$/, '')
 export const DIRECTORY_WS_URL = DIRECTORY_URL.replace(/^http/, 'ws')
 
 class ApiError extends Error {
