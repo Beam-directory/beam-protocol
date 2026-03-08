@@ -11,11 +11,13 @@ import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
 const connections = new Map<string, WebSocket>()
+const intentFeedSubscribers = new Set<WebSocket>()
 
 const pendingResults = new Map<string, {
   db: Database
   fromBeamId: string
   toBeamId: string
+  intentType: string
   startedAtMs: number
   resolve: (frame: ResultFrame) => void
   reject: (err: Error) => void
@@ -41,6 +43,23 @@ export function createWebSocketServer(db: Database): WebSocketServer {
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const urlStr = req.url ?? '/'
     const url = new URL(urlStr, 'http://localhost')
+    const feed = url.searchParams.get('feed')
+
+    if (feed === 'intents') {
+      intentFeedSubscribers.add(ws)
+      sendJson(ws, { type: 'feed_connected' })
+
+      ws.on('close', () => {
+        intentFeedSubscribers.delete(ws)
+      })
+
+      ws.on('error', () => {
+        intentFeedSubscribers.delete(ws)
+      })
+
+      return
+    }
+
     const beamId = url.searchParams.get('beamId')
 
     if (!beamId) {
@@ -111,6 +130,17 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
   enforceSecurityChecks(db, prepared, sender.public_key)
 
   logIntentStart(db, prepared)
+  broadcastIntentFeed({
+    nonce: prepared.nonce,
+    from: prepared.from,
+    to: prepared.to,
+    intentType: prepared.intent,
+    timestamp: prepared.timestamp,
+    completedAt: null,
+    roundTripLatencyMs: null,
+    status: 'pending',
+    errorCode: null,
+  })
 
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
@@ -120,6 +150,17 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
       toBeamId: prepared.to,
       success: false,
       latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
       errorCode: 'OFFLINE',
     })
     throw new RelayError('OFFLINE', `Agent ${prepared.to} is not currently connected`)
@@ -141,6 +182,17 @@ export async function relayIntentFromHttp(db: Database, frame: IntentFrame, time
       toBeamId: prepared.to,
       success: false,
       latencyMs: null,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
       errorCode: 'DELIVERY_FAILED',
     })
     throw new RelayError('DELIVERY_FAILED', err instanceof Error ? err.message : 'Failed to relay intent')
@@ -243,6 +295,17 @@ async function handleIntent(
   }
 
   logIntentStart(db, prepared)
+  broadcastIntentFeed({
+    nonce: prepared.nonce,
+    from: prepared.from,
+    to: prepared.to,
+    intentType: prepared.intent,
+    timestamp: prepared.timestamp,
+    completedAt: null,
+    roundTripLatencyMs: null,
+    status: 'pending',
+    errorCode: null,
+  })
 
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
@@ -252,6 +315,17 @@ async function handleIntent(
       toBeamId: prepared.to,
       success: false,
       latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
       errorCode: 'OFFLINE',
     })
     sendJson(senderWs, {
@@ -398,13 +472,25 @@ function handleResult(frame: ResultFrame): void {
 
   clearTimeout(pending.timeout)
   pendingResults.delete(frame.nonce)
+  const latencyMs = typeof frame.latency === 'number' ? frame.latency : Math.max(0, Date.now() - pending.startedAtMs)
   finalizeIntentLog(pending.db, {
     nonce: frame.nonce,
     fromBeamId: pending.fromBeamId,
     toBeamId: pending.toBeamId,
     success: frame.success,
-    latencyMs: typeof frame.latency === 'number' ? frame.latency : Math.max(0, Date.now() - pending.startedAtMs),
+    latencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? 'RESULT_ERROR'),
+  })
+  broadcastIntentFeed({
+    nonce: frame.nonce,
+    from: pending.fromBeamId,
+    to: pending.toBeamId,
+    intentType: pending.intentType,
+    timestamp: new Date(pending.startedAtMs).toISOString(),
+    completedAt: new Date().toISOString(),
+    roundTripLatencyMs: latencyMs,
+    status: frame.success ? 'success' : 'error',
+    errorCode: frame.success ? null : (frame.errorCode ?? 'RESULT_ERROR'),
   })
   pending.resolve(frame)
 }
@@ -420,12 +506,24 @@ function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number)
   return new Promise<ResultFrame>((resolve, reject) => {
     const timeout = setTimeout(() => {
       pendingResults.delete(frame.nonce)
+      const latencyMs = Math.max(0, Date.now() - safeStartedAtMs)
       finalizeIntentLog(db, {
         nonce: frame.nonce,
         fromBeamId: frame.from,
         toBeamId: frame.to,
         success: false,
-        latencyMs: Math.max(0, Date.now() - safeStartedAtMs),
+        latencyMs,
+        errorCode: 'TIMEOUT',
+      })
+      broadcastIntentFeed({
+        nonce: frame.nonce,
+        from: frame.from,
+        to: frame.to,
+        intentType: frame.intent,
+        timestamp: frame.timestamp,
+        completedAt: new Date().toISOString(),
+        roundTripLatencyMs: latencyMs,
+        status: 'error',
         errorCode: 'TIMEOUT',
       })
       reject(new RelayError('TIMEOUT', `Intent timed out waiting for result (${timeoutMs}ms)`))
@@ -435,6 +533,7 @@ function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number)
       db,
       fromBeamId: frame.from,
       toBeamId: frame.to,
+      intentType: frame.intent,
       startedAtMs: safeStartedAtMs,
       resolve,
       reject,
@@ -453,5 +552,29 @@ function clearPendingResult(nonce: string): void {
 function sendJson(ws: WebSocket, payload: object): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload))
+  }
+}
+
+function broadcastIntentFeed(entry: {
+  nonce: string
+  from: string
+  to: string
+  intentType: string
+  timestamp: string
+  completedAt: string | null
+  roundTripLatencyMs: number | null
+  status: string
+  errorCode: string | null
+}): void {
+  for (const ws of intentFeedSubscribers) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      intentFeedSubscribers.delete(ws)
+      continue
+    }
+
+    sendJson(ws, {
+      type: 'intent_feed',
+      entry,
+    })
   }
 }

@@ -1,19 +1,20 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
-import type { AgentRow, RegisterRequest } from '../types.js'
+import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import {
-  registerAgent,
   getAgent,
+  getAgentDirectoryStats,
+  getAgentIntentStats,
+  registerAgent,
   searchAgents,
   updateLastSeen,
 } from '../db.js'
 
-// ---------------------------------------------------------------------------
-// Rate limiter
-// ---------------------------------------------------------------------------
-
 const requests = new Map<string, { count: number; resetAt: number }>()
+const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
 
 function checkRateLimit(ip: string, limit = 60): boolean {
   const now = Date.now()
@@ -27,7 +28,6 @@ function checkRateLimit(ip: string, limit = 60): boolean {
   return true
 }
 
-// Periodically prune stale entries to avoid unbounded memory growth
 setInterval(() => {
   const now = Date.now()
   for (const [key, entry] of requests.entries()) {
@@ -35,17 +35,64 @@ setInterval(() => {
   }
 }, 5 * 60_000)
 
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
+function parseCapabilities(value: unknown): string[] | null {
+  if (!Array.isArray(value)) return null
+  const capabilities = value
+    .filter((item): item is string => typeof item === 'string')
+    .map((item) => item.trim())
+    .filter(Boolean)
 
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
+  return capabilities.length === value.length ? capabilities : null
+}
+
+function slugify(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-')
+    .slice(0, 32)
+}
+
+function deriveOrg(email: string): string {
+  const domain = email.split('@')[1] ?? 'public'
+  const label = domain.split('.')[0] ?? 'public'
+  return slugify(label) || 'public'
+}
+
+function buildBeamId(baseName: string, org: string, db: Database): string {
+  let candidate = `${baseName}@${org}.beam.directory`
+  if (!getAgent(db, candidate)) {
+    return candidate
+  }
+
+  for (let index = 2; index < 1000; index++) {
+    candidate = `${baseName}-${index}@${org}.beam.directory`
+    if (!getAgent(db, candidate)) {
+      return candidate
+    }
+  }
+
+  return `${baseName}-${Date.now()}@${org}.beam.directory`
+}
 
 function serializeAgent(row: AgentRow): object {
   return {
-    ...row,
+    beamId: row.beam_id,
+    org: row.org,
+    displayName: row.display_name,
     capabilities: JSON.parse(row.capabilities) as string[],
+    publicKey: row.public_key,
+    email: row.email,
+    emailVerified: row.email_verified === 1,
+    verificationTier: row.verification_tier,
+    description: row.description,
+    logoUrl: row.logo_url,
+    trustScore: row.trust_score,
     verified: row.verified === 1,
+    createdAt: row.created_at,
+    lastSeen: row.last_seen,
   }
 }
 
@@ -57,16 +104,23 @@ function getClientIp(req: Request): string {
   )
 }
 
-// ---------------------------------------------------------------------------
-// Router factory
-// ---------------------------------------------------------------------------
-
 export function agentsRouter(db: Database): Hono {
   const router = new Hono()
 
-  // -------------------------------------------------------------------------
-  // POST /agents/register
-  // -------------------------------------------------------------------------
+  router.get('/stats', (c) => {
+    const ip = getClientIp(c.req.raw)
+    if (!checkRateLimit(ip)) {
+      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
+    }
+
+    try {
+      return c.json(getAgentDirectoryStats(db))
+    } catch (err) {
+      console.error('Agent stats error:', err)
+      return c.json({ error: 'Failed to load agent stats', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   router.post('/register', async (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip, 30)) {
@@ -80,66 +134,107 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
     }
 
-    if (
-      typeof body !== 'object' ||
-      body === null ||
-      Array.isArray(body)
-    ) {
+    if (typeof body !== 'object' || body === null || Array.isArray(body)) {
       return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
     }
 
     const raw = body as Record<string, unknown>
-
-    // Validate beamId
-    if (typeof raw['beamId'] !== 'string' || !BEAM_ID_RE.test(raw['beamId'])) {
-      return c.json({
-        error: 'beamId must match pattern agent@org.beam.directory (lowercase alphanumeric, hyphens, underscores)',
-        errorCode: 'INVALID_BEAM_ID',
-      }, 400)
-    }
-
-    // Validate publicKey
-    if (typeof raw['publicKey'] !== 'string' || raw['publicKey'].trim().length === 0) {
-      return c.json({ error: 'publicKey must be a non-empty string', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
-    }
-
-    // Validate capabilities
-    if (
-      !Array.isArray(raw['capabilities']) ||
-      !(raw['capabilities'] as unknown[]).every((c) => typeof c === 'string')
-    ) {
+    const capabilities = parseCapabilities(raw.capabilities)
+    if (!capabilities) {
       return c.json({ error: 'capabilities must be an array of strings', errorCode: 'INVALID_CAPABILITIES' }, 400)
     }
 
-    // Validate displayName
-    if (typeof raw['displayName'] !== 'string' || raw['displayName'].trim().length === 0) {
-      return c.json({ error: 'displayName must be a non-empty string', errorCode: 'INVALID_DISPLAY_NAME' }, 400)
+    const displayName = typeof raw.displayName === 'string'
+      ? raw.displayName.trim()
+      : typeof raw.display_name === 'string'
+        ? raw.display_name.trim()
+        : ''
+    if (!displayName) {
+      return c.json({ error: 'display_name must be a non-empty string', errorCode: 'INVALID_DISPLAY_NAME' }, 400)
     }
 
-    // Validate org
-    if (typeof raw['org'] !== 'string' || raw['org'].trim().length === 0) {
-      return c.json({ error: 'org must be a non-empty string', errorCode: 'INVALID_ORG' }, 400)
+    const email = typeof raw.email === 'string' ? raw.email.trim().toLowerCase() : ''
+    if (!EMAIL_RE.test(email)) {
+      return c.json({ error: 'email must be a valid email address', errorCode: 'INVALID_EMAIL' }, 400)
     }
 
-    const beamId = raw['beamId'] as string
-    const org = raw['org'] as string
+    const publicKey = typeof raw.publicKey === 'string'
+      ? raw.publicKey.trim()
+      : typeof raw.public_key === 'string'
+        ? raw.public_key.trim()
+        : ''
+    if (!publicKey) {
+      return c.json({ error: 'public_key must be a non-empty string', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
+    }
 
-    // Ensure org in beamId matches provided org
-    const orgFromId = beamId.split('@')[1]  // e.g. "acme.beam.directory"
-    const orgSlug = orgFromId?.split('.')[0] // e.g. "acme"
-    if (orgSlug !== org) {
+    const description = typeof raw.description === 'string' && raw.description.trim()
+      ? raw.description.trim()
+      : null
+    const logoUrl = typeof raw.logoUrl === 'string'
+      ? raw.logoUrl.trim()
+      : typeof raw.logo_url === 'string'
+        ? raw.logo_url.trim()
+        : ''
+    const cleanedLogoUrl = logoUrl || null
+    if (cleanedLogoUrl) {
+      try {
+        new URL(cleanedLogoUrl)
+      } catch {
+        return c.json({ error: 'logo_url must be a valid absolute URL', errorCode: 'INVALID_LOGO_URL' }, 400)
+      }
+    }
+
+    const emailVerified = raw.emailVerified === true || raw.email_verified === true
+    const requestedTier = typeof raw.verificationTier === 'string'
+      ? raw.verificationTier
+      : typeof raw.verification_tier === 'string'
+        ? raw.verification_tier
+        : undefined
+    if (requestedTier && !ALLOWED_TIERS.has(requestedTier as VerificationTier)) {
+      return c.json({ error: 'verification_tier is invalid', errorCode: 'INVALID_VERIFICATION_TIER' }, 400)
+    }
+
+    let beamId = typeof raw.beamId === 'string' ? raw.beamId.trim().toLowerCase() : ''
+    let org = typeof raw.org === 'string' ? raw.org.trim().toLowerCase() : ''
+
+    if (beamId) {
+      if (!BEAM_ID_RE.test(beamId)) {
+        return c.json({
+          error: 'beamId must match pattern agent@org.beam.directory (lowercase alphanumeric, hyphens, underscores)',
+          errorCode: 'INVALID_BEAM_ID',
+        }, 400)
+      }
+      org = org || beamId.split('@')[1]?.split('.')[0] || ''
+    }
+
+    if (!org) {
+      org = deriveOrg(email)
+    }
+
+    if (!beamId) {
+      const baseName = slugify(displayName) || slugify(email.split('@')[0] ?? '') || 'agent'
+      beamId = buildBeamId(baseName, org, db)
+    }
+
+    const orgFromId = beamId.split('@')[1]?.split('.')[0]
+    if (orgFromId !== org) {
       return c.json({
-        error: `org field (${org}) does not match org extracted from beamId (${orgSlug ?? 'unknown'})`,
+        error: `org field (${org}) does not match org extracted from beamId (${orgFromId ?? 'unknown'})`,
         errorCode: 'ORG_MISMATCH',
       }, 400)
     }
 
     const request: RegisterRequest = {
       beamId,
-      displayName: (raw['displayName'] as string).trim(),
-      capabilities: raw['capabilities'] as string[],
-      publicKey: (raw['publicKey'] as string).trim(),
       org,
+      displayName,
+      capabilities,
+      publicKey,
+      email,
+      emailVerified,
+      description,
+      logoUrl: cleanedLogoUrl,
+      verificationTier: (requestedTier as VerificationTier | undefined) ?? (emailVerified ? 'verified' : 'basic'),
     }
 
     try {
@@ -152,9 +247,6 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // -------------------------------------------------------------------------
-  // GET /agents/search
-  // -------------------------------------------------------------------------
   router.get('/search', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
@@ -165,15 +257,17 @@ export function agentsRouter(db: Database): Hono {
     const capabilitiesParam = c.req.query('capabilities')
     const minTrustScoreParam = c.req.query('minTrustScore')
     const limitParam = c.req.query('limit')
+    const q = c.req.query('q')?.trim().toLowerCase()
+    const verificationTier = c.req.query('verificationTier')?.trim().toLowerCase()
 
     const capabilities = capabilitiesParam
-      ? capabilitiesParam.split(',').map((s) => s.trim()).filter(Boolean)
+      ? capabilitiesParam.split(',').map((value) => value.trim()).filter(Boolean)
       : undefined
 
     let minTrustScore: number | undefined
     if (minTrustScoreParam !== undefined) {
       const parsed = parseFloat(minTrustScoreParam)
-      if (isNaN(parsed) || parsed < 0 || parsed > 1) {
+      if (Number.isNaN(parsed) || parsed < 0 || parsed > 1) {
         return c.json({ error: 'minTrustScore must be a number between 0 and 1', errorCode: 'INVALID_PARAM' }, 400)
       }
       minTrustScore = parsed
@@ -182,19 +276,37 @@ export function agentsRouter(db: Database): Hono {
     let limit: number | undefined
     if (limitParam !== undefined) {
       const parsed = parseInt(limitParam, 10)
-      if (isNaN(parsed) || parsed < 1) {
+      if (Number.isNaN(parsed) || parsed < 1) {
         return c.json({ error: 'limit must be a positive integer', errorCode: 'INVALID_PARAM' }, 400)
       }
       limit = parsed
     }
 
     try {
-      const rows = searchAgents(db, {
+      let rows = searchAgents(db, {
         org: orgParam,
         capabilities,
         minTrustScore,
         limit,
       })
+
+      if (verificationTier && ALLOWED_TIERS.has(verificationTier as VerificationTier)) {
+        rows = rows.filter((row) => row.verification_tier === verificationTier)
+      }
+
+      if (q) {
+        rows = rows.filter((row) => {
+          const haystack = [
+            row.beam_id,
+            row.display_name,
+            row.org,
+            row.description ?? '',
+            row.capabilities,
+          ].join(' ').toLowerCase()
+          return haystack.includes(q)
+        })
+      }
+
       return c.json({ agents: rows.map(serializeAgent), total: rows.length })
     } catch (err) {
       console.error('Search error:', err)
@@ -202,18 +314,13 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // -------------------------------------------------------------------------
-  // GET /agents/:beamId
-  // -------------------------------------------------------------------------
   router.get('/:beamId', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
       return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
     }
 
-    const rawId = c.req.param('beamId')
-    const beamId = decodeURIComponent(rawId)
-
+    const beamId = decodeURIComponent(c.req.param('beamId'))
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -223,25 +330,24 @@ export function agentsRouter(db: Database): Hono {
       if (!agent) {
         return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
       }
-      return c.json(serializeAgent(agent))
+
+      return c.json({
+        ...serializeAgent(agent),
+        intentStats: getAgentIntentStats(db, beamId),
+      })
     } catch (err) {
       console.error('Get agent error:', err)
       return c.json({ error: 'Failed to retrieve agent', errorCode: 'DB_ERROR' }, 500)
     }
   })
 
-  // -------------------------------------------------------------------------
-  // POST /agents/:beamId/heartbeat
-  // -------------------------------------------------------------------------
   router.post('/:beamId/heartbeat', (c) => {
     const ip = getClientIp(c.req.raw)
     if (!checkRateLimit(ip)) {
       return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
     }
 
-    const rawId = c.req.param('beamId')
-    const beamId = decodeURIComponent(rawId)
-
+    const beamId = decodeURIComponent(c.req.param('beamId'))
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -253,7 +359,6 @@ export function agentsRouter(db: Database): Hono {
       }
 
       updateLastSeen(db, beamId)
-
       const updated = getAgent(db, beamId) as AgentRow
       return c.json(serializeAgent(updated))
     } catch (err) {

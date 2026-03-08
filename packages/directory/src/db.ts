@@ -1,6 +1,16 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type { AgentRow, IntentFrame, IntentLogRow, OrgAgentRow, OrgRow, RegisterRequest, TrustScoreRow } from './types.js'
+import type {
+  AgentIntentStats,
+  AgentRow,
+  IntentFrame,
+  IntentLogRow,
+  OrgAgentRow,
+  OrgRow,
+  RegisterRequest,
+  TrustScoreRow,
+  VerificationTier,
+} from './types.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -51,6 +61,11 @@ function initSchema(db: DB): void {
       display_name TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       public_key TEXT NOT NULL,
+      email TEXT,
+      email_verified INTEGER NOT NULL DEFAULT 0,
+      verification_tier TEXT NOT NULL DEFAULT 'basic',
+      description TEXT,
+      logo_url TEXT,
       trust_score REAL NOT NULL DEFAULT 0.5,
       verified INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL,
@@ -126,6 +141,37 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_trust_scores_updated
       ON trust_scores(last_updated DESC);
   `)
+
+  ensureAgentColumns(db)
+}
+
+function getTableColumns(db: DB, tableName: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return new Set(rows.map((row) => row.name))
+}
+
+function ensureAgentColumns(db: DB): void {
+  const columns = getTableColumns(db, 'agents')
+
+  if (!columns.has('email')) {
+    db.exec('ALTER TABLE agents ADD COLUMN email TEXT')
+  }
+
+  if (!columns.has('email_verified')) {
+    db.exec('ALTER TABLE agents ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 0')
+  }
+
+  if (!columns.has('verification_tier')) {
+    db.exec("ALTER TABLE agents ADD COLUMN verification_tier TEXT NOT NULL DEFAULT 'basic'")
+  }
+
+  if (!columns.has('description')) {
+    db.exec('ALTER TABLE agents ADD COLUMN description TEXT')
+  }
+
+  if (!columns.has('logo_url')) {
+    db.exec('ALTER TABLE agents ADD COLUMN logo_url TEXT')
+  }
 }
 
 export function buildBeamDomain(orgName: string): string {
@@ -254,6 +300,8 @@ function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
 export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const now = new Date().toISOString()
   const capabilitiesJson = JSON.stringify(data.capabilities)
+  const verified = data.verificationTier && data.verificationTier !== 'basic' ? 1 : 0
+  const verificationTier: VerificationTier = data.verificationTier ?? (data.emailVerified ? 'verified' : 'basic')
 
   const existing = getAgent(db, data.beamId)
 
@@ -264,6 +312,12 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           display_name = ?,
           capabilities = ?,
           public_key = ?,
+          email = ?,
+          email_verified = ?,
+          verification_tier = ?,
+          description = ?,
+          logo_url = ?,
+          verified = ?,
           last_seen = ?
       WHERE beam_id = ?
     `).run(
@@ -271,19 +325,46 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.displayName,
       capabilitiesJson,
       data.publicKey,
+      data.email ?? null,
+      data.emailVerified ? 1 : 0,
+      verificationTier,
+      data.description ?? null,
+      data.logoUrl ?? null,
+      verified,
       now,
       data.beamId
     )
   } else {
     db.prepare(`
-      INSERT INTO agents (beam_id, org, display_name, capabilities, public_key, trust_score, verified, created_at, last_seen)
-      VALUES (?, ?, ?, ?, ?, 0.3, 0, ?, ?)
+      INSERT INTO agents (
+        beam_id,
+        org,
+        display_name,
+        capabilities,
+        public_key,
+        email,
+        email_verified,
+        verification_tier,
+        description,
+        logo_url,
+        trust_score,
+        verified,
+        created_at,
+        last_seen
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, ?)
     `).run(
       data.beamId,
       data.org,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
+      data.email ?? null,
+      data.emailVerified ? 1 : 0,
+      verificationTier,
+      data.description ?? null,
+      data.logoUrl ?? null,
+      verified,
       now,
       now
     )
@@ -500,6 +581,62 @@ export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
     ORDER BY requested_at DESC
     LIMIT ?
   `).all(safeLimit) as IntentLogRow[]
+}
+
+export function getAgentIntentStats(db: DB, beamId: string): AgentIntentStats {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS received,
+      SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS responded,
+      AVG(CASE WHEN status = 'success' THEN round_trip_latency_ms END) AS avg_response_time_ms
+    FROM intent_log
+    WHERE to_beam_id = ?
+  `).get(beamId) as {
+    received: number | null
+    responded: number | null
+    avg_response_time_ms: number | null
+  } | undefined
+
+  return {
+    received: row?.received ?? 0,
+    responded: row?.responded ?? 0,
+    avg_response_time_ms: row?.avg_response_time_ms == null ? null : Math.round(row.avg_response_time_ms),
+  }
+}
+
+export function getAgentDirectoryStats(db: DB): {
+  total_agents: number
+  verified_agents: number
+  intents_processed: number
+  avg_response_time_ms: number | null
+} {
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS total_agents,
+      SUM(CASE WHEN verified = 1 OR verification_tier != 'basic' THEN 1 ELSE 0 END) AS verified_agents,
+      (
+        SELECT COUNT(*)
+        FROM intent_log
+      ) AS intents_processed,
+      (
+        SELECT AVG(round_trip_latency_ms)
+        FROM intent_log
+        WHERE status = 'success' AND round_trip_latency_ms IS NOT NULL
+      ) AS avg_response_time_ms
+    FROM agents
+  `).get() as {
+    total_agents: number | null
+    verified_agents: number | null
+    intents_processed: number | null
+    avg_response_time_ms: number | null
+  } | undefined
+
+  return {
+    total_agents: row?.total_agents ?? 0,
+    verified_agents: row?.verified_agents ?? 0,
+    intents_processed: row?.intents_processed ?? 0,
+    avg_response_time_ms: row?.avg_response_time_ms == null ? null : Math.round(row.avg_response_time_ms),
+  }
 }
 
 export function listTrustScores(db: DB): TrustScoreRow[] {
