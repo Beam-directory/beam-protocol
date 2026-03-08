@@ -31,7 +31,8 @@ ENV PORT=3100
 ENV DB_PATH=/data/beam-directory.db
 
 # S1: Install Litestream for SQLite → S3 streaming replication
-ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64-static.tar.gz /tmp/litestream.tar.gz
+# Litestream is Go static binary — works on Alpine without glibc
+ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
 RUN tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin/ && rm /tmp/litestream.tar.gz
 
 COPY litestream.yml /etc/litestream.yml
