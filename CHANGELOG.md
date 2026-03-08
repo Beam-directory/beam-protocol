@@ -1,42 +1,86 @@
 # Changelog
 
-All notable changes to Beam Protocol release materials are documented in this file.
+## v0.5.1 (2026-03-08)
 
-## [0.5.0] - 2026-03-08
+### 🆔 DID Identity System
+- `did:beam:tobias` (personal), `did:beam:lufthansa:booking` (org-bound), `did:beam:z6Mk...` (key-based)
+- W3C DID v1.1 compatible — Ed25519VerificationKey2020, no blockchain
+- DID resolution via `GET /agents/did/:didString`
+- Directory issuer DID: `did:beam:beam:directory`
+- Verifiable Credentials: Email, Domain, Business — all W3C VC format
 
-### Added
+### ✅ Verification Tiers
+- Email verification via Resend API (SMTP fallback)
+- Domain verification via DNS TXT records
+- Business verification: DE (Handelsregister HRB/HRA) + UK (Companies House API)
+- 4 tiers: Basic ⚪, Verified 🔵, Business 🟢, Enterprise 🟠
 
-- TypeScript SDK release under `beam-protocol-sdk` with support for identity generation, registration, profile updates, domain verification, key rotation, browsing, stats, delegations, reports, intent delivery, natural-language messaging, and threaded conversations.
-- Python SDK release under `beam-directory` with parity for Beam identity management, directory operations, intent sending, natural-language `talk`, and multi-turn conversation helpers.
-- Consumer Beam IDs alongside organization Beam IDs, enabling both `agent@beam.directory` and `agent@org.beam.directory` addressing models.
-- `did:beam` identity support, including DID document creation, DID resolution, DID deactivation/update helpers, and resolver endpoints in the directory.
-- Verifiable credential helpers for email, domain, and business assertions, plus local credential verification utilities.
-- Verification and profile management flows for public agent metadata, website/logo fields, verification state, and verification tier exposure.
-- Verification tiers covering `basic`, `verified`, `business`, and `enterprise` trust levels.
-- Directory federation with peer registration, federated agent lookup, cached remote agent documents, hop-count-aware relay, and trust propagation between directories.
-- CLI coverage for registration, browsing, profile management, verification, stats, delegations, reporting, lookup, and messaging.
-- `create-beam-agent` scaffolding for quickly bootstrapping a Beam-connected TypeScript agent.
-- `beam-langchain` integration for exposing Beam conversations and intents as LangChain tools.
-- `beam-crewai` integration for using Beam recipients from CrewAI agents and tools.
-- Dashboard and operational surfaces for live directory stats, intent activity, and verification-oriented workflows.
+### 🔑 Consumer Key Management (SDK)
+- AES-256-GCM encrypted export/import with PBKDF2 key derivation
+- BIP-39 12-word recovery phrase generation and recovery
+- QR code data format for mobile identity transfer
 
-### Improved
+### 💳 Stripe Billing
+- `POST /billing/checkout` — creates Stripe Checkout session for tier upgrades
+- Webhook handler: auto-upgrade verification tier on payment
+- Subscription management: cancel → auto-downgrade
 
-- Docs surface for the hosted documentation site and release-oriented package inventory.
-- Release packaging across the monorepo so all public artifacts align on `0.5.0`.
+### 🌐 Public Website
+- New beam.directory with agent directory, live search, verification pricing
+- Self-registration UI (vanilla HTML+JS, Ed25519 key gen in browser)
+- Mobile-responsive with hamburger menu
 
-## [0.3.0]
+### 🔧 Production Fixes
+- All 10 route files now mounted in server.ts (credentials, DID, federation were dead code)
+- Deduplicated route mounts
+- `.dockerignore` for native module isolation (better-sqlite3 arm64/amd64)
+- `ensureColumn` before queries, `CREATE INDEX` after `ensureColumn`
+- `catalog.yaml` try/catch resilience in all 3 files
+- Persistent SQLite volume on Fly.io
 
-### Added
+### 📦 Packages Published
+- npm: `beam-protocol-sdk@0.5.1`, `beam-protocol-cli@0.5.1`
+- PyPI: `beam-directory@0.5.1`, `beam-langchain@0.5.1`, `beam-crewai@0.5.1`
 
-- Public agent profiles with display names, descriptions, websites, logos, and richer directory records.
-- Verification workflows for email and domain ownership, plus the first trust-tier signals exposed through agent records.
-- Search and browse APIs for discovering agents by capability, organization, verification state, and trust filters.
-- Directory health and stats views for connected agents, relay visibility, and operational monitoring.
-- Dashboard groundwork for registration, discovery, verification, and intent observability.
-- Hosted documentation site structure with VitePress-based guide and API sections.
+---
 
-### Improved
+## v0.5.0 (2026-03-08)
 
-- Directory experience beyond basic relay, shifting Beam from a protocol prototype toward an operator-facing platform.
-- Discovery UX for teams that need verified agents instead of manually configured peer endpoints.
+### Features
+- Public Directory on Fly.io Frankfurt
+- Dashboard v2 on Vercel
+- Federation protocol (RFC-0002)
+- SDK v0.5.0 with DID and credentials support
+- 17 parallel Codex agents built this release
+
+---
+
+## v0.3.0 (2026-03-07)
+
+### Features
+- 64 vitest tests across 7 files
+- GitHub Actions CI + Docker deploy
+- Dynamic trust scores, auto-reconnect, multi-org support
+- VitePress documentation site (11 pages)
+- RFC-0002 Federation draft
+
+---
+
+## v0.2.2 (2026-03-06)
+
+### Features
+- Initial npm publish with actual dist files
+- CLI with init/send/lookup/register commands
+- Python SDK on PyPI
+- LangChain and CrewAI integrations
+
+---
+
+## v0.1.0 (2026-03-04)
+
+### Initial Release
+- Beam-ID system
+- Intent/Result frame specification (RFC-0001)
+- Ed25519 signature verification
+- Self-hosted directory server
+- Live E2E test: 4 agents, 25.8s roundtrip
