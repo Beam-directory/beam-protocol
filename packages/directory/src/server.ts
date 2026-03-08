@@ -609,6 +609,18 @@ export function createApp(db: Database): Hono {
     }
   })
 
+  app.delete('/admin/waitlist', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) return auth
+    try {
+      const result = db.prepare('DELETE FROM waitlist').run()
+      return c.json({ deleted: result.changes })
+    } catch (err) {
+      console.error('Admin waitlist clear error:', err)
+      return c.json({ error: 'Failed to clear waitlist', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   app.get('/admin/waitlist', (c) => {
     const auth = requireAdmin(c)
     if (auth instanceof Response) {
