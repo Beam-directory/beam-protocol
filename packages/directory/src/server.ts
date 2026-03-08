@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
@@ -10,6 +11,7 @@ import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
+import { listRecentIntentLogs, listTrustScores } from './db.js'
 import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -46,6 +48,492 @@ function loadIntentCatalog(): unknown {
   return JSON.parse(raw)
 }
 
+function getAdminKeyFromRequest(c: Context): string {
+  return c.req.header('x-admin-key') ?? c.req.query('key') ?? ''
+}
+
+function requireAdmin(c: Context): { ok: true; key: string } | Response {
+  const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
+  if (!configuredKey) {
+    return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
+  }
+
+  const suppliedKey = getAdminKeyFromRequest(c)
+  if (!suppliedKey || suppliedKey !== configuredKey) {
+    return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+  }
+
+  return { ok: true, key: suppliedKey }
+}
+
+function tableExists(db: Database, tableName: string): boolean {
+  const row = db.prepare(`
+    SELECT name
+    FROM sqlite_master
+    WHERE type = 'table' AND name = ?
+  `).get(tableName) as { name: string } | undefined
+
+  return Boolean(row)
+}
+
+function getTableColumns(db: Database, tableName: string): Set<string> {
+  const rows = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return new Set(rows.map((row) => row.name))
+}
+
+function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array<{ email: string; company: string | null; signupDate: string | null }>; total: number } {
+  if (!tableExists(db, 'waitlist')) {
+    return { available: false, waitlist: [], total: 0 }
+  }
+
+  const columns = getTableColumns(db, 'waitlist')
+  const emailExpr = columns.has('email') ? 'email' : columns.has('contact_email') ? 'contact_email' : ''
+  if (!emailExpr) {
+    return { available: true, waitlist: [], total: 0 }
+  }
+
+  const companyExpr = columns.has('company')
+    ? 'company'
+    : columns.has('organization')
+      ? 'organization'
+      : columns.has('source')
+        ? 'source'
+        : 'NULL'
+  const signupDateExpr = columns.has('created_at')
+    ? 'created_at'
+    : columns.has('signup_date')
+      ? 'signup_date'
+      : columns.has('createdAt')
+        ? 'createdAt'
+        : 'NULL'
+  const orderByExpr = columns.has('created_at')
+    ? 'created_at'
+    : columns.has('signup_date')
+      ? 'signup_date'
+      : columns.has('createdAt')
+        ? 'createdAt'
+        : 'rowid'
+
+  const rows = db.prepare(`
+    SELECT
+      ${emailExpr} AS email,
+      ${companyExpr} AS company,
+      ${signupDateExpr} AS signupDate
+    FROM waitlist
+    ORDER BY ${orderByExpr} DESC
+  `).all() as Array<{ email: string; company: string | null; signupDate: string | null }>
+
+  return {
+    available: true,
+    waitlist: rows,
+    total: rows.length,
+  }
+}
+
+function renderDashboardHtml(adminKey: string): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Beam Directory Admin</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #0a0a0f;
+        --card: rgba(255,255,255,0.03);
+        --accent: #F75C03;
+        --text: #e2e8f0;
+        --muted: #64748b;
+        --border: rgba(255,255,255,0.08);
+        --success: #22c55e;
+        --warning: #f59e0b;
+      }
+
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        background: radial-gradient(circle at top, rgba(247,92,3,0.12), transparent 28%), var(--bg);
+        color: var(--text);
+      }
+
+      .shell {
+        max-width: 1440px;
+        margin: 0 auto;
+        padding: 32px 20px 56px;
+      }
+
+      .hero {
+        display: flex;
+        gap: 16px;
+        justify-content: space-between;
+        align-items: flex-end;
+        margin-bottom: 24px;
+        flex-wrap: wrap;
+      }
+
+      h1, h2, h3, p { margin: 0; }
+      h1 {
+        font-size: 32px;
+        line-height: 1.1;
+        letter-spacing: -0.03em;
+      }
+
+      .subtle {
+        color: var(--muted);
+        margin-top: 8px;
+        font-size: 14px;
+      }
+
+      .meta {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        color: var(--muted);
+        font-size: 13px;
+      }
+
+      .pill, .badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        border: 1px solid var(--border);
+        background: rgba(255,255,255,0.02);
+        border-radius: 999px;
+        padding: 8px 12px;
+      }
+
+      .badge {
+        color: var(--accent);
+        border-color: rgba(247,92,3,0.35);
+        background: rgba(247,92,3,0.08);
+        font-weight: 600;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 18px;
+      }
+
+      .card {
+        background: var(--card);
+        border: 1px solid var(--border);
+        border-radius: 18px;
+        overflow: hidden;
+        backdrop-filter: blur(12px);
+        min-height: 260px;
+      }
+
+      .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        gap: 12px;
+        padding: 18px 20px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .card-body {
+        padding: 12px 0;
+      }
+
+      table {
+        width: 100%;
+        border-collapse: collapse;
+      }
+
+      th, td {
+        text-align: left;
+        padding: 12px 20px;
+        font-size: 14px;
+        border-bottom: 1px solid rgba(255,255,255,0.05);
+        vertical-align: top;
+      }
+
+      th {
+        color: var(--muted);
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+      }
+
+      tr:last-child td { border-bottom: none; }
+
+      .status {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        color: var(--text);
+        white-space: nowrap;
+      }
+
+      .dot {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: var(--muted);
+        box-shadow: 0 0 0 3px rgba(255,255,255,0.03);
+      }
+
+      .dot.online { background: var(--success); }
+      .dot.stale { background: var(--warning); }
+
+      .muted { color: var(--muted); }
+      .mono {
+        font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+        font-size: 13px;
+      }
+
+      .empty, .error {
+        padding: 24px 20px;
+        color: var(--muted);
+        font-size: 14px;
+      }
+
+      .error { color: #fca5a5; }
+
+      @media (max-width: 980px) {
+        .grid { grid-template-columns: 1fr; }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <div class="hero">
+        <div>
+          <div class="badge">Beam Directory Admin</div>
+          <h1>Network health at a glance</h1>
+          <p class="subtle">Live visibility into agents, intents, waitlist demand, and pairwise trust.</p>
+        </div>
+        <div class="meta">
+          <div class="pill">Auto-refresh every 30s</div>
+          <div class="pill">Last updated <span id="last-updated">—</span></div>
+        </div>
+      </div>
+
+      <div class="grid">
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Connected Agents</h2>
+              <p class="subtle">Registered agents with current connection state.</p>
+            </div>
+            <div class="badge" id="agents-count">0</div>
+          </div>
+          <div class="card-body" id="agents-content"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Recent Intents</h2>
+              <p class="subtle">Most recent relay attempts with round-trip latency.</p>
+            </div>
+            <div class="badge" id="intents-count">0</div>
+          </div>
+          <div class="card-body" id="intents-content"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Waitlist Signups</h2>
+              <p class="subtle">Interest from teams tracking Beam access.</p>
+            </div>
+            <div class="badge" id="waitlist-count">0</div>
+          </div>
+          <div class="card-body" id="waitlist-content"></div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <div>
+              <h2>Trust Scores</h2>
+              <p class="subtle">Latest pairwise trust values inferred from relay outcomes.</p>
+            </div>
+            <div class="badge" id="trust-count">0</div>
+          </div>
+          <div class="card-body" id="trust-content"></div>
+        </section>
+      </div>
+    </div>
+
+    <script>
+      const adminKey = ${JSON.stringify(adminKey)};
+
+      function escapeHtml(value) {
+        return String(value ?? '')
+          .replaceAll('&', '&amp;')
+          .replaceAll('<', '&lt;')
+          .replaceAll('>', '&gt;')
+          .replaceAll('"', '&quot;')
+          .replaceAll("'", '&#39;');
+      }
+
+      function formatTime(value) {
+        if (!value) return '—';
+        const date = new Date(value);
+        if (Number.isNaN(date.getTime())) return escapeHtml(value);
+        return date.toLocaleString();
+      }
+
+      function formatLatency(value) {
+        return typeof value === 'number' ? value.toLocaleString() + ' ms' : '—';
+      }
+
+      function setCount(id, value) {
+        document.getElementById(id).textContent = String(value ?? 0);
+      }
+
+      function setBody(id, html) {
+        document.getElementById(id).innerHTML = html;
+      }
+
+      function renderEmpty(message) {
+        return '<div class="empty">' + escapeHtml(message) + '</div>';
+      }
+
+      function renderError(message) {
+        return '<div class="error">' + escapeHtml(message) + '</div>';
+      }
+
+      function renderTable(headers, rows) {
+        return '<table><thead><tr>'
+          + headers.map((header) => '<th>' + escapeHtml(header) + '</th>').join('')
+          + '</tr></thead><tbody>'
+          + rows.join('')
+          + '</tbody></table>';
+      }
+
+      function renderAgents(payload) {
+        const agents = Array.isArray(payload.agents) ? payload.agents : [];
+        setCount('agents-count', payload.total ?? agents.length);
+        if (!agents.length) {
+          setBody('agents-content', renderEmpty('No agents registered yet.'));
+          return;
+        }
+
+        const rows = agents.map((agent) => {
+          const statusClass = agent.connected ? 'online' : 'stale';
+          const statusLabel = agent.connected ? 'Online' : 'Offline';
+          return '<tr>'
+            + '<td class="mono">' + escapeHtml(agent.beamId) + '</td>'
+            + '<td>' + escapeHtml(agent.name) + '</td>'
+            + '<td><span class="status"><span class="dot ' + statusClass + '"></span>' + statusLabel + '</span></td>'
+            + '<td>' + escapeHtml(formatTime(agent.lastSeen)) + '</td>'
+            + '</tr>';
+        });
+
+        setBody('agents-content', renderTable(['Beam ID', 'Name', 'Status', 'Last Seen'], rows));
+      }
+
+      function renderIntents(payload) {
+        const intents = Array.isArray(payload.intents) ? payload.intents : [];
+        setCount('intents-count', payload.total ?? intents.length);
+        if (!intents.length) {
+          setBody('intents-content', renderEmpty('No intent activity recorded yet.'));
+          return;
+        }
+
+        const rows = intents.map((intent) => '<tr>'
+          + '<td class="mono">' + escapeHtml(intent.from) + '</td>'
+          + '<td class="mono">' + escapeHtml(intent.to) + '</td>'
+          + '<td>' + escapeHtml(intent.intentType) + '</td>'
+          + '<td>' + escapeHtml(formatTime(intent.timestamp)) + '</td>'
+          + '<td>' + escapeHtml(formatLatency(intent.roundTripLatencyMs)) + '</td>'
+          + '</tr>');
+
+        setBody('intents-content', renderTable(['From', 'To', 'Intent', 'Timestamp', 'Latency'], rows));
+      }
+
+      function renderWaitlist(payload) {
+        const waitlist = Array.isArray(payload.waitlist) ? payload.waitlist : [];
+        setCount('waitlist-count', payload.total ?? waitlist.length);
+        if (payload.available === false) {
+          setBody('waitlist-content', renderEmpty('Waitlist table is not available in this deployment yet.'));
+          return;
+        }
+        if (!waitlist.length) {
+          setBody('waitlist-content', renderEmpty('No waitlist signups found.'));
+          return;
+        }
+
+        const rows = waitlist.map((entry) => '<tr>'
+          + '<td>' + escapeHtml(entry.email) + '</td>'
+          + '<td>' + escapeHtml(formatTime(entry.signupDate)) + '</td>'
+          + '<td>' + escapeHtml(entry.company ?? '—') + '</td>'
+          + '</tr>');
+
+        setBody('waitlist-content', renderTable(['Email', 'Signup Date', 'Company'], rows));
+      }
+
+      function renderTrust(payload) {
+        const trust = Array.isArray(payload.trustScores) ? payload.trustScores : [];
+        setCount('trust-count', payload.total ?? trust.length);
+        if (!trust.length) {
+          setBody('trust-content', renderEmpty('No pairwise trust scores recorded yet.'));
+          return;
+        }
+
+        const rows = trust.map((entry) => '<tr>'
+          + '<td class="mono">' + escapeHtml(entry.from) + '</td>'
+          + '<td class="mono">' + escapeHtml(entry.to) + '</td>'
+          + '<td>' + escapeHtml(Number(entry.score ?? 0).toFixed(2)) + '</td>'
+          + '<td>' + escapeHtml(formatTime(entry.lastUpdated)) + '</td>'
+          + '</tr>');
+
+        setBody('trust-content', renderTable(['From', 'To', 'Score', 'Last Updated'], rows));
+      }
+
+      async function fetchJson(path) {
+        const response = await fetch(path, {
+          headers: { 'X-Admin-Key': adminKey },
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          let message = 'Request failed';
+          try {
+            const payload = await response.json();
+            message = payload.error || message;
+          } catch {}
+          throw new Error(message);
+        }
+
+        return response.json();
+      }
+
+      async function refresh() {
+        try {
+          const [agents, intents, waitlist, trust] = await Promise.all([
+            fetchJson('/admin/agents'),
+            fetchJson('/admin/intents?limit=50'),
+            fetchJson('/admin/waitlist'),
+            fetchJson('/admin/trust'),
+          ]);
+          renderAgents(agents);
+          renderIntents(intents);
+          renderWaitlist(waitlist);
+          renderTrust(trust);
+          document.getElementById('last-updated').textContent = new Date().toLocaleTimeString();
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Failed to load dashboard data';
+          setBody('agents-content', renderError(message));
+          setBody('intents-content', renderError(message));
+          setBody('waitlist-content', renderError(message));
+          setBody('trust-content', renderError(message));
+        }
+      }
+
+      refresh();
+      setInterval(refresh, 30_000);
+    </script>
+  </body>
+</html>`
+}
+
 export function createApp(db: Database): Hono {
   const app = new Hono()
   seedAclsFromCatalog(db)
@@ -55,6 +543,110 @@ export function createApp(db: Database): Hono {
     allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-Admin-Key'],
   }))
+
+  app.get('/dashboard', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.html(renderDashboardHtml(auth.key))
+  })
+
+  app.get('/admin/agents', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    try {
+      const rows = db.prepare('SELECT * FROM agents ORDER BY last_seen DESC, beam_id ASC').all() as AgentRow[]
+      const connected = new Set(getConnectedBeamIds())
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        agents: rows.map((row) => ({
+          beamId: row.beam_id,
+          name: row.display_name,
+          connected: connected.has(row.beam_id),
+          lastSeen: row.last_seen,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('Admin agents error:', err)
+      return c.json({ error: 'Failed to load agents', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/intents', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const limit = Number.parseInt(c.req.query('limit') ?? '50', 10)
+
+    try {
+      const rows = listRecentIntentLogs(db, limit)
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        intents: rows.map((row) => ({
+          from: row.from_beam_id,
+          to: row.to_beam_id,
+          intentType: row.intent_type,
+          timestamp: row.requested_at,
+          roundTripLatencyMs: row.round_trip_latency_ms,
+          status: row.status,
+          errorCode: row.error_code,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('Admin intents error:', err)
+      return c.json({ error: 'Failed to load intents', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/waitlist', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    try {
+      const waitlist = getWaitlistEntries(db)
+      c.header('Cache-Control', 'no-store')
+      return c.json(waitlist)
+    } catch (err) {
+      console.error('Admin waitlist error:', err)
+      return c.json({ error: 'Failed to load waitlist', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/trust', (c) => {
+    const auth = requireAdmin(c)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    try {
+      const rows = listTrustScores(db)
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        trustScores: rows.map((row) => ({
+          from: row.source_beam_id,
+          to: row.target_beam_id,
+          score: row.score,
+          lastUpdated: row.last_updated,
+        })),
+        total: rows.length,
+      })
+    } catch (err) {
+      console.error('Admin trust error:', err)
+      return c.json({ error: 'Failed to load trust scores', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
 
   // List all agents with connection status (before sub-router to avoid conflict)
   app.get('/directory/agents', (c) => {
@@ -291,11 +883,10 @@ export function createApp(db: Database): Hono {
         if (err.code === 'RATE_LIMITED') {
           return c.json({ error: err.message, errorCode: 'RATE_LIMITED' }, 429)
         }
-        return c.json({ error: err.message, errorCode: err.code }, 502)
       }
 
-      console.error('HTTP intent relay error:', err)
-      return c.json({ error: 'Failed to relay intent', errorCode: 'RELAY_FAILED' }, 500)
+      console.error('Relay intent HTTP error:', err)
+      return c.json({ error: 'Failed to relay intent', errorCode: 'RELAY_ERROR' }, 500)
     }
   })
 
@@ -327,7 +918,7 @@ export function createApp(db: Database): Hono {
   return app
 }
 
-export function startServer(db: Database, port = 3000): HttpServer {
+export function startServer(db: Database, port = 3100): HttpServer {
   const app = createApp(db)
   const wss = createWebSocketServer(db)
 

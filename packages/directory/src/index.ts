@@ -1,7 +1,7 @@
 import { createDatabase, cleanExpiredNonces } from './db.js'
 import { startServer } from './server.js'
 
-const PORT = parseInt(process.env['PORT'] ?? '3000', 10)
+const PORT = parseInt(process.env['PORT'] ?? '3100', 10)
 const DB_PATH = process.env['DB_PATH'] ?? './beam-directory.db'
 
 const db = createDatabase(DB_PATH)
