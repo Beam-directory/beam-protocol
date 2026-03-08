@@ -9,7 +9,11 @@ import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
+import { delegationsRouter } from './routes/delegations.js'
+import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
+import { reportsRouter } from './routes/reports.js'
+import { verificationRouter } from './routes/verify.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { listRecentIntentLogs, listTrustScores } from './db.js'
@@ -39,7 +43,9 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
   return {
     ...row,
     capabilities: JSON.parse(row.capabilities) as string[],
-    verified: row.verified === 1,
+    verified: row.verified === 1 || row.verification_tier === 'verified',
+    flagged: row.flagged === 1,
+    verificationTier: row.verification_tier,
     connected: connectedSet.has(row.beam_id),
   }
 }
@@ -678,6 +684,11 @@ export function createApp(db: Database): Hono {
 
   app.route('/orgs', orgsRouter(db))
   app.route('/agents', agentsRouter(db))
+  app.route('/agents', verificationRouter(db))
+  app.route('/agents', agentKeysRouter(db))
+  app.route('/agents', delegationsRouter(db))
+  app.route('/agents', reportsRouter(db))
+  app.route('/keys', revokedKeysRouter(db))
 
   app.post('/acl', async (c) => {
     let body: unknown

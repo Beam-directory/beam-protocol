@@ -45,7 +45,9 @@ function serializeAgent(row: AgentRow): object {
   return {
     ...row,
     capabilities: JSON.parse(row.capabilities) as string[],
-    verified: row.verified === 1,
+    verified: row.verified === 1 || row.verification_tier === 'verified',
+    flagged: row.flagged === 1,
+    verificationTier: row.verification_tier,
   }
 }
 

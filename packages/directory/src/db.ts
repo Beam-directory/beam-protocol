@@ -1,6 +1,18 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type { AgentRow, IntentFrame, IntentLogRow, OrgAgentRow, OrgRow, RegisterRequest, TrustScoreRow } from './types.js'
+import type {
+  AgentKeyRow,
+  AgentRow,
+  DelegationRow,
+  DomainVerificationRow,
+  IntentFrame,
+  IntentLogRow,
+  OrgAgentRow,
+  OrgRow,
+  RegisterRequest,
+  ReportRow,
+  TrustScoreRow,
+} from './types.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -91,6 +103,7 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
       ON waitlist(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS intent_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nonce TEXT NOT NULL UNIQUE,
@@ -125,7 +138,107 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_trust_scores_updated
       ON trust_scores(last_updated DESC);
+
+    CREATE TABLE IF NOT EXISTS domain_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL,
+      domain TEXT NOT NULL,
+      challenge_token TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      created_at INTEGER NOT NULL,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_domain_verifications_beam
+      ON domain_verifications(beam_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_domain_verifications_status
+      ON domain_verifications(status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS agent_keys (
+      id INTEGER PRIMARY KEY,
+      beam_id TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      revoked_at INTEGER,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id)
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_keys_unique
+      ON agent_keys(beam_id, public_key);
+    CREATE INDEX IF NOT EXISTS idx_agent_keys_beam_revoked
+      ON agent_keys(beam_id, revoked_at);
+    CREATE INDEX IF NOT EXISTS idx_agent_keys_revoked
+      ON agent_keys(revoked_at DESC);
+
+    CREATE TABLE IF NOT EXISTS delegations (
+      id INTEGER PRIMARY KEY,
+      grantor_beam_id TEXT NOT NULL,
+      grantee_beam_id TEXT NOT NULL,
+      scope TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      revoked INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (grantor_beam_id) REFERENCES agents(beam_id),
+      FOREIGN KEY (grantee_beam_id) REFERENCES agents(beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_delegations_grantor
+      ON delegations(grantor_beam_id, revoked, expires_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_delegations_grantee
+      ON delegations(grantee_beam_id, revoked, expires_at DESC);
+
+    CREATE TABLE IF NOT EXISTS reports (
+      id INTEGER PRIMARY KEY,
+      reporter_beam_id TEXT NOT NULL,
+      target_beam_id TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      FOREIGN KEY (reporter_beam_id) REFERENCES agents(beam_id),
+      FOREIGN KEY (target_beam_id) REFERENCES agents(beam_id),
+      UNIQUE(reporter_beam_id, target_beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_reports_target_status
+      ON reports(target_beam_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_reports_reporter_target
+      ON reports(reporter_beam_id, target_beam_id);
   `)
+
+  ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'unverified'")
+  ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
+
+  db.prepare(`
+    UPDATE agents
+    SET verification_tier = CASE
+      WHEN verification_tier IS NULL OR verification_tier = '' THEN 'unverified'
+      ELSE verification_tier
+    END
+  `).run()
+
+  const backfillKeysCreatedAt = Date.now()
+  db.prepare(`
+    INSERT OR IGNORE INTO agent_keys (beam_id, public_key, created_at, revoked_at)
+    SELECT beam_id, public_key, ?, NULL
+    FROM agents
+  `).run(backfillKeysCreatedAt)
+}
+
+function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  if (columns.some((column) => column.name === columnName)) {
+    return
+  }
+
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+}
+
+function nowIso(): string {
+  return new Date().toISOString()
+}
+
+function nowMs(): number {
+  return Date.now()
 }
 
 export function buildBeamDomain(orgName: string): string {
@@ -142,7 +255,7 @@ export function createOrg(
     verificationToken: string
   }
 ): OrgRow {
-  const now = new Date().toISOString()
+  const now = nowIso()
   const beamDomain = buildBeamDomain(input.name)
 
   db.prepare(`
@@ -164,7 +277,7 @@ export function createOrg(
     beamDomain,
     input.apiKeyHash,
     input.verificationToken,
-    now
+    now,
   )
 
   return getOrg(db, input.name) as OrgRow
@@ -190,6 +303,8 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
       a.org,
       a.trust_score,
       a.verified,
+      a.verification_tier,
+      a.flagged,
       a.last_seen
     FROM org_agents oa
     LEFT JOIN agents a ON a.beam_id = oa.beam_id
@@ -199,7 +314,7 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
 }
 
 export function markOrgVerified(db: DB, name: string): OrgRow | null {
-  const now = new Date().toISOString()
+  const now = nowIso()
   db.prepare('UPDATE orgs SET verified = 1, verified_at = ? WHERE name = ?').run(now, name)
   return getOrg(db, name)
 }
@@ -218,7 +333,7 @@ function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
     return
   }
 
-  const now = new Date().toISOString()
+  const now = nowIso()
   db.prepare(`
     INSERT INTO org_agents (
       org_name,
@@ -244,15 +359,28 @@ function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
     JSON.stringify(data.capabilities),
     data.publicKey,
     createdAt,
-    now
+    now,
   )
 }
 
-/**
- * Insert or update an agent record. Returns the resulting row.
- */
+function syncOrgAgentPublicKey(db: DB, beamId: string, publicKey: string): void {
+  db.prepare(`
+    UPDATE org_agents
+    SET public_key = ?, updated_at = ?
+    WHERE beam_id = ?
+  `).run(publicKey, nowIso(), beamId)
+}
+
+function ensureAgentKeyRecorded(db: DB, beamId: string, publicKey: string, createdAt: number): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO agent_keys (beam_id, public_key, created_at, revoked_at)
+    VALUES (?, ?, ?, NULL)
+  `).run(beamId, publicKey, createdAt)
+}
+
 export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
-  const now = new Date().toISOString()
+  const now = nowIso()
+  const createdAtMs = nowMs()
   const capabilitiesJson = JSON.stringify(data.capabilities)
 
   const existing = getAgent(db, data.beamId)
@@ -272,12 +400,24 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       capabilitiesJson,
       data.publicKey,
       now,
-      data.beamId
+      data.beamId,
     )
   } else {
     db.prepare(`
-      INSERT INTO agents (beam_id, org, display_name, capabilities, public_key, trust_score, verified, created_at, last_seen)
-      VALUES (?, ?, ?, ?, ?, 0.3, 0, ?, ?)
+      INSERT INTO agents (
+        beam_id,
+        org,
+        display_name,
+        capabilities,
+        public_key,
+        trust_score,
+        verified,
+        verification_tier,
+        flagged,
+        created_at,
+        last_seen
+      )
+      VALUES (?, ?, ?, ?, ?, 0.3, 0, 'unverified', 0, ?, ?)
     `).run(
       data.beamId,
       data.org,
@@ -285,31 +425,24 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       capabilitiesJson,
       data.publicKey,
       now,
-      now
+      now,
     )
   }
 
   syncOrgAgent(db, data, existing?.created_at ?? now)
+  ensureAgentKeyRecorded(db, data.beamId, data.publicKey, createdAtMs)
 
-  // Recompute trust score after upsert
   const score = calculateTrustScore(db, data.beamId)
   db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, data.beamId)
 
   return getAgent(db, data.beamId) as AgentRow
 }
 
-/**
- * Retrieve a single agent by beam ID. Returns null if not found.
- */
 export function getAgent(db: DB, beamId: string): AgentRow | null {
   const row = db.prepare('SELECT * FROM agents WHERE beam_id = ?').get(beamId) as AgentRow | undefined
   return row ?? null
 }
 
-/**
- * Search agents with optional filters. Capabilities filtering is done in JavaScript
- * for compatibility with SQLite versions that lack full JSON function support.
- */
 export function searchAgents(
   db: DB,
   query: {
@@ -317,9 +450,9 @@ export function searchAgents(
     capabilities?: string[]
     minTrustScore?: number
     limit?: number
-  }
+  },
 ): AgentRow[] {
-  const params: (string | number)[] = []
+  const params: Array<string | number> = []
   const conditions: string[] = []
 
   if (query.org) {
@@ -338,7 +471,6 @@ export function searchAgents(
   const sql = `SELECT * FROM agents ${where} ORDER BY trust_score DESC ${limitClause}`
   let rows = db.prepare(sql).all(...params) as AgentRow[]
 
-  // Filter by capabilities in JS (safe JSON array intersection)
   if (query.capabilities && query.capabilities.length > 0) {
     const required = new Set(query.capabilities)
     rows = rows.filter((row) => {
@@ -350,8 +482,8 @@ export function searchAgents(
       }
       if (!Array.isArray(parsed)) return false
       const agentCaps = new Set(parsed as string[])
-      for (const cap of required) {
-        if (!agentCaps.has(cap)) return false
+      for (const capability of required) {
+        if (!agentCaps.has(capability)) return false
       }
       return true
     })
@@ -360,61 +492,42 @@ export function searchAgents(
   return rows
 }
 
-/**
- * Update the last_seen timestamp for an agent.
- */
 export function updateLastSeen(db: DB, beamId: string): void {
-  const now = new Date().toISOString()
+  const now = nowIso()
   db.prepare('UPDATE agents SET last_seen = ? WHERE beam_id = ?').run(now, beamId)
 
-  // Recompute trust score since activity affects it
   const score = calculateTrustScore(db, beamId)
   db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, beamId)
 }
 
-/**
- * Record a nonce to prevent replay attacks.
- * Returns false if the nonce has already been seen (replay detected).
- * Nonces expire after 5 minutes.
- */
 export function recordNonce(db: DB, nonce: string): boolean {
-  const expiresAt = Date.now() + 5 * 60 * 1000  // 5 minutes
+  const expiresAt = Date.now() + 5 * 60 * 1000
 
   try {
     db.prepare('INSERT INTO nonces (nonce, expires_at) VALUES (?, ?)').run(nonce, expiresAt)
     return true
   } catch {
-    // INSERT failed — nonce already exists (UNIQUE constraint violation)
     return false
   }
 }
 
-/**
- * Remove all expired nonces from the database.
- */
 export function cleanExpiredNonces(db: DB): void {
   db.prepare('DELETE FROM nonces WHERE expires_at < ?').run(Date.now())
 }
 
-/**
- * Calculate trust score for an agent based on verified status, recent activity,
- * and account age.
- *
- * Formula:
- *   base     = 0.3  (all registered agents)
- *   +0.3     if verified
- *   +0.2     if last_seen within 24h
- *   +0.2     if account older than 7 days
- *   max      = 1.0
- */
 export function calculateTrustScore(db: DB, beamId: string): number {
   const row = getAgent(db, beamId)
   if (!row) return 0.0
+  if (row.flagged === 1) return 0.0
 
   let score = 0.3
 
   if (row.verified === 1) {
     score += 0.3
+  }
+
+  if (row.verification_tier === 'verified') {
+    score += 0.2
   }
 
   const lastSeen = new Date(row.last_seen).getTime()
@@ -429,7 +542,202 @@ export function calculateTrustScore(db: DB, beamId: string): number {
     score += 0.2
   }
 
-  return Math.min(1.0, Math.round(score * 100) / 100)
+  return clampScore(score)
+}
+
+export function createDomainVerification(
+  db: DB,
+  input: { beamId: string; domain: string; challengeToken: string },
+): DomainVerificationRow {
+  const createdAt = nowMs()
+
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      UPDATE domain_verifications
+      SET status = 'superseded'
+      WHERE beam_id = ? AND domain = ? AND status = 'pending'
+    `).run(input.beamId, input.domain)
+
+    const result = db.prepare(`
+      INSERT INTO domain_verifications (beam_id, domain, challenge_token, status, created_at)
+      VALUES (?, ?, ?, 'pending', ?)
+    `).run(input.beamId, input.domain, input.challengeToken, createdAt)
+
+    return result.lastInsertRowid
+  })
+
+  const id = Number(transaction())
+  return db.prepare('SELECT * FROM domain_verifications WHERE id = ?').get(id) as DomainVerificationRow
+}
+
+export function getLatestDomainVerification(db: DB, beamId: string): DomainVerificationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM domain_verifications
+    WHERE beam_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(beamId) as DomainVerificationRow | undefined
+
+  return row ?? null
+}
+
+export function updateDomainVerificationStatus(db: DB, id: number, status: string): DomainVerificationRow | null {
+  db.prepare('UPDATE domain_verifications SET status = ? WHERE id = ?').run(status, id)
+  const row = db.prepare('SELECT * FROM domain_verifications WHERE id = ?').get(id) as DomainVerificationRow | undefined
+  return row ?? null
+}
+
+export function markAgentDomainVerified(db: DB, beamId: string): AgentRow | null {
+  db.prepare(`
+    UPDATE agents
+    SET verification_tier = 'verified',
+        flagged = 0
+    WHERE beam_id = ?
+  `).run(beamId)
+
+  const score = calculateTrustScore(db, beamId)
+  db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, beamId)
+  return getAgent(db, beamId)
+}
+
+export function rotateAgentKey(db: DB, beamId: string, newPublicKey: string): AgentRow | null {
+  const existing = getAgent(db, beamId)
+  if (!existing) {
+    return null
+  }
+
+  const revokedAt = nowMs()
+  const transaction = db.transaction(() => {
+    db.prepare('UPDATE agents SET public_key = ? WHERE beam_id = ?').run(newPublicKey, beamId)
+    db.prepare(`
+      UPDATE agent_keys
+      SET revoked_at = ?
+      WHERE beam_id = ? AND public_key = ? AND revoked_at IS NULL
+    `).run(revokedAt, beamId, existing.public_key)
+    db.prepare(`
+      INSERT OR IGNORE INTO agent_keys (beam_id, public_key, created_at, revoked_at)
+      VALUES (?, ?, ?, NULL)
+    `).run(beamId, newPublicKey, revokedAt)
+    syncOrgAgentPublicKey(db, beamId, newPublicKey)
+  })
+
+  transaction()
+  return getAgent(db, beamId)
+}
+
+export function listRevokedAgentKeys(db: DB): AgentKeyRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM agent_keys
+    WHERE revoked_at IS NOT NULL
+    ORDER BY revoked_at DESC, id DESC
+  `).all() as AgentKeyRow[]
+}
+
+export function createDelegation(
+  db: DB,
+  input: { grantorBeamId: string; granteeBeamId: string; scope: string; expiresAt: number },
+): DelegationRow {
+  const createdAt = nowMs()
+  const result = db.prepare(`
+    INSERT INTO delegations (grantor_beam_id, grantee_beam_id, scope, created_at, expires_at, revoked)
+    VALUES (?, ?, ?, ?, ?, 0)
+  `).run(input.grantorBeamId, input.granteeBeamId, input.scope, createdAt, input.expiresAt)
+
+  return db.prepare('SELECT * FROM delegations WHERE id = ?').get(Number(result.lastInsertRowid)) as DelegationRow
+}
+
+export function listActiveDelegations(db: DB, beamId: string, currentTime = nowMs()): DelegationRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM delegations
+    WHERE grantor_beam_id = ?
+      AND revoked = 0
+      AND expires_at > ?
+    ORDER BY created_at DESC, id DESC
+  `).all(beamId, currentTime) as DelegationRow[]
+}
+
+export function revokeDelegation(db: DB, grantorBeamId: string, id: number): boolean {
+  const result = db.prepare(`
+    UPDATE delegations
+    SET revoked = 1
+    WHERE id = ? AND grantor_beam_id = ? AND revoked = 0
+  `).run(id, grantorBeamId)
+
+  return result.changes > 0
+}
+
+export function hasActiveDelegation(
+  db: DB,
+  input: { grantorBeamId: string; granteeBeamId: string; scope: string; currentTime?: number },
+): boolean {
+  const row = db.prepare(`
+    SELECT id
+    FROM delegations
+    WHERE grantor_beam_id = ?
+      AND grantee_beam_id = ?
+      AND revoked = 0
+      AND expires_at > ?
+      AND (scope = '*' OR scope = ?)
+    LIMIT 1
+  `).get(
+    input.grantorBeamId,
+    input.granteeBeamId,
+    input.currentTime ?? nowMs(),
+    input.scope,
+  ) as { id: number } | undefined
+
+  return Boolean(row)
+}
+
+export function createReport(
+  db: DB,
+  input: { reporterBeamId: string; targetBeamId: string; reason: string },
+): ReportRow {
+  const createdAt = nowMs()
+
+  const transaction = db.transaction(() => {
+    const result = db.prepare(`
+      INSERT INTO reports (reporter_beam_id, target_beam_id, reason, created_at, status)
+      VALUES (?, ?, ?, ?, 'pending')
+    `).run(input.reporterBeamId, input.targetBeamId, input.reason, createdAt)
+
+    const pendingCount = getPendingReportCount(db, input.targetBeamId)
+    if (pendingCount >= 5) {
+      db.prepare(`
+        UPDATE agents
+        SET flagged = 1,
+            trust_score = 0.0
+        WHERE beam_id = ?
+      `).run(input.targetBeamId)
+    }
+
+    return result.lastInsertRowid
+  })
+
+  const id = Number(transaction())
+  return db.prepare('SELECT * FROM reports WHERE id = ?').get(id) as ReportRow
+}
+
+export function getPendingReportCount(db: DB, targetBeamId: string): number {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM reports
+    WHERE target_beam_id = ? AND status = 'pending'
+  `).get(targetBeamId) as { count: number } | undefined
+
+  return row?.count ?? 0
+}
+
+export function listReportsForTarget(db: DB, targetBeamId: string): ReportRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM reports
+    WHERE target_beam_id = ?
+    ORDER BY created_at DESC, id DESC
+  `).all(targetBeamId) as ReportRow[]
 }
 
 export function logIntentStart(db: DB, frame: IntentFrame): void {
@@ -456,7 +764,7 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
     frame.from,
     frame.to,
     frame.intent,
-    frame.timestamp
+    frame.timestamp,
   )
 }
 
@@ -469,9 +777,9 @@ export function finalizeIntentLog(
     success: boolean
     latencyMs: number | null
     errorCode?: string
-  }
+  },
 ): void {
-  const completedAt = new Date().toISOString()
+  const completedAt = nowIso()
   const status = input.success ? 'success' : 'error'
 
   db.prepare(`
@@ -486,7 +794,7 @@ export function finalizeIntentLog(
     input.latencyMs,
     status,
     input.errorCode ?? null,
-    input.nonce
+    input.nonce,
   )
 
   updatePairTrustScore(db, input)
@@ -518,7 +826,7 @@ function updatePairTrustScore(
     success: boolean
     latencyMs: number | null
     errorCode?: string
-  }
+  },
 ): void {
   const sender = getAgent(db, input.fromBeamId)
   const recipient = getAgent(db, input.toBeamId)
@@ -537,7 +845,7 @@ function updatePairTrustScore(
       : 0.15
   const targetScore = clampScore(base * 0.6 + signal * 0.4)
   const nextScore = clampScore((existing?.score ?? base) * 0.7 + targetScore * 0.3)
-  const lastUpdated = new Date().toISOString()
+  const lastUpdated = nowIso()
 
   db.prepare(`
     INSERT INTO trust_scores (source_beam_id, target_beam_id, score, last_updated)
