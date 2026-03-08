@@ -614,30 +614,11 @@ export function createApp(db: Database): Hono {
     await next()
   })
 
-  // Beam Shield — Wall 2: Trust Gate
-  app.use('*', createTrustGateMiddleware(
-    {
-      minTrustScore: 0.3,
-      allowlist: [],
-      blocklist: [],
-      senderRateLimit: 20,
-      newAgentRateLimit: 5,
-    },
-    {
-      getTrust: (beamId) => {
-        try {
-          const row = db.prepare('SELECT trust_score FROM agents WHERE beam_id = ?').get(beamId) as { trust_score: number } | undefined
-          return row?.trust_score ?? 0
-        } catch { return 0 }
-      },
-      getCreatedAt: (beamId) => {
-        try {
-          const row = db.prepare('SELECT created_at FROM agents WHERE beam_id = ?').get(beamId) as { created_at: string } | undefined
-          return row?.created_at ?? null
-        } catch { return null }
-      },
-    },
-  ))
+  // Beam Shield — Wall 2: Trust Gate (per-agent config from DB)
+  app.use('*', createTrustGateMiddleware(db, {
+    defaultMinTrust: 0.3,
+    defaultRateLimit: 20,
+  }))
 
   app.get('/dashboard', (c) => {
     const auth = requireAdmin(c)

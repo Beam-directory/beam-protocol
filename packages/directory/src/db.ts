@@ -364,6 +364,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agents', 'visibility', "TEXT NOT NULL DEFAULT 'unlisted'")
+  ensureColumn(db, 'agents', 'shield_config', 'TEXT')
 
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
