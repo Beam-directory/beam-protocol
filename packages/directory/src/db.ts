@@ -87,7 +87,6 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_agents_org ON agents(org);
     CREATE INDEX IF NOT EXISTS idx_agents_trust ON agents(trust_score DESC);
-    CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC);
     CREATE INDEX IF NOT EXISTS idx_agents_email_verified ON agents(email_verified, trust_score DESC);
 
     CREATE TABLE IF NOT EXISTS did_documents (
@@ -306,6 +305,9 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'email_token', 'TEXT')
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
+
+  // Create indexes that depend on ensureColumn'd columns
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
 
   db.prepare(`
