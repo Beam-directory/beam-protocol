@@ -69,6 +69,7 @@ function initSchema(db: DB): void {
     CREATE TABLE IF NOT EXISTS agents (
       beam_id TEXT PRIMARY KEY,
       org TEXT,
+      personal INTEGER NOT NULL DEFAULT 0,
       display_name TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       public_key TEXT NOT NULL,
@@ -305,6 +306,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'email_token', 'TEXT')
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
 
   db.prepare(`
     UPDATE agents
@@ -427,7 +429,7 @@ function extractAgentName(beamId: string): string {
 }
 
 function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
-  if (!data.org) {
+  if (!data.org || data.personal) {
     return
   }
 
@@ -484,6 +486,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const now = nowIso()
   const createdAtMs = nowMs()
   const capabilitiesJson = JSON.stringify(data.capabilities)
+  const personal = data.personal === true ? 1 : 0
 
   const existing = getAgent(db, data.beamId)
   const normalizedEmail = data.email?.trim().toLowerCase() || null
@@ -499,6 +502,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
     db.prepare(`
       UPDATE agents
       SET org = ?,
+          personal = ?,
           display_name = ?,
           capabilities = ?,
           public_key = ?,
@@ -513,6 +517,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       WHERE beam_id = ?
     `).run(
       data.org ?? null,
+      personal,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
@@ -531,6 +536,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       INSERT INTO agents (
         beam_id,
         org,
+        personal,
         display_name,
         capabilities,
         public_key,
@@ -546,10 +552,11 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
+      personal,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
@@ -680,10 +687,10 @@ export function findAgentByHandle(db: DB, handle: string): AgentRow | null {
   const rows = db.prepare(`
     SELECT *
     FROM agents
-    WHERE beam_id GLOB ?
+    WHERE beam_id = ? OR beam_id GLOB ?
     ORDER BY created_at ASC
     LIMIT 2
-  `).all(`${handle}@*.beam.directory`) as AgentRow[]
+  `).all(`${handle}@beam.directory`, `${handle}@*.beam.directory`) as AgentRow[]
 
   if (rows.length !== 1) {
     return null
@@ -728,6 +735,7 @@ export function searchAgents(
   db: DB,
   query: {
     org?: string
+    personal?: boolean
     capabilities?: string[]
     minTrustScore?: number
     limit?: number
@@ -736,7 +744,9 @@ export function searchAgents(
   const params: Array<string | number> = []
   const conditions: string[] = []
 
-  if (query.org) {
+  if (query.personal === true) {
+    conditions.push('personal = 1')
+  } else if (query.org) {
     conditions.push('org = ?')
     params.push(query.org)
   }

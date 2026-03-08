@@ -2,8 +2,7 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { ReportRow } from '../types.js'
 import { createReport, getAgent, getPendingReportCount, listReportsForTarget } from '../db.js'
-
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
+import { BEAM_ID_RE } from '../validation.js'
 
 function serializeReport(row: ReportRow): object {
   return {

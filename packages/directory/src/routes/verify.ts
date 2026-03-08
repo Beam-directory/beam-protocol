@@ -4,6 +4,7 @@ import type { ResolverOptions } from 'node:dns'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow } from '../types.js'
+import { BEAM_ID_RE } from '../validation.js'
 import {
   createDomainVerification,
   getAgent,
@@ -12,7 +13,6 @@ import {
   updateDomainVerificationStatus,
 } from '../db.js'
 
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
 
 type ResolveTxtFn = (hostname: string, options?: ResolverOptions) => Promise<string[][]>
@@ -26,6 +26,7 @@ function serializeAgent(row: AgentRow): object {
   return {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
+    personal: row.personal === 1,
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,

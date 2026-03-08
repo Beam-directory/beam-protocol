@@ -5,6 +5,7 @@ import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { toBeamDID } from '../did.js'
 import { sendAgentVerificationEmail } from '../email.js'
+import { BEAM_ID_RE } from '../validation.js'
 import {
   createVerificationToken,
   getAgent,
@@ -17,29 +18,8 @@ import {
   updateLastSeen,
 } from '../db.js'
 
-const requests = new Map<string, { count: number; resetAt: number }>()
-const BEAM_ID_RE = /^[a-z0-9_-]+@[a-z0-9_-]+\.beam\.directory$/
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
-
-function checkRateLimit(ip: string, limit = 60): boolean {
-  const now = Date.now()
-  const entry = requests.get(ip)
-  if (!entry || now > entry.resetAt) {
-    requests.set(ip, { count: 1, resetAt: now + 60_000 })
-    return true
-  }
-  if (entry.count >= limit) return false
-  entry.count++
-  return true
-}
-
-setInterval(() => {
-  const now = Date.now()
-  for (const [key, entry] of requests.entries()) {
-    if (now > entry.resetAt) requests.delete(key)
-  }
-}, 5 * 60_000)
 
 function parseCapabilities(value: unknown): string[] | null {
   if (!Array.isArray(value)) return null
@@ -61,26 +41,43 @@ function slugify(value: string): string {
     .slice(0, 32)
 }
 
-function deriveOrg(email: string): string {
-  const domain = email.split('@')[1] ?? 'public'
-  const label = domain.split('.')[0] ?? 'public'
-  return slugify(label) || 'public'
+function deriveOrg(email: string): string | null {
+  if (!email) {
+    return null
+  }
+
+  const domain = email.split('@')[1] ?? ''
+  const label = domain.split('.')[0] ?? ''
+  return slugify(label) || null
 }
 
-function buildBeamId(baseName: string, org: string, db: Database): string {
-  let candidate = `${baseName}@${org}.beam.directory`
+function parseBeamId(beamId: string): { org: string; personal: boolean } | null {
+  const match = /^([a-z0-9_-]+)@(?:([a-z0-9_-]+)\.)?beam\.directory$/.exec(beamId)
+  if (!match) {
+    return null
+  }
+
+  return {
+    org: match[2] ?? 'personal',
+    personal: !match[2],
+  }
+}
+
+function buildBeamId(baseName: string, org: string, personal: boolean, db: Database): string {
+  const suffix = personal ? 'beam.directory' : `${org}.beam.directory`
+  let candidate = `${baseName}@${suffix}`
   if (!getAgent(db, candidate)) {
     return candidate
   }
 
   for (let index = 2; index < 1000; index++) {
-    candidate = `${baseName}-${index}@${org}.beam.directory`
+    candidate = `${baseName}-${index}@${suffix}`
     if (!getAgent(db, candidate)) {
       return candidate
     }
   }
 
-  return `${baseName}-${Date.now()}@${org}.beam.directory`
+  return `${baseName}-${Date.now()}@${suffix}`
 }
 
 function serializeAgent(row: AgentRow): object {
@@ -89,29 +86,17 @@ function serializeAgent(row: AgentRow): object {
     ...agent,
     did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
+    personal: row.personal === 1,
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
   }
 }
 
-function getClientIp(req: Request): string {
-  return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim() ??
-    req.headers.get('x-real-ip') ??
-    'unknown'
-  )
-}
-
 export function agentsRouter(db: Database): Hono {
   const router = new Hono()
 
   router.get('/stats', (c) => {
-    const ip = getClientIp(c.req.raw)
-    if (!checkRateLimit(ip)) {
-      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
-    }
-
     try {
       return c.json(getAgentDirectoryStats(db))
     } catch (err) {
@@ -121,11 +106,6 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.post('/register', async (c) => {
-    const ip = getClientIp(c.req.raw)
-    if (!checkRateLimit(ip, 30)) {
-      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
-    }
-
     let body: unknown
     try {
       body = await c.req.json()
@@ -153,7 +133,7 @@ export function agentsRouter(db: Database): Hono {
     }
 
     const email = typeof raw.email === 'string' ? raw.email.trim().toLowerCase() : ''
-    if (!EMAIL_RE.test(email)) {
+    if (email && !EMAIL_RE.test(email)) {
       return c.json({ error: 'email must be a valid email address', errorCode: 'INVALID_EMAIL' }, 400)
     }
 
@@ -195,28 +175,40 @@ export function agentsRouter(db: Database): Hono {
 
     let beamId = typeof raw.beamId === 'string' ? raw.beamId.trim().toLowerCase() : ''
     let org = typeof raw.org === 'string' ? raw.org.trim().toLowerCase() : ''
+    let personal = false
 
     if (beamId) {
       if (!BEAM_ID_RE.test(beamId)) {
         return c.json({
-          error: 'beamId must match pattern agent@org.beam.directory (lowercase alphanumeric, hyphens, underscores)',
+          error: 'beamId must match pattern agent@org.beam.directory or agent@beam.directory (lowercase alphanumeric, hyphens, underscores)',
           errorCode: 'INVALID_BEAM_ID',
         }, 400)
       }
-      org = org || beamId.split('@')[1]?.split('.')[0] || ''
+
+      const parsedBeamId = parseBeamId(beamId)
+      if (!parsedBeamId) {
+        return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
+      }
+
+      personal = parsedBeamId.personal
+      org = org || parsedBeamId.org
     }
 
     if (!org) {
-      org = deriveOrg(email)
+      org = deriveOrg(email) ?? 'personal'
+      personal = org === 'personal'
+    } else if (org === 'personal') {
+      personal = true
     }
 
     if (!beamId) {
       const baseName = slugify(displayName) || slugify(email.split('@')[0] ?? '') || 'agent'
-      beamId = buildBeamId(baseName, org, db)
+      beamId = buildBeamId(baseName, org, personal, db)
     }
 
-    const orgFromId = beamId.split('@')[1]?.split('.')[0]
-    if (orgFromId !== org) {
+    const parsedBeamId = parseBeamId(beamId)
+    const orgFromId = parsedBeamId?.org
+    if (!parsedBeamId || orgFromId !== org || parsedBeamId.personal !== personal) {
       return c.json({
         error: `org field (${org}) does not match org extracted from beamId (${orgFromId ?? 'unknown'})`,
         errorCode: 'ORG_MISMATCH',
@@ -226,10 +218,11 @@ export function agentsRouter(db: Database): Hono {
     const request: RegisterRequest = {
       beamId,
       org,
+      personal,
       displayName,
       capabilities,
       publicKey,
-      email,
+      email: email || undefined,
       emailVerified,
       description,
       logoUrl: cleanedLogoUrl,
@@ -274,11 +267,6 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.get('/search', (c) => {
-    const ip = getClientIp(c.req.raw)
-    if (!checkRateLimit(ip)) {
-      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
-    }
-
     const orgParam = c.req.query('org')
     const capabilitiesParam = c.req.query('capabilities')
     const minTrustScoreParam = c.req.query('minTrustScore')
@@ -311,6 +299,7 @@ export function agentsRouter(db: Database): Hono {
     try {
       let rows = searchAgents(db, {
         org: orgParam,
+        personal: orgParam === 'personal',
         capabilities,
         minTrustScore,
         limit,
@@ -326,6 +315,7 @@ export function agentsRouter(db: Database): Hono {
             row.beam_id,
             row.display_name,
             row.org,
+            row.personal === 1 ? 'personal' : '',
             row.description ?? '',
             row.capabilities,
           ].join(' ').toLowerCase()
@@ -341,11 +331,6 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.get('/:beamId', (c) => {
-    const ip = getClientIp(c.req.raw)
-    if (!checkRateLimit(ip)) {
-      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
-    }
-
     const beamId = decodeURIComponent(c.req.param('beamId'))
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
@@ -368,11 +353,6 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.post('/:beamId/heartbeat', (c) => {
-    const ip = getClientIp(c.req.raw)
-    if (!checkRateLimit(ip)) {
-      return c.json({ error: 'Too many requests', errorCode: 'RATE_LIMITED' }, 429)
-    }
-
     const beamId = decodeURIComponent(c.req.param('beamId'))
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)

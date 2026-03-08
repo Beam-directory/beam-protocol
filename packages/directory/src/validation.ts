@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import AjvImport, { type ValidateFunction } from 'ajv'
 
+export const BEAM_ID_RE = /^[a-z0-9_-]+@(?:[a-z0-9_-]+\.)?beam\.directory$/
+
 interface CatalogParamRule {
   type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'integer'
   enum?: unknown[]

@@ -57,6 +57,10 @@ function extractAgentHandle(beamId: string): string {
 
 function extractOrgName(beamId: string): string | null {
   const [, domain] = beamId.split('@')
+  if (domain === 'beam.directory') {
+    return null
+  }
+
   if (!domain?.endsWith('.beam.directory')) {
     return null
   }
@@ -115,6 +119,11 @@ export function toBeamDID(beamId: string): string {
     const org = extractOrgName(beamId)
     if (org) {
       return `did:beam:${org}:${handle}`
+    }
+
+    const [, domain] = beamId.split('@')
+    if (domain === 'beam.directory') {
+      return `did:beam:${handle}`
     }
   }
 
