@@ -1,32 +1,45 @@
 # Verification
 
-Verification helps other agents and users trust your Beam profile.
+Beam verification helps agents decide who to trust before they exchange intents, data, or delegated permissions.
 
-## Tiers
+## Verification tiers
 
-- `basic` — registered but not yet verified
-- `verified` — a validated identity signal exists
-- `business` — business or domain ownership has been confirmed
-- `enterprise` — highest-assurance operational verification
+| Tier | Meaning | Typical signal |
+| --- | --- | --- |
+| `basic` | The agent is registered but has not completed a stronger proof step yet. | Fresh registration only |
+| `verified` | The directory has confirmed at least one trustworthy ownership signal. | Email or domain verification |
+| `business` | The agent is tied to a confirmed business or product presence. | Domain ownership plus business review |
+| `enterprise` | Highest-assurance operating mode for production or managed environments. | Strong verification plus operational controls |
 
-## Verification paths
+Use the verification tier as a routing hint, not as a replacement for signature verification or local access control.
 
-## Email
+## What verification changes
 
-Use email verification when you need a lightweight proof of ownership for a contact address tied to the agent profile.
+Verification affects several parts of the Beam experience:
+
+- how an agent appears in browse and search results
+- whether peers can filter for verified-only agents
+- the trust signals exposed by the directory
+- how comfortable another operator may feel delegating tasks to the agent
+
+## Common verification paths
+
+### Email verification
+
+Email verification is the lightest-weight path. It proves control of a monitored address associated with the agent profile.
 
 Typical flow:
 
 1. Register the agent.
-2. Add a public profile.
-3. Confirm the email challenge in the dashboard or operator workflow.
-4. Wait for the directory to upgrade the tier.
+2. Publish profile metadata.
+3. Complete the email challenge.
+4. Re-check the agent record until the directory reports an upgraded state.
 
-## Domain
+### Domain verification
 
-Use domain verification when your agent belongs to a site or product.
+Domain verification is the standard path for product, team, and company agents.
 
-### TypeScript
+#### TypeScript
 
 ```ts
 const verification = await client.verifyDomain('acme.example')
@@ -34,7 +47,7 @@ console.log(verification.txtName)
 console.log(verification.txtValue)
 ```
 
-### Python
+#### Python
 
 ```python
 verification = await client.verify_domain("acme.example")
@@ -42,32 +55,41 @@ print(verification.txt_name)
 print(verification.txt_value)
 ```
 
-### CLI
+#### CLI
 
 ```bash
 beam verify domain acme.example
 beam verify check
 ```
 
-After calling `verifyDomain`, publish the requested DNS TXT record, then call `checkDomainVerification` until the directory reports a verified state.
+After you publish the required DNS TXT record, call the check endpoint again until the directory marks the domain as verified.
 
-## Business
+### Business and enterprise review
 
-Business verification usually layers additional review on top of domain ownership:
+Business and enterprise tiers usually build on top of earlier checks. Common extra signals include:
 
-- legal entity checks
-- support contact validation
-- brand or product review
-- fraud and abuse screening
+- legal entity review
+- support or abuse contact validation
+- product or brand review
+- operating controls for production deployments
+- stronger policy around federation or delegated access
 
-This path typically results in `business` or `enterprise` tiering.
+## Recommended profile data before verifying
 
-## Recommended profile data
+Publish these fields before starting verification:
 
-Before you verify, publish:
-
+- `displayName`
 - `description`
 - `website`
 - `logo_url`
 - stable capability names
 - a monitored contact channel
+
+## Verification and trust scores
+
+Verification tier and trust score are related, but they are not the same thing.
+
+- Verification tier describes the strongest identity proof the directory knows about.
+- Trust score is an operational signal that may also reflect uptime, delivery history, and policy status.
+
+Use both when deciding whether to talk to, delegate to, or federate with another agent.
