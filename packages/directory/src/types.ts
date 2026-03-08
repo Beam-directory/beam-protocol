@@ -5,24 +5,14 @@ export interface AgentRecord {
   beam_id: string
   org: string | null
   display_name: string
-  capabilities: string[]  // parsed array
-  public_key: string      // SPKI DER base64
-  email: string | null
-  email_verified: number
-  verification_tier: VerificationTier
-  description: string | null
-  logo_url: string | null
-  trust_score: number     // 0.0-1.0
-  verified: number        // 0 or 1 (SQLite boolean)
-  email: string | null
-  description: string | null
-  logo_url: string | null
-  website: string | null
-  verification_tier: 'basic' | 'verified' | 'business' | 'enterprise'
-  email_verified: number
-  email_token: string | null
-  created_at: string      // ISO 8601
-  last_seen: string       // ISO 8601
+  capabilities: string[]
+  public_key: string
+  trust_score: number
+  verified: number
+  verification_tier: string
+  flagged: number
+  created_at: string
+  last_seen: string
 }
 
 export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
@@ -116,12 +106,11 @@ export interface OrgAgentRow {
   updated_at: string
 }
 
-// AgentRow represents a raw row from the SQLite agents table
 export interface AgentRow {
   beam_id: string
   org: string | null
   display_name: string
-  capabilities: string  // JSON string
+  capabilities: string
   public_key: string
   email: string | null
   email_verified: number
@@ -130,21 +119,46 @@ export interface AgentRow {
   logo_url: string | null
   trust_score: number
   verified: number
-  email: string | null
-  description: string | null
-  logo_url: string | null
-  website: string | null
-  verification_tier: 'basic' | 'verified' | 'business' | 'enterprise'
-  email_verified: number
-  email_token: string | null
+  verification_tier: string
+  flagged: number
   created_at: string
   last_seen: string
 }
 
-export interface AgentIntentStats {
-  received: number
-  responded: number
-  avg_response_time_ms: number | null
+export interface DomainVerificationRow {
+  id: number
+  beam_id: string
+  domain: string
+  challenge_token: string
+  status: string
+  created_at: number
+}
+
+export interface AgentKeyRow {
+  id: number
+  beam_id: string
+  public_key: string
+  created_at: number
+  revoked_at: number | null
+}
+
+export interface DelegationRow {
+  id: number
+  grantor_beam_id: string
+  grantee_beam_id: string
+  scope: string
+  created_at: number
+  expires_at: number
+  revoked: number
+}
+
+export interface ReportRow {
+  id: number
+  reporter_beam_id: string
+  target_beam_id: string
+  reason: string
+  created_at: number
+  status: string
 }
 
 export interface WsMessage {
@@ -154,17 +168,7 @@ export interface WsMessage {
   message?: string
   beamId?: string
   senderPublicKey?: string
-  entry?: {
-    nonce: string
-    from: string
-    to: string
-    intentType: string
-    timestamp: string
-    completedAt?: string | null
-    roundTripLatencyMs?: number | null
-    status: string
-    errorCode?: string | null
-  }
+  actingBeamId?: string
 }
 
 export type WsClientMessage =

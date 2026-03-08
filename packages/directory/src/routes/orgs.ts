@@ -96,7 +96,7 @@ function serializeOrgAgent(row: OrgAgentRow & Partial<AgentRow>): object {
     capabilities: JSON.parse(row.capabilities) as string[],
     publicKey: row.public_key,
     trustScore: row.trust_score ?? 0.3,
-    verified: row.verified === 1,
+    verified: row.verified === 1 || row.verification_tier === 'verified',
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     lastSeen: row.last_seen ?? row.created_at,

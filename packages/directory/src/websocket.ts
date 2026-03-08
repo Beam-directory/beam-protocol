@@ -1,12 +1,12 @@
-import { createPublicKey, verify } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
-import { finalizeIntentLog, getAgent, logIntentStart, recordNonce, updateLastSeen } from './db.js'
+import { finalizeIntentLog, getAgent, hasActiveDelegation, logIntentStart, recordNonce, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
+import { verifySignedPayload } from './crypto.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
@@ -250,23 +250,15 @@ async function handleIntent(
     return
   }
 
-  if (prepared.from !== senderBeamId) {
+  let senderAgent
+  try {
+    senderAgent = resolveIntentSender(db, senderBeamId, prepared)
+  } catch (err) {
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
-      errorCode: 'SENDER_MISMATCH',
-      message: `from field (${prepared.from}) does not match connected beamId (${senderBeamId})`,
-    })
-    return
-  }
-
-  const senderAgent = getAgent(db, senderBeamId)
-  if (!senderAgent) {
-    sendJson(senderWs, {
-      type: 'error',
-      nonce: prepared.nonce,
-      errorCode: 'UNKNOWN_SENDER',
-      message: 'Sender is not registered in the directory',
+      errorCode: err instanceof RelayError ? err.code : 'UNKNOWN_SENDER',
+      message: err instanceof Error ? err.message : 'Sender is not registered in the directory',
     })
     return
   }
@@ -343,6 +335,7 @@ async function handleIntent(
     type: 'intent',
     frame: prepared,
     senderPublicKey: senderAgent.public_key,
+    actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
   })
 
   updateLastSeen(db, senderBeamId)
@@ -390,6 +383,41 @@ function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
   }
 }
 
+export function canActOnBehalf(
+  db: Database,
+  connectedBeamId: string,
+  claimedFromBeamId: string,
+  intentType: string,
+): boolean {
+  if (connectedBeamId === claimedFromBeamId) {
+    return true
+  }
+
+  return hasActiveDelegation(db, {
+    grantorBeamId: claimedFromBeamId,
+    granteeBeamId: connectedBeamId,
+    scope: intentType,
+  })
+}
+
+function resolveIntentSender(db: Database, connectedBeamId: string, frame: IntentFrame) {
+  const senderAgent = getAgent(db, connectedBeamId)
+  if (!senderAgent) {
+    throw new RelayError('BAD_REQUEST', 'Sender is not registered in the directory')
+  }
+
+  if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
+    throw new RelayError(
+      connectedBeamId === frame.from ? 'BAD_REQUEST' : 'FORBIDDEN',
+      connectedBeamId === frame.from
+        ? 'Sender is not registered in the directory'
+        : `No active delegation allows ${connectedBeamId} to send ${frame.intent} for ${frame.from}`,
+    )
+  }
+
+  return senderAgent
+}
+
 function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey: string): void {
   if (!checkAgentRateLimit(frame.from, getRateLimitPerMinute())) {
     throw new RelayError('RATE_LIMITED', `Rate limit exceeded for ${frame.from}`)
@@ -432,32 +460,17 @@ function enforceReplayProtection(db: Database, frame: IntentFrame): void {
 }
 
 function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string): boolean {
-  try {
-    const publicKey = createPublicKey({
-      key: Buffer.from(senderPublicKeyBase64, 'base64'),
-      format: 'der',
-      type: 'spki',
-    })
+  const signedPayload = JSON.stringify({
+    type: 'intent',
+    from: frame.from,
+    to: frame.to,
+    intent: frame.intent,
+    payload: frame.payload,
+    timestamp: frame.timestamp,
+    nonce: frame.nonce,
+  })
 
-    const signedPayload = JSON.stringify({
-      type: 'intent',
-      from: frame.from,
-      to: frame.to,
-      intent: frame.intent,
-      payload: frame.payload,
-      timestamp: frame.timestamp,
-      nonce: frame.nonce,
-    })
-
-    return verify(
-      null,
-      Buffer.from(signedPayload, 'utf8'),
-      publicKey,
-      Buffer.from(frame.signature ?? '', 'base64')
-    )
-  } catch {
-    return false
-  }
+  return verifySignedPayload(senderPublicKeyBase64, signedPayload, frame.signature ?? '')
 }
 
 function handleResult(frame: ResultFrame): void {

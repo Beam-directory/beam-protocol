@@ -87,16 +87,9 @@ function serializeAgent(row: AgentRow): object {
     org: row.org,
     displayName: row.display_name,
     capabilities: JSON.parse(row.capabilities) as string[],
-    publicKey: row.public_key,
-    email: row.email,
-    emailVerified: row.email_verified === 1,
+    verified: row.verified === 1 || row.verification_tier === 'verified',
+    flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
-    description: row.description,
-    logoUrl: row.logo_url,
-    trustScore: row.trust_score,
-    verified: row.verified === 1,
-    createdAt: row.created_at,
-    lastSeen: row.last_seen,
   }
 }
 
