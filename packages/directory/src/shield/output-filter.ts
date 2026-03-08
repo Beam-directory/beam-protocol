@@ -14,6 +14,13 @@ export const PII_PATTERNS: Record<string, RegExp> = {
   ipv4_internal: /\b(?:10\.\d{1,3}|172\.(?:1[6-9]|2\d|3[01])|192\.168)\.\d{1,3}\.\d{1,3}\b/g,
   german_tax_id: /\b\d{2}\/\d{3}\/\d{5}\b/g,
   password_in_url: /(?:password|passwd|pwd)=[^&\s]{4,}/gi,
+  // H5 FIX: Additional PII patterns from security audit
+  date_of_birth: /\b(?:0[1-9]|[12]\d|3[01])\.(?:0[1-9]|1[0-2])\.\d{4}\b/g,
+  vat_id: /\bDE\d{9}\b/g,
+  bic_swift: /\b[A-Z]{6}[A-Z0-9]{2}(?:[A-Z0-9]{3})?\b/g,
+  vehicle_plate_de: /\b[A-ZÄÖÜ]{1,3}[-\s][A-Z]{1,2}\s?\d{1,4}\b/g,
+  sozialversicherung_de: /\b\d{2}\s?\d{6}\s?[A-Z]\s?\d{3}\b/g,
+  passport_de: /\b[CFGHJKLMNPRTVWXYZ][0-9]{2}[A-Z0-9]{6}\b/g,
 }
 
 export interface PIIMatch {
@@ -22,14 +29,31 @@ export interface PIIMatch {
   index: number
 }
 
+/** H6 FIX: Normalize Unicode before PII scanning to catch confusable exfiltration */
+function normalizeForPIIScan(text: string): string {
+  // Strip zero-width characters
+  let normalized = text.replace(/[\u200B\u200C\u200D\uFEFF\u00AD\u2060\u180E]/g, '')
+  normalized = normalized.normalize('NFC')
+  // Cyrillic confusables
+  const confusables: Record<string, string> = {
+    '\u0430': 'a', '\u0435': 'e', '\u043e': 'o', '\u0440': 'p', '\u0441': 'c',
+    '\u0443': 'y', '\u0456': 'i', '\u0455': 's', '\u0458': 'j', '\u04BB': 'h',
+  }
+  for (const [from, to] of Object.entries(confusables)) {
+    normalized = normalized.replaceAll(from, to)
+  }
+  return normalized
+}
+
 export function detectPII(text: string): { found: boolean; matches: PIIMatch[] } {
   const matches: PIIMatch[] = []
+  const normalized = normalizeForPIIScan(text)
 
   for (const [type, pattern] of Object.entries(PII_PATTERNS)) {
     // Reset regex state for global patterns
     const re = new RegExp(pattern.source, pattern.flags)
     let match: RegExpExecArray | null
-    while ((match = re.exec(text)) !== null) {
+    while ((match = re.exec(normalized)) !== null) {
       matches.push({ type, value: match[0], index: match.index })
     }
   }

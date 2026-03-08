@@ -19,15 +19,26 @@ const DEFAULT_GLOBAL: TrustGateGlobalConfig = {
   defaultRateLimit: 20,
 }
 
-type RateEntry = { count: number; windowStart: number }
-const senderRateCounts = new Map<string, RateEntry>()
 const WINDOW_MS = 3600_000
 
-function pruneRateEntries(): void {
+// H2 FIX: Persistent rate limiting in SQLite instead of in-memory Map
+function checkAndIncrementRate(db: Database, rateKey: string, limit: number): boolean {
   const now = Date.now()
-  for (const [key, entry] of senderRateCounts) {
-    if (now - entry.windowStart >= WINDOW_MS) senderRateCounts.delete(key)
+  const windowStart = now - WINDOW_MS
+  const row = db.prepare('SELECT count, window_start FROM rate_limits WHERE rate_key = ?').get(rateKey) as { count: number; window_start: number } | undefined
+
+  if (!row || row.window_start < windowStart) {
+    // Expired or new — reset
+    db.prepare('INSERT OR REPLACE INTO rate_limits (rate_key, count, window_start) VALUES (?, 1, ?)').run(rateKey, now)
+    return true // allowed
   }
+
+  if (row.count >= limit) {
+    return false // rate limited
+  }
+
+  db.prepare('UPDATE rate_limits SET count = count + 1 WHERE rate_key = ?').run(rateKey)
+  return true // allowed
 }
 
 /** Match beam_id against pattern (exact or *@suffix wildcard) */
@@ -60,7 +71,11 @@ export function createTrustGateMiddleware(
 ): MiddlewareHandler {
   const cfg = { ...DEFAULT_GLOBAL, ...globalConfig }
 
-  setInterval(pruneRateEntries, 300_000)
+  // H2: Periodic cleanup of expired rate limit entries
+  setInterval(() => {
+    const cutoff = Date.now() - WINDOW_MS
+    try { db.prepare('DELETE FROM rate_limits WHERE window_start < ?').run(cutoff) } catch { /* ignore */ }
+  }, 300_000)
 
   return async (c, next) => {
     const sender = c.req.header('x-beam-sender')
@@ -137,23 +152,16 @@ export function createTrustGateMiddleware(
       }, 403)
     }
 
-    // === RATE LIMIT ===
+    // === RATE LIMIT (H2 FIX: persistent in SQLite) ===
     const rateKey = `${sender}→${recipient ?? 'global'}`
-    const now = Date.now()
-    const entry = senderRateCounts.get(rateKey)
-
-    if (entry && now - entry.windowStart < WINDOW_MS) {
-      if (entry.count >= shield.rateLimit) {
-        return c.json({
-          error: 'Rate limited by Beam Shield',
-          errorCode: 'SHIELD_RATE_LIMITED',
-          sender,
-          limit: shield.rateLimit,
-        }, 429)
-      }
-      entry.count++
-    } else {
-      senderRateCounts.set(rateKey, { count: 1, windowStart: now })
+    const allowed = checkAndIncrementRate(db, rateKey, shield.rateLimit)
+    if (!allowed) {
+      return c.json({
+        error: 'Rate limited by Beam Shield',
+        errorCode: 'SHIELD_RATE_LIMITED',
+        sender,
+        limit: shield.rateLimit,
+      }, 429)
     }
 
     await next()

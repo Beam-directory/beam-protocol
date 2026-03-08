@@ -354,6 +354,12 @@ function initSchema(db: DB): void {
       created_at TEXT NOT NULL,
       UNIQUE(beam_id, pinned_beam_id)
     );
+
+    CREATE TABLE IF NOT EXISTS rate_limits (
+      rate_key TEXT PRIMARY KEY,
+      count INTEGER NOT NULL DEFAULT 1,
+      window_start INTEGER NOT NULL
+    );
   `)
 
   ensureColumn(db, 'agents', 'email', 'TEXT')
