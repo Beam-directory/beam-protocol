@@ -1,6 +1,6 @@
 {
   "name": "@beam-protocol/directory",
-  "version": "0.1.0",
+  "version": "0.5.0",
   "description": "Beam Protocol Directory Server — agent registration, discovery, and intent routing",
   "type": "module",
   "main": "./dist/index.js",
@@ -23,6 +23,8 @@
     "@types/ws": "^8.5.10",
     "typescript": "^5.3.3"
   },
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "license": "Apache-2.0"
 }

@@ -953,7 +953,7 @@ export function createApp(db: Database): Hono {
       intentsProcessed,
       uptime: Math.floor(process.uptime()),
       waitlistSize,
-      version: '0.2.0',
+      version: '0.5.0',
     })
   })
 

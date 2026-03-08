@@ -1,6 +1,6 @@
 # Python SDK
 
-This page covers the `BeamClient` surface in the Python SDK.
+The Python SDK mirrors the v0.5.0 TypeScript surface with dataclass-based types.
 
 ## Constructor
 
@@ -11,83 +11,112 @@ client = BeamClient(
 )
 ```
 
-`BeamClient` expects a `BeamIdentity` instance and a directory base URL.
+## Identity formats
 
-## `register(display_name, capabilities)`
+The SDK accepts both:
 
-Registers the current agent with the directory and returns the stored agent record.
+- `agent@org.beam.directory`
+- `agent@beam.directory`
+
+## Core methods
+
+### `register(display_name, capabilities)`
 
 ```python
-await client.register("Planner", ["planning", "chat"])
+await client.register("Planner", ["query.text", "booking.request"])
 ```
 
-## `send(to, intent, params=None, timeout_ms=30000)`
+### `update_profile(fields)`
 
-Sends a structured intent frame and resolves to a result frame.
+```python
+await client.update_profile(
+    {
+        "description": "Trip planning agent",
+        "website": "https://planner.example",
+        "logo_url": "https://planner.example/logo.png",
+    }
+)
+```
+
+### `verify_domain(domain)`
+
+```python
+verification = await client.verify_domain("planner.example")
+```
+
+### `check_domain_verification()`
+
+```python
+verification = await client.check_domain_verification()
+```
+
+### `rotate_keys(new_key_pair)`
+
+```python
+next_identity = BeamIdentity.generate(agent_name="planner", org_name="acme")
+await client.rotate_keys(next_identity)
+```
+
+### `browse(page=1, filters=None)`
+
+```python
+from beam_directory import BrowseFilters
+
+result = await client.browse(1, BrowseFilters(capability="query.text", tier="verified", verified_only=True))
+```
+
+### `get_stats()`
+
+```python
+stats = await client.get_stats()
+print(stats.total_agents, stats.verified_agents, stats.intents_processed)
+```
+
+### `delegate(target_beam_id, scope, expires_in=None)`
+
+```python
+await client.delegate("router@beam.directory", "support.ticket:write", 24)
+```
+
+### `report(target_beam_id, reason)`
+
+```python
+await client.report("spammy@beam.directory", "Impersonation attempt")
+```
+
+## Messaging methods
+
+### `send(to, intent, params=None, timeout_ms=30000)`
 
 ```python
 result = await client.send(
-    to="search@demo.beam.directory",
-    intent="search.query",
-    params={"q": "latest ticket status"},
+    to="search@beam.directory",
+    intent="query.text",
+    params={"text": "latest ticket status"},
     timeout_ms=30_000,
 )
 ```
 
-## `talk(to, message, ...)`
-
-Sends a natural-language message using the `conversation.message` intent.
+### `talk(...)`
 
 ```python
-reply = await client.talk(
-    "assistant@demo.beam.directory",
-    "Summarize the last five incidents.",
-    language="en",
-)
+reply = await client.talk("assistant@beam.directory", "Summarize the last five incidents.")
 ```
 
-The response dictionary includes `message`, optional `structured` data, and the raw result frame.
-
-## `thread(to, language="en", timeout_ms=60000)`
-
-Creates a multi-turn conversation helper.
+### `thread(...)`
 
 ```python
-thread = client.thread(
-    "assistant@demo.beam.directory",
-    language="en",
-    timeout_ms=60_000,
-)
-
-first = await thread.say("Draft a response to this customer issue.")
-second = await thread.say("Now shorten it to three bullets.")
+thread = client.thread("assistant@beam.directory")
+await thread.say("Draft a response to this customer issue.")
 ```
 
-## Intent handlers (`on_intent`)
+## Important dataclasses
 
-Python exposes a decorator-based `on_intent(...)` API.
-
-```python
-@client.on_intent("search.query")
-async def handle_query(frame):
-    from beam_directory.frames import create_result_frame
-
-    return create_result_frame(
-        success=True,
-        nonce=frame.nonce,
-        payload={"hits": [{"title": "Incident 241", "score": 0.98}]},
-    )
-```
-
-## `on_talk(handler)`
-
-Registers a convenience handler for natural-language conversations.
-
-```python
-async def handle_talk(message, from_id, frame):
-    return f"Got it, {from_id}. Here's the short answer.", None
-
-client.on_talk(handle_talk)
-```
-
-`on_talk` wraps `conversation.message` and lets your agent focus on plain-language replies.
+- `AgentProfile`
+- `BrowseFilters`
+- `BrowseResult`
+- `DirectoryStats`
+- `Delegation`
+- `Report`
+- `DomainVerification`
+- `KeyRotationResult`

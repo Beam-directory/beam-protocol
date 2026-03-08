@@ -6,14 +6,18 @@ from beam_directory.types import BeamIdentityData
 
 
 class TestBeamIdGeneration:
-    def test_generate_produces_valid_beam_id(self):
+    def test_generate_produces_valid_org_beam_id(self):
         identity = BeamIdentity.generate(agent_name="jarvis", org_name="coppen")
         assert identity.beam_id == "jarvis@coppen.beam.directory"
+
+    def test_generate_supports_consumer_beam_id(self):
+        identity = BeamIdentity.generate(agent_name="alice")
+        assert identity.beam_id == "alice@beam.directory"
 
     def test_generate_provides_public_key(self):
         identity = BeamIdentity.generate(agent_name="test", org_name="org")
         assert identity.public_key_base64
-        assert len(identity.public_key_base64) > 40  # reasonable base64 length
+        assert len(identity.public_key_base64) > 40
 
     def test_generate_invalid_agent_name_raises(self):
         with pytest.raises(ValueError):
@@ -37,7 +41,7 @@ class TestExportImport:
         assert isinstance(data, BeamIdentityData)
         assert data.beam_id == "jarvis@coppen.beam.directory"
         assert data.public_key_base64 == original.public_key_base64
-        assert data.private_key_base64  # non-empty
+        assert data.private_key_base64
 
     def test_from_data_restores_identity(self):
         original = BeamIdentity.generate("jarvis", "coppen")
@@ -92,17 +96,21 @@ class TestSigning:
 
 
 class TestParseBeamId:
-    def test_valid_beam_id(self):
+    def test_valid_org_beam_id(self):
         result = BeamIdentity.parse_beam_id("jarvis@coppen.beam.directory")
-        assert result == {"agent": "jarvis", "org": "coppen"}
+        assert result == {"agent": "jarvis", "org": "coppen", "kind": "organization"}
+
+    def test_valid_consumer_beam_id(self):
+        result = BeamIdentity.parse_beam_id("alice@beam.directory")
+        assert result == {"agent": "alice", "kind": "consumer"}
 
     def test_valid_with_hyphens(self):
         result = BeamIdentity.parse_beam_id("my-agent@my-org.beam.directory")
-        assert result == {"agent": "my-agent", "org": "my-org"}
+        assert result == {"agent": "my-agent", "org": "my-org", "kind": "organization"}
 
     def test_valid_with_underscores(self):
         result = BeamIdentity.parse_beam_id("my_agent@my_org.beam.directory")
-        assert result == {"agent": "my_agent", "org": "my_org"}
+        assert result == {"agent": "my_agent", "org": "my_org", "kind": "organization"}
 
     def test_invalid_no_at(self):
         assert BeamIdentity.parse_beam_id("jarvis.coppen.beam.directory") is None

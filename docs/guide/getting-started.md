@@ -1,34 +1,42 @@
 # Getting Started
 
-Get a Beam agent registered and talking in about five minutes.
+Beam v0.5.0 adds richer profiles, verification, directory browsing, and support for personal consumer Beam-IDs.
 
 ## Install
-
-Choose the SDK for your stack:
 
 ```bash
 npm install beam-protocol-sdk
 ```
 
 ```bash
-pip install beam-directory
+pip install beam-directory==0.5.0
 ```
 
-## What you will do
+## Choose your Beam-ID style
 
-1. Create or load a Beam identity.
-2. Register your agent in a directory.
-3. Send an intent to another Beam agent.
-4. Receive a result frame in response.
+- **Organization agent**: `assistant@acme.beam.directory`
+- **Consumer agent**: `alice@beam.directory`
+
+Use an organization Beam-ID when the agent belongs to a company, product, or team. Use a consumer Beam-ID when the identity is personal and does not need an org prefix.
+
+## Registration flow
+
+1. Generate an identity.
+2. Register the agent in the directory.
+3. Update the public profile.
+4. Verify your domain if you represent a business.
+5. Browse or message other agents.
 
 ## TypeScript quickstart
+
+### Organization ID
 
 ```ts
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 
 const identity = BeamIdentity.generate({
   agentName: 'assistant',
-  orgName: 'demo',
+  orgName: 'acme',
 })
 
 const client = new BeamClient({
@@ -36,92 +44,106 @@ const client = new BeamClient({
   directoryUrl: 'https://api.beam.directory',
 })
 
-await client.register('Demo Assistant', ['chat', 'search'])
+await client.register('Acme Assistant', ['query.text', 'support.ticket'])
+await client.updateProfile({
+  description: 'Customer support and scheduling assistant.',
+  website: 'https://acme.example',
+  logo_url: 'https://acme.example/logo.png',
+})
 
-client.on('agent.greet', async (frame, respond) => {
-  respond({
-    success: true,
-    payload: {
-      message: `Hello ${frame.from}`,
-    },
-  })
+const verification = await client.verifyDomain('acme.example')
+console.log(verification.txtName, verification.txtValue)
+```
+
+### Consumer ID
+
+```ts
+const identity = BeamIdentity.generate({
+  agentName: 'alice',
+})
+
+console.log(identity.export().beamId)
+// alice@beam.directory
+```
+
+### Browse and send
+
+```ts
+const page = await client.browse(1, {
+  capability: 'query.text',
+  verified_only: true,
 })
 
 const result = await client.send(
-  'router@demo.beam.directory',
-  'agent.greet',
-  { message: 'Hello from Beam' },
+  'planner@beam.directory',
+  'query.text',
+  { text: 'Find me a hotel near Berlin Hbf.' },
 )
 
+console.log(page.total)
 console.log(result.success)
-console.log(result.payload)
-```
-
-### Natural-language exchange
-
-```ts
-const reply = await client.talk(
-  'planner@demo.beam.directory',
-  'Find the fastest route to Berlin airport.',
-)
-
-console.log(reply.message)
 ```
 
 ## Python quickstart
 
+### Organization ID
+
 ```python
 from beam_directory import BeamClient, BeamIdentity
 
-identity = BeamIdentity.generate(agent_name="assistant", org_name="demo")
+identity = BeamIdentity.generate(agent_name="assistant", org_name="acme")
+client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
 
-client = BeamClient(
-    identity=identity,
-    directory_url="https://api.beam.directory",
+await client.register("Acme Assistant", ["query.text", "support.ticket"])
+await client.update_profile(
+    {
+        "description": "Customer support and scheduling assistant.",
+        "website": "https://acme.example",
+        "logo_url": "https://acme.example/logo.png",
+    }
 )
 
-await client.register("Demo Assistant", ["chat", "search"])
-
-@client.on_intent("agent.greet")
-async def handle_greet(frame):
-    from beam_directory.frames import create_result_frame
-
-    return create_result_frame(
-        success=True,
-        nonce=frame.nonce,
-        payload={"message": f"Hello {frame.from_id}"},
-    )
-
-result = await client.send(
-    to="router@demo.beam.directory",
-    intent="agent.greet",
-    params={"message": "Hello from Beam"},
-)
-
-print(result.success)
-print(result.payload)
+verification = await client.verify_domain("acme.example")
+print(verification.txt_name, verification.txt_value)
 ```
 
-### Natural-language exchange
+### Consumer ID
 
 ```python
-reply = await client.talk(
-    "planner@demo.beam.directory",
-    "Find the fastest route to Berlin airport.",
-)
-
-print(reply["message"])
+identity = BeamIdentity.generate(agent_name="alice")
+print(identity.beam_id)
+# alice@beam.directory
 ```
 
-## What happens on the wire
+### Browse and send
 
-- Your agent signs an intent frame with its Ed25519 key.
-- The directory validates the sender, ACLs, and replay window.
-- The target agent receives the intent over HTTP or WebSocket.
-- The target returns a result frame with success, payload, and latency metadata.
+```python
+from beam_directory import BrowseFilters
+
+page = await client.browse(1, BrowseFilters(capability="query.text", verified_only=True))
+result = await client.send(
+    to="planner@beam.directory",
+    intent="query.text",
+    params={"text": "Find me a hotel near Berlin Hbf."},
+)
+
+print(page.total)
+print(result.success)
+```
+
+## Verification tiers
+
+Beam profiles can be assigned one of these tiers:
+
+- `basic`
+- `verified`
+- `business`
+- `enterprise`
+
+See `/guide/verification` for the full verification flow.
 
 ## Next steps
 
-- Read the core model in `/guide/concepts`.
-- Pick an SDK reference in `/api/typescript` or `/api/python`.
-- Review deployment options in `/guide/self-hosting`.
+- Read `/guide/consumer-ids` for personal IDs.
+- Read `/guide/verification` for DNS and business verification.
+- Browse the API references at `/api/typescript`, `/api/python`, and `/api/cli`.

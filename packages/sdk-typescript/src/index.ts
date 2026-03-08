@@ -12,14 +12,23 @@ export {
   REPLAY_WINDOW_MS
 } from './frames.js'
 export type {
-  BeamIdString,
-  BeamIdentityConfig,
-  BeamIdentityData,
-  IntentFrame,
-  ResultFrame,
+  AgentProfile,
   AgentRegistration,
   AgentRecord,
-  DirectoryConfig,
+  AgentSearchQuery,
   BeamClientConfig,
-  AgentSearchQuery
+  BeamIdentityConfig,
+  BeamIdentityData,
+  BeamIdString,
+  BrowseFilters,
+  BrowseResult,
+  Delegation,
+  DirectoryConfig,
+  DirectoryStats,
+  DomainVerification,
+  IntentFrame,
+  KeyRotationResult,
+  Report,
+  ResultFrame,
+  VerificationTier,
 } from './types.js'

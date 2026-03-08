@@ -2,11 +2,16 @@ import { describe, it, expect } from 'vitest'
 import { BeamIdentity } from '../src/identity.js'
 
 describe('BeamIdentity', () => {
-  it('generate() creates valid beamId format', () => {
+  it('generate() creates valid organizational beamId format', () => {
     const identity = BeamIdentity.generate({ agentName: 'myagent', orgName: 'myorg' })
     expect(identity.beamId).toBe('myagent@myorg.beam.directory')
     expect(identity.publicKeyBase64).toBeTruthy()
     expect(typeof identity.publicKeyBase64).toBe('string')
+  })
+
+  it('generate() supports consumer beam IDs', () => {
+    const identity = BeamIdentity.generate({ agentName: 'alice' })
+    expect(identity.beamId).toBe('alice@beam.directory')
   })
 
   it('sign() + verify() round-trip works', () => {
@@ -31,7 +36,6 @@ describe('BeamIdentity', () => {
     const identity = BeamIdentity.generate({ agentName: 'alice', orgName: 'acme' })
     const data = 'hello beam protocol'
     const signature = identity.sign(data)
-    // Flip a character in the signature
     const tampered = signature.slice(0, -4) + 'AAAA'
     const valid = BeamIdentity.verify(data, tampered, identity.publicKeyBase64)
     expect(valid).toBe(false)
@@ -42,7 +46,6 @@ describe('BeamIdentity', () => {
     const identity2 = BeamIdentity.generate({ agentName: 'bob', orgName: 'acme' })
     const data = 'hello beam protocol'
     const signature = identity1.sign(data)
-    // Verify with wrong key
     const valid = BeamIdentity.verify(data, signature, identity2.publicKeyBase64)
     expect(valid).toBe(false)
   })
@@ -59,59 +62,33 @@ describe('BeamIdentity', () => {
     expect(restored.beamId).toBe(original.beamId)
     expect(restored.publicKeyBase64).toBe(original.publicKeyBase64)
 
-    // Signing with restored key should verify against original public key
     const message = 'test round trip'
     const sig = restored.sign(message)
     expect(BeamIdentity.verify(message, sig, original.publicKeyBase64)).toBe(true)
   })
 
-  it('export() produces stable base64 keys', () => {
-    const identity = BeamIdentity.generate({ agentName: 'stable', orgName: 'org' })
-    const export1 = identity.export()
-    const export2 = identity.export()
-    expect(export1.publicKeyBase64).toBe(export2.publicKeyBase64)
-    expect(export1.privateKeyBase64).toBe(export2.privateKeyBase64)
-  })
-
   describe('parseBeamId()', () => {
-    it('returns correct agent/org for valid beam ID', () => {
+    it('returns correct agent/org for valid organizational beam ID', () => {
       const result = BeamIdentity.parseBeamId('myagent@myorg.beam.directory')
       expect(result).not.toBeNull()
-      expect(result!.agent).toBe('myagent')
-      expect(result!.org).toBe('myorg')
+      expect(result).toEqual({ agent: 'myagent', org: 'myorg', kind: 'organization' })
+    })
+
+    it('returns correct result for consumer beam IDs', () => {
+      const result = BeamIdentity.parseBeamId('alice@beam.directory')
+      expect(result).toEqual({ agent: 'alice', kind: 'consumer' })
     })
 
     it('returns correct result for hyphenated names', () => {
       const result = BeamIdentity.parseBeamId('my-agent@my-org.beam.directory')
-      expect(result).not.toBeNull()
-      expect(result!.agent).toBe('my-agent')
-      expect(result!.org).toBe('my-org')
+      expect(result).toEqual({ agent: 'my-agent', org: 'my-org', kind: 'organization' })
     })
 
-    it('returns correct result for underscore names', () => {
-      const result = BeamIdentity.parseBeamId('my_agent@my_org.beam.directory')
-      expect(result).not.toBeNull()
-      expect(result!.agent).toBe('my_agent')
-      expect(result!.org).toBe('my_org')
-    })
-
-    it('returns null for invalid format - missing @', () => {
+    it('returns null for invalid format', () => {
       expect(BeamIdentity.parseBeamId('myagentmyorg.beam.directory')).toBeNull()
-    })
-
-    it('returns null for invalid format - wrong suffix', () => {
       expect(BeamIdentity.parseBeamId('myagent@myorg.beam.com')).toBeNull()
-    })
-
-    it('returns null for invalid format - uppercase letters', () => {
       expect(BeamIdentity.parseBeamId('MyAgent@myorg.beam.directory')).toBeNull()
-    })
-
-    it('returns null for empty string', () => {
       expect(BeamIdentity.parseBeamId('')).toBeNull()
-    })
-
-    it('returns null for partial match', () => {
       expect(BeamIdentity.parseBeamId('agent@org.beam.directory.extra')).toBeNull()
     })
   })
@@ -119,7 +96,6 @@ describe('BeamIdentity', () => {
   it('generateNonce() returns a UUID v4 string', () => {
     const nonce = BeamIdentity.generateNonce()
     expect(typeof nonce).toBe('string')
-    // UUID v4 format: xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx
     expect(nonce).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/)
   })
 

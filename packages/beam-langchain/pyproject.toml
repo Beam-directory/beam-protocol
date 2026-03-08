@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "beam-langchain"
-version = "0.1.0"
+version = "0.5.0"
 description = "LangChain tools and toolkit for Beam Protocol agent-to-agent communication"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,7 +24,7 @@ classifiers = [
   "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
-  "beam-directory>=0.2.0",
+  "beam-directory>=0.5.0",
   "langchain-core>=0.3.0",
   "pydantic>=2.0.0",
 ]
