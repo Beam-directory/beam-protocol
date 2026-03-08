@@ -1,7 +1,7 @@
 {
-  "name": "@beam-protocol/sdk",
-  "version": "0.1.0",
-  "description": "TypeScript SDK for the Beam Protocol — Agent-to-Agent communication",
+  "name": "beam-protocol-sdk",
+  "version": "0.3.0",
+  "description": "TypeScript SDK for the Beam Protocol \u2014 Agent-to-Agent communication",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -26,6 +26,8 @@
   "optionalDependencies": {
     "ws": "^8.16.0"
   },
-  "engines": { "node": ">=18.0.0" },
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "license": "Apache-2.0"
 }

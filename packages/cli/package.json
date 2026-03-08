@@ -1,7 +1,7 @@
 {
-  "name": "@beam-protocol/cli",
-  "version": "0.1.0",
-  "description": "Beam Protocol CLI — manage Beam identities, register agents, send intents",
+  "name": "beam-protocol-cli",
+  "version": "0.3.0",
+  "description": "Beam Protocol CLI \u2014 manage Beam identities, register agents, send intents",
   "type": "module",
   "bin": {
     "beam": "./dist/index.js"
