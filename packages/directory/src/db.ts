@@ -1,18 +1,8 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type {
-  AgentKeyRow,
-  AgentRow,
-  DelegationRow,
-  DomainVerificationRow,
-  IntentFrame,
-  IntentLogRow,
-  OrgAgentRow,
-  OrgRow,
-  RegisterRequest,
-  ReportRow,
-  TrustScoreRow,
-} from './types.js'
+import type { AgentRow, IntentFrame, IntentLogRow, OrgAgentRow, OrgRow, RegisterRequest, TrustScoreRow } from './types.js'
+import type { DIDDocument } from './did.js'
+import { generateDIDDocument } from './did.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -85,6 +75,16 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_agents_trust ON agents(trust_score DESC);
     CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC);
     CREATE INDEX IF NOT EXISTS idx_agents_email_verified ON agents(email_verified, trust_score DESC);
+
+    CREATE TABLE IF NOT EXISTS did_documents (
+      did TEXT PRIMARY KEY,
+      document TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_did_documents_updated_at
+      ON did_documents(updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS nonces (
       nonce TEXT PRIMARY KEY,
@@ -494,7 +494,9 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const score = calculateTrustScore(db, data.beamId)
   db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, data.beamId)
 
-  return getAgent(db, data.beamId) as AgentRow
+  const agent = getAgent(db, data.beamId) as AgentRow
+  upsertDIDDocument(db, generateDIDDocument(agent))
+  return agent
 }
 
 export function getAgent(db: DB, beamId: string): AgentRow | null {
@@ -502,6 +504,54 @@ export function getAgent(db: DB, beamId: string): AgentRow | null {
   return row ?? null
 }
 
+export function findAgentByHandle(db: DB, handle: string): AgentRow | null {
+  const rows = db.prepare(`
+    SELECT *
+    FROM agents
+    WHERE beam_id GLOB ?
+    ORDER BY created_at ASC
+    LIMIT 2
+  `).all(`${handle}@*.beam.directory`) as AgentRow[]
+
+  if (rows.length !== 1) {
+    return null
+  }
+
+  return rows[0] ?? null
+}
+
+export function upsertDIDDocument(db: DB, document: DIDDocument): DIDDocument {
+  const now = new Date().toISOString()
+  const existing = getDIDDocument(db, document.id)
+  db.prepare(`
+    INSERT INTO did_documents (did, document, created_at, updated_at)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(did) DO UPDATE SET
+      document = excluded.document,
+      updated_at = excluded.updated_at
+  `).run(
+    document.id,
+    JSON.stringify(document),
+    existing?.created ?? now,
+    now
+  )
+
+  return getDIDDocument(db, document.id) as DIDDocument
+}
+
+export function getDIDDocument(db: DB, did: string): DIDDocument | null {
+  const row = db.prepare('SELECT document FROM did_documents WHERE did = ?').get(did) as { document: string } | undefined
+  if (!row) {
+    return null
+  }
+
+  return JSON.parse(row.document) as DIDDocument
+}
+
+/**
+ * Search agents with optional filters. Capabilities filtering is done in JavaScript
+ * for compatibility with SQLite versions that lack full JSON function support.
+ */
 export function searchAgents(
   db: DB,
   query: {

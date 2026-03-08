@@ -3,6 +3,7 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
+import { toBeamDID } from '../did.js'
 import {
   getAgent,
   getAgentDirectoryStats,
@@ -83,9 +84,8 @@ function buildBeamId(baseName: string, org: string, db: Database): string {
 function serializeAgent(row: AgentRow): object {
   const { email_token: _emailToken, ...agent } = row
   return {
-    beamId: row.beam_id,
-    org: row.org,
-    displayName: row.display_name,
+    ...row,
+    did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
     verified: row.verified === 1 || row.verification_tier === 'verified',
     flagged: row.flagged === 1,

@@ -1,5 +1,6 @@
 import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
+import { BeamCredentialsClient, BeamDID } from './did.js'
 import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import type {
   AgentProfile,
@@ -57,6 +58,8 @@ async function openWebSocket(url: string): Promise<WebSocketLike> {
 export class BeamClient {
   private _identity: BeamIdentity
   private readonly _directory: BeamDirectory
+  private readonly _did: BeamDID
+  private readonly _credentials: BeamCredentialsClient
   private readonly _directoryUrl: string
   private _ws: WebSocketLike | null = null
   private _wsConnected = false
@@ -67,6 +70,8 @@ export class BeamClient {
     this._identity = BeamIdentity.fromData(config.identity)
     this._directoryUrl = config.directoryUrl
     this._directory = new BeamDirectory({ baseUrl: config.directoryUrl })
+    this._did = new BeamDID({ baseUrl: config.directoryUrl, identity: this._identity })
+    this._credentials = new BeamCredentialsClient(config.directoryUrl)
   }
 
   get beamId(): BeamIdString {
@@ -75,6 +80,14 @@ export class BeamClient {
 
   get directory(): BeamDirectory {
     return this._directory
+  }
+
+  get did(): BeamDID {
+    return this._did
+  }
+
+  get credentials(): BeamCredentialsClient {
+    return this._credentials
   }
 
   async register(displayName: string, capabilities: string[]): Promise<AgentRecord> {

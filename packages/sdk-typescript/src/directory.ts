@@ -57,87 +57,16 @@ function getStringArray(raw: Record<string, unknown>, ...keys: string[]): string
 
 function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
   return {
-    beamId: (getString(raw, 'beamId', 'beam_id') ?? '') as BeamIdString,
-    displayName: getString(raw, 'displayName', 'display_name') ?? '',
-    capabilities: getStringArray(raw, 'capabilities'),
-    publicKey: getString(raw, 'publicKey', 'public_key') ?? '',
-    org: getString(raw, 'org'),
-    trustScore: getNumber(raw, 'trustScore', 'trust_score') ?? 0,
-    verified: getBoolean(raw, 'verified') ?? false,
-    createdAt: getString(raw, 'createdAt', 'created_at') ?? '',
-    lastSeen: getString(raw, 'lastSeen', 'last_seen') ?? '',
-  }
-}
-
-function normalizeProfile(raw: Record<string, unknown>): AgentProfile {
-  const base = normalizeAgent(raw)
-  return {
-    ...base,
-    description: getString(raw, 'description'),
-    logoUrl: getString(raw, 'logoUrl', 'logo_url'),
-    website: getString(raw, 'website'),
-    verificationTier: getString(raw, 'verificationTier', 'verification_tier', 'tier') as VerificationTier | undefined,
-    verificationStatus: getString(raw, 'verificationStatus', 'verification_status', 'status') as AgentProfile['verificationStatus'],
-    domain: getString(raw, 'domain'),
-    intentsHandled: getNumber(raw, 'intentsHandled', 'intents_handled'),
-  }
-}
-
-function normalizeStats(raw: Record<string, unknown>): DirectoryStats {
-  return {
-    totalAgents: getNumber(raw, 'totalAgents', 'total_agents', 'agents') ?? 0,
-    verifiedAgents: getNumber(raw, 'verifiedAgents', 'verified_agents', 'verified') ?? 0,
-    intentsProcessed: getNumber(raw, 'intentsProcessed', 'intents_processed', 'intents') ?? 0,
-    consumerAgents: getNumber(raw, 'consumerAgents', 'consumer_agents'),
-    uptime: getNumber(raw, 'uptime'),
-    waitlistSize: getNumber(raw, 'waitlistSize', 'waitlist_size'),
-    version: getString(raw, 'version'),
-  }
-}
-
-function normalizeVerification(raw: Record<string, unknown>, fallbackDomain = ''): DomainVerification {
-  return {
-    domain: getString(raw, 'domain') ?? fallbackDomain,
-    verified: getBoolean(raw, 'verified') ?? false,
-    status: getString(raw, 'status', 'errorCode', 'error_code'),
-    tier: getString(raw, 'tier', 'verificationTier', 'verification_tier') as VerificationTier | undefined,
-    txtName: getString(raw, 'txtName', 'txt_name'),
-    txtValue: getString(raw, 'txtValue', 'txt_value'),
-    expected: getString(raw, 'expected'),
-    records: getStringArray(raw, 'records'),
-    checkedAt: getString(raw, 'checkedAt', 'checked_at'),
-  }
-}
-
-function normalizeDelegation(raw: Record<string, unknown>): Delegation {
-  return {
-    id: getString(raw, 'id'),
-    sourceBeamId: (getString(raw, 'sourceBeamId', 'source_beam_id', 'from') ?? '') as BeamIdString,
-    targetBeamId: (getString(raw, 'targetBeamId', 'target_beam_id', 'to') ?? '') as BeamIdString,
-    scope: getString(raw, 'scope') ?? '',
-    expiresAt: getString(raw, 'expiresAt', 'expires_at'),
-    createdAt: getString(raw, 'createdAt', 'created_at'),
-    status: getString(raw, 'status'),
-  }
-}
-
-function normalizeReport(raw: Record<string, unknown>): Report {
-  return {
-    id: getString(raw, 'id'),
-    reporterBeamId: (getString(raw, 'reporterBeamId', 'reporter_beam_id', 'from') ?? '') as BeamIdString,
-    targetBeamId: (getString(raw, 'targetBeamId', 'target_beam_id', 'to') ?? '') as BeamIdString,
-    reason: getString(raw, 'reason') ?? '',
-    createdAt: getString(raw, 'createdAt', 'created_at'),
-    status: getString(raw, 'status'),
-  }
-}
-
-function normalizeRotation(raw: Record<string, unknown>, beamId: BeamIdString, publicKey: string): KeyRotationResult {
-  return {
-    beamId: (getString(raw, 'beamId', 'beam_id') ?? beamId) as BeamIdString,
-    publicKey: getString(raw, 'publicKey', 'public_key') ?? publicKey,
-    rotatedAt: getString(raw, 'rotatedAt', 'rotated_at'),
-    previousKey: getString(raw, 'previousKey', 'previous_key'),
+    beamId: (raw.beamId ?? raw.beam_id) as AgentRecord['beamId'],
+    did: (raw.did ?? '') as string,
+    displayName: (raw.displayName ?? raw.display_name ?? '') as string,
+    capabilities: (raw.capabilities ?? []) as string[],
+    publicKey: (raw.publicKey ?? raw.public_key ?? '') as string,
+    org: (raw.org ?? '') as string,
+    trustScore: (raw.trustScore ?? raw.trust_score ?? 0) as number,
+    verified: (raw.verified ?? false) as boolean,
+    createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
+    lastSeen: (raw.lastSeen ?? raw.last_seen ?? '') as string,
   }
 }
 

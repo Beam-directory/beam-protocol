@@ -1,6 +1,7 @@
 export { BeamIdentity } from './identity.js'
 export { BeamDirectory, BeamDirectoryError } from './directory.js'
 export { BeamClient, BeamThread } from './client.js'
+export { BeamDID, BeamCredentialsClient, CredentialVerifier } from './did.js'
 export {
   createIntentFrame,
   createResultFrame,
@@ -32,3 +33,11 @@ export type {
   ResultFrame,
   VerificationTier,
 } from './types.js'
+export type {
+  DIDDocument,
+  VerificationMethod,
+  ServiceEndpoint,
+  VerifiableCredential,
+  CredentialSubject,
+  Proof,
+} from './did.js'

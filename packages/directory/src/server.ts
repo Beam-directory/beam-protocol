@@ -9,8 +9,8 @@ import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import { agentsRouter } from './routes/agents.js'
-import { delegationsRouter } from './routes/delegations.js'
-import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
+import { credentialsRouter } from './routes/credentials.js'
+import { didRouter } from './routes/did.js'
 import { orgsRouter } from './routes/orgs.js'
 import { reportsRouter } from './routes/reports.js'
 import { verificationRouter } from './routes/verify.js'
@@ -685,11 +685,8 @@ export function createApp(db: Database): Hono {
 
   app.route('/orgs', orgsRouter(db))
   app.route('/agents', agentsRouter(db))
-  app.route('/agents', verificationRouter(db))
-  app.route('/agents', agentKeysRouter(db))
-  app.route('/agents', delegationsRouter(db))
-  app.route('/agents', reportsRouter(db))
-  app.route('/keys', revokedKeysRouter(db))
+  app.route('/', didRouter(db))
+  app.route('/credentials', credentialsRouter())
 
   app.post('/acl', async (c) => {
     let body: unknown

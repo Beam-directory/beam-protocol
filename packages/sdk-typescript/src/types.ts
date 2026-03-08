@@ -45,7 +45,8 @@ export interface AgentRegistration {
 }
 
 export interface AgentRecord extends AgentRegistration {
-  trustScore: number
+  did?: string
+  trustScore: number  // 0.0-1.0
   verified: boolean
   createdAt: string
   lastSeen: string
