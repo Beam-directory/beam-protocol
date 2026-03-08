@@ -21,7 +21,7 @@ import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
-const BEAM_DIRECTORY_ORIGIN = 'https://beam.directory'
+const serverStartedAt = Date.now()
 
 type WaitlistSignupInput = {
   email: string
@@ -579,17 +579,17 @@ export function createApp(db: Database): Hono {
   seedAclsFromCatalog(db)
 
   app.use('*', cors({
-    origin: (origin) => origin === BEAM_DIRECTORY_ORIGIN ? origin : '*',
-    allowMethods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
+    origin: [
+      'https://beam-dashboard.vercel.app',
+      'https://dashboard.beam.directory',
+      'http://localhost:5173',
+    ],
+    allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: [
       'Content-Type',
       'Authorization',
       'X-Admin-Key',
-      'X-Directory-User',
-      'X-Beam-Federation-Secret',
-      'X-Beam-Source-Directory',
-      'X-Beam-Hop-Count',
-      'X-Beam-mTLS-Verified',
+      'X-API-Key',
     ],
   }))
 
@@ -1026,12 +1026,34 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/health', (c) => {
-    return c.json({
-      status: 'ok',
-      protocol: 'beam/1',
-      connectedAgents: getConnectedCount(),
-      timestamp: new Date().toISOString(),
-    })
+    const timestamp = new Date().toISOString()
+
+    try {
+      const row = db.prepare('SELECT 1 AS ok').get() as { ok: number } | undefined
+
+      return c.json({
+        status: 'ok',
+        protocol: 'beam/1',
+        connectedAgents: getConnectedCount(),
+        timestamp,
+        uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+        db: {
+          status: row?.ok === 1 ? 'ok' : 'error',
+        },
+      })
+    } catch (error) {
+      return c.json({
+        status: 'error',
+        protocol: 'beam/1',
+        connectedAgents: getConnectedCount(),
+        timestamp,
+        uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+        db: {
+          status: 'error',
+          message: error instanceof Error ? error.message : 'Unknown database error',
+        },
+      }, 503)
+    }
   })
 
   app.get('/stats', (c) => {
