@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import { canonicalizeJson, multibaseToRawEd25519, rawEd25519ToPublicKeyBase64, signPayload, verifyPayload } from './crypto.js'
+import { toBeamDID } from './did.js'
 import { getDirectoryIssuerDid, getDirectoryIssuerPrivateKey, getDirectoryIssuerPublicKeyMultibase } from './issuer.js'
 
 export interface CredentialSubject {
@@ -46,7 +47,7 @@ function buildCredential(input: {
     issuer,
     issuanceDate,
     credentialSubject: {
-      id: input.beamId,
+      id: toBeamDID(input.beamId),
       ...input.subject,
       verified: true,
     },
