@@ -105,18 +105,25 @@ export interface SanitizeResult {
 
 export function sanitizeExternalMessage(message: string): SanitizeResult {
   // K2 FIX: Strip HTML/Markdown BEFORE regex scan to prevent HTML-wrapped bypasses
+  const htmlStripped = stripHtmlAndMarkdown(message)
   // H4 FIX: Normalize Unicode to catch confusables and zero-width chars
-  const stripped = normalizeUnicode(stripHtmlAndMarkdown(message))
+  const normalized = normalizeUnicode(htmlStripped)
 
   const matched: string[] = []
   let maxSeverity = 0
 
+  // Run patterns against BOTH stripped (for native script patterns like Russian/CJK)
+  // and normalized (for confusable-based bypasses)
   for (const { pattern, name, severity } of INJECTION_PATTERNS) {
-    if (pattern.test(stripped)) {
-      matched.push(name)
-      maxSeverity = Math.max(maxSeverity, severity)
+    if (pattern.test(normalized) || pattern.test(htmlStripped)) {
+      if (!matched.includes(name)) {
+        matched.push(name)
+        maxSeverity = Math.max(maxSeverity, severity)
+      }
     }
   }
+
+  const stripped = normalized
 
   const truncated = truncateMessage(stripped)
 
