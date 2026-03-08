@@ -299,6 +299,26 @@
       max-width: 700px;
       margin: 0 auto;
     }
+    .stats-live {
+      display: none;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin: 16px auto 0;
+      font-size: 0.82rem;
+      font-weight: 600;
+      color: #16A34A;
+    }
+    .stats-live.visible {
+      display: inline-flex;
+    }
+    .stats-live-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #22c55e;
+      animation: pulse 2s infinite;
+    }
     .stat {
       background: var(--bg-white);
       padding: 24px 16px;
@@ -752,12 +772,12 @@
 
     <div class="stats-row fade-up">
       <div class="stat">
-        <div class="stat-value">4</div>
+        <div class="stat-value" id="hero-agents">4</div>
         <div class="stat-label">Live Agents</div>
       </div>
       <div class="stat">
-        <div class="stat-value">6.7s</div>
-        <div class="stat-label">Fastest E2E</div>
+        <div class="stat-value" id="hero-uptime">6.7s</div>
+        <div class="stat-label">Uptime</div>
       </div>
       <div class="stat">
         <div class="stat-value">Ed25519</div>
@@ -767,6 +787,10 @@
         <div class="stat-value">0</div>
         <div class="stat-label">Cloud Deps</div>
       </div>
+    </div>
+    <div class="stats-live fade-up" id="hero-stats-live" aria-live="polite">
+      <span class="stats-live-dot" aria-hidden="true"></span>
+      <span>Live</span>
     </div>
   </div>
 </section>
@@ -1203,6 +1227,46 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
     });
   }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
   document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
+
+  const HERO_STATS_API_URL = 'https://api.beam.directory/stats';
+
+  function formatUptime(totalSeconds) {
+    const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    if (minutes > 0) return `${minutes}m`;
+    return `${seconds}s`;
+  }
+
+  window.addEventListener('load', async () => {
+    try {
+      const res = await fetch(HERO_STATS_API_URL);
+      if (!res.ok) throw new Error('Stats fetch failed');
+
+      const stats = await res.json();
+      const agentsEl = document.getElementById('hero-agents');
+      const uptimeEl = document.getElementById('hero-uptime');
+      const liveEl = document.getElementById('hero-stats-live');
+
+      if (agentsEl && Number.isFinite(Number(stats.agents))) {
+        agentsEl.textContent = String(stats.agents);
+      }
+
+      if (uptimeEl) {
+        uptimeEl.textContent = formatUptime(stats.uptime);
+      }
+
+      if (liveEl) {
+        liveEl.classList.add('visible');
+      }
+    } catch (err) {
+      console.error('Hero stats fetch failed:', err);
+    }
+  });
 
   // Waitlist form
   const WAITLIST_API_URL = 'https://api.beam.directory/waitlist';

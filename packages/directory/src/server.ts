@@ -922,6 +922,41 @@ export function createApp(db: Database): Hono {
     })
   })
 
+  app.get('/stats', (c) => {
+    let agents = 0
+    let intentsProcessed = 0
+    let waitlistSize = 0
+
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS count FROM agents').get() as { count: number } | undefined
+      agents = row?.count ?? 0
+    } catch {
+      agents = 0
+    }
+
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS count FROM intent_log').get() as { count: number } | undefined
+      intentsProcessed = row?.count ?? 0
+    } catch {
+      intentsProcessed = 0
+    }
+
+    try {
+      const row = db.prepare('SELECT COUNT(*) AS count FROM waitlist').get() as { count: number } | undefined
+      waitlistSize = row?.count ?? 0
+    } catch {
+      waitlistSize = 0
+    }
+
+    return c.json({
+      agents,
+      intentsProcessed,
+      uptime: Math.floor(process.uptime()),
+      waitlistSize,
+      version: '0.2.0',
+    })
+  })
+
   app.notFound((c) => c.json({ error: 'Not found', errorCode: 'NOT_FOUND' }, 404))
 
   app.onError((err, c) => {
