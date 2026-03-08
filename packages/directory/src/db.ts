@@ -329,6 +329,31 @@ function initSchema(db: DB): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_billing_beam_id ON billing(beam_id);
+
+    CREATE TABLE IF NOT EXISTS shield_audit_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT,
+      sender_beam_id TEXT,
+      sender_trust REAL,
+      intent_type TEXT,
+      payload_hash TEXT,
+      decision TEXT,
+      risk_score REAL,
+      response_size INTEGER,
+      anomaly_flags TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_shield_audit_sender ON shield_audit_log(sender_beam_id);
+    CREATE INDEX IF NOT EXISTS idx_shield_audit_created ON shield_audit_log(created_at);
+
+    CREATE TABLE IF NOT EXISTS pinned_keys (
+      beam_id TEXT NOT NULL,
+      pinned_beam_id TEXT NOT NULL,
+      public_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(beam_id, pinned_beam_id)
+    );
   `)
 
   ensureColumn(db, 'agents', 'email', 'TEXT')

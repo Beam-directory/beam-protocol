@@ -18,7 +18,9 @@ import { federationRouter } from './routes/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
 import { reportsRouter } from './routes/reports.js'
+import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
+import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores } from './db.js'
@@ -603,6 +605,40 @@ export function createApp(db: Database): Hono {
 
   app.use('*', createRateLimitMiddleware())
 
+  // Beam Shield — Wall 1: Body size limit (64KB)
+  app.use('*', async (c, next) => {
+    const contentLength = parseInt(c.req.header('content-length') ?? '0', 10)
+    if (contentLength > 65536) {
+      return c.json({ error: 'Payload too large (max 64KB)', errorCode: 'SHIELD_PAYLOAD_TOO_LARGE' }, 413)
+    }
+    await next()
+  })
+
+  // Beam Shield — Wall 2: Trust Gate
+  app.use('*', createTrustGateMiddleware(
+    {
+      minTrustScore: 0.3,
+      allowlist: [],
+      blocklist: [],
+      senderRateLimit: 20,
+      newAgentRateLimit: 5,
+    },
+    {
+      getTrust: (beamId) => {
+        try {
+          const row = db.prepare('SELECT trust_score FROM agents WHERE beam_id = ?').get(beamId) as { trust_score: number } | undefined
+          return row?.trust_score ?? 0
+        } catch { return 0 }
+      },
+      getCreatedAt: (beamId) => {
+        try {
+          const row = db.prepare('SELECT created_at FROM agents WHERE beam_id = ?').get(beamId) as { created_at: string } | undefined
+          return row?.created_at ?? null
+        } catch { return null }
+      },
+    },
+  ))
+
   app.get('/dashboard', (c) => {
     const auth = requireAdmin(c)
     if (auth instanceof Response) {
@@ -785,6 +821,7 @@ export function createApp(db: Database): Hono {
   app.route('/agents', didRouter(db))
   app.route('/federation', federationRouter(db))
   app.route('/billing', billingRouter(db))
+  app.route('/shield', shieldRouter(db))
   app.route('/keys', revokedKeysRouter(db))
 
   app.post('/acl', async (c) => {
