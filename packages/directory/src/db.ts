@@ -6,6 +6,7 @@ import type {
   AgentKeyRow,
   AgentRow,
   AuditLogRow,
+  BusinessVerificationRow,
   DelegationRow,
   DomainVerificationRow,
   DirectoryRoleRow,
@@ -272,6 +273,24 @@ function initSchema(db: DB): void {
     );
 
     CREATE INDEX IF NOT EXISTS idx_domain_verifications_beam_id ON domain_verifications(beam_id);
+
+    CREATE TABLE IF NOT EXISTS business_verifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      beam_id TEXT NOT NULL,
+      country TEXT NOT NULL,
+      registration_number TEXT NOT NULL,
+      legal_name TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'pending',
+      verification_source TEXT,
+      source_reference TEXT,
+      evidence TEXT,
+      created_at TEXT NOT NULL,
+      verified_at TEXT,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_business_verifications_beam_id
+      ON business_verifications(beam_id, created_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS delegations (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -819,7 +838,7 @@ export function calculateTrustScore(db: DB, beamId: string): number {
     score += 0.3
   }
 
-  if (row.verification_tier === 'verified') {
+  if (row.verification_tier !== 'basic') {
     score += 0.2
   }
 
@@ -881,10 +900,86 @@ export function updateDomainVerificationStatus(db: DB, id: number, status: strin
   return row ?? null
 }
 
+export function createBusinessVerification(
+  db: DB,
+  input: {
+    beamId: string
+    country: string
+    registrationNumber: string
+    legalName: string
+    status?: string
+    verificationSource?: string | null
+    sourceReference?: string | null
+    evidence?: unknown
+    verifiedAt?: string | null
+  },
+): BusinessVerificationRow {
+  const createdAt = nowIso()
+  const status = input.status ?? 'pending'
+  const verifiedAt = input.verifiedAt ?? (status === 'verified' ? createdAt : null)
+
+  const result = db.prepare(`
+    INSERT INTO business_verifications (
+      beam_id,
+      country,
+      registration_number,
+      legal_name,
+      status,
+      verification_source,
+      source_reference,
+      evidence,
+      created_at,
+      verified_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.beamId,
+    input.country,
+    input.registrationNumber,
+    input.legalName,
+    status,
+    input.verificationSource ?? null,
+    input.sourceReference ?? null,
+    input.evidence === undefined ? null : JSON.stringify(input.evidence),
+    createdAt,
+    verifiedAt,
+  )
+
+  return db.prepare('SELECT * FROM business_verifications WHERE id = ?').get(Number(result.lastInsertRowid)) as BusinessVerificationRow
+}
+
+export function getLatestBusinessVerification(db: DB, beamId: string): BusinessVerificationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM business_verifications
+    WHERE beam_id = ?
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(beamId) as BusinessVerificationRow | undefined
+
+  return row ?? null
+}
+
+export function markAgentBusinessVerified(db: DB, beamId: string): AgentRow | null {
+  db.prepare(`
+    UPDATE agents
+    SET verification_tier = 'business',
+        verified = 1,
+        flagged = 0,
+        last_seen = ?
+    WHERE beam_id = ?
+  `).run(nowIso(), beamId)
+
+  const score = calculateTrustScore(db, beamId)
+  db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, beamId)
+  return getAgent(db, beamId)
+}
+
 export function markAgentDomainVerified(db: DB, beamId: string): AgentRow | null {
   db.prepare(`
     UPDATE agents
     SET verification_tier = 'verified',
+        verified = 1,
         flagged = 0
     WHERE beam_id = ?
   `).run(beamId)

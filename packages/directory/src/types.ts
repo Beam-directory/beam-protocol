@@ -203,6 +203,20 @@ export interface DomainVerificationRow {
   created_at: number
 }
 
+export interface BusinessVerificationRow {
+  id: number
+  beam_id: string
+  country: string
+  registration_number: string
+  legal_name: string
+  status: string
+  verification_source: string | null
+  source_reference: string | null
+  evidence: string | null
+  created_at: string
+  verified_at: string | null
+}
+
 export interface AgentKeyRow {
   id: number
   beam_id: string
