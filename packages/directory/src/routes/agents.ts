@@ -16,6 +16,7 @@ import {
   setAgentEmailToken,
   updateAgentProfile,
   updateLastSeen,
+  verifyAgentEmailToken,
 } from '../db.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -95,6 +96,29 @@ function serializeAgent(row: AgentRow): object {
 
 export function agentsRouter(db: Database): Hono {
   const router = new Hono()
+
+  const handleVerifyEmail = (token: string | undefined | null) => {
+    const verificationToken = token?.trim()
+    if (!verificationToken) {
+      return { status: 400 as const, body: { error: 'token is required', errorCode: 'MISSING_TOKEN' } }
+    }
+
+    const agent = verifyAgentEmailToken(db, verificationToken)
+    if (!agent) {
+      return {
+        status: 400 as const,
+        body: { error: 'Invalid or expired verification token', errorCode: 'INVALID_TOKEN' },
+      }
+    }
+
+    return {
+      status: 200 as const,
+      body: {
+        verified: true,
+        agent: serializeAgent(agent),
+      },
+    }
+  }
 
   router.get('/stats', (c) => {
     try {
@@ -264,6 +288,16 @@ export function agentsRouter(db: Database): Hono {
       console.error('Registration error:', err)
       return c.json({ error: 'Failed to register agent', errorCode: 'DB_ERROR' }, 500)
     }
+  })
+
+  router.get('/verify', (c) => {
+    const result = handleVerifyEmail(c.req.query('token'))
+    return c.json(result.body, result.status)
+  })
+
+  router.get('/verify-email', (c) => {
+    const result = handleVerifyEmail(c.req.query('token'))
+    return c.json(result.body, result.status)
   })
 
   router.get('/search', (c) => {
