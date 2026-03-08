@@ -73,6 +73,30 @@ export interface RegisterRequest {
   org: string
 }
 
+export interface OrgRow {
+  name: string
+  display_name: string
+  domain: string | null
+  beam_domain: string
+  api_key_hash: string
+  verification_token: string
+  verified: number
+  created_at: string
+  verified_at: string | null
+}
+
+export interface OrgAgentRow {
+  id: number
+  org_name: string
+  agent_name: string
+  beam_id: string
+  display_name: string
+  capabilities: string
+  public_key: string
+  created_at: string
+  updated_at: string
+}
+
 // AgentRow represents a raw row from the SQLite agents table
 export interface AgentRow {
   beam_id: string

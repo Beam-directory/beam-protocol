@@ -508,6 +508,100 @@
     .compare-table .partial { color: #F59E0B; }
     .compare-table .beam-col { background: rgba(247, 92, 3, 0.03); font-weight: 600; }
 
+    /* ── Pricing ─────────────────────────────────────── */
+    #pricing {
+      background: linear-gradient(135deg, #1a0a00 0%, #0a0a0f 100%);
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+    }
+    #pricing .section-header h2,
+    #pricing .section-header p {
+      color: #F4F4F5;
+    }
+    #pricing .section-header p {
+      color: #A1A1AA;
+    }
+    .pricing-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .pricing-card {
+      position: relative;
+      background: rgba(16, 16, 24, 0.92);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      border-radius: var(--radius-lg);
+      padding: 32px 28px;
+      color: #F4F4F5;
+      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+    }
+    .pricing-card.highlight {
+      border-color: rgba(247, 92, 3, 0.5);
+      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(247, 92, 3, 0.18), 0 0 42px rgba(247, 92, 3, 0.18);
+      transform: translateY(-4px);
+    }
+    .pricing-badge {
+      position: absolute;
+      top: 18px;
+      right: 18px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      background: rgba(247, 92, 3, 0.14);
+      border: 1px solid rgba(247, 92, 3, 0.22);
+      color: #FF9A64;
+      font-size: 0.72rem;
+      font-weight: 700;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+    }
+    .pricing-tier {
+      font-size: 1.35rem;
+      font-weight: 800;
+      letter-spacing: -0.02em;
+      margin-bottom: 8px;
+    }
+    .pricing-price {
+      display: flex;
+      align-items: flex-end;
+      gap: 6px;
+      margin-bottom: 10px;
+    }
+    .pricing-price .amount {
+      font-size: 2.2rem;
+      font-weight: 800;
+      line-height: 1;
+      letter-spacing: -0.04em;
+    }
+    .pricing-price .period,
+    .pricing-copy {
+      color: #A1A1AA;
+    }
+    .pricing-copy {
+      font-size: 0.92rem;
+      line-height: 1.7;
+      margin-bottom: 22px;
+    }
+    .pricing-features {
+      list-style: none;
+      display: grid;
+      gap: 12px;
+    }
+    .pricing-features li {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      color: #E4E4E7;
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+    .pricing-features li::before {
+      content: "✦";
+      color: var(--accent);
+      font-size: 0.9rem;
+      line-height: 1.4;
+      margin-top: 1px;
+    }
+
     /* ── Waitlist ──────────────────────────────────────── */
     #waitlist { background: var(--bg); }
     .waitlist-card {
@@ -587,6 +681,7 @@
       .nav-links { display: none; }
       .pillars-grid { grid-template-columns: 1fr; }
       .result-grid { grid-template-columns: 1fr; }
+      .pricing-grid { grid-template-columns: 1fr; }
       .stats-row { grid-template-columns: repeat(2, 1fr); }
       .hero-actions { flex-direction: column; align-items: center; }
       .waitlist-form { flex-direction: column; }
@@ -608,6 +703,7 @@
     <li><a href="#live">Live Results</a></li>
     <li><a href="#security">Security</a></li>
     <li><a href="#compare">Compare</a></li>
+    <li><a href="#pricing">Pricing</a></li>
     <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
     <li><a href="#waitlist" class="nav-cta">Get Early Access</a></li>
   </ul>
@@ -993,6 +1089,61 @@ $ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_c
           </tr>
         </tbody>
       </table>
+    </div>
+  </div>
+</section>
+
+<!-- ── Pricing ────────────────────────────────────────────── -->
+<section id="pricing">
+  <div class="container">
+    <div class="section-header fade-up">
+      <span class="section-label">Pricing</span>
+      <h2>Simple plans for every agent fleet</h2>
+      <p>Start free, scale to production, or bring Beam into your enterprise stack with dedicated support.</p>
+    </div>
+
+    <div class="pricing-grid">
+      <div class="pricing-card fade-up">
+        <div class="pricing-tier">Free</div>
+        <div class="pricing-price">
+          <span class="amount">$0</span>
+          <span class="period">/mo</span>
+        </div>
+        <p class="pricing-copy">For experiments, prototypes, and small internal agent workflows.</p>
+        <ul class="pricing-features">
+          <li>Up to 3 agents</li>
+          <li>1K intents per month</li>
+          <li>Shared Beam domain</li>
+        </ul>
+      </div>
+
+      <div class="pricing-card highlight fade-up">
+        <div class="pricing-badge">Most Popular</div>
+        <div class="pricing-tier">Pro</div>
+        <div class="pricing-price">
+          <span class="amount">$49</span>
+          <span class="period">/mo</span>
+        </div>
+        <p class="pricing-copy">For production teams shipping multi-agent systems with branded identity.</p>
+        <ul class="pricing-features">
+          <li>Up to 25 agents</li>
+          <li>50K intents per month</li>
+          <li>Custom domain support</li>
+        </ul>
+      </div>
+
+      <div class="pricing-card fade-up">
+        <div class="pricing-tier">Enterprise</div>
+        <div class="pricing-price">
+          <span class="amount">Custom</span>
+        </div>
+        <p class="pricing-copy">For large deployments that need scale, reliability guarantees, and bespoke rollout help.</p>
+        <ul class="pricing-features">
+          <li>Unlimited agents</li>
+          <li>Unlimited scale planning</li>
+          <li>SLA and priority support</li>
+        </ul>
+      </div>
     </div>
   </div>
 </section>

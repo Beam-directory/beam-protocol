@@ -1,6 +1,8 @@
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
-import type { AgentRow, IntentFrame, IntentLogRow, RegisterRequest, TrustScoreRow } from './types.js'
+import type { AgentRow, IntentFrame, IntentLogRow, OrgAgentRow, OrgRow, RegisterRequest, TrustScoreRow } from './types.js'
+
+const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
 export function createDatabase(dbPath = './beam-directory.db'): DB {
   const db = new Database(dbPath)
@@ -12,6 +14,37 @@ export function createDatabase(dbPath = './beam-directory.db'): DB {
 
 function initSchema(db: DB): void {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS orgs (
+      name TEXT PRIMARY KEY,
+      display_name TEXT NOT NULL,
+      domain TEXT,
+      beam_domain TEXT NOT NULL UNIQUE,
+      api_key_hash TEXT NOT NULL,
+      verification_token TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      verified_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_orgs_domain ON orgs(domain);
+    CREATE INDEX IF NOT EXISTS idx_orgs_verified ON orgs(verified, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS org_agents (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      org_name TEXT NOT NULL,
+      agent_name TEXT NOT NULL,
+      beam_id TEXT NOT NULL UNIQUE,
+      display_name TEXT NOT NULL,
+      capabilities TEXT NOT NULL DEFAULT '[]',
+      public_key TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE,
+      UNIQUE(org_name, agent_name)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_org_agents_org_name ON org_agents(org_name, agent_name);
+
     CREATE TABLE IF NOT EXISTS agents (
       beam_id TEXT PRIMARY KEY,
       org TEXT NOT NULL,
@@ -95,6 +128,126 @@ function initSchema(db: DB): void {
   `)
 }
 
+export function buildBeamDomain(orgName: string): string {
+  return `${orgName}.${BEAM_DOMAIN_SUFFIX}`
+}
+
+export function createOrg(
+  db: DB,
+  input: {
+    name: string
+    displayName: string
+    domain?: string | null
+    apiKeyHash: string
+    verificationToken: string
+  }
+): OrgRow {
+  const now = new Date().toISOString()
+  const beamDomain = buildBeamDomain(input.name)
+
+  db.prepare(`
+    INSERT INTO orgs (
+      name,
+      display_name,
+      domain,
+      beam_domain,
+      api_key_hash,
+      verification_token,
+      verified,
+      created_at,
+      verified_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL)
+  `).run(
+    input.name,
+    input.displayName,
+    input.domain ?? null,
+    beamDomain,
+    input.apiKeyHash,
+    input.verificationToken,
+    now
+  )
+
+  return getOrg(db, input.name) as OrgRow
+}
+
+export function getOrg(db: DB, name: string): OrgRow | null {
+  const row = db.prepare('SELECT * FROM orgs WHERE name = ?').get(name) as OrgRow | undefined
+  return row ?? null
+}
+
+export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Partial<AgentRow>> {
+  return db.prepare(`
+    SELECT
+      oa.id,
+      oa.org_name,
+      oa.agent_name,
+      oa.beam_id,
+      oa.display_name,
+      oa.capabilities,
+      oa.public_key,
+      oa.created_at,
+      oa.updated_at,
+      a.org,
+      a.trust_score,
+      a.verified,
+      a.last_seen
+    FROM org_agents oa
+    LEFT JOIN agents a ON a.beam_id = oa.beam_id
+    WHERE oa.org_name = ?
+    ORDER BY oa.agent_name ASC
+  `).all(orgName) as Array<OrgAgentRow & Partial<AgentRow>>
+}
+
+export function markOrgVerified(db: DB, name: string): OrgRow | null {
+  const now = new Date().toISOString()
+  db.prepare('UPDATE orgs SET verified = 1, verified_at = ? WHERE name = ?').run(now, name)
+  return getOrg(db, name)
+}
+
+function orgExists(db: DB, name: string): boolean {
+  const row = db.prepare('SELECT 1 FROM orgs WHERE name = ? LIMIT 1').get(name) as { 1: number } | undefined
+  return Boolean(row)
+}
+
+function extractAgentName(beamId: string): string {
+  return beamId.split('@')[0] ?? beamId
+}
+
+function syncOrgAgent(db: DB, data: RegisterRequest, createdAt: string): void {
+  if (!orgExists(db, data.org)) {
+    return
+  }
+
+  const now = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO org_agents (
+      org_name,
+      agent_name,
+      beam_id,
+      display_name,
+      capabilities,
+      public_key,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(org_name, agent_name) DO UPDATE SET
+      beam_id = excluded.beam_id,
+      display_name = excluded.display_name,
+      capabilities = excluded.capabilities,
+      public_key = excluded.public_key,
+      updated_at = excluded.updated_at
+  `).run(
+    data.org,
+    extractAgentName(data.beamId),
+    data.beamId,
+    data.displayName,
+    JSON.stringify(data.capabilities),
+    data.publicKey,
+    createdAt,
+    now
+  )
+}
+
 /**
  * Insert or update an agent record. Returns the resulting row.
  */
@@ -135,6 +288,8 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       now
     )
   }
+
+  syncOrgAgent(db, data, existing?.created_at ?? now)
 
   // Recompute trust score after upsert
   const score = calculateTrustScore(db, data.beamId)
