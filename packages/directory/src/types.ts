@@ -53,6 +53,66 @@ export interface TrustScoreRow {
   last_updated: string
 }
 
+export interface FederationPeer {
+  directoryUrl: string
+  publicKey: string
+  trustLevel: number
+  lastSeen: string | null
+  syncedAt: string | null
+}
+
+export interface FederationPeerRow {
+  id: number
+  directory_url: string
+  public_key: string
+  trust_level: number
+  status: string
+  created_at: string
+  last_seen: string | null
+  synced_at: string | null
+}
+
+export interface FederatedAgentRow {
+  beam_id: string
+  home_directory_url: string
+  cached_document: string
+  cached_at: string
+  ttl: number
+}
+
+export interface DirectoryRoleRow {
+  user_id: string
+  role: 'admin' | 'operator' | 'viewer'
+  directory_url: string
+}
+
+export interface AuditLogRow {
+  id: number
+  action: string
+  actor: string
+  target: string
+  timestamp: string
+  details: string
+}
+
+export interface DnsCacheRow {
+  cache_key: string
+  record_type: string
+  payload: string
+  expires_at: number
+  cached_at: string
+}
+
+export interface FederatedTrustRow {
+  beam_id: string
+  source_directory_url: string
+  origin_directory_url: string
+  asserted_trust: number
+  effective_trust: number
+  hop_count: number
+  asserted_at: string
+}
+
 export interface ResultFrame {
   v: '1'
   success: boolean
