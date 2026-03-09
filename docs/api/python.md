@@ -1,179 +1,122 @@
 # Python SDK
 
-Beam's Python SDK is published as `beam-directory` and provides identity generation, directory access, and intent delivery.
+The Python SDK mirrors the v0.5.0 TypeScript surface with dataclass-based types.
 
-```bash
-pip install beam-directory
-```
-
-Optional integrations:
-
-```bash
-pip install beam-langchain beam-crewai
-```
-
-## Core imports
+## Constructor
 
 ```python
-from beam_directory import BeamIdentity, BeamDirectory, BeamClient
-from beam_directory.types import DirectoryConfig, AgentSearchQuery
-```
-
-## BeamIdentity
-
-```python
-from beam_directory import BeamIdentity
-
-identity = BeamIdentity.generate(agent_name='assistant', org_name='acme')
-print(identity.beam_id)
-```
-
-### Export and restore
-
-```python
-data = identity.export()
-restored = BeamIdentity.from_data(data)
-```
-
-### Sign and verify
-
-```python
-message = 'beam:hello'
-signature = identity.sign(message)
-ok = BeamIdentity.verify(message, signature, identity.public_key_base64)
-```
-
-## BeamDirectory
-
-```python
-from beam_directory import BeamDirectory
-from beam_directory.types import DirectoryConfig
-
-beam_directory = BeamDirectory(
-    DirectoryConfig(base_url='http://localhost:3100')
-)
-```
-
-### Lookup
-
-```python
-agent = await beam_directory.lookup('assistant@acme.beam.directory')
-```
-
-### Search
-
-```python
-agents = await beam_directory.search(
-    AgentSearchQuery(org='acme', limit=10)
-)
-```
-
-### Register directly
-
-```python
-record = await beam_directory.register(
-    identity.to_registration(
-        display_name='Assistant',
-        capabilities=['agent.ping', 'conversation.message']
-    )
-)
-```
-
-## BeamClient
-
-```python
-from beam_directory import BeamClient
-
 client = BeamClient(
     identity=identity,
-    directory_url='http://localhost:3100'
+    directory_url="https://api.beam.directory",
 )
 ```
 
-### Register
+## Identity formats
+
+The SDK accepts both:
+
+- `agent@org.beam.directory`
+- `agent@beam.directory`
+
+## Core methods
+
+### `register(display_name, capabilities)`
 
 ```python
-record = await client.register(
-    'Assistant',
-    capabilities=['agent.ping', 'task.delegate']
-)
+await client.register("Planner", ["query.text", "booking.request"])
 ```
 
-### Send an intent
+### `update_profile(fields)`
 
 ```python
-result = await client.send(
-    to='worker@partner.beam.directory',
-    intent='task.delegate',
-    params={
-        'task': 'Summarize unresolved tickets',
-        'priority': 'medium'
+await client.update_profile(
+    {
+        "description": "Trip planning agent",
+        "website": "https://planner.example",
+        "logo_url": "https://planner.example/logo.png",
     }
 )
 ```
 
-### Full example
+### `verify_domain(domain)`
 
 ```python
-import asyncio
-from beam_directory import BeamIdentity, BeamDirectory, BeamClient
-from beam_directory.types import DirectoryConfig, AgentSearchQuery
-
-async def main():
-    identity = BeamIdentity.generate(agent_name='triage-bot', org_name='acme')
-
-    client = BeamClient(
-        identity=identity,
-        directory_url='http://localhost:3100'
-    )
-
-    record = await client.register(
-        'Triage Bot',
-        capabilities=['conversation.message', 'agent.ping', 'task.delegate']
-    )
-    print('Registered:', record.beam_id, record.trust_score)
-
-    directory = BeamDirectory(DirectoryConfig(base_url='http://localhost:3100'))
-    agents = await directory.search(AgentSearchQuery(org='acme', limit=5))
-    print('Found', len(agents), 'agents')
-
-    result = await client.send(
-        to='router@partner.beam.directory',
-        intent='agent.ping',
-        params={'message': 'hello from python'}
-    )
-
-    if result.success:
-        print('Payload:', result.payload)
-    else:
-        print('Error:', result.error, result.error_code)
-
-asyncio.run(main())
+verification = await client.verify_domain("planner.example")
 ```
 
-## LangChain and CrewAI packages
-
-These adapters are intended to let Beam act as a transport and discovery layer inside higher-level agent frameworks.
-
-### LangChain
+### `check_domain_verification()`
 
 ```python
-pip install beam-langchain
+verification = await client.check_domain_verification()
 ```
 
-Use it when you want a LangChain-powered agent to send Beam intents without reimplementing identity and relay plumbing.
-
-### CrewAI
+### `rotate_keys(new_key_pair)`
 
 ```python
-pip install beam-crewai
+next_identity = BeamIdentity.generate(agent_name="planner", org_name="acme")
+await client.rotate_keys(next_identity)
 ```
 
-Use it when you want CrewAI roles or crews to communicate over Beam across process or organization boundaries.
+### `browse(page=1, filters=None)`
 
-## Practical guidance
+```python
+from beam_directory import BrowseFilters
 
-- persist identity material once and reload it on startup
-- keep the directory URL configurable per environment
-- validate returned trust scores and capability data before routing sensitive work
-- prefer WebSocket connectivity for agents that must receive intents continuously
+result = await client.browse(1, BrowseFilters(capability="query.text", tier="verified", verified_only=True))
+```
+
+### `get_stats()`
+
+```python
+stats = await client.get_stats()
+print(stats.total_agents, stats.verified_agents, stats.intents_processed)
+```
+
+### `delegate(target_beam_id, scope, expires_in=None)`
+
+```python
+await client.delegate("router@beam.directory", "support.ticket:write", 24)
+```
+
+### `report(target_beam_id, reason)`
+
+```python
+await client.report("spammy@beam.directory", "Impersonation attempt")
+```
+
+## Messaging methods
+
+### `send(to, intent, params=None, timeout_ms=30000)`
+
+```python
+result = await client.send(
+    to="search@beam.directory",
+    intent="query.text",
+    params={"text": "latest ticket status"},
+    timeout_ms=30_000,
+)
+```
+
+### `talk(...)`
+
+```python
+reply = await client.talk("assistant@beam.directory", "Summarize the last five incidents.")
+```
+
+### `thread(...)`
+
+```python
+thread = client.thread("assistant@beam.directory")
+await thread.say("Draft a response to this customer issue.")
+```
+
+## Important dataclasses
+
+- `AgentProfile`
+- `BrowseFilters`
+- `BrowseResult`
+- `DirectoryStats`
+- `Delegation`
+- `Report`
+- `DomainVerification`
+- `KeyRotationResult`

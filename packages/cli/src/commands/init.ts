@@ -1,11 +1,11 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamIdentity } from 'beam-protocol-sdk'
+import { BeamIdentity } from '@beam-protocol/sdk'
 import { configExists, saveConfig, DEFAULT_DIRECTORY_URL } from '../config.js'
 
 interface InitOptions {
   agent: string
-  org: string
+  org?: string
   force?: boolean
   directory?: string
 }
@@ -13,12 +13,11 @@ interface InitOptions {
 export async function cmdInit(options: InitOptions): Promise<void> {
   const { agent, org, force, directory = DEFAULT_DIRECTORY_URL } = options
 
-  // Validate inputs
   if (!/^[a-z0-9_-]+$/.test(agent)) {
     console.error(chalk.red('✖ Agent name must match [a-z0-9_-]'))
     process.exit(1)
   }
-  if (!/^[a-z0-9_-]+$/.test(org)) {
+  if (org && !/^[a-z0-9_-]+$/.test(org)) {
     console.error(chalk.red('✖ Org name must match [a-z0-9_-]'))
     process.exit(1)
   }
@@ -55,5 +54,8 @@ export async function cmdInit(options: InitOptions): Promise<void> {
   console.log(chalk.yellow('⚠  Keep .beam/identity.json secret — it contains your private key!'))
   console.log(chalk.dim('   Add .beam/ to your .gitignore'))
   console.log('')
-  console.log(chalk.green('Next step:'), `beam register --display-name "My Agent" --capabilities "query,answer"`)
+  console.log(
+    chalk.green('Next step:'),
+    `beam register --display-name "${org ? agent : 'My Consumer Agent'}" --capabilities "query,answer"`
+  )
 }

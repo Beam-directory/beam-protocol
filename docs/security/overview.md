@@ -1,136 +1,117 @@
 # Security Overview
 
-Beam Protocol is designed to make inter-agent communication verifiable, replay-resistant, and policy-aware without requiring heavyweight PKI or vendor-specific identity systems.
+Beam Protocol is designed with security as a first-class concern. Every layer — from identity to transport to storage — has explicit security measures.
 
-## Core security properties
+## Security Layers
 
-### Ed25519 identities
+### 1. Cryptographic Identity (Ed25519)
 
-Every Beam agent has an Ed25519 key pair.
+Every agent identity is backed by an Ed25519 keypair:
 
-- the **public key** is registered with the directory
-- the **private key** signs outgoing frames
-- receivers verify signatures using the sender's published key
+- **Private key** stays with the agent, never transmitted
+- **Public key** registered in the directory
+- **Every intent is signed** — the directory verifies signatures before relaying
+- **Key rotation** supported via the `/agents/:beamId/keys` API
 
-This avoids shared secrets between agents and allows any compliant implementation to verify origin authenticity.
-
-## Signed frames
-
-Both Intent Frames and Result Frames are signed.
-
-The signature covers the canonical form of the frame body, excluding the signature field itself.
-
-Security implications:
-
-- the sender cannot deny authorship of a valid frame they signed
-- intermediaries cannot silently change payload fields without invalidating the signature
-- recipients can verify origin before executing work
-
-## Replay protection
-
-Beam uses two anti-replay primitives:
-
-- **nonce**: a unique identifier per request
-- **timestamp**: the frame creation time in UTC
-
-A directory can reject a frame when:
-
-- the nonce has already been seen
-- the timestamp falls outside the allowed replay window
-
-This blocks simple capture-and-replay attacks even when the original signature remains valid.
-
-## ACL enforcement
-
-Directories can apply access-control rules before a frame reaches the recipient.
-
-Example policy:
-
-- only `crm@acme.beam.directory` may send `payment.status_check` to `billing@acme.beam.directory`
-
-This is useful for:
-
-- internal segmentation
-- least-privilege routing
-- reducing attack surface for sensitive agents
-
-## Trust score
-
-Trust score is not cryptographic proof, but it is part of the security posture.
-
-Agents can use trust score to:
-
-- ignore low-reputation or dormant peers
-- require higher trust for sensitive intents
-- blend directory policy with local risk rules
-
-Treat trust score as a routing hint, not an authorization oracle.
-
-## Rate limiting
-
-The reference directory applies rate limiting to protect itself and recipient agents.
-
-Rate limiting helps defend against:
-
-- brute-force abuse
-- flooding and queue exhaustion
-- accidental tight loops between misconfigured agents
-
-## Transport guidance
-
-### WebSocket
-
-Use WebSocket when the agent must receive intents in real time:
-
-```text
-ws://host:3100/ws?beamId=agent@org.beam.directory
+```
+Agent generates Ed25519 keypair
+  → Public key registered at directory
+  → Every message signed with private key
+  → Receiver verifies signature via public key from directory
+  → Impossible to impersonate without the private key
 ```
 
-For internet-facing deployments, replace `ws://` with `wss://`.
+### 2. Replay Protection (Nonces)
 
-### HTTP
+Every signed intent includes a nonce:
 
-Use HTTP for explicit request submission:
+- Nonces are single-use and time-limited
+- The directory rejects any intent with a reused nonce
+- Prevents replay attacks where a captured message is re-sent
 
-```text
-POST /intents
+### 3. Rate Limiting
+
+IP-based rate limiting on all endpoints:
+
+| Endpoint | Limit |
+|----------|-------|
+| `POST /agents/register` | 10/minute |
+| `GET /agents/search` | 30/minute |
+| All other endpoints | 60/minute |
+
+Exceeded limits return `429 Too Many Requests`.
+
+### 4. Input Validation
+
+- **Beam-ID format**: Regex-enforced (`^[a-z0-9_-]+@(?:[a-z0-9_-]+\.)?beam\.directory$`)
+- **Intent payloads**: AJV schema validation against the intent catalog
+- **Email format**: Regex-validated before storage
+- **URL format**: `new URL()` validation for logo URLs
+- **SQL injection**: All queries use prepared statements (better-sqlite3)
+- **XSS**: `escapeHtml()` on all dashboard HTML output
+
+### 5. CORS
+
+Strict whitelist:
+
+```
+https://beam-dashboard.vercel.app
+https://dashboard.beam.directory
+http://localhost:5173
 ```
 
-or, in the current reference server package:
+No wildcard origins. No `*`.
 
-```text
-POST /intents/send
-```
+### 6. Authentication
 
-## Secure deployment recommendations
+| Resource | Auth Method |
+|----------|------------|
+| Intent relay | Ed25519 signature on every frame |
+| Visibility toggle | Ed25519 signature or admin key |
+| Delegations | Ed25519 signature (grantor) |
+| Admin endpoints | `x-admin-key` header |
+| Billing webhook | Stripe signature verification (`whsec_*`) |
+| Federation | Mutual TLS / peer registration |
 
-- terminate TLS for all internet-facing traffic
-- store private keys outside source control
-- rotate agent identities when compromise is suspected
-- validate both signature and policy before acting
-- log enough metadata for audits without logging secrets unnecessarily
-- pin allowed intents per role wherever possible
+### 7. Privacy
 
-## What Beam does not assume
+- **Unlisted by default**: New agents are not visible in the directory
+- **Opt-in visibility**: Agents explicitly set `visibility: "public"` to appear in search
+- **Stats count all**: Total agent count includes unlisted (for network size), but unlisted agents are never returned in listings or search
+- **No message storage**: The directory relays intents but does not store message content
+- **DID resolution**: Public by design (W3C standard), but only for registered agents
 
-Beam does not require:
+## Threat Model
 
-- OAuth between every pair of agents
-- a single central CA
-- identical runtime stacks across organizations
-- trust in the transport path without cryptographic verification
+### What Beam Protects Against
 
-## Security boundaries
+| Threat | Protection |
+|--------|-----------|
+| **Impersonation** | Ed25519 signatures on every intent. Cannot send as another agent without their private key. |
+| **Replay attacks** | Nonce-based. Each nonce is single-use and time-limited. |
+| **Man-in-the-middle** | TLS in transit. Signatures on payloads. Receiver can verify sender independently. |
+| **Directory poisoning** | Registration rate-limited. Verification tiers add trust signals. Abuse reporting API. |
+| **Spam/flooding** | Rate limiting per IP. Trust score affects relay priority. |
+| **SQL injection** | Prepared statements everywhere. No string concatenation in queries. |
+| **XSS on dashboard** | `escapeHtml()` on all dynamic output. |
 
-Beam secures the protocol envelope. Your application still needs to secure:
+### What Agents Must Handle Themselves
 
-- the meaning and safety of tool execution
-- secrets included in payloads
-- model outputs and prompt injection handling
-- downstream APIs invoked after a successful Beam exchange
+| Threat | Responsibility |
+|--------|---------------|
+| **Prompt injection in natural language messages** | The receiving agent must sanitize/validate message content before acting on it. Beam delivers the message; the agent interprets it. |
+| **Malicious payloads (semantic)** | Schema validation ensures structure. Meaning is the agent's domain. |
+| **Trust decisions** | Beam provides trust scores and verification tiers. The agent decides its trust threshold. |
+| **Key storage** | The agent is responsible for securing its private key. Beam provides export/import utilities. |
 
-## Related reading
+### Design Philosophy
 
-- [Threat Model](/security/threat-model)
-- [RFC-0001](/spec/rfc-0001)
-- [RFC-0002](/spec/rfc-0002)
+Beam follows the **email model**: the protocol handles identity, transport, and basic validation. Content-level security (spam filtering, phishing detection, prompt injection defense) is the responsibility of the receiving agent — just like email spam filters are at the recipient's end.
+
+This is intentional: a protocol that tries to understand message semantics becomes an AI itself. Beam stays focused on identity, trust, and transport.
+
+## Reporting Vulnerabilities
+
+Email: security@beam.directory
+
+Or open a GitHub issue: [github.com/Beam-directory/beam-protocol/issues](https://github.com/Beam-directory/beam-protocol/issues)

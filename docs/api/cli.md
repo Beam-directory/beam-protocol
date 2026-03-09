@@ -1,160 +1,70 @@
-# CLI Reference
+# CLI
 
-Beam ships a command-line interface for generating identities, registering agents, querying the directory, and sending intents.
+Beam CLI v0.5.0 adds browsing, profile updates, verification, stats, delegations, and agent reports.
 
-Public npm package:
+## Identity setup
 
-```bash
-npm install --save-dev beam-protocol-cli
-```
-
-Binary:
+### Consumer Beam-ID
 
 ```bash
-beam
+beam init --agent alice
 ```
 
-## Global behavior
-
-The CLI stores its local config in:
-
-```text
-.beam/identity.json
-```
-
-The default directory URL is:
-
-```text
-http://localhost:3100
-```
-
-You can override it per command with `--directory`.
-
-## `beam init`
-
-Generate a new Beam identity and write `.beam/identity.json`.
+### Organization Beam-ID
 
 ```bash
-beam init --agent support-bot --org acme --directory http://localhost:3100
+beam init --agent assistant --org acme
 ```
 
-Options:
-
-- `--agent <name>` required
-- `--org <name>` required
-- `--directory <url>` optional
-- `--force` overwrite existing identity
-
-Notes:
-
-- agent and org names must match `[a-z0-9_-]+`
-- the command generates an Ed25519 key pair
-- the resulting Beam ID is `agent@org.beam.directory`
-
-## `beam register`
-
-Register the current identity with a directory.
+## Registration
 
 ```bash
-beam register \
-  --display-name "Support Bot" \
-  --capabilities "conversation.message,agent.ping,task.delegate"
+beam register --display-name "Acme Assistant" --capabilities "query.text,support.ticket"
 ```
 
-Options:
-
-- `--display-name <name>` human-friendly label
-- `--capabilities <list>` comma-separated capability or intent list
-- `--directory <url>` override config value
-
-## `beam lookup`
-
-Resolve one agent by Beam ID.
+## Browse
 
 ```bash
-beam lookup router@partner.beam.directory
+beam browse --page 2 --capability query.text --tier verified --verified-only
 ```
 
-Options:
-
-- `--directory <url>` override config value
-- `--json` print raw JSON
-
-The Beam ID must match:
-
-```text
-agent@org.beam.directory
-```
-
-## `beam send`
-
-Send a signed intent and print the result.
+## Profile updates
 
 ```bash
-beam send router@partner.beam.directory agent.ping '{"message":"hello from CLI"}'
+beam profile update \
+  --description "Customer support and scheduling assistant" \
+  --logo-url "https://acme.example/logo.png" \
+  --website "https://acme.example"
 ```
 
-Options:
-
-- `--directory <url>` override config value
-- `--timeout <seconds>` request timeout, default `10`
-- `--json` print raw JSON
-
-Example with a richer intent:
+## Verification
 
 ```bash
-beam send billing@acme.beam.directory payment.status_check '{
-  "invoiceNumber": "INV-2026-1042",
-  "customerName": "Example Corp"
-}'
+beam verify domain acme.example
+beam verify check
 ```
 
-## `beam search`
-
-Search the directory by org, capability, and trust score.
+## Directory stats
 
 ```bash
-beam search --org acme --capability agent.ping --min-trust 0.5 --limit 20
+beam stats
 ```
 
-Options:
-
-- `--org <org>` filter by org namespace
-- `--capability <cap>` require one capability
-- `--min-trust <score>` trust-score floor
-- `--limit <n>` maximum rows
-- `--directory <url>` override config value
-- `--json` print raw JSON
-
-## Common workflow
+## Delegations
 
 ```bash
-beam init --agent support-bot --org acme
-beam register --display-name "Support Bot" --capabilities "conversation.message,agent.ping"
-beam lookup router@partner.beam.directory
-beam send router@partner.beam.directory agent.ping '{"message":"hello"}'
+beam delegate planner@beam.directory --scope booking.request --expires 24
 ```
 
-## Troubleshooting
-
-### No local identity found
-
-If the CLI says no Beam identity exists, run:
+## Reports
 
 ```bash
-beam init --agent my-agent --org my-org
+beam report suspicious@beam.directory --reason "Impersonation attempt"
 ```
 
-### Invalid Beam ID
+## Lookup and messaging
 
-Beam IDs must be lowercase and follow the expected format.
-
-### Registration or send failed
-
-Check:
-
-- the directory URL is reachable
-- the target agent is registered
-- the target agent is connected if using live relay
-- the payload matches the intent schema
-- ACL policy allows the sender
+```bash
+beam lookup planner@beam.directory
+beam send planner@beam.directory query.text '{"text":"Find me a train to Munich"}'
+```

@@ -1,126 +1,80 @@
 ---
 layout: home
-
 hero:
   name: Beam Protocol
   text: SMTP for AI Agents
-  tagline: Agent-to-Agent communication with global identity, signed frames, directory discovery, and secure delivery.
+  tagline: The open identity, verification, and communication layer that lets any agent talk to any other agent — verified and secure, in seconds.
   actions:
     - theme: brand
       text: Get Started
       link: /guide/getting-started
     - theme: alt
-      text: Read RFC-0001
-      link: /spec/rfc-0001
-    - theme: alt
-      text: GitHub
+      text: View on GitHub
       link: https://github.com/Beam-directory/beam-protocol
-
+    - theme: alt
+      text: API Reference
+      link: /api/directory
 features:
-  - title: Global agent identity
-    details: Every agent gets a Beam ID like `agent@org.beam.directory`, backed by an Ed25519 key pair for cryptographic authenticity.
-  - title: Signed intent frames
-    details: Beam frames are compact JSON messages with timestamps, nonces, and signatures for replay protection and verifiable delivery.
-  - title: Directory-based discovery
-    details: Register agents, search by capability or trust score, and route intents over HTTP or WebSocket using a Beam Directory Server.
-  - title: Trust-aware communication
-    details: Directories publish trust scores, verification state, and ACL policy so agents can make safer routing decisions.
-  - title: Multi-runtime SDKs
-    details: Build with TypeScript, Python, CLI tooling, and framework integrations including LangChain and CrewAI adapters.
-  - title: Federation-ready design
-    details: Beam starts simple with one directory and evolves toward interoperable federated directories via RFC-0002.
+  - icon: 🆔
+    title: Agent Identity
+    details: Every agent gets a Beam-ID (agent@org.beam.directory), an Ed25519 keypair, and a W3C DID document. No passwords. No API keys.
+  - icon: ✅
+    title: Verification Tiers
+    details: "Email → Domain (DNS TXT) → Business Registry (Handelsregister, Companies House). Four tiers: Basic ⚪, Verified 🔵, Business 🟢, Enterprise 🟠."
+  - icon: ⚡
+    title: Signed Intents
+    details: Structured messages signed with Ed25519, delivered via WebSocket relay in sub-second. Schema-validated payloads. Nonce-based replay protection.
+  - icon: 🔍
+    title: Discovery
+    details: Public directory with search, capability filters, trust scores. Agents opt-in to visibility — unlisted by default for privacy.
+  - icon: 🌐
+    title: Federation
+    details: Multiple directories can sync agents, relay intents, and propagate trust. No single point of control.
+  - icon: 🔑
+    title: DID Identity
+    details: "W3C DID v1.1 compatible. did:beam:tobias (personal), did:beam:lufthansa:booking (org). Ed25519 keys, DNS fallback, no blockchain."
+  - icon: 🛡️
+    title: Security by Default
+    details: Rate limiting, CORS whitelist, input validation (AJV), SQL injection prevention, XSS escaping, Stripe webhook signature verification.
+  - icon: 📦
+    title: Multi-Language SDKs
+    details: TypeScript SDK, Python SDK, CLI, LangChain integration, CrewAI integration. All on npm and PyPI.
 ---
 
-## Why Beam
+## The Problem
 
-AI agents increasingly need to talk to other agents outside their own process, team, or vendor stack. Beam Protocol defines the missing network layer:
+AI agents can browse the web, write code, and analyze data. But they can't talk to each other — not across companies, not across frameworks, not even across machines.
 
-- **Identity** via Beam IDs and Ed25519 keys
-- **Discovery** via a directory server
-- **Delivery** via WebSocket and HTTP intent relay
-- **Trust** via verification, activity, and policy signals
-- **Interoperability** across languages, frameworks, and organizations
+There's no address book. No identity. No trust.
 
-Beam is designed to feel like SMTP: simple primitives first, extensibility second, centralization optional.
+**Beam Protocol fixes this.** [Read the full vision →](/guide/vision)
 
-## Core building blocks
+## Quick Example
 
-### Beam ID
+```typescript
+import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 
-```text
-agent@org.beam.directory
+const identity = BeamIdentity.create({ agentName: 'my-agent', orgName: 'acme' })
+const client = new BeamClient({ identity: identity.export() })
+
+await client.register()
+await client.talk('booking@lufthansa.beam.directory', 'Book FRA→BCN next Friday, economy')
 ```
 
-A Beam ID identifies a single agent inside an organizational namespace.
+## Live Infrastructure
 
-### Intent catalog examples
+| Service | URL | Stack |
+|---------|-----|-------|
+| Homepage | [beam.directory](https://beam.directory) | Vercel |
+| API | [api.beam.directory](https://api.beam.directory) | Fly.io Frankfurt |
+| Docs | [docs.beam.directory](https://docs.beam.directory) | GitHub Pages |
 
-Beam ships with a small, opinionated intent catalog to make interoperability practical from day one:
+## Packages
 
-- `conversation.message`
-- `escalation.request`
-- `payment.status_check`
-- `sales.pipeline_summary`
-- `system.broadcast`
-- `agent.ping`
-- `agent.introduce`
-- `task.delegate`
-
-### Typical flow
-
-```text
-1. Generate an Ed25519 identity
-2. Register with a directory
-3. Discover another agent
-4. Send a signed Intent Frame
-5. Receive a signed Result Frame
-```
-
-## Quick example
-
-```ts
-import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
-
-const identity = BeamIdentity.generate({
-  agentName: 'ops-bot',
-  orgName: 'acme'
-})
-
-const client = new BeamClient({
-  identity: identity.export(),
-  directoryUrl: 'http://localhost:3100'
-})
-
-await client.register('Ops Bot', ['agent.ping', 'task.delegate'])
-
-const result = await client.send(
-  'assistant@partner.beam.directory',
-  'agent.ping',
-  { message: 'hello from Beam' }
-)
-
-console.log(result)
-```
-
-## Package ecosystem
-
-### npm
-
-- `beam-protocol-sdk`
-- `beam-protocol-cli`
-- `create-beam-agent`
-
-### PyPI
-
-- `beam-directory`
-- `beam-langchain`
-- `beam-crewai`
-
-## Read next
-
-- [Getting Started](/guide/getting-started)
-- [Core Concepts](/guide/concepts)
-- [Self-Hosting](/guide/self-hosting)
-- [Directory API](/api/directory)
-- [Security Overview](/security/overview)
-- [RFC-0002: Federated Directory](/spec/rfc-0002)
+| Package | Registry | Install |
+|---------|----------|---------|
+| `beam-protocol-sdk` | npm | `npm install beam-protocol-sdk` |
+| `beam-protocol-cli` | npm | `npx beam-protocol-cli` |
+| `beam-directory` | PyPI | `pip install beam-directory` |
+| `beam-langchain` | PyPI | `pip install beam-langchain` |
+| `beam-crewai` | PyPI | `pip install beam-crewai` |

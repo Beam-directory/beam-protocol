@@ -1,153 +1,66 @@
 # Self-Hosting
 
-You can run your own Beam Directory Server for development, internal deployments, or future federation.
-
-## What the directory does
-
-A self-hosted directory provides:
-
-- agent registration and lookup
-- capability and trust-score search
-- HTTP relay for signed intents
-- WebSocket delivery for connected agents
-- ACL enforcement
-- rate limiting and replay protection
-
-## Default ports and endpoints
-
-Recommended local defaults:
-
-- HTTP: `http://localhost:3100`
-- WebSocket: `ws://localhost:3100/ws?beamId=agent@org.beam.directory`
-- HTTP relay: `POST /intents`
-
-The current reference server package exposes the relay route as `POST /intents/send`. If you run behind a reverse proxy, you can map either public path to the same backend.
+Beam's directory service is small enough to deploy in a few different ways, depending on how much control you want.
 
 ## Docker
 
-The reference directory package includes a Dockerfile.
+The repository includes a `packages/directory/Dockerfile` for containerized deployments.
 
-### Build the image
-
-```bash
-docker build -t beam-directory ./packages/directory
-```
-
-### Run the container
+Typical flow:
 
 ```bash
-docker run --rm \
-  -p 3100:3100 \
-  -e PORT=3100 \
-  -e DB_PATH=/data/beam-directory.db \
-  -v $(pwd)/.beam-data:/data \
-  beam-directory
+npm run build --workspace=packages/directory
+docker build -f packages/directory/Dockerfile -t beam-directory packages/directory
+docker run -p 3100:3100 -e PORT=3100 -e DB_PATH=/data/beam-directory.db beam-directory
 ```
 
-### Verify health
+Recommended container settings:
+
+- mount persistent storage for the SQLite database
+- terminate TLS at a proxy or load balancer
+- set `PORT` and `DB_PATH` explicitly
+- monitor `/health` and WebSocket connection counts
+
+## Fly.io
+
+The repo also includes `packages/directory/fly.toml`, which is a good starting point for Fly.io.
+
+Typical flow:
 
 ```bash
-curl http://localhost:3100/health
+fly launch --copy-config --name beam-protocol
+fly volumes create beam_data --size 1 --region fra
+fly deploy
 ```
 
-Expected response:
+For Fly deployments, make sure you:
 
-```json
-{
-  "status": "ok",
-  "protocol": "beam/1",
-  "connectedAgents": 0,
-  "timestamp": "2026-03-08T10:00:00.000Z"
-}
-```
+- persist `/data` for the SQLite file
+- keep `force_https = true`
+- expose port `3100`
+- configure your admin key and any proxy headers upstream
 
-## Node.js
+## Bare metal
 
-### Install dependencies
-
-From the repository root:
+For a VM or dedicated host:
 
 ```bash
-npm install
+npm run build --workspace=packages/directory
+PORT=3100 DB_PATH=/var/lib/beam/beam-directory.db node packages/directory/dist/index.js
 ```
 
-### Start the directory
+Recommended production setup:
 
-```bash
-PORT=3100 DB_PATH=./packages/directory/beam-directory.db npm run dev:directory
-```
-
-Or, after building the package directly:
-
-```bash
-cd packages/directory
-npm run build
-PORT=3100 node dist/index.js
-```
-
-## Register a local agent
-
-```bash
-beam init --agent local-bot --org acme --directory http://localhost:3100
-beam register --display-name "Local Bot" --capabilities "agent.ping,task.delegate"
-```
-
-## Runtime behavior
-
-### Persistence
-
-The reference server stores state in SQLite. Persist the database file if you want registrations and ACLs to survive restarts.
-
-### Presence
-
-An agent is considered connected when it holds an active WebSocket connection.
-
-### Heartbeats
-
-Agents can keep `lastSeen` fresh with:
-
-```bash
-curl -X POST http://localhost:3100/agents/local-bot%40acme.beam.directory/heartbeat
-```
-
-### Catalog and ACLs
-
-The server seeds ACL entries from the intent catalog where possible and exposes endpoints to inspect and manage ACL rows.
-
-## Reverse proxy notes
-
-For production deployments:
-
-- terminate TLS at the proxy or app tier
-- forward WebSocket upgrades for `/ws`
-- preserve `x-forwarded-for` headers for rate limiting
-- keep request body size small because Beam frames are intentionally compact
-
-An example NGINX route layout:
-
-```nginx
-location /ws {
-  proxy_pass http://127.0.0.1:3100;
-  proxy_http_version 1.1;
-  proxy_set_header Upgrade $http_upgrade;
-  proxy_set_header Connection "upgrade";
-}
-
-location / {
-  proxy_pass http://127.0.0.1:3100;
-}
-```
+- Node.js 18+ or newer
+- systemd or another process supervisor
+- reverse proxy with TLS termination
+- regular database backups
+- firewall rules for HTTP and WebSocket ingress
 
 ## Operational checklist
 
-- secure the database and any backups
-- do not log private keys or full secret-bearing payloads
-- enable TLS for any internet-facing deployment
-- monitor `connectedAgents`, relay latency, and error rates
-- periodically prune stale identities or unreachable agents if your policy requires it
-
-## Next reading
-
-- [Directory API](/api/directory)
-- [Security Overview](/security/overview)
-- [RFC-0002: Federated Directory](/spec/rfc-0002)
+- Store private keys only on the agents that own them.
+- Protect admin endpoints with `BEAM_ADMIN_KEY`.
+- Back up the directory database.
+- Rotate keys and ACLs when agent ownership changes.
+- Watch connection health, relay latency, and rate-limit events.

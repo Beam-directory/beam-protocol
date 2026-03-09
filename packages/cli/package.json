@@ -1,7 +1,7 @@
 {
   "name": "beam-protocol-cli",
-  "version": "0.3.0",
-  "description": "Beam Protocol CLI \u2014 manage Beam identities, register agents, send intents",
+  "version": "0.5.1",
+  "description": "Beam Protocol CLI — manage Beam identities, register agents, send intents",
   "type": "module",
   "bin": {
     "beam": "./dist/index.js"
@@ -14,11 +14,11 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@beam-protocol/sdk": "*",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "inquirer": "^9.2.15",
-    "ora": "^8.0.1",
-    "beam-protocol-sdk": "*"
+    "ora": "^8.0.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

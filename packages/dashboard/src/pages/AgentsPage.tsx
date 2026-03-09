@@ -1,217 +1,184 @@
-import { useState, useMemo } from 'react'
-import { useQuery } from 'convex/react'
-import { api } from '../../convex/_generated/api'
-import { Search, Bot, Shield, Clock, Filter } from 'lucide-react'
-import { formatRelativeTime, trustScoreColor, truncateBeamId } from '../lib/utils'
+import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
+import { Search } from 'lucide-react'
+import { ApiError, directoryApi, type DirectoryAgent, type VerificationTier } from '../lib/api'
+import { cn, formatRelativeTime, trustScoreColor, trustScoreText, trustScoreTextColor, verificationTierColor } from '../lib/utils'
+
+const TIER_OPTIONS: Array<{ value: 'all' | VerificationTier; label: string }> = [
+  { value: 'all', label: 'All tiers' },
+  { value: 'basic', label: 'Basic' },
+  { value: 'verified', label: 'Verified' },
+  { value: 'business', label: 'Business' },
+  { value: 'enterprise', label: 'Enterprise' },
+]
 
 export default function AgentsPage() {
-  const agents = useQuery(api.agents.listAllAgents, { limit: 200 })
-  const [search, setSearch] = useState('')
-  const [capFilter, setCapFilter] = useState('')
-  const [orgFilter, setOrgFilter] = useState('')
+  const [agents, setAgents] = useState<DirectoryAgent[]>([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
+  const [query, setQuery] = useState('')
+  const [selectedCapability, setSelectedCapability] = useState('all')
+  const [selectedTier, setSelectedTier] = useState<'all' | VerificationTier>('all')
 
-  const allCapabilities = useMemo(() => {
-    if (!agents) return []
-    const caps = new Set<string>()
-    agents.forEach(a => a.capabilities.forEach(c => caps.add(c)))
-    return Array.from(caps).sort()
+  useEffect(() => {
+    let cancelled = false
+
+    async function load() {
+      try {
+        setLoading(true)
+        const response = await directoryApi.searchAgents({ limit: 250 })
+        if (cancelled) return
+        setAgents(response.agents)
+        setError(null)
+      } catch (err) {
+        if (cancelled) return
+        setError(err instanceof ApiError ? err.message : 'Failed to load agents')
+      } finally {
+        if (!cancelled) setLoading(false)
+      }
+    }
+
+    void load()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+
+  const capabilities = useMemo(() => {
+    const values = new Set<string>()
+    agents.forEach((agent) => agent.capabilities.forEach((capability) => values.add(capability)))
+    return Array.from(values).sort((left, right) => left.localeCompare(right))
   }, [agents])
 
-  const allOrgs = useMemo(() => {
-    if (!agents) return []
-    const orgs = new Set<string>()
-    agents.forEach(a => orgs.add(a.orgId))
-    return Array.from(orgs).sort()
-  }, [agents])
+  const filteredAgents = useMemo(() => {
+    return agents
+      .filter((agent) => {
+        const matchesQuery = !query || [agent.displayName, agent.beamId, agent.description ?? '', agent.capabilities.join(' ')].join(' ').toLowerCase().includes(query.toLowerCase())
+        const matchesCapability = selectedCapability === 'all' || agent.capabilities.includes(selectedCapability)
+        const matchesTier = selectedTier === 'all' || agent.verificationTier === selectedTier
+        return matchesQuery && matchesCapability && matchesTier
+      })
+      .sort((left, right) => right.trustScore - left.trustScore)
+  }, [agents, query, selectedCapability, selectedTier])
 
-  const filtered = useMemo(() => {
-    if (!agents) return []
-    return agents.filter(a => {
-      const matchSearch =
-        !search ||
-        a.beamId.toLowerCase().includes(search.toLowerCase()) ||
-        a.displayName.toLowerCase().includes(search.toLowerCase())
-      const matchCap = !capFilter || a.capabilities.includes(capFilter)
-      const matchOrg = !orgFilter || a.orgId === orgFilter
-      return matchSearch && matchCap && matchOrg
-    })
-  }, [agents, search, capFilter, orgFilter])
+  const hasActiveFilters = query.trim().length > 0 || selectedCapability !== 'all' || selectedTier !== 'all'
 
   return (
-    <div className="p-5 space-y-4 animate-fade-in">
-      {/* Header */}
-      <div className="flex items-center justify-between">
+    <div className="space-y-6">
+      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-base font-bold text-text tracking-tight">Agents</h1>
-          <p className="text-xs text-text-muted mt-0.5 font-mono">
-            {agents ? `${agents.length} registered beam IDs` : 'Loading…'}
-          </p>
+          <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
+          <p className="text-sm text-slate-500 dark:text-slate-400">Search and filter real agents from the directory registry.</p>
         </div>
-      </div>
+        <div className="text-sm text-slate-500 dark:text-slate-400">{filteredAgents.length} results</div>
+      </section>
 
-      {/* Filters */}
-      <div className="flex items-center gap-2">
-        <div className="relative flex-1 max-w-xs">
-          <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-dim" />
-          <input
-            type="text"
-            className="input-field w-full pl-7"
-            placeholder="Search beam ID or name…"
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-        </div>
-        <div className="relative">
-          <Filter size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-text-dim pointer-events-none" />
-          <select
-            className="input-field pl-7 pr-6 appearance-none cursor-pointer"
-            value={capFilter}
-            onChange={e => setCapFilter(e.target.value)}
-          >
-            <option value="">All capabilities</option>
-            {allCapabilities.map(c => (
-              <option key={c} value={c}>{c}</option>
+      <section className="panel">
+        <div className="grid gap-3 lg:grid-cols-[1.6fr,1fr,1fr]">
+          <label className="relative block">
+            <Search size={16} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input
+              className="input-field pl-10"
+              placeholder="Search by Beam-ID, name, description"
+              value={query}
+              onChange={(event) => setQuery(event.target.value)}
+            />
+          </label>
+          <select className="input-field" value={selectedCapability} onChange={(event) => setSelectedCapability(event.target.value)}>
+            <option value="all">All capabilities</option>
+            {capabilities.map((capability) => (
+              <option key={capability} value={capability}>{capability}</option>
+            ))}
+          </select>
+          <select className="input-field" value={selectedTier} onChange={(event) => setSelectedTier(event.target.value as 'all' | VerificationTier)}>
+            {TIER_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
         </div>
-        <div className="relative">
-          <select
-            className="input-field pr-6 appearance-none cursor-pointer"
-            value={orgFilter}
-            onChange={e => setOrgFilter(e.target.value)}
-          >
-            <option value="">All orgs</option>
-            {allOrgs.map(o => (
-              <option key={o} value={o}>{o}</option>
-            ))}
-          </select>
-        </div>
-        {(search || capFilter || orgFilter) && (
-          <button
-            className="btn-ghost text-xs"
-            onClick={() => { setSearch(''); setCapFilter(''); setOrgFilter('') }}
-          >
-            Clear
-          </button>
-        )}
-      </div>
+      </section>
 
-      {/* Table */}
-      <div className="bg-bg-card border border-border rounded-lg overflow-hidden">
-        <table className="w-full">
-          <thead>
-            <tr className="border-b border-border">
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Beam ID
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Org
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Capabilities
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Trust
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Status
-              </th>
-              <th className="table-cell text-left text-xs font-mono text-text-dim uppercase tracking-widest">
-                Last Seen
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {agents === undefined ? (
-              <tr>
-                <td colSpan={6} className="table-cell py-8 text-center text-text-dim font-mono text-xs">
-                  Loading…
-                </td>
-              </tr>
-            ) : filtered.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="table-cell py-8 text-center">
-                  <div className="flex flex-col items-center gap-2">
-                    <Bot size={24} className="text-text-dim" />
-                    <span className="text-xs text-text-dim font-mono">
-                      {agents.length === 0
-                        ? 'No agents registered yet'
-                        : 'No agents match your filters'}
+      {error && <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">{error}</div>}
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {loading ? (
+          <PlaceholderGrid />
+        ) : filteredAgents.length === 0 ? (
+          <div className="rounded-xl border border-dashed border-slate-200 p-8 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400 md:col-span-2 xl:col-span-3">
+            {hasActiveFilters ? 'No agents matched your search. Try clearing a filter or broadening the query.' : 'No agents are listed yet. Check back soon as new agents join the directory.'}
+          </div>
+        ) : (
+          filteredAgents.map((agent) => (
+            <Link key={agent.beamId} to={`/agents/${encodeURIComponent(agent.beamId)}`} className="panel transition hover:-translate-y-0.5 hover:border-orange-300 dark:hover:border-orange-500/40">
+              <div className="flex items-start gap-4">
+                {agent.logoUrl ? (
+                  <img src={agent.logoUrl} alt={agent.displayName} className="h-12 w-12 rounded-xl object-cover" />
+                ) : (
+                  <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-orange-500/10 text-sm font-semibold text-orange-600 dark:text-orange-300">
+                    {agent.displayName.slice(0, 2).toUpperCase()}
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="truncate text-lg font-semibold tracking-tight">{agent.displayName}</h2>
+                    <span className={cn('rounded-full px-2 py-1 text-xs font-medium capitalize', verificationTierColor(agent.verificationTier))}>
+                      <span className="mr-1" aria-hidden="true">{verificationTierBadge(agent.verificationTier)}</span>
+                      {agent.verificationTier}
                     </span>
                   </div>
-                </td>
-              </tr>
-            ) : (
-              filtered.map(agent => (
-                <tr key={agent._id} className="table-row">
-                  <td className="table-cell">
-                    <div className="flex items-center gap-2">
-                      <div className="w-5 h-5 rounded bg-accent/10 flex items-center justify-center shrink-0">
-                        <Bot size={11} className="text-accent" />
-                      </div>
-                      <div>
-                        <div className="font-mono text-xs text-text truncate max-w-[180px]" title={agent.beamId}>
-                          {truncateBeamId(agent.beamId)}
-                        </div>
-                        <div className="text-xs text-text-muted mt-0.5">{agent.displayName}</div>
-                      </div>
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <span className="badge-blue">{agent.orgId}</span>
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex flex-wrap gap-1 max-w-[160px]">
-                      {agent.capabilities.slice(0, 3).map(cap => (
-                        <span key={cap} className="badge-muted">{cap}</span>
-                      ))}
-                      {agent.capabilities.length > 3 && (
-                        <span className="badge-muted">+{agent.capabilities.length - 3}</span>
-                      )}
-                    </div>
-                  </td>
-                  <td className="table-cell">
-                    <TrustBar score={agent.trustScore} />
-                  </td>
-                  <td className="table-cell">
-                    {agent.verified ? (
-                      <span className="badge-green">
-                        <Shield size={10} />
-                        Verified
-                      </span>
-                    ) : (
-                      <span className="badge-muted">Unverified</span>
-                    )}
-                  </td>
-                  <td className="table-cell">
-                    <div className="flex items-center gap-1 text-xs text-text-muted font-mono">
-                      <Clock size={10} />
-                      {agent.lastSeen ? formatRelativeTime(agent.lastSeen) : '—'}
-                    </div>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </div>
+                  <div className="mt-1 truncate text-sm text-slate-500 dark:text-slate-400">{agent.beamId}</div>
+                </div>
+              </div>
+
+              {agent.description && <p className="mt-4 line-clamp-2 text-sm text-slate-600 dark:text-slate-300">{agent.description}</p>}
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                {agent.capabilities.map((capability) => (
+                  <span key={capability} className="rounded-full bg-slate-100 px-2.5 py-1 text-xs text-slate-600 dark:bg-slate-800 dark:text-slate-300">
+                    {capability}
+                  </span>
+                ))}
+              </div>
+
+              <div className="mt-5 space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-500 dark:text-slate-400">Trust score</span>
+                  <span className={cn('font-medium', trustScoreTextColor(agent.trustScore))}>{trustScoreText(agent.trustScore)}</span>
+                </div>
+                <div className="h-2.5 rounded-full bg-slate-200 dark:bg-slate-800">
+                  <div className={cn('h-2.5 rounded-full', trustScoreColor(agent.trustScore))} style={{ width: `${Math.round(agent.trustScore * 100)}%` }} />
+                </div>
+              </div>
+
+              <div className="mt-4 text-sm text-slate-500 dark:text-slate-400">Seen {formatRelativeTime(agent.lastSeen)}</div>
+            </Link>
+          ))
+        )}
+      </section>
     </div>
   )
 }
 
-function TrustBar({ score }: { score: number }) {
-  const color = trustScoreColor(score)
-  return (
-    <div className="flex items-center gap-2">
-      <div className="w-16 h-1.5 bg-bg-hover rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all"
-          style={{ width: `${score}%`, background: color }}
-        />
-      </div>
-      <span className="text-xs font-mono" style={{ color }}>
-        {score}
-      </span>
+function verificationTierBadge(tier: VerificationTier): string {
+  switch (tier) {
+    case 'enterprise':
+      return '👑'
+    case 'business':
+      return '🏢'
+    case 'verified':
+      return '✅'
+    default:
+      return '🔹'
+  }
+}
+
+function PlaceholderGrid() {
+  return Array.from({ length: 6 }).map((_, index) => (
+    <div key={index} className="panel animate-pulse space-y-4">
+      <div className="h-12 w-12 rounded-xl bg-slate-200 dark:bg-slate-800" />
+      <div className="h-5 w-40 rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="h-4 w-full rounded bg-slate-200 dark:bg-slate-800" />
+      <div className="h-4 w-3/4 rounded bg-slate-200 dark:bg-slate-800" />
     </div>
-  )
+  ))
 }

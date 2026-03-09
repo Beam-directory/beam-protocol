@@ -1,13 +1,13 @@
 {
   "name": "beam-protocol-sdk",
-  "version": "0.3.0",
-  "description": "TypeScript SDK for the Beam Protocol \u2014 Agent-to-Agent communication",
+  "version": "0.5.1",
+  "description": "TypeScript SDK for the Beam Protocol — Agent-to-Agent communication",
   "type": "module",
   "main": "./dist/index.js",
-  "types": "./dist/index.d.ts",
+  "types": "./src/index.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
+      "types": "./src/index.ts",
       "import": "./dist/index.js"
     }
   },
@@ -29,5 +29,25 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beam-directory/beam-protocol.git",
+    "directory": "packages/sdk-typescript"
+  },
+  "homepage": "https://beam.directory",
+  "keywords": [
+    "beam",
+    "protocol",
+    "agent",
+    "a2a",
+    "ai",
+    "communication",
+    "ed25519"
+  ]
 }

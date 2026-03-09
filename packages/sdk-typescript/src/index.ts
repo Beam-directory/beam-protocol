@@ -1,6 +1,7 @@
 export { BeamIdentity } from './identity.js'
 export { BeamDirectory, BeamDirectoryError } from './directory.js'
-export { BeamClient } from './client.js'
+export { BeamClient, BeamThread } from './client.js'
+export { BeamDID, BeamCredentialsClient, CredentialVerifier } from './did.js'
 export {
   createIntentFrame,
   createResultFrame,
@@ -12,14 +13,32 @@ export {
   REPLAY_WINDOW_MS
 } from './frames.js'
 export type {
-  BeamIdString,
-  BeamIdentityConfig,
-  BeamIdentityData,
-  IntentFrame,
-  ResultFrame,
+  AgentProfile,
   AgentRegistration,
   AgentRecord,
-  DirectoryConfig,
+  AgentSearchQuery,
   BeamClientConfig,
-  AgentSearchQuery
+  BeamIdentityConfig,
+  BeamIdentityData,
+  BeamIdString,
+  BrowseFilters,
+  BrowseResult,
+  Delegation,
+  DirectoryConfig,
+  DirectoryStats,
+  DomainVerification,
+  IntentFrame,
+  KeyRotationResult,
+  Report,
+  ResultFrame,
+  VerificationTier,
 } from './types.js'
+export type {
+  DIDDocument,
+  VerificationMethod,
+  ServiceEndpoint,
+  VerifiableCredential,
+  CredentialSubject,
+  Proof,
+} from './did.js'
+export * from './key-management.js'

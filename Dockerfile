@@ -28,6 +28,14 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV PORT=3100
+ENV DB_PATH=/data/beam-directory.db
+
+# S1: Install Litestream for SQLite → S3 streaming replication
+# Litestream is Go static binary — works on Alpine without glibc
+ADD https://github.com/benbjohnson/litestream/releases/download/v0.3.13/litestream-v0.3.13-linux-amd64.tar.gz /tmp/litestream.tar.gz
+RUN tar -xzf /tmp/litestream.tar.gz -C /usr/local/bin/ && rm /tmp/litestream.tar.gz
+
+COPY litestream.yml /etc/litestream.yml
 
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
@@ -36,5 +44,11 @@ COPY --from=builder /app/packages/directory/dist ./packages/directory/dist
 
 EXPOSE 3100
 
-CMD ["node", "packages/directory/dist/index.js"]
-
+# If Litestream env vars are set, use Litestream as process wrapper (auto-restore + replicate).
+# Otherwise, run Node.js directly (backward compatible).
+CMD if [ -n "$LITESTREAM_REPLICA_BUCKET" ]; then \
+      litestream restore -if-db-not-exists -config /etc/litestream.yml ${DB_PATH} && \
+      exec litestream replicate -exec "node packages/directory/dist/index.js" -config /etc/litestream.yml; \
+    else \
+      exec node packages/directory/dist/index.js; \
+    fi

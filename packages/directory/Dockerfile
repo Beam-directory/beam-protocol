@@ -2,16 +2,12 @@ FROM node:22-slim
 
 WORKDIR /app
 
-# Copy package files
-COPY package.json package-lock.json* ./
+COPY package.json ./
+RUN npm install --omit=dev
 
-# Install dependencies
-RUN npm ci --omit=dev
-
-# Copy built files
 COPY dist/ ./dist/
+COPY catalog.yaml ./catalog.yaml
 
-# Create data directory for SQLite
 RUN mkdir -p /data
 
 ENV NODE_ENV=production

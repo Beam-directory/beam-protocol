@@ -6,6 +6,13 @@ import { cmdRegister } from './commands/register.js'
 import { cmdLookup } from './commands/lookup.js'
 import { cmdSearch } from './commands/search.js'
 import { cmdSend } from './commands/send.js'
+import { cmdBrowse } from './commands/browse.js'
+import { cmdProfileUpdate } from './commands/profile-update.js'
+import { cmdVerifyDomain } from './commands/verify-domain.js'
+import { cmdVerifyCheck } from './commands/verify-check.js'
+import { cmdStats } from './commands/stats.js'
+import { cmdDelegate } from './commands/delegate.js'
+import { cmdReport } from './commands/report.js'
 
 const program = new Command()
 
@@ -15,21 +22,19 @@ program
     chalk.bold('Beam Protocol CLI') + '\n' +
     chalk.dim('SMTP for AI Agents — agent identity, registration & intent routing')
   )
-  .version('0.1.0')
+  .version('0.5.0')
 
-// ─── beam init ────────────────────────────────────────────────────────────────
 program
   .command('init')
   .description('Generate a new Beam identity (writes .beam/identity.json)')
   .requiredOption('-a, --agent <name>', 'Agent name (e.g. jarvis)')
-  .requiredOption('-o, --org <name>', 'Organisation name (e.g. coppen)')
-  .option('-d, --directory <url>', 'Directory server URL', process.env['BEAM_DIRECTORY_URL'] ?? 'http://localhost:3100')
+  .option('-o, --org <name>', 'Organisation name (optional for consumer Beam-IDs)')
+  .option('-d, --directory <url>', 'Directory server URL', process.env['BEAM_DIRECTORY_URL'] ?? 'https://api.beam.directory')
   .option('-f, --force', 'Overwrite existing identity')
-  .action(async (opts: { agent: string; org: string; directory?: string; force?: boolean }) => {
+  .action(async (opts: { agent: string; org?: string; directory?: string; force?: boolean }) => {
     await cmdInit(opts)
   })
 
-// ─── beam register ────────────────────────────────────────────────────────────
 program
   .command('register')
   .description('Register this agent with a Beam directory')
@@ -40,7 +45,6 @@ program
     await cmdRegister(opts)
   })
 
-// ─── beam lookup ──────────────────────────────────────────────────────────────
 program
   .command('lookup <beamId>')
   .description('Look up an agent by Beam ID')
@@ -50,7 +54,6 @@ program
     await cmdLookup(beamId, opts)
   })
 
-// ─── beam search ──────────────────────────────────────────────────────────────
 program
   .command('search')
   .description('Search for agents in the directory')
@@ -64,7 +67,81 @@ program
     await cmdSearch(opts)
   })
 
-// ─── beam send ────────────────────────────────────────────────────────────────
+program
+  .command('browse')
+  .description('Browse paginated agent listings')
+  .option('--page <n>', 'Page number', '1')
+  .option('--capability <cap>', 'Filter by capability')
+  .option('--tier <tier>', 'Filter by verification tier')
+  .option('--verified-only', 'Only show verified agents')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts: { page?: string; capability?: string; tier?: string; verifiedOnly?: boolean; directory?: string; json?: boolean }) => {
+    await cmdBrowse(opts)
+  })
+
+const profile = program.command('profile').description('Profile management commands')
+profile
+  .command('update')
+  .description('Update your agent profile')
+  .option('--description <text>', 'Profile description')
+  .option('--logo-url <url>', 'Public logo URL')
+  .option('--website <url>', 'Public website URL')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts: { description?: string; logoUrl?: string; website?: string; directory?: string; json?: boolean }) => {
+    await cmdProfileUpdate(opts)
+  })
+
+const verify = program.command('verify').description('Verification commands')
+verify
+  .command('domain <domain>')
+  .description('Initiate DNS verification for a domain')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (domain: string, opts: { directory?: string; json?: boolean }) => {
+    await cmdVerifyDomain(domain, opts)
+  })
+
+verify
+  .command('check')
+  .description('Check current verification status')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts: { directory?: string; json?: boolean }) => {
+    await cmdVerifyCheck(opts)
+  })
+
+program
+  .command('stats')
+  .description('Show directory statistics')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts: { directory?: string; json?: boolean }) => {
+    await cmdStats(opts)
+  })
+
+program
+  .command('delegate <targetBeamId>')
+  .description('Create a delegation for another Beam agent')
+  .requiredOption('--scope <scope>', 'Delegation scope')
+  .option('--expires <hours>', 'Hours until delegation expiry')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (targetBeamId: string, opts: { scope?: string; expires?: string; directory?: string; json?: boolean }) => {
+    await cmdDelegate(targetBeamId, opts)
+  })
+
+program
+  .command('report <targetBeamId>')
+  .description('Report an agent')
+  .requiredOption('--reason <reason>', 'Reason for the report')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (targetBeamId: string, opts: { reason?: string; directory?: string; json?: boolean }) => {
+    await cmdReport(targetBeamId, opts)
+  })
+
 program
   .command('send <to> <intent> [params]')
   .description('Send an intent to an agent and print the result')
@@ -75,9 +152,11 @@ program
     await cmdSend(to, intent, params, opts)
   })
 
-// ─── Error handling ───────────────────────────────────────────────────────────
 program.configureOutput({
-  writeErr: str => process.stderr.write(chalk.red(str))
+  outputError: (str, write) => write(chalk.red(str))
 })
 
-program.parse()
+program.parseAsync(process.argv).catch((err: Error) => {
+  console.error(chalk.red(`\n✖ ${err.message}`))
+  process.exit(1)
+})

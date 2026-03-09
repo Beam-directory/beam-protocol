@@ -35,13 +35,13 @@ async def main():
     # 2. Register with a directory
     client = BeamClient(
         identity=identity,
-        directory_url="http://localhost:3100"
+        directory_url="https://api.beam.directory"
     )
     record = await client.register("My Agent", capabilities=["query", "answer"])
     print(f"Registered! Trust score: {record.trust_score}")
 
     # 3. Look up another agent
-    directory = BeamDirectory(DirectoryConfig(base_url="http://localhost:3100"))
+    directory = BeamDirectory(DirectoryConfig(base_url="https://api.beam.directory"))
     agent = await directory.lookup("other@org.beam.directory")
     if agent:
         print(f"Found: {agent.display_name}")
@@ -128,7 +128,7 @@ parts = BeamIdentity.parse_beam_id("agent@org.beam.directory")
 from beam_directory import BeamDirectory
 from beam_directory.types import DirectoryConfig
 
-dir = BeamDirectory(DirectoryConfig(base_url="http://localhost:3100"))
+dir = BeamDirectory(DirectoryConfig(base_url="https://api.beam.directory"))
 
 # Register
 record = await dir.register(identity.to_registration("My Agent", ["query"]))
@@ -146,7 +146,7 @@ await dir.heartbeat("agent@org.beam.directory")
 ### `BeamClient`
 
 ```python
-client = BeamClient(identity=identity, directory_url="http://localhost:3100")
+client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
 
 # Register shortcut
 record = await client.register("My Agent", ["query", "answer"])

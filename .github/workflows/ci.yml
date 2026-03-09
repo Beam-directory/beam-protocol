@@ -4,46 +4,84 @@ on:
   push:
     branches:
       - main
+    tags:
+      - 'v*'
   pull_request:
 
 jobs:
   test:
-    name: Node ${{ matrix.node-version }}
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: false
       matrix:
-        node-version:
-          - 18
-          - 20
-
+        node: [20, 22]
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
+      - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ matrix.node }}
+          registry-url: https://registry.npmjs.org
 
-      - name: Restore workspace dependencies cache
-        uses: actions/cache@v4
-        with:
-          # Cache installed dependencies directly because this repo uses npm workspaces
-          # and the job intentionally runs `npm install` from the repository root.
-          path: |
-            node_modules
-            packages/*/node_modules
-          key: ${{ runner.os }}-node-${{ matrix.node-version }}-${{ hashFiles('package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-${{ matrix.node-version }}-
-
-      - name: Install dependencies
+      - name: Install SDK dependencies
+        working-directory: packages/sdk-typescript
         run: npm install
 
-      - name: Type check workspaces
-        run: npm run typecheck
+      - name: Build SDK
+        working-directory: packages/sdk-typescript
+        run: npm run build
 
-      - name: Run tests
+      - name: Test SDK
+        working-directory: packages/sdk-typescript
         run: npm test
 
+  test-directory:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node: [20, 22]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+
+      - name: Install directory dependencies
+        working-directory: packages/directory
+        run: npm install
+
+      - name: Build directory
+        working-directory: packages/directory
+        run: npm run build
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+
+      - name: Install SDK dependencies
+        working-directory: packages/sdk-typescript
+        run: npm install
+
+      - name: Build SDK
+        working-directory: packages/sdk-typescript
+        run: npm run build
+
+      - name: Publish SDK to npm
+        working-directory: packages/sdk-typescript
+        run: npm publish --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

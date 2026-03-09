@@ -10,7 +10,7 @@
 import { BeamIdentity, BeamClient, BeamDirectory } from '../packages/sdk-typescript/src/index.js'
 import type { BeamIdString } from '../packages/sdk-typescript/src/index.js'
 
-const DIRECTORY_URL = process.env.BEAM_DIRECTORY_URL ?? 'http://localhost:3100'
+const DIRECTORY_URL = process.env.BEAM_DIRECTORY_URL ?? 'https://api.beam.directory'
 
 // ─────────────────────────────────────────────────
 // 1. Generate identities for COPPEN agents

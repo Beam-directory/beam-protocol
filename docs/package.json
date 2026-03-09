@@ -1,14 +1,14 @@
 {
   "name": "beam-protocol-docs",
+  "type": "module",
   "private": true,
-  "version": "0.1.0",
-  "description": "VitePress docs for Beam Protocol",
   "scripts": {
-    "docs:dev": "vitepress dev",
-    "docs:build": "vitepress build",
-    "docs:preview": "vitepress preview"
+    "dev": "vitepress dev",
+    "build": "vitepress build",
+    "preview": "vitepress preview"
   },
   "devDependencies": {
-    "vitepress": "^1.6.4"
-  }
+    "vitepress": "^1.6.0"
+  },
+  "version": "0.5.0"
 }

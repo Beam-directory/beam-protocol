@@ -1,194 +1,76 @@
-# Concepts
+# Core Concepts
 
-This page defines the core Beam Protocol nouns you will see across the SDKs, CLI, and RFCs.
+Beam Protocol is a small set of building blocks for secure agent-to-agent communication.
 
-## Beam ID
+## Beam-ID
 
-A **Beam ID** is the network address of an agent.
+A Beam-ID is the global address for an agent, formatted like an email address:
 
 ```text
 agent@org.beam.directory
 ```
 
-Examples:
+It identifies both the agent name and the organization namespace.
 
-- `assistant@acme.beam.directory`
-- `router@partner.beam.directory`
-- `ops_bot@infra.beam.directory`
+## Intent Frames
 
-Rules:
-
-- the local part identifies one agent within an org
-- the org part identifies the organizational namespace
-- names are lowercase and URL-safe
-- the suffix is `.beam.directory`
-
-Each Beam ID maps to an Ed25519 public key registered in a directory.
-
-## Beam identity
-
-A **Beam identity** combines:
-
-- the Beam ID
-- the Ed25519 public key
-- the Ed25519 private key
-
-The public key is published. The private key signs outgoing frames and stays local.
-
-## Intent Frame
-
-An **Intent Frame** is the request message sent from one agent to another.
-
-```json
-{
-  "v": "1",
-  "intent": "task.delegate",
-  "from": "manager@acme.beam.directory",
-  "to": "analyst@partner.beam.directory",
-  "payload": {
-    "task": "Summarize all open enterprise opportunities",
-    "priority": "high"
-  },
-  "nonce": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2026-03-08T10:00:00.000Z",
-  "signature": "<base64 Ed25519 signature>"
-}
-```
-
-An intent frame contains:
+Intent frames are request messages. They usually include:
 
 - protocol version
-- intent type
-- sender and recipient Beam IDs
-- structured payload or parameters
-- nonce for replay protection
-- timestamp for freshness checks
+- sender Beam-ID
+- recipient Beam-ID
+- intent name
+- payload or params
+- nonce
+- timestamp
 - Ed25519 signature
 
-## Result Frame
+Use intent frames for structured operations such as `search.query`, `workflow.start`, or `conversation.message`.
 
-A **Result Frame** is the response to an intent.
+## Result Frames
 
-```json
-{
-  "v": "1",
-  "success": true,
-  "payload": {
-    "accepted": true,
-    "estimatedCompletion": "2026-03-08T10:15:00.000Z"
-  },
-  "nonce": "550e8400-e29b-41d4-a716-446655440000",
-  "timestamp": "2026-03-08T10:00:01.210Z",
-  "latency": 1210,
-  "signature": "<base64 Ed25519 signature>"
-}
-```
+Result frames are replies to intents. They normally include:
 
-A result frame can carry either:
+- the original nonce for correlation
+- `success` status
+- a response payload
+- optional error and error code
+- latency metadata
+- a signature from the responding agent
 
-- `success: true` with a `payload`
-- `success: false` with `error` and optional `errorCode`
+Together, intent and result frames create a verifiable request-response protocol for agents.
 
 ## Directory
 
-A **Directory Server** is the discovery and routing layer of Beam.
+The directory is the shared coordination layer for Beam. It handles:
 
-It is responsible for:
+- agent registration
+- discovery and lookup
+- intent relay
+- WebSocket fan-in and fan-out
+- operational health signals
 
-- registering agents and their public keys
-- serving lookup and search APIs
-- tracking trust and verification state
-- accepting HTTP relayed intents
-- brokering WebSocket delivery
-- enforcing ACL and rate limits
+You can run one public directory, a private team directory, or multiple federated directories.
 
-The default local deployment port is typically `3100`.
+## Trust Scores
 
-## Trust score
+Trust scores help agents rank or filter potential peers. A directory may calculate trust from signals like:
 
-A **trust score** is a floating-point value from `0.0` to `1.0` used to help agents reason about counterparty quality.
+- successful registrations
+- uptime and heartbeat freshness
+- delivery success rate
+- verification or policy status
 
-Typical inputs include:
-
-- registration age
-- verification state
-- recent activity or heartbeat freshness
-- directory-specific reputation logic
-
-Trust score is advisory, not a replacement for signature verification.
+Trust scores are advisory, not absolute. Agents should still verify signatures and enforce local policy.
 
 ## ACL
 
-An **Access Control List (ACL)** is a policy that limits which senders may invoke which intents against a target agent.
+Access control lists define who may send which intents to which targets.
 
-A typical rule looks like:
+Typical ACL rules answer questions like:
 
-- target: `billing@acme.beam.directory`
-- intent: `payment.status_check`
-- allowed sender: `crm@acme.beam.directory`
+- which Beam-IDs may call a sensitive intent
+- whether a wildcard sender is allowed
+- which workflows are internal-only
 
-Directories SHOULD deny relays that fail ACL checks before contacting the destination agent.
-
-## Transport modes
-
-Beam supports two common transport modes.
-
-### WebSocket delivery
-
-An agent maintains a persistent connection to:
-
-```text
-ws://host:3100/ws?beamId=agent@org.beam.directory
-```
-
-Advantages:
-
-- low latency
-- server push delivery
-- easier request/response matching
-- presence tracking via active connection state
-
-### HTTP relay
-
-An HTTP client submits a signed intent to the directory, which forwards it to the recipient if connected.
-
-```text
-POST /intents
-```
-
-In the current reference server package, the concrete route is `POST /intents/send`.
-
-## Intent catalog
-
-These intent types are included in the current Beam catalog:
-
-- `conversation.message`
-- `escalation.request`
-- `payment.status_check`
-- `sales.pipeline_summary`
-- `system.broadcast`
-- `agent.ping`
-- `agent.introduce`
-- `task.delegate`
-
-Directories can publish the catalog at `/intents/catalog`.
-
-## Replay protection
-
-Beam protects against naive replay attacks by combining:
-
-- nonces that must be unique inside the replay window
-- timestamps checked against a freshness bound
-- signature verification over the frame body
-
-A valid signature on an old message is not enough if the timestamp is stale or the nonce has already been seen.
-
-## Canonical signing
-
-Beam implementations MUST serialize frames deterministically before verifying signatures. The exact canonicalization format is defined in [RFC-0001](/spec/rfc-0001).
-
-## Federation
-
-Beam starts with a single-directory deployment model and extends naturally to multiple cooperating directories.
-
-See [RFC-0002](/spec/rfc-0002) for the federated directory model.
+ACLs are a policy layer on top of cryptographic identity.

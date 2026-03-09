@@ -1,9 +1,10 @@
-/** Beam ID format: agent@org.beam.directory */
-export type BeamIdString = `${string}@${string}.beam.directory`
+export type BeamIdString = `${string}@beam.directory` | `${string}@${string}.beam.directory`
+
+export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
 
 export interface BeamIdentityConfig {
   agentName: string
-  orgName: string
+  orgName?: string
 }
 
 export interface BeamIdentityData {
@@ -40,14 +41,86 @@ export interface AgentRegistration {
   displayName: string
   capabilities: string[]
   publicKey: string
-  org: string
+  org?: string
 }
 
 export interface AgentRecord extends AgentRegistration {
-  trustScore: number
+  did?: string
+  trustScore: number  // 0.0-1.0
   verified: boolean
   createdAt: string
   lastSeen: string
+}
+
+export interface AgentProfile extends AgentRecord {
+  description?: string
+  logoUrl?: string
+  website?: string
+  verificationTier?: VerificationTier
+  verificationStatus?: 'pending' | 'verified' | 'failed' | 'unverified'
+  domain?: string
+  intentsHandled?: number
+}
+
+export interface BrowseFilters {
+  capability?: string
+  tier?: VerificationTier
+  verified_only?: boolean
+}
+
+export interface BrowseResult {
+  page: number
+  pageSize: number
+  total: number
+  agents: AgentProfile[]
+}
+
+export interface DirectoryStats {
+  totalAgents: number
+  verifiedAgents: number
+  intentsProcessed: number
+  consumerAgents?: number
+  uptime?: number
+  waitlistSize?: number
+  version?: string
+}
+
+export interface Delegation {
+  id?: string
+  sourceBeamId: BeamIdString
+  targetBeamId: BeamIdString
+  scope: string
+  expiresAt?: string
+  createdAt?: string
+  status?: string
+}
+
+export interface Report {
+  id?: string
+  reporterBeamId: BeamIdString
+  targetBeamId: BeamIdString
+  reason: string
+  createdAt?: string
+  status?: string
+}
+
+export interface DomainVerification {
+  domain: string
+  verified: boolean
+  status?: string
+  tier?: VerificationTier
+  txtName?: string
+  txtValue?: string
+  expected?: string
+  records?: string[]
+  checkedAt?: string
+}
+
+export interface KeyRotationResult {
+  beamId: BeamIdString
+  publicKey: string
+  rotatedAt?: string
+  previousKey?: string
 }
 
 export interface DirectoryConfig {
@@ -58,9 +131,6 @@ export interface DirectoryConfig {
 export interface BeamClientConfig {
   identity: BeamIdentityData
   directoryUrl: string
-  autoReconnect?: boolean
-  onDisconnect?: () => void
-  onReconnect?: () => void
 }
 
 export interface AgentSearchQuery {

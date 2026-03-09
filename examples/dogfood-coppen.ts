@@ -8,7 +8,7 @@ import { BeamIdentity } from '../packages/sdk-typescript/src/identity.js'
 import { BeamDirectory } from '../packages/sdk-typescript/src/directory.js'
 import { BeamClient } from '../packages/sdk-typescript/src/client.js'
 
-const DIRECTORY_URL = 'http://localhost:3100'
+const DIRECTORY_URL = 'https://api.beam.directory'
 
 async function main() {
   console.log('=== BEAM DOGFOOD: COPPEN GmbH ===\n')
@@ -86,7 +86,7 @@ async function main() {
     respond({
       success: true,
       payload: {
-        action: 'tobias-notified',
+        action: 'admin-notified',
         priority: 'high',
         message: 'Tobias wird per WhatsApp informiert. Interne Klärung läuft.'
       }

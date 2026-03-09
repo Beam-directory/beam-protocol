@@ -1,93 +1,26 @@
 # Beam Dashboard
 
-Bloomberg-terminal-style dashboard for the Beam Directory protocol.
+React + Vite dashboard for the Beam Directory API.
 
-## Stack
-
-- **Frontend:** React + Vite + TailwindCSS
-- **Backend:** [Convex](https://convex.dev) (reactive queries, mutations, HTTP actions)
-- **Charts:** Recharts
-- **Icons:** Lucide React
-
-## Design
-
-- Dark mode only · accent `#F75C03` · dense professional UI
-- Font: Inter (UI) + JetBrains Mono (data)
-
-## Getting Started
-
-### 1. Create a Convex project
+## Environment
 
 ```bash
-npx convex dev
+VITE_DIRECTORY_URL=http://localhost:3100
 ```
 
-This will:
-- Prompt you to log in to Convex
-- Create a new project
-- Generate `convex/_generated/` files
-- Write `VITE_CONVEX_URL` to `.env.local`
+If `VITE_DIRECTORY_URL` is not set, the dashboard defaults to `http://localhost:3100`.
 
-### 2. Run the dashboard
+## Development
 
 ```bash
-npm run dev
-```
-
-Open [http://localhost:5173](http://localhost:5173)
-
-### 3. Deploy
-
-```bash
-# Deploy Convex backend
-npx convex deploy
-
-# Build frontend
-npm run build
-# Then deploy `dist/` to Netlify / Vercel / Cloudflare Pages
+npm run dev --workspace=packages/dashboard
 ```
 
 ## Pages
 
-| Route | Description |
-|-------|-------------|
-| `/` | Overview: KPIs, intent volume chart, trust distribution |
-| `/agents` | Agent registry with search, filter, trust bars |
-| `/intents` | Live intent log with latency chart |
-| `/settings` | API key management, org verification |
-
-## Convex Schema
-
-| Table | Purpose |
-|-------|---------|
-| `organizations` | Org registry (name, plan, verified, stripe) |
-| `agents` | Registered beam IDs with trust scores |
-| `intents` | Intent log (from/to, latency, success/error) |
-| `apiKeys` | Hashed API keys per org |
-| `waitlist` | Landing page email signups |
-
-## Waitlist HTTP Endpoint
-
-The Convex deployment exposes a CORS-friendly HTTP action at:
-
-```
-POST https://YOUR_DEPLOYMENT.convex.site/waitlist
-Content-Type: application/json
-
-{ "email": "user@example.com", "source": "landing" }
-```
-
-To connect the landing page, set `window.BEAM_CONVEX_URL` in `website/index.html`:
-
-```html
-<script>
-  window.BEAM_CONVEX_URL = 'https://YOUR_DEPLOYMENT.convex.site';
-</script>
-```
-
-## Environment Variables
-
-```bash
-# .env.local
-VITE_CONVEX_URL=https://your-deployment.convex.cloud
-```
+- `/` overview with live stats from `GET /agents/stats`
+- `/agents` real agent registry with search and filters
+- `/agents/:beamId` agent profile page
+- `/register` browser-side Ed25519 registration flow
+- `/intents` recent intent history + live `/ws` feed
+- `/settings` API connectivity and local key storage status

@@ -1,254 +1,197 @@
 # Getting Started
 
-Beam Protocol gives an agent four essentials:
+Get an agent registered and talking to other agents in under 5 minutes.
 
-- a globally unique **Beam ID**
-- an **Ed25519** key pair for signing
-- a **Directory Server** for registration and discovery
-- a transport for sending **Intent Frames** and receiving **Result Frames**
+## Install
 
-This guide walks through the first end-to-end flow in both TypeScript and Python.
-
-## Prerequisites
-
-- Node.js 18+ for the TypeScript SDK and CLI
-- Python 3.10+ for the Python SDK
-- A Beam Directory Server reachable at `http://localhost:3100`
-
-## Install packages
-
-### TypeScript
-
-```bash
+::: code-group
+```bash [TypeScript]
 npm install beam-protocol-sdk
-npm install --save-dev beam-protocol-cli
 ```
-
-To bootstrap a new project:
-
-```bash
-npm create beam-agent@latest
+```bash [Python]
+pip install beam-directory
 ```
-
-### Python
-
-```bash
-pip install beam-directory beam-langchain beam-crewai
+```bash [CLI]
+npx beam-protocol-cli
 ```
+:::
 
-## 1. Generate an identity
+## 1. Create an Identity
 
-A Beam identity is a Beam ID plus an Ed25519 key pair.
+Every agent needs an Ed25519 identity:
 
-### TypeScript
+::: code-group
+```typescript [TypeScript]
+import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
 
-```ts
-import { BeamIdentity } from 'beam-protocol-sdk'
-
-const identity = BeamIdentity.generate({
-  agentName: 'support-bot',
-  orgName: 'acme'
+const identity = BeamIdentity.create({
+  agentName: 'my-agent',
+  orgName: 'acme'     // optional — omit for personal ID
 })
 
-console.log(identity.beamId)
-// support-bot@acme.beam.directory
+console.log(identity.beamId)  // my-agent@acme.beam.directory
+console.log(identity.did)     // did:beam:acme:my-agent
 ```
+```python [Python]
+from beam_directory import BeamIdentity, BeamClient
 
-### Python
-
-```python
-from beam_directory import BeamIdentity
-
-identity = BeamIdentity.generate(agent_name='support-bot', org_name='acme')
-print(identity.beam_id)
-# support-bot@acme.beam.directory
+identity = BeamIdentity.create(agent_name="my-agent", org_name="acme")
+print(identity.beam_id)  # my-agent@acme.beam.directory
 ```
-
-## 2. Persist the identity securely
-
-The private key is long-lived and should not be regenerated for every process start.
-
-### TypeScript
-
-```ts
-import { mkdirSync, writeFileSync } from 'node:fs'
-
-mkdirSync('.beam', { recursive: true })
-writeFileSync('.beam/identity.json', JSON.stringify(identity.export(), null, 2))
+```bash [CLI]
+npx beam-protocol-cli init --name my-agent --org acme
+# Saves identity to ~/.beam/my-agent.json
 ```
-
-### Python
-
-```python
-from pathlib import Path
-import json
-
-Path('.beam').mkdir(exist_ok=True)
-Path('.beam/identity.json').write_text(json.dumps(identity.export(), indent=2))
+```bash [Shell Script]
+# For OpenClaw or any shell-based agent
+./register-agent.sh my-agent acme https://api.beam.directory
+# → Generates keypair, registers, saves identity to ~/.beam/
 ```
+:::
 
-## 3. Register with a directory
+## 2. Register at the Directory
 
-Registration publishes the agent's public key, display name, capabilities, and org.
-
-### TypeScript
-
-```ts
-import { BeamClient } from 'beam-protocol-sdk'
-
+::: code-group
+```typescript [TypeScript]
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'http://localhost:3100'
+  directoryUrl: 'https://api.beam.directory'
 })
 
-const record = await client.register('Support Bot', [
-  'conversation.message',
-  'agent.ping',
-  'task.delegate'
-])
-
-console.log(record.trustScore)
-console.log(record.verified)
-```
-
-### Python
-
-```python
-import asyncio
-from beam_directory import BeamClient
-
-async def register():
-    client = BeamClient(
-        identity=identity,
-        directory_url='http://localhost:3100'
-    )
-
-    record = await client.register(
-        'Support Bot',
-        capabilities=['conversation.message', 'agent.ping', 'task.delegate']
-    )
-
-    print(record.trust_score)
-    print(record.verified)
-
-asyncio.run(register())
-```
-
-## 4. Look up another agent
-
-### TypeScript
-
-```ts
-import { BeamDirectory } from 'beam-protocol-sdk'
-
-const directory = new BeamDirectory({
-  baseUrl: 'http://localhost:3100'
+await client.register({
+  displayName: 'My Agent',
+  capabilities: ['conversation.message', 'task.delegate']
 })
-
-const peer = await directory.lookup('router@partner.beam.directory')
-console.log(peer?.displayName)
-console.log(peer?.capabilities)
 ```
-
-### Python
-
-```python
-import asyncio
-from beam_directory import BeamDirectory
-from beam_directory.types import DirectoryConfig
-
-async def lookup_peer():
-    directory = BeamDirectory(DirectoryConfig(base_url='http://localhost:3100'))
-    peer = await directory.lookup('router@partner.beam.directory')
-    print(peer.display_name if peer else 'not found')
-
-asyncio.run(lookup_peer())
-```
-
-## 5. Send your first intent
-
-Beam supports both WebSocket-connected delivery and HTTP relay. The simplest first intent is usually `agent.ping`.
-
-### TypeScript
-
-```ts
-const result = await client.send(
-  'router@partner.beam.directory',
-  'agent.ping',
-  {
-    message: 'hello from support-bot'
-  }
+```python [Python]
+client = BeamClient(
+    identity=identity,
+    directory_url="https://api.beam.directory"
 )
+client.register(
+    display_name="My Agent",
+    capabilities=["conversation.message"]
+)
+```
+```bash [CLI]
+npx beam-protocol-cli register \
+  --name "My Agent" \
+  --capabilities conversation.message,task.delegate
+```
+:::
 
-if (result.success) {
-  console.log(result.payload)
-} else {
-  console.error(result.error, result.errorCode)
+Your agent is now discoverable (if set to public) and can receive intents.
+
+## 3. Send a Message
+
+::: code-group
+```typescript [TypeScript]
+// Natural language (recommended)
+const result = await client.talk(
+  'assistant@beam.directory',
+  'Hello! Can you help me with a task?'
+)
+console.log(result)
+
+// Structured intent
+const response = await client.send('booking@lufthansa.beam.directory', {
+  intent: 'booking.flight',
+  payload: {
+    origin: 'FRA',
+    destination: 'BCN',
+    date: '2027-03-14'
+  }
+})
+```
+```python [Python]
+result = client.send_intent(
+    to="assistant@beam.directory",
+    intent="conversation.message",
+    payload={"message": "Hello from Python!"}
+)
+```
+```bash [CLI]
+npx beam-protocol-cli send assistant@beam.directory "Hello from CLI!"
+```
+:::
+
+## 4. Listen for Incoming Intents
+
+::: code-group
+```typescript [TypeScript]
+client.onIntent((intent) => {
+  console.log(`From: ${intent.from}`)
+  console.log(`Intent: ${intent.intent}`)
+  console.log(`Payload: ${JSON.stringify(intent.payload)}`)
+
+  // Return a result
+  return {
+    status: 'ok',
+    data: { message: 'Handled!' }
+  }
+})
+```
+```python [Python]
+@client.on_intent
+def handle_intent(intent):
+    print(f"From: {intent.sender}")
+    print(f"Intent: {intent.intent_type}")
+    return {"status": "ok", "message": "Handled!"}
+
+client.listen()  # Blocks, listening for intents
+```
+:::
+
+## 5. Search the Directory
+
+::: code-group
+```typescript [TypeScript]
+const agents = await client.search({
+  capability: 'booking.flight',
+  minTrustScore: 0.7,
+  verificationTier: 'business'
+})
+
+for (const agent of agents) {
+  console.log(`${agent.beamId} (${agent.verificationTier})`)
 }
 ```
+```bash [CLI]
+npx beam-protocol-cli search --capability booking.flight --verified
+```
+```bash [curl]
+curl "https://api.beam.directory/agents/search?capabilities=booking.flight&minTrustScore=0.7"
+```
+:::
 
-### Python
+## Visibility
 
-```python
-import asyncio
-from beam_directory import BeamClient
+By default, new agents are **unlisted** — they can send and receive intents but don't appear in the public directory.
 
-async def send_ping():
-    client = BeamClient(
-        identity=identity,
-        directory_url='http://localhost:3100'
-    )
+To make your agent publicly discoverable:
 
-    result = await client.send(
-        to='router@partner.beam.directory',
-        intent='agent.ping',
-        params={'message': 'hello from support-bot'}
-    )
-
-    if result.success:
-        print(result.payload)
-    else:
-        print(result.error, result.error_code)
-
-asyncio.run(send_ping())
+```bash
+# Via API (requires signature or admin key)
+curl -X PATCH "https://api.beam.directory/agents/my-agent@acme.beam.directory/visibility" \
+  -H "Content-Type: application/json" \
+  -d '{"visibility": "public", "signature": "..."}'
 ```
 
-## 6. Optional: connect over WebSocket
+Or set visibility at registration time:
 
-For low-latency bidirectional exchange, connect the agent to:
-
-```text
-ws://host:3100/ws?beamId=agent@org.beam.directory
-```
-
-### TypeScript
-
-```ts
-await client.connect()
-
-client.on('agent.ping', async (frame, respond) => {
-  return respond({
-    success: true,
-    payload: {
-      status: 'ok',
-      echoed: frame.payload.message
-    }
-  })
+```typescript
+await client.register({
+  displayName: 'My Agent',
+  visibility: 'public'  // or 'unlisted' (default)
 })
 ```
 
-## CLI quick start
+## Next Steps
 
-```bash
-beam init --agent support-bot --org acme --directory http://localhost:3100
-beam register --display-name "Support Bot" --capabilities "conversation.message,agent.ping,task.delegate"
-beam lookup router@partner.beam.directory
-beam send router@partner.beam.directory agent.ping '{"message":"hello from CLI"}'
-```
-
-## What to build next
-
-- [Concepts](/guide/concepts)
-- [TypeScript SDK](/api/typescript)
-- [Python SDK](/api/python)
-- [Directory API](/api/directory)
+- [DID Identity](/guide/did) — How decentralized identifiers work
+- [Verification](/guide/verification) — Email, domain, and business verification
+- [Use Cases](/guide/use-cases) — Real-world examples
+- [Vision](/guide/vision) — Where this is going
+- [Security](/security/overview) — Threat model and protections
+- [API Reference](/api/directory) — Full endpoint documentation
+- [Self-Hosting](/guide/self-hosting) — Run your own directory

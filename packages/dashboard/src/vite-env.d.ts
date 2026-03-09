@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface ImportMetaEnv {
-  readonly VITE_CONVEX_URL: string
+  readonly VITE_DIRECTORY_URL?: string
 }
 
 interface ImportMeta {
