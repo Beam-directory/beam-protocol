@@ -639,6 +639,232 @@ function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string
   }
 }
 
+async function resolveSenderPublicKey(
+  db: Database,
+  beamId: string,
+  sourceDirectory: string
+): Promise<string | null> {
+  const local = getAgent(db, beamId)
+  if (local) {
+    return local.public_key
+  }
+
+  const cached = getCachedFederatedPublicKey(db, beamId)
+  if (cached) {
+    return cached
+  }
+
+  if (sourceDirectory && sourceDirectory !== getLocalDirectoryUrl()) {
+    const fromSource = await queryPeerForAgent(db, sourceDirectory, beamId, { localOnly: true })
+    const publicKey = fromSource?.agent.public_key ?? fromSource?.agent.publicKey
+    if (typeof publicKey === 'string' && publicKey.length > 0) {
+      return publicKey
+    }
+  }
+
+  const resolved = await resolveAgentAcrossFederation(db, beamId, { autoDiscover: false })
+  const publicKey = resolved?.agent.public_key ?? resolved?.agent.publicKey
+  return typeof publicKey === 'string' && publicKey.length > 0 ? publicKey : null
+}
+
+async function relayIntentToFederatedPeer(
+  db: Database,
+  frame: IntentFrame,
+  timeoutMs: number,
+  options: { sourceDirectory: string; hopCount: number }
+): Promise<ResultFrame> {
+  const resolved = await resolveAgentAcrossFederation(db, frame.to)
+  const peerUrl = resolved?.directoryUrl
+
+  if (!resolved || !peerUrl || peerUrl === getLocalDirectoryUrl()) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    throw new RelayError('OFFLINE', `Agent ${frame.to} is not available locally or through federation`)
+  }
+
+  const nextHopCount = options.hopCount + 1
+  if (nextHopCount > MAX_FEDERATION_HOPS) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'BAD_REQUEST',
+    })
+    throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
+  }
+
+  const startedAt = Date.now()
+  const response = await fetch(`${peerUrl}/federation/relay`, {
+    method: 'POST',
+    headers: getFederationRequestHeaders({
+      'Content-Type': 'application/json',
+      'X-Beam-Source-Directory': options.sourceDirectory,
+      'X-Beam-Hop-Count': String(nextHopCount),
+    }),
+    body: JSON.stringify(frame),
+  })
+
+  if (!response.ok) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: Date.now() - startedAt,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    throw new RelayError('DELIVERY_FAILED', `Federated relay failed with status ${response.status}`)
+  }
+
+  const result = await response.json() as ResultFrame
+  finalizeIntentLog(db, {
+    nonce: frame.nonce,
+    fromBeamId: frame.from,
+    toBeamId: frame.to,
+    success: result.success,
+    latencyMs: typeof result.latency === 'number' ? result.latency : Date.now() - startedAt,
+    errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
+  })
+
+  return result
+}
+
+function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
+  if (!frame || typeof frame !== 'object') {
+    throw new RelayError('BAD_REQUEST', 'Invalid intent frame body')
+  }
+
+  const payloadCandidate = (frame as unknown as { payload?: unknown; params?: unknown }).payload
+    ?? (frame as unknown as { params?: unknown }).params
+
+  const payload = (payloadCandidate && typeof payloadCandidate === 'object' && !Array.isArray(payloadCandidate))
+    ? payloadCandidate as Record<string, unknown>
+    : null
+
+  if (typeof frame.from !== 'string' || typeof frame.to !== 'string' || typeof frame.intent !== 'string') {
+    throw new RelayError('BAD_REQUEST', 'from, to and intent are required')
+  }
+  if (!payload) {
+    throw new RelayError('BAD_REQUEST', 'payload must be an object')
+  }
+  if (typeof frame.nonce !== 'string' || frame.nonce.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'nonce is required')
+  }
+  if (typeof frame.timestamp !== 'string' || frame.timestamp.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'timestamp is required')
+  }
+  if (typeof frame.signature !== 'string' || frame.signature.length === 0) {
+    throw new RelayError('BAD_REQUEST', 'signature is required')
+  }
+
+  return {
+    ...frame,
+    payload,
+  }
+}
+
+export function canActOnBehalf(
+  db: Database,
+  connectedBeamId: string,
+  claimedFromBeamId: string,
+  intentType: string,
+): boolean {
+  if (connectedBeamId === claimedFromBeamId) {
+    return true
+  }
+
+  return hasActiveDelegation(db, {
+    grantorBeamId: claimedFromBeamId,
+    granteeBeamId: connectedBeamId,
+    scope: intentType,
+  })
+}
+
+function resolveIntentSender(db: Database, connectedBeamId: string, frame: IntentFrame) {
+  const senderAgent = getAgent(db, connectedBeamId)
+  if (!senderAgent) {
+    throw new RelayError('BAD_REQUEST', 'Sender is not registered in the directory')
+  }
+
+  if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
+    throw new RelayError(
+      connectedBeamId === frame.from ? 'BAD_REQUEST' : 'FORBIDDEN',
+      connectedBeamId === frame.from
+        ? 'Sender is not registered in the directory'
+        : `No active delegation allows ${connectedBeamId} to send ${frame.intent} for ${frame.from}`,
+    )
+  }
+
+  return senderAgent
+}
+
+function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey: string): void {
+  if (!checkAgentRateLimit(frame.from, getRateLimitPerMinute())) {
+    throw new RelayError('RATE_LIMITED', `Rate limit exceeded for ${frame.from}`)
+  }
+
+  if (!verifyIntentSignature(frame, senderPublicKey)) {
+    throw new RelayError('BAD_REQUEST', 'Signature verification failed')
+  }
+
+  const localTarget = getAgent(db, frame.to)
+  if (localTarget && !isIntentAllowed(db, {
+    targetBeamId: frame.to,
+    intentType: frame.intent,
+    fromBeamId: frame.from,
+  })) {
+    throw new RelayError('FORBIDDEN', `ACL denied intent ${frame.intent} from ${frame.from} to ${frame.to}`)
+  }
+
+  const payloadValidation = validateIntentPayload(frame.intent, frame.payload)
+  if (!payloadValidation.valid) {
+    throw new RelayError('BAD_REQUEST', payloadValidation.error ?? 'Invalid payload')
+  }
+
+  enforceReplayProtection(db, frame)
+}
+
+function enforceReplayProtection(db: Database, frame: IntentFrame): void {
+  const parsedTimestamp = new Date(frame.timestamp).getTime()
+  if (Number.isNaN(parsedTimestamp)) {
+    throw new RelayError('BAD_REQUEST', 'Invalid timestamp format')
+  }
+
+  if (Math.abs(Date.now() - parsedTimestamp) > REPLAY_WINDOW_MS) {
+    throw new RelayError('BAD_REQUEST', 'Timestamp outside allowed replay window (5 minutes)')
+  }
+
+  const isNewNonce = recordNonce(db, frame.nonce)
+  if (!isNewNonce) {
+    throw new RelayError('BAD_REQUEST', `Replay detected: nonce ${frame.nonce} was already used`)
+  }
+}
+
+function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string): boolean {
+  // K4 FIX: Pass object directly to verifyPayload, not JSON.stringify'd string.
+  // verifyPayload() calls canonicalizeJson() internally which handles deterministic serialization.
+  // Previously: JSON.stringify → string → canonicalizeJson(string) = double-encoded.
+  const signedPayload = {
+    type: 'intent' as const,
+    from: frame.from,
+    to: frame.to,
+    intent: frame.intent,
+    payload: frame.payload,
+    timestamp: frame.timestamp,
+    nonce: frame.nonce,
+  }
+
+  return verifyPayload(signedPayload, frame.signature ?? '', senderPublicKeyBase64)
+}
+
 function handleResult(frame: ResultFrame): void {
   if (!frame || typeof frame.nonce !== 'string') {
     return
