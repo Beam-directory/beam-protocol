@@ -3,6 +3,8 @@ import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import AjvImport, { type ValidateFunction } from 'ajv'
 
+export const BEAM_ID_RE = /^[a-z0-9_-]+@(?:[a-z0-9_-]+\.)?beam\.directory$/
+
 interface CatalogParamRule {
   type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'integer'
   enum?: unknown[]
@@ -25,7 +27,10 @@ interface ValidationResult {
 }
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
+const catalogPaths = [
+  resolve(__dirname, '../../../intents/catalog.yaml'),
+  resolve(__dirname, '../catalog.yaml'),
+]
 
 const AjvCtor = AjvImport as unknown as {
   new (options?: Record<string, unknown>): { compile: (schema: object) => ValidateFunction }
@@ -34,9 +39,19 @@ const ajv = new AjvCtor({ allErrors: true, strict: false })
 const validators = new Map<string, ValidateFunction>()
 
 function loadCatalog(): CatalogIntent[] {
-  const raw = readFileSync(catalogPath, 'utf8')
-  const parsed = JSON.parse(raw) as CatalogFile
-  return Array.isArray(parsed.intents) ? parsed.intents : []
+  for (const catalogPath of catalogPaths) {
+    try {
+      const raw = readFileSync(catalogPath, 'utf8')
+      const parsed = JSON.parse(raw) as CatalogFile
+      const intents = Array.isArray(parsed.intents) ? parsed.intents : []
+      if (intents.length > 0) {
+        return intents
+      }
+    } catch {
+    }
+  }
+
+  return []
 }
 
 function buildIntentSchema(intent: CatalogIntent): Record<string, unknown> {

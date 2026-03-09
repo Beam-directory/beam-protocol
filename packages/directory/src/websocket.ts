@@ -1,22 +1,35 @@
-import { createPublicKey, verify } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
+import { createPublicKey, verify } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
-import { getAgent, incrementAgentStat, recordNonce, updateLastSeen } from './db.js'
+import { finalizeIntentLog, getAgent, hasActiveDelegation, logIntentStart, recordNonce, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
+import {
+  getCachedFederatedPublicKey,
+  getFederationRequestHeaders,
+  getLocalDirectoryUrl,
+  MAX_FEDERATION_HOPS,
+  queryPeerForAgent,
+  resolveAgentAcrossFederation,
+} from './federation.js'
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
 const connections = new Map<string, WebSocket>()
+const intentFeedSubscribers = new Set<WebSocket>()
 
 const pendingResults = new Map<string, {
+  db: Database
+  fromBeamId: string
+  toBeamId: string
+  intentType: string
+  startedAtMs: number
   resolve: (frame: ResultFrame) => void
   reject: (err: Error) => void
   timeout: ReturnType<typeof setTimeout>
-  expectedResponder: string
 }>()
 
 setInterval(() => {
@@ -38,6 +51,23 @@ export function createWebSocketServer(db: Database): WebSocketServer {
   wss.on('connection', (ws: WebSocket, req: IncomingMessage) => {
     const urlStr = req.url ?? '/'
     const url = new URL(urlStr, 'http://localhost')
+    const feed = url.searchParams.get('feed')
+
+    if (feed === 'intents') {
+      intentFeedSubscribers.add(ws)
+      sendJson(ws, { type: 'feed_connected' })
+
+      ws.on('close', () => {
+        intentFeedSubscribers.delete(ws)
+      })
+
+      ws.on('error', () => {
+        intentFeedSubscribers.delete(ws)
+      })
+
+      return
+    }
+
     const beamId = url.searchParams.get('beamId')
 
     if (!beamId) {
@@ -97,32 +127,105 @@ export function getConnectedBeamIds(): string[] {
     .map(([beamId]) => beamId)
 }
 
-export async function relayIntentFromHttp(db: Database, frame: IntentFrame, timeoutMs = 60_000): Promise<ResultFrame> {
+export async function relayIntentFromHttp(
+  db: Database,
+  frame: IntentFrame,
+  timeoutMs = 60_000,
+  options: { sourceDirectory?: string; hopCount?: number } = {}
+): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)
-  const sender = getAgent(db, prepared.from)
+  const sourceDirectory = options.sourceDirectory ?? getLocalDirectoryUrl()
+  const hopCount = options.hopCount ?? 0
 
-  if (!sender) {
+  if (hopCount > MAX_FEDERATION_HOPS) {
+    throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
+  }
+
+  const sender = getAgent(db, prepared.from)
+  const senderPublicKey = sender?.public_key ?? await resolveSenderPublicKey(db, prepared.from, sourceDirectory)
+
+  if (!senderPublicKey) {
     throw new RelayError('BAD_REQUEST', `Sender ${prepared.from} is not registered`)
   }
 
-  enforceSecurityChecks(db, prepared, sender.public_key)
+  enforceSecurityChecks(db, prepared, senderPublicKey)
+
+  const localRecipient = getAgent(db, prepared.to)
+  if (!localRecipient) {
+    const federatedResult = await relayIntentToFederatedPeer(db, prepared, timeoutMs, {
+      sourceDirectory,
+      hopCount,
+    })
+    updateLastSeen(db, prepared.from)
+    return federatedResult
+  }
+
+  logIntentStart(db, prepared)
+  broadcastIntentFeed({
+    nonce: prepared.nonce,
+    from: prepared.from,
+    to: prepared.to,
+    intentType: prepared.intent,
+    timestamp: prepared.timestamp,
+    completedAt: null,
+    roundTripLatencyMs: null,
+    status: 'pending',
+    errorCode: null,
+  })
 
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
+      errorCode: 'OFFLINE',
+    })
     throw new RelayError('OFFLINE', `Agent ${prepared.to} is not currently connected`)
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, timeoutMs, prepared.to)
+  const resultPromise = createResultWaiter(db, prepared, timeoutMs)
 
   try {
     sendJson(recipientWs, {
       type: 'intent',
       frame: prepared,
-      senderPublicKey: sender.public_key,
+      senderPublicKey,
     })
-    incrementAgentStat(db, prepared.to, 'intents_received')
   } catch (err) {
     clearPendingResult(prepared.nonce)
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
+      errorCode: 'DELIVERY_FAILED',
+    })
     throw new RelayError('DELIVERY_FAILED', err instanceof Error ? err.message : 'Failed to relay intent')
   }
 
@@ -153,7 +256,7 @@ async function handleMessage(
   if (msg.type === 'intent') {
     await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame)
   } else if (msg.type === 'result') {
-    handleResult(db, senderBeamId, senderWs, msg.frame as ResultFrame)
+    handleResult(msg.frame as ResultFrame)
   } else {
     sendJson(senderWs, { type: 'error', message: `Unknown message type: ${msg.type}` })
   }
@@ -178,23 +281,15 @@ async function handleIntent(
     return
   }
 
-  if (prepared.from !== senderBeamId) {
+  let senderAgent
+  try {
+    senderAgent = resolveIntentSender(db, senderBeamId, prepared)
+  } catch (err) {
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
-      errorCode: 'SENDER_MISMATCH',
-      message: `from field (${prepared.from}) does not match connected beamId (${senderBeamId})`,
-    })
-    return
-  }
-
-  const senderAgent = getAgent(db, senderBeamId)
-  if (!senderAgent) {
-    sendJson(senderWs, {
-      type: 'error',
-      nonce: prepared.nonce,
-      errorCode: 'UNKNOWN_SENDER',
-      message: 'Sender is not registered in the directory',
+      errorCode: err instanceof RelayError ? err.code : 'UNKNOWN_SENDER',
+      message: err instanceof Error ? err.message : 'Sender is not registered in the directory',
     })
     return
   }
@@ -222,8 +317,61 @@ async function handleIntent(
     return
   }
 
+  logIntentStart(db, prepared)
+  broadcastIntentFeed({
+    nonce: prepared.nonce,
+    from: prepared.from,
+    to: prepared.to,
+    intentType: prepared.intent,
+    timestamp: prepared.timestamp,
+    completedAt: null,
+    roundTripLatencyMs: null,
+    status: 'pending',
+    errorCode: null,
+  })
+
+  const localRecipient = getAgent(db, prepared.to)
+  if (!localRecipient) {
+    try {
+      const result = await relayIntentToFederatedPeer(db, prepared, 30_000, {
+        sourceDirectory: getLocalDirectoryUrl(),
+        hopCount: 0,
+      })
+      updateLastSeen(db, senderBeamId)
+      sendJson(senderWs, { type: 'result', frame: result })
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Federated delivery failed'
+      sendJson(senderWs, {
+        type: 'error',
+        nonce: prepared.nonce,
+        errorCode: err instanceof RelayError ? err.code : 'DELIVERY_FAILED',
+        message,
+      })
+    }
+    return
+  }
+
   const recipientWs = connections.get(prepared.to)
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: new Date().toISOString(),
+      roundTripLatencyMs: null,
+      status: 'error',
+      errorCode: 'OFFLINE',
+    })
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
@@ -233,14 +381,14 @@ async function handleIntent(
     return
   }
 
-  const resultPromise = createResultWaiter(prepared.nonce, 30_000, prepared.to)
+  const resultPromise = createResultWaiter(db, prepared, 30_000)
 
   sendJson(recipientWs, {
     type: 'intent',
     frame: prepared,
     senderPublicKey: senderAgent.public_key,
+    actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
   })
-  incrementAgentStat(db, prepared.to, 'intents_received')
 
   updateLastSeen(db, senderBeamId)
 
@@ -251,6 +399,104 @@ async function handleIntent(
     const message = err instanceof Error ? err.message : 'Delivery failed'
     sendJson(senderWs, { type: 'error', nonce: prepared.nonce, message })
   }
+}
+
+async function resolveSenderPublicKey(
+  db: Database,
+  beamId: string,
+  sourceDirectory: string
+): Promise<string | null> {
+  const local = getAgent(db, beamId)
+  if (local) {
+    return local.public_key
+  }
+
+  const cached = getCachedFederatedPublicKey(db, beamId)
+  if (cached) {
+    return cached
+  }
+
+  if (sourceDirectory && sourceDirectory !== getLocalDirectoryUrl()) {
+    const fromSource = await queryPeerForAgent(db, sourceDirectory, beamId, { localOnly: true })
+    const publicKey = fromSource?.agent.public_key ?? fromSource?.agent.publicKey
+    if (typeof publicKey === 'string' && publicKey.length > 0) {
+      return publicKey
+    }
+  }
+
+  const resolved = await resolveAgentAcrossFederation(db, beamId, { autoDiscover: false })
+  const publicKey = resolved?.agent.public_key ?? resolved?.agent.publicKey
+  return typeof publicKey === 'string' && publicKey.length > 0 ? publicKey : null
+}
+
+async function relayIntentToFederatedPeer(
+  db: Database,
+  frame: IntentFrame,
+  timeoutMs: number,
+  options: { sourceDirectory: string; hopCount: number }
+): Promise<ResultFrame> {
+  const resolved = await resolveAgentAcrossFederation(db, frame.to)
+  const peerUrl = resolved?.directoryUrl
+
+  if (!resolved || !peerUrl || peerUrl === getLocalDirectoryUrl()) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'OFFLINE',
+    })
+    throw new RelayError('OFFLINE', `Agent ${frame.to} is not available locally or through federation`)
+  }
+
+  const nextHopCount = options.hopCount + 1
+  if (nextHopCount > MAX_FEDERATION_HOPS) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'BAD_REQUEST',
+    })
+    throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
+  }
+
+  const startedAt = Date.now()
+  const response = await fetch(`${peerUrl}/federation/relay`, {
+    method: 'POST',
+    headers: getFederationRequestHeaders({
+      'Content-Type': 'application/json',
+      'X-Beam-Source-Directory': options.sourceDirectory,
+      'X-Beam-Hop-Count': String(nextHopCount),
+    }),
+    body: JSON.stringify(frame),
+  })
+
+  if (!response.ok) {
+    finalizeIntentLog(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      success: false,
+      latencyMs: Date.now() - startedAt,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    throw new RelayError('DELIVERY_FAILED', `Federated relay failed with status ${response.status}`)
+  }
+
+  const result = await response.json() as ResultFrame
+  finalizeIntentLog(db, {
+    nonce: frame.nonce,
+    fromBeamId: frame.from,
+    toBeamId: frame.to,
+    success: result.success,
+    latencyMs: typeof result.latency === 'number' ? result.latency : Date.now() - startedAt,
+    errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
+  })
+
+  return result
 }
 
 function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
@@ -287,6 +533,41 @@ function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
   }
 }
 
+export function canActOnBehalf(
+  db: Database,
+  connectedBeamId: string,
+  claimedFromBeamId: string,
+  intentType: string,
+): boolean {
+  if (connectedBeamId === claimedFromBeamId) {
+    return true
+  }
+
+  return hasActiveDelegation(db, {
+    grantorBeamId: claimedFromBeamId,
+    granteeBeamId: connectedBeamId,
+    scope: intentType,
+  })
+}
+
+function resolveIntentSender(db: Database, connectedBeamId: string, frame: IntentFrame) {
+  const senderAgent = getAgent(db, connectedBeamId)
+  if (!senderAgent) {
+    throw new RelayError('BAD_REQUEST', 'Sender is not registered in the directory')
+  }
+
+  if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
+    throw new RelayError(
+      connectedBeamId === frame.from ? 'BAD_REQUEST' : 'FORBIDDEN',
+      connectedBeamId === frame.from
+        ? 'Sender is not registered in the directory'
+        : `No active delegation allows ${connectedBeamId} to send ${frame.intent} for ${frame.from}`,
+    )
+  }
+
+  return senderAgent
+}
+
 function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey: string): void {
   if (!checkAgentRateLimit(frame.from, getRateLimitPerMinute())) {
     throw new RelayError('RATE_LIMITED', `Rate limit exceeded for ${frame.from}`)
@@ -296,7 +577,8 @@ function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey
     throw new RelayError('BAD_REQUEST', 'Signature verification failed')
   }
 
-  if (!isIntentAllowed(db, {
+  const localTarget = getAgent(db, frame.to)
+  if (localTarget && !isIntentAllowed(db, {
     targetBeamId: frame.to,
     intentType: frame.intent,
     fromBeamId: frame.from,
@@ -329,60 +611,35 @@ function enforceReplayProtection(db: Database, frame: IntentFrame): void {
 }
 
 function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string): boolean {
+  const signedPayload = JSON.stringify({
+    type: 'intent',
+    from: frame.from,
+    to: frame.to,
+    intent: frame.intent,
+    payload: frame.payload,
+    timestamp: frame.timestamp,
+    nonce: frame.nonce,
+  })
+
   try {
     const publicKey = createPublicKey({
       key: Buffer.from(senderPublicKeyBase64, 'base64'),
       format: 'der',
       type: 'spki',
-    })
-
-    const signedPayload = JSON.stringify({
-      type: 'intent',
-      from: frame.from,
-      to: frame.to,
-      intent: frame.intent,
-      payload: frame.payload,
-      timestamp: frame.timestamp,
-      nonce: frame.nonce,
     })
 
     return verify(
       null,
       Buffer.from(signedPayload, 'utf8'),
       publicKey,
-      Buffer.from(frame.signature ?? '', 'base64')
+      Buffer.from(frame.signature ?? '', 'base64'),
     )
   } catch {
     return false
   }
 }
 
-function verifyResultSignature(frame: ResultFrame, senderPublicKeyBase64: string): boolean {
-  try {
-    const publicKey = createPublicKey({
-      key: Buffer.from(senderPublicKeyBase64, 'base64'),
-      format: 'der',
-      type: 'spki',
-    })
-
-    const { signature, ...unsignedFrame } = frame
-    return verify(
-      null,
-      Buffer.from(canonicalizeFrame(unsignedFrame as Record<string, unknown>), 'utf8'),
-      publicKey,
-      Buffer.from(signature ?? '', 'base64')
-    )
-  } catch {
-    return false
-  }
-}
-
-function handleResult(
-  db: Database,
-  senderBeamId: string,
-  senderWs: WebSocket,
-  frame: ResultFrame
-): void {
+function handleResult(frame: ResultFrame): void {
   if (!frame || typeof frame.nonce !== 'string') {
     return
   }
@@ -392,46 +649,75 @@ function handleResult(
     return
   }
 
-  if (pending.expectedResponder !== senderBeamId) {
-    sendJson(senderWs, {
-      type: 'error',
-      nonce: frame.nonce,
-      errorCode: 'FORBIDDEN',
-      message: `Only ${pending.expectedResponder} can respond to nonce ${frame.nonce}`,
-    })
-    return
-  }
-
-  const senderAgent = getAgent(db, senderBeamId)
-  if (!senderAgent || !verifyResultSignature(frame, senderAgent.public_key)) {
-    sendJson(senderWs, {
-      type: 'error',
-      nonce: frame.nonce,
-      errorCode: 'INVALID_RESULT',
-      message: 'Result signature verification failed',
-    })
-    return
-  }
-
   clearTimeout(pending.timeout)
   pendingResults.delete(frame.nonce)
-  incrementAgentStat(db, senderBeamId, 'intents_responded')
-  updateLastSeen(db, senderBeamId)
+  const latencyMs = typeof frame.latency === 'number' ? frame.latency : Math.max(0, Date.now() - pending.startedAtMs)
+  finalizeIntentLog(pending.db, {
+    nonce: frame.nonce,
+    fromBeamId: pending.fromBeamId,
+    toBeamId: pending.toBeamId,
+    success: frame.success,
+    latencyMs,
+    errorCode: frame.success ? undefined : (frame.errorCode ?? 'RESULT_ERROR'),
+  })
+  broadcastIntentFeed({
+    nonce: frame.nonce,
+    from: pending.fromBeamId,
+    to: pending.toBeamId,
+    intentType: pending.intentType,
+    timestamp: new Date(pending.startedAtMs).toISOString(),
+    completedAt: new Date().toISOString(),
+    roundTripLatencyMs: latencyMs,
+    status: frame.success ? 'success' : 'error',
+    errorCode: frame.success ? null : (frame.errorCode ?? 'RESULT_ERROR'),
+  })
   pending.resolve(frame)
 }
 
-function createResultWaiter(nonce: string, timeoutMs: number, expectedResponder: string): Promise<ResultFrame> {
-  if (pendingResults.has(nonce)) {
-    clearPendingResult(nonce)
+function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number): Promise<ResultFrame> {
+  if (pendingResults.has(frame.nonce)) {
+    clearPendingResult(frame.nonce)
   }
+
+  const startedAtMs = new Date(frame.timestamp).getTime()
+  const safeStartedAtMs = Number.isNaN(startedAtMs) ? Date.now() : startedAtMs
 
   return new Promise<ResultFrame>((resolve, reject) => {
     const timeout = setTimeout(() => {
-      pendingResults.delete(nonce)
+      pendingResults.delete(frame.nonce)
+      const latencyMs = Math.max(0, Date.now() - safeStartedAtMs)
+      finalizeIntentLog(db, {
+        nonce: frame.nonce,
+        fromBeamId: frame.from,
+        toBeamId: frame.to,
+        success: false,
+        latencyMs,
+        errorCode: 'TIMEOUT',
+      })
+      broadcastIntentFeed({
+        nonce: frame.nonce,
+        from: frame.from,
+        to: frame.to,
+        intentType: frame.intent,
+        timestamp: frame.timestamp,
+        completedAt: new Date().toISOString(),
+        roundTripLatencyMs: latencyMs,
+        status: 'error',
+        errorCode: 'TIMEOUT',
+      })
       reject(new RelayError('TIMEOUT', `Intent timed out waiting for result (${timeoutMs}ms)`))
     }, timeoutMs)
 
-    pendingResults.set(nonce, { resolve, reject, timeout, expectedResponder })
+    pendingResults.set(frame.nonce, {
+      db,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      intentType: frame.intent,
+      startedAtMs: safeStartedAtMs,
+      resolve,
+      reject,
+      timeout,
+    })
   })
 }
 
@@ -442,24 +728,32 @@ function clearPendingResult(nonce: string): void {
   pendingResults.delete(nonce)
 }
 
-function canonicalizeFrame(frame: Record<string, unknown>): string {
-  return JSON.stringify(deepSortKeys(frame))
-}
-
-function deepSortKeys(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(deepSortKeys)
-  if (value !== null && typeof value === 'object') {
-    const sorted: Record<string, unknown> = {}
-    for (const key of Object.keys(value as object).sort()) {
-      sorted[key] = deepSortKeys((value as Record<string, unknown>)[key])
-    }
-    return sorted
-  }
-  return value
-}
-
 function sendJson(ws: WebSocket, payload: object): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload))
+  }
+}
+
+function broadcastIntentFeed(entry: {
+  nonce: string
+  from: string
+  to: string
+  intentType: string
+  timestamp: string
+  completedAt: string | null
+  roundTripLatencyMs: number | null
+  status: string
+  errorCode: string | null
+}): void {
+  for (const ws of intentFeedSubscribers) {
+    if (ws.readyState !== WebSocket.OPEN) {
+      intentFeedSubscribers.delete(ws)
+      continue
+    }
+
+    sendJson(ws, {
+      type: 'intent_feed',
+      entry,
+    })
   }
 }
