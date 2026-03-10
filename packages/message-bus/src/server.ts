@@ -27,11 +27,11 @@ function parseArgs(): Record<string, string> {
 const args = parseArgs()
 
 const bus = createBus({
-  port: args.port ? parseInt(args.port) : 8420,
-  directoryUrl: args.directory ?? 'http://localhost:3100',
-  dbPath: args.db ?? './beam-bus.sqlite',
-  identityPath: args.identity,
-  rateLimit: args['rate-limit'] ? parseInt(args['rate-limit']) : 10,
+  port: args.port ? parseInt(args.port) : parseInt(process.env.PORT ?? '8420'),
+  directoryUrl: args.directory ?? process.env.DIRECTORY_URL ?? 'http://localhost:3100',
+  dbPath: args.db ?? process.env.DB_PATH ?? './beam-bus.sqlite',
+  identityPath: args.identity ?? process.env.IDENTITY_PATH,
+  rateLimit: args['rate-limit'] ? parseInt(args['rate-limit']) : parseInt(process.env.RATE_LIMIT ?? '10'),
 })
 
 bus.start().catch(err => {
