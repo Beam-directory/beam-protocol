@@ -4,6 +4,7 @@ import type { AgentKeyRow, AgentRow } from '../types.js'
 import { getAgent, listRevokedAgentKeys, rotateAgentKey } from '../db.js'
 import { verifyPayload } from '../crypto.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
 
 function serializeAgent(row: AgentRow): object {
   const { email_token: _emailToken, ...agent } = row
@@ -53,18 +54,20 @@ export function agentKeysRouter(db: Database): Hono {
     }
 
     const raw = body as Record<string, unknown>
-    const newPublicKey = String(raw.new_public_key ?? '').trim()
+    const newPublicKey = String(raw.new_public_key ?? raw.publicKey ?? raw.public_key ?? '').trim()
     const rotationProof = String(raw.rotation_proof ?? '').trim()
 
-    if (!newPublicKey || !rotationProof) {
-      return c.json({ error: 'new_public_key and rotation_proof are required', errorCode: 'INVALID_ROTATION' }, 400)
+    if (!newPublicKey) {
+      return c.json({ error: 'new_public_key is required', errorCode: 'INVALID_ROTATION' }, 400)
     }
 
     if (newPublicKey === agent.public_key) {
       return c.json({ error: 'new_public_key must differ from the current key', errorCode: 'NOOP_ROTATION' }, 400)
     }
 
-    if (!verifyPayload(newPublicKey, rotationProof, agent.public_key)) {
+    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
+    const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
+    if (!hasApiKey && (!rotationProof || !verifyPayload(newPublicKey, rotationProof, agent.public_key))) {
       return c.json({ error: 'rotation_proof is invalid', errorCode: 'INVALID_ROTATION_PROOF' }, 400)
     }
 

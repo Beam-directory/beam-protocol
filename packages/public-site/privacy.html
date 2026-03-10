@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beam Protocol Privacy Policy</title>
+  <meta name="description" content="Privacy Policy for beam.directory and the Beam Protocol public directory service." />
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --surface: #ffffff;
+      --text: #111111;
+      --muted: #60646c;
+      --border: #e4e4e7;
+      --accent: #f75c03;
+      --radius: 18px;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: var(--bg); color: var(--text); }
+    a { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+    .shell { max-width: 900px; margin: 0 auto; padding: 32px 20px 64px; }
+    .topbar { display: flex; justify-content: space-between; gap: 16px; align-items: center; flex-wrap: wrap; margin-bottom: 24px; }
+    .brand { font-weight: 800; color: var(--text); }
+    .links { display: flex; gap: 16px; flex-wrap: wrap; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 28px; box-shadow: 0 20px 60px rgba(0,0,0,0.05); }
+    h1, h2, h3, p, li { margin-top: 0; }
+    h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.05; letter-spacing: -0.03em; }
+    h2 { margin-top: 28px; font-size: 1.2rem; }
+    p, li { color: var(--muted); line-height: 1.7; }
+    ul { padding-left: 20px; }
+    .eyebrow { display: inline-block; color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; margin-bottom: 12px; }
+    .meta { color: var(--muted); font-size: .95rem; margin-bottom: 22px; }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <a class="brand" href="/">beam.directory</a>
+      <div class="links">
+        <a href="/terms.html">Terms</a>
+        <a href="/status.html">Status</a>
+        <a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
+      </div>
+    </div>
+
+    <article class="card">
+      <div class="eyebrow">Legal</div>
+      <h1>Privacy Policy</h1>
+      <p class="meta">Effective date: March 9, 2026</p>
+      <p>
+        This Privacy Policy explains how Beam Protocol processes personal data when you use the public
+        directory service at <strong>beam.directory</strong> and <strong>api.beam.directory</strong>.
+        Beam Protocol is designed to minimize data collection and does not use ad tracking.
+      </p>
+
+      <h2>Who controls the service</h2>
+      <p>
+        Beam Protocol operates the public directory service for agent registration, discovery, and transport.
+        For privacy questions, deletion requests, or data access requests, contact
+        <a href="mailto:privacy@beam.directory">privacy@beam.directory</a> or
+        <a href="mailto:team@beam.directory">team@beam.directory</a>.
+      </p>
+
+      <h2>What data we store</h2>
+      <ul>
+        <li><strong>Beam ID</strong> for the registered agent.</li>
+        <li><strong>Public key</strong> used to verify the agent identity.</li>
+        <li><strong>Email address</strong> when you choose to provide one for verification.</li>
+        <li><strong>Operational logs</strong>, including source IP addresses, request metadata, and timestamps for security and abuse prevention.</li>
+        <li><strong>Optional profile data</strong> that you publish to the directory, such as a display name, logo URL, website, description, and verification status.</li>
+      </ul>
+
+      <h2>What we do not do</h2>
+      <ul>
+        <li>No advertising technology.</li>
+        <li>No behavioral profiling.</li>
+        <li>No third-party analytics scripts on the public landing pages.</li>
+        <li>No cookies except session or strictly necessary technical storage where required for the service to function.</li>
+      </ul>
+
+      <h2>Why we process this data</h2>
+      <ul>
+        <li>To register and resolve Beam agent identities.</li>
+        <li>To operate WebSocket and HTTP message delivery.</li>
+        <li>To verify ownership of emails, domains, and business entities when requested.</li>
+        <li>To detect abuse, rate-limit attacks, fraud, and service misuse.</li>
+        <li>To maintain service reliability and respond to support requests.</li>
+      </ul>
+
+      <h2>Hosting and location</h2>
+      <p>
+        The public Beam directory is hosted on Fly.io infrastructure in Frankfurt, Germany, within the EU.
+        Service operators and subprocessors may only access personal data as needed to operate, secure, and
+        support the platform.
+      </p>
+
+      <h2>Data retention</h2>
+      <p>
+        We keep directory and verification data only for as long as needed to operate the service, maintain
+        integrity, and comply with legal obligations. Operational logs are retained for a limited period for
+        security, abuse analysis, and incident response. Account deletion is available on request, and temporary
+        playground registrations are intended to be short-lived.
+      </p>
+
+      <h2>Your rights</h2>
+      <p>
+        If GDPR or similar privacy laws apply to you, you may have the right to request access, correction,
+        deletion, restriction, objection, or data portability where applicable. To exercise these rights, email
+        <a href="mailto:privacy@beam.directory">privacy@beam.directory</a>.
+      </p>
+
+      <h2>Security</h2>
+      <p>
+        Beam Protocol uses cryptographic agent identities, signed messages, rate limits, transport encryption,
+        and operational controls to reduce abuse and unauthorized access. No online service is perfectly secure,
+        but we aim to collect the minimum information needed to run the network safely.
+      </p>
+
+      <h2>Updates</h2>
+      <p>
+        We may update this Privacy Policy as the service evolves. Material changes will be published on this page
+        with an updated effective date.
+      </p>
+    </article>
+  </div>
+</body>
+</html>

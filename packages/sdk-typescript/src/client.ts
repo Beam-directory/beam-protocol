@@ -2,6 +2,7 @@ import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
 import { BeamCredentialsClient, BeamDID } from './did.js'
 import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
+import { beamIdFromApiKey } from './api-key.js'
 import type {
   AgentProfile,
   AgentRecord,
@@ -56,7 +57,9 @@ async function openWebSocket(url: string): Promise<WebSocketLike> {
 }
 
 export class BeamClient {
-  private _identity: BeamIdentity
+  private _identity: BeamIdentity | null
+  private readonly _beamId: BeamIdString
+  private readonly _apiKey?: string
   private readonly _directory: BeamDirectory
   private readonly _did: BeamDID
   private readonly _credentials: BeamCredentialsClient
@@ -67,15 +70,27 @@ export class BeamClient {
   private readonly _intentHandlers = new Map<string, IntentHandler>()
 
   constructor(config: BeamClientConfig) {
-    this._identity = BeamIdentity.fromData(config.identity)
+    if (!config.identity && !config.apiKey) {
+      throw new Error('BeamClient requires either identity or apiKey')
+    }
+
+    this._identity = config.identity ? BeamIdentity.fromData(config.identity) : null
+    this._apiKey = config.apiKey
+
+    const resolvedBeamId = this._identity?.beamId ?? beamIdFromApiKey(config.apiKey ?? '')
+    if (!resolvedBeamId) {
+      throw new Error('Could not derive a Beam ID from the supplied apiKey')
+    }
+
+    this._beamId = resolvedBeamId as BeamIdString
     this._directoryUrl = config.directoryUrl
-    this._directory = new BeamDirectory({ baseUrl: config.directoryUrl })
-    this._did = new BeamDID({ baseUrl: config.directoryUrl, identity: this._identity })
+    this._directory = new BeamDirectory({ baseUrl: config.directoryUrl, apiKey: config.apiKey })
+    this._did = new BeamDID({ baseUrl: config.directoryUrl, identity: this._identity ?? undefined })
     this._credentials = new BeamCredentialsClient(config.directoryUrl)
   }
 
   get beamId(): BeamIdString {
-    return this._identity.beamId
+    return this._beamId
   }
 
   get directory(): BeamDirectory {
@@ -91,6 +106,10 @@ export class BeamClient {
   }
 
   async register(displayName: string, capabilities: string[]): Promise<AgentRecord> {
+    if (!this._identity) {
+      throw new Error('register() requires an Ed25519 identity')
+    }
+
     const parsed = BeamIdentity.parseBeamId(this._identity.beamId)
     if (!parsed) throw new Error('Invalid beam ID on identity')
 
@@ -104,20 +123,25 @@ export class BeamClient {
   }
 
   async updateProfile(fields: { description?: string; logo_url?: string; website?: string }): Promise<AgentProfile> {
-    return this._directory.updateProfile(this._identity.beamId, fields)
+    return this._directory.updateProfile(this._beamId, fields)
   }
 
   async verifyDomain(domain: string): Promise<DomainVerification> {
-    return this._directory.verifyDomain(this._identity.beamId, domain)
+    return this._directory.verifyDomain(this._beamId, domain)
   }
 
   async checkDomainVerification(): Promise<DomainVerification> {
-    return this._directory.checkDomainVerification(this._identity.beamId)
+    return this._directory.checkDomainVerification(this._beamId)
   }
 
   async rotateKeys(newKeyPair: BeamIdentity | BeamIdentityData): Promise<KeyRotationResult> {
+    if (!this._identity && !this._apiKey) {
+      throw new Error('rotateKeys() requires identity or apiKey auth')
+    }
+
     const identity = newKeyPair instanceof BeamIdentity ? newKeyPair : BeamIdentity.fromData(newKeyPair)
-    const result = await this._directory.rotateKeys(this._identity.beamId, identity.publicKeyBase64)
+    const rotationProof = this._identity ? this._identity.sign(JSON.stringify(identity.publicKeyBase64)) : undefined
+    const result = await this._directory.rotateKeys(this._beamId, identity.publicKeyBase64, rotationProof)
     this._identity = identity
     return result
   }
@@ -131,20 +155,25 @@ export class BeamClient {
   }
 
   async delegate(targetBeamId: string, scope: string, expiresIn?: number): Promise<Delegation> {
-    return this._directory.delegate(this._identity.beamId, targetBeamId as BeamIdString, scope, expiresIn)
+    return this._directory.delegate(this._beamId, targetBeamId as BeamIdString, scope, expiresIn)
   }
 
   async report(targetBeamId: string, reason: string): Promise<Report> {
-    return this._directory.report(this._identity.beamId, targetBeamId as BeamIdString, reason)
+    return this._directory.report(this._beamId, targetBeamId as BeamIdString, reason)
   }
 
   async connect(): Promise<void> {
     if (this._ws && this._wsConnected) return
 
+    const params = new URLSearchParams({ beamId: this._beamId })
+    if (this._apiKey) {
+      params.set('apiKey', this._apiKey)
+    }
+
     const wsUrl = this._directoryUrl
       .replace(/^http:\/\//, 'ws://')
       .replace(/^https:\/\//, 'wss://')
-      .replace(/\/$/, '') + `/ws?beamId=${encodeURIComponent(this._identity.beamId)}`
+      .replace(/\/$/, '') + `/ws?${params.toString()}`
 
     return new Promise<void>((resolve, reject) => {
       openWebSocket(wsUrl).then((ws) => {
@@ -234,10 +263,18 @@ export class BeamClient {
       latency?: number
     }): ResultFrame => {
       const latency = options.latency ?? (Date.now() - startTime)
-      const resultFrame = createResultFrame(
-        { ...options, nonce: frame.nonce, latency },
-        this._identity
-      )
+      const resultFrame: ResultFrame = this._identity
+        ? createResultFrame({ ...options, nonce: frame.nonce, latency }, this._identity)
+        : {
+            v: '1',
+            success: options.success,
+            nonce: frame.nonce,
+            timestamp: new Date().toISOString(),
+            ...(options.payload !== undefined && { payload: options.payload }),
+            ...(options.error !== undefined && { error: options.error }),
+            ...(options.errorCode !== undefined && { errorCode: options.errorCode }),
+            ...(latency !== undefined && { latency }),
+          }
       if (this._ws && this._wsConnected) {
         this._ws.send(JSON.stringify({ type: 'result', frame: resultFrame }))
       }
@@ -259,8 +296,25 @@ export class BeamClient {
     payload?: Record<string, unknown>,
     timeoutMs = 30_000
   ): Promise<ResultFrame> {
-    const frame = createIntentFrame({ intent, from: this._identity.beamId, to, payload }, this._identity)
-    signFrame(frame, this._identity.export().privateKeyBase64)
+    const frame = this._identity
+      ? createIntentFrame({ intent, from: this._beamId, to, payload }, this._identity)
+      : {
+          v: '1' as const,
+          intent,
+          from: this._beamId,
+          to,
+          payload: payload ?? {},
+          nonce: BeamIdentity.generateNonce(),
+          timestamp: new Date().toISOString(),
+        }
+
+    if (this._identity) {
+      signFrame(frame, this._identity.export().privateKeyBase64)
+    }
+
+    if (!this._identity && !this._wsConnected) {
+      await this.connect()
+    }
 
     if (this._ws && this._wsConnected) {
       return this._sendViaWebSocket(frame, timeoutMs)
@@ -289,9 +343,13 @@ export class BeamClient {
 
   private async _sendViaHttp(frame: IntentFrame): Promise<ResultFrame> {
     const baseUrl = this._directoryUrl.replace(/\/$/, '')
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this._apiKey) {
+      headers['x-api-key'] = this._apiKey
+    }
     const res = await fetch(`${baseUrl}/intents/send`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(frame)
     })
     if (!res.ok) {

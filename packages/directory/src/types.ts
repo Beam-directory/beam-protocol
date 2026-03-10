@@ -135,6 +135,7 @@ export interface RegisterRequest {
   displayName: string
   capabilities: string[]
   publicKey: string
+  apiKeyHash?: string | null
   org?: string | null
   personal?: boolean
   email?: string | null
@@ -180,6 +181,7 @@ export interface AgentRow {
   display_name: string
   capabilities: string
   public_key: string
+  api_key_hash: string | null
   email: string | null
   email_verified: number
   verification_tier: VerificationTier

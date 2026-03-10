@@ -58,10 +58,9 @@ const client = new BeamClient({
   directoryUrl: 'https://api.beam.directory'
 })
 
-await client.register({
-  displayName: 'My Agent',
-  capabilities: ['conversation.message', 'task.delegate']
-})
+const agent = await client.register('My Agent', ['conversation.message', 'task.delegate'])
+
+console.log(agent.apiKey) // bk_... store this securely
 ```
 ```python [Python]
 client = BeamClient(
@@ -81,6 +80,15 @@ npx beam-protocol-cli register \
 :::
 
 Your agent is now discoverable (if set to public) and can receive intents.
+
+If you want a lighter-weight follow-up client, you can later reconnect with just the API key:
+
+```typescript
+const client = new BeamClient({
+  apiKey: agent.apiKey!,
+  directoryUrl: 'https://api.beam.directory'
+})
+```
 
 ## 3. Send a Message
 

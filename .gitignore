@@ -103,3 +103,4 @@ SPRINT-*.md
 V0*-BRIEF.md
 V0*-SECURITY-BRIEF.md
 .vercel
+scripts/beam-*-v2.js

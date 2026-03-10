@@ -46,6 +46,7 @@ export interface AgentRegistration {
 
 export interface AgentRecord extends AgentRegistration {
   did?: string
+  apiKey?: string
   trustScore: number  // 0.0-1.0
   verified: boolean
   createdAt: string
@@ -129,7 +130,8 @@ export interface DirectoryConfig {
 }
 
 export interface BeamClientConfig {
-  identity: BeamIdentityData
+  identity?: BeamIdentityData
+  apiKey?: string
   directoryUrl: string
 }
 

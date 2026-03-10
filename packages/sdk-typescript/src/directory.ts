@@ -61,6 +61,7 @@ function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
     did: (raw.did ?? '') as string,
     displayName: (raw.displayName ?? raw.display_name ?? '') as string,
     capabilities: (raw.capabilities ?? []) as string[],
+    apiKey: (raw.apiKey ?? raw.api_key ?? undefined) as string | undefined,
     publicKey: (raw.publicKey ?? raw.public_key ?? '') as string,
     org: (raw.org ?? '') as string,
     trustScore: (raw.trustScore ?? raw.trust_score ?? 0) as number,
@@ -159,7 +160,7 @@ export class BeamDirectory {
     this.baseUrl = config.baseUrl.replace(/\/$/, '')
     this.headers = {
       'Content-Type': 'application/json',
-      ...(config.apiKey && { Authorization: `Bearer ${config.apiKey}` })
+      ...(config.apiKey && { 'x-api-key': config.apiKey })
     }
   }
 
@@ -284,10 +285,13 @@ export class BeamDirectory {
     return normalizeVerification(body)
   }
 
-  async rotateKeys(beamId: BeamIdString, publicKey: string): Promise<KeyRotationResult> {
+  async rotateKeys(beamId: BeamIdString, publicKey: string, rotationProof?: string): Promise<KeyRotationResult> {
     const body = await this.request<Record<string, unknown>>(`/agents/${encodeURIComponent(beamId)}/keys/rotate`, {
       method: 'POST',
-      body: JSON.stringify({ publicKey }),
+      body: JSON.stringify({
+        new_public_key: publicKey,
+        ...(rotationProof ? { rotation_proof: rotationProof } : {}),
+      }),
     })
     return normalizeRotation(body, beamId, publicKey)
   }

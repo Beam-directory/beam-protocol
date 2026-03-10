@@ -1,6 +1,7 @@
 export { BeamIdentity } from './identity.js'
 export { BeamDirectory, BeamDirectoryError } from './directory.js'
 export { BeamClient, BeamThread } from './client.js'
+export { beamIdFromApiKey } from './api-key.js'
 export { BeamDID, BeamCredentialsClient, CredentialVerifier } from './did.js'
 export {
   createIntentFrame,

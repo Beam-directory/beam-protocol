@@ -22,7 +22,7 @@ import type {
   TrustScoreRow,
   VerificationTier,
 } from './types.js'
-import { generateDIDDocument, type DIDDocument } from './did.js'
+import { generateDIDDocument, toBeamDID, type DIDDocument } from './did.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -74,6 +74,7 @@ function initSchema(db: DB): void {
       display_name TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       public_key TEXT NOT NULL,
+      api_key_hash TEXT,
       email TEXT,
       email_verified INTEGER NOT NULL DEFAULT 0,
       description TEXT,
@@ -378,6 +379,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'email_verified', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agents', 'description', 'TEXT')
   ensureColumn(db, 'agents', 'logo_url', 'TEXT')
+  ensureColumn(db, 'agents', 'api_key_hash', 'TEXT')
   ensureColumn(db, 'agents', 'email_token', 'TEXT')
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
   ensureColumn(db, 'agents', 'flagged', 'INTEGER NOT NULL DEFAULT 0')
@@ -594,6 +596,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
           display_name = ?,
           capabilities = ?,
           public_key = ?,
+          api_key_hash = ?,
           email = ?,
           email_verified = ?,
           verification_tier = ?,
@@ -612,6 +615,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.displayName,
       capabilitiesJson,
       data.publicKey,
+      data.apiKeyHash ?? existing?.api_key_hash ?? null,
       normalizedEmail,
       emailVerified,
       verificationTier,
@@ -634,6 +638,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         display_name,
         capabilities,
         public_key,
+        api_key_hash,
         email,
         email_verified,
         description,
@@ -649,7 +654,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
@@ -657,6 +662,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       data.displayName,
       capabilitiesJson,
       data.publicKey,
+      data.apiKeyHash ?? null,
       normalizedEmail,
       emailVerified,
       data.description ?? null,
@@ -686,6 +692,34 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
 export function getAgent(db: DB, beamId: string): AgentRow | null {
   const row = db.prepare('SELECT * FROM agents WHERE beam_id = ?').get(beamId) as AgentRow | undefined
   return row ?? null
+}
+
+export function deleteAgent(db: DB, beamId: string): boolean {
+  const existing = getAgent(db, beamId)
+  if (!existing) {
+    return false
+  }
+
+  const remove = db.transaction((targetBeamId: string) => {
+    db.prepare('DELETE FROM verification_tokens WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM intent_acls WHERE target_beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM trust_scores WHERE source_beam_id = ? OR target_beam_id = ?').run(targetBeamId, targetBeamId)
+    db.prepare('DELETE FROM intent_log WHERE from_beam_id = ? OR to_beam_id = ?').run(targetBeamId, targetBeamId)
+    db.prepare('DELETE FROM delegations WHERE grantor_beam_id = ? OR grantee_beam_id = ?').run(targetBeamId, targetBeamId)
+    db.prepare('DELETE FROM reports WHERE reporter_beam_id = ? OR target_beam_id = ?').run(targetBeamId, targetBeamId)
+    db.prepare('DELETE FROM billing WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM business_verifications WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM domain_verifications WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM agent_keys WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM pinned_keys WHERE beam_id = ? OR pinned_beam_id = ?').run(targetBeamId, targetBeamId)
+    db.prepare('DELETE FROM usage_metering WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM org_agents WHERE beam_id = ?').run(targetBeamId)
+    db.prepare('DELETE FROM did_documents WHERE did = ?').run(toBeamDID(targetBeamId))
+    db.prepare('DELETE FROM agents WHERE beam_id = ?').run(targetBeamId)
+  })
+
+  remove(beamId)
+  return true
 }
 
 export function setAgentEmailToken(db: DB, beamId: string, token: string | null): AgentRow | null {

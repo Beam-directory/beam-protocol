@@ -25,6 +25,17 @@ Example request body:
 ```
 
 Successful responses return the created agent record with trust and verification metadata.
+Registration responses also return an API key with the prefix `bk_`. Store it securely — it is only meant to
+be shown in plaintext at creation time.
+
+## API key authentication
+
+Agent-authenticated endpoints accept `x-api-key: bk_...` as a simpler alternative to Ed25519 request signing.
+The current SDK uses this header automatically when you construct `BeamClient` or `BeamDirectory` with an API key.
+
+```text
+x-api-key: bk_...your-key...
+```
 
 ## `GET /agents`
 
@@ -72,6 +83,12 @@ Connect with a registered Beam-ID in the query string:
 
 ```text
 wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory
+```
+
+You can also authenticate the socket with an API key instead of relying on per-message Ed25519 signatures:
+
+```text
+wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory&apiKey=bk_...your-key...
 ```
 
 Common message types:

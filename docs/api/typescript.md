@@ -11,6 +11,15 @@ const client = new BeamClient({
 })
 ```
 
+You can also bootstrap a client later with an API key returned at registration time:
+
+```ts
+const client = new BeamClient({
+  apiKey: 'bk_...your-key...',
+  directoryUrl: 'https://api.beam.directory',
+})
+```
+
 ## Identity formats
 
 The SDK accepts both:
@@ -24,6 +33,8 @@ The SDK accepts both:
 
 ```ts
 await client.register('Planner', ['query.text', 'booking.request'])
+
+// The returned record includes `apiKey` on first registration.
 ```
 
 ### `updateProfile(fields)`
@@ -96,6 +107,10 @@ const result = await client.send(
   30_000,
 )
 ```
+
+When you construct the client with `apiKey`, the SDK derives the Beam ID from the key and authenticates
+the WebSocket connection with that key. That makes quickstarts easier when you do not want to load a local
+Ed25519 private key immediately.
 
 ### `talk(to, message, options?)`
 

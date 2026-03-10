@@ -1,0 +1,259 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Beam Directory Status</title>
+  <meta name="description" content="Live operational status for beam.directory, the Beam API, and the Beam WebSocket service." />
+  <style>
+    :root {
+      --bg: #081018;
+      --surface: #101926;
+      --surface-2: #0d1520;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --border: rgba(255,255,255,.08);
+      --accent: #f75c03;
+      --ok: #22c55e;
+      --warn: #f59e0b;
+      --err: #ef4444;
+      --radius: 18px;
+      --mono: "JetBrains Mono", ui-monospace, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: Inter, system-ui, sans-serif; background: radial-gradient(circle at top, rgba(247,92,3,.12), transparent 24%), var(--bg); color: var(--text); }
+    a { color: inherit; text-decoration: none; }
+    .shell { max-width: 1100px; margin: 0 auto; padding: 32px 20px 64px; }
+    .topbar { display: flex; justify-content: space-between; align-items: center; gap: 16px; flex-wrap: wrap; margin-bottom: 24px; }
+    .brand { font-weight: 800; }
+    .links { display: flex; gap: 16px; flex-wrap: wrap; color: var(--muted); }
+    .hero, .grid, .checks { display: grid; gap: 20px; }
+    .hero { grid-template-columns: 1.15fr .85fr; margin-bottom: 20px; }
+    .grid { grid-template-columns: repeat(4, minmax(0, 1fr)); margin-bottom: 20px; }
+    .checks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .card { background: rgba(16,25,38,.95); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px; box-shadow: 0 20px 50px rgba(0,0,0,.28); }
+    .eyebrow { color: var(--accent); font-weight: 700; text-transform: uppercase; letter-spacing: .08em; font-size: .78rem; margin-bottom: 12px; }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { font-size: clamp(2rem, 5vw, 3rem); line-height: 1.04; letter-spacing: -0.03em; margin-bottom: 12px; }
+    p { color: var(--muted); line-height: 1.7; }
+    .overall { display: inline-flex; align-items: center; gap: 10px; padding: 10px 14px; border-radius: 999px; font-weight: 700; }
+    .overall.ok { background: rgba(34,197,94,.12); color: #bbf7d0; }
+    .overall.warn { background: rgba(245,158,11,.12); color: #fde68a; }
+    .overall.err { background: rgba(239,68,68,.12); color: #fecaca; }
+    .dot { width: 10px; height: 10px; border-radius: 999px; display: inline-block; }
+    .dot.ok { background: var(--ok); box-shadow: 0 0 12px rgba(34,197,94,.4); }
+    .dot.warn { background: var(--warn); }
+    .dot.err { background: var(--err); }
+    .metric-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: .76rem; margin-bottom: 8px; }
+    .metric-value { font-size: 1.8rem; font-weight: 800; }
+    .metric-sub { color: var(--muted); margin-top: 6px; font-size: .9rem; }
+    .check-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 12px; }
+    .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; font-weight: 700; font-size: .82rem; }
+    .badge.ok { background: rgba(34,197,94,.12); color: #bbf7d0; }
+    .badge.warn { background: rgba(245,158,11,.12); color: #fde68a; }
+    .badge.err { background: rgba(239,68,68,.12); color: #fecaca; }
+    .mono { font-family: var(--mono); color: #e2e8f0; word-break: break-word; }
+    .meta { color: var(--muted); font-size: .92rem; margin-top: 16px; }
+    @media (max-width: 920px) {
+      .hero, .grid, .checks { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <div class="topbar">
+      <a class="brand" href="/">beam.directory</a>
+      <div class="links">
+        <a href="/playground.html">Playground</a>
+        <a href="/privacy.html">Privacy</a>
+        <a href="/terms.html">Terms</a>
+      </div>
+    </div>
+
+    <section class="hero">
+      <div class="card">
+        <div class="eyebrow">Operations</div>
+        <h1>Beam Directory Status</h1>
+        <p>
+          Live checks for the public Beam API and WebSocket relay. This page refreshes every 30 seconds
+          and performs fresh checks in your browser.
+        </p>
+        <div id="overall-status" class="overall warn"><span class="dot warn"></span>Checking services…</div>
+        <p class="meta">Last refresh: <span id="last-refresh">—</span></p>
+      </div>
+      <div class="card">
+        <div class="metric-label">Status source</div>
+        <div class="metric-value mono">https://api.beam.directory/health</div>
+        <div class="metric-sub">WebSocket check: <span class="mono">wss://api.beam.directory/ws?feed=intents</span></div>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card">
+        <div class="metric-label">API status</div>
+        <div class="metric-value" id="api-status">—</div>
+        <div class="metric-sub" id="api-detail">Waiting for health check</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">WebSocket</div>
+        <div class="metric-value" id="ws-status">—</div>
+        <div class="metric-sub" id="ws-detail">Waiting for socket check</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Connected agents</div>
+        <div class="metric-value" id="connected-agents">—</div>
+        <div class="metric-sub">Reported by the health endpoint</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Uptime</div>
+        <div class="metric-value" id="uptime">—</div>
+        <div class="metric-sub">Reported in seconds by the directory</div>
+      </div>
+    </section>
+
+    <section class="checks">
+      <div class="card">
+        <div class="check-top">
+          <h2>HTTP health check</h2>
+          <div id="http-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
+        </div>
+        <p class="mono" id="http-payload">No payload yet.</p>
+      </div>
+      <div class="card">
+        <div class="check-top">
+          <h2>WebSocket handshake</h2>
+          <div id="socket-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
+        </div>
+        <p class="mono" id="socket-payload">No handshake yet.</p>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const HEALTH_URL = 'https://api.beam.directory/health';
+    const WS_URL = 'wss://api.beam.directory/ws?feed=intents';
+    const REFRESH_MS = 30_000;
+
+    const elements = {
+      overallStatus: document.getElementById('overall-status'),
+      lastRefresh: document.getElementById('last-refresh'),
+      apiStatus: document.getElementById('api-status'),
+      apiDetail: document.getElementById('api-detail'),
+      wsStatus: document.getElementById('ws-status'),
+      wsDetail: document.getElementById('ws-detail'),
+      connectedAgents: document.getElementById('connected-agents'),
+      uptime: document.getElementById('uptime'),
+      httpBadge: document.getElementById('http-badge'),
+      httpPayload: document.getElementById('http-payload'),
+      socketBadge: document.getElementById('socket-badge'),
+      socketPayload: document.getElementById('socket-payload'),
+    };
+
+    function setBadge(element, variant, label) {
+      element.className = `badge ${variant}`;
+      element.innerHTML = `<span class="dot ${variant}"></span>${label}`;
+    }
+
+    function setOverall(variant, label) {
+      elements.overallStatus.className = `overall ${variant}`;
+      elements.overallStatus.innerHTML = `<span class="dot ${variant}"></span>${label}`;
+    }
+
+    function formatUptime(totalSeconds) {
+      const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
+      const days = Math.floor(seconds / 86400);
+      const hours = Math.floor((seconds % 86400) / 3600);
+      const minutes = Math.floor((seconds % 3600) / 60);
+      if (days > 0) return `${days}d ${hours}h`;
+      if (hours > 0) return `${hours}h ${minutes}m`;
+      if (minutes > 0) return `${minutes}m`;
+      return `${seconds}s`;
+    }
+
+    async function checkHttp() {
+      const startedAt = performance.now();
+      const response = await fetch(HEALTH_URL, { cache: 'no-store' });
+      const latency = Math.round(performance.now() - startedAt);
+      const payload = await response.json().catch(() => ({}));
+
+      if (!response.ok) {
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      setBadge(elements.httpBadge, 'ok', `Healthy · ${latency} ms`);
+      elements.httpPayload.textContent = JSON.stringify(payload, null, 2);
+      elements.apiStatus.textContent = String(payload.status || 'ok').toUpperCase();
+      elements.apiDetail.textContent = `${latency} ms · ${payload.protocol || 'beam/1'}`;
+      elements.connectedAgents.textContent = String(payload.connectedAgents ?? '—');
+      elements.uptime.textContent = formatUptime(payload.uptimeSeconds);
+      return { ok: true, payload, latency };
+    }
+
+    function checkWebSocket() {
+      return new Promise((resolve, reject) => {
+        const startedAt = performance.now();
+        const socket = new WebSocket(WS_URL);
+        const timeout = window.setTimeout(() => {
+          socket.close();
+          reject(new Error('WebSocket timeout'));
+        }, 8000);
+
+        socket.addEventListener('message', (event) => {
+          clearTimeout(timeout);
+          const latency = Math.round(performance.now() - startedAt);
+          setBadge(elements.socketBadge, 'ok', `Reachable · ${latency} ms`);
+          elements.socketPayload.textContent = event.data;
+          elements.wsStatus.textContent = 'ONLINE';
+          elements.wsDetail.textContent = `${latency} ms handshake`;
+          socket.close(1000, 'status check complete');
+          resolve({ ok: true, latency, payload: event.data });
+        }, { once: true });
+
+        socket.addEventListener('error', () => {
+          clearTimeout(timeout);
+          reject(new Error('WebSocket connection failed'));
+        }, { once: true });
+      });
+    }
+
+    async function refresh() {
+      elements.lastRefresh.textContent = new Date().toLocaleString();
+      let httpOk = false;
+      let wsOk = false;
+
+      try {
+        await checkHttp();
+        httpOk = true;
+      } catch (error) {
+        setBadge(elements.httpBadge, 'err', 'Unavailable');
+        elements.httpPayload.textContent = error instanceof Error ? error.message : 'HTTP check failed';
+        elements.apiStatus.textContent = 'DOWN';
+        elements.apiDetail.textContent = 'Health endpoint unavailable';
+        elements.connectedAgents.textContent = '—';
+        elements.uptime.textContent = '—';
+      }
+
+      try {
+        await checkWebSocket();
+        wsOk = true;
+      } catch (error) {
+        setBadge(elements.socketBadge, 'err', 'Unavailable');
+        elements.socketPayload.textContent = error instanceof Error ? error.message : 'WebSocket check failed';
+        elements.wsStatus.textContent = 'DOWN';
+        elements.wsDetail.textContent = 'Handshake failed';
+      }
+
+      if (httpOk && wsOk) {
+        setOverall('ok', 'All core services operational');
+      } else if (httpOk || wsOk) {
+        setOverall('warn', 'Partial degradation detected');
+      } else {
+        setOverall('err', 'Service disruption detected');
+      }
+    }
+
+    void refresh();
+    window.setInterval(() => { void refresh(); }, REFRESH_MS);
+  </script>
+</body>
+</html>

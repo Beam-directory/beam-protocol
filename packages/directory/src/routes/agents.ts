@@ -8,6 +8,7 @@ import { sendAgentVerificationEmail } from '../email.js'
 import { BEAM_ID_RE } from '../validation.js'
 import {
   createVerificationToken,
+  deleteAgent,
   getAgent,
   getAgentDirectoryStats,
   getAgentIntentStats,
@@ -18,6 +19,7 @@ import {
   updateLastSeen,
   verifyAgentEmailToken,
 } from '../db.js'
+import { agentApiKeyMatches, createAgentApiKey, getSuppliedApiKey, hashApiKey } from '../api-key.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
@@ -110,7 +112,7 @@ function buildBeamId(baseName: string, org: string, personal: boolean, db: Datab
 }
 
 function serializeAgent(row: AgentRow): object {
-  const { email_token: _emailToken, ...agent } = row
+  const { email_token: _emailToken, api_key_hash: _apiKeyHash, ...agent } = row
   return {
     ...agent,
     did: toBeamDID(row.beam_id),
@@ -120,6 +122,10 @@ function serializeAgent(row: AgentRow): object {
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
   }
+}
+
+function isAdminRequest(adminKey: string | undefined): boolean {
+  return Boolean(adminKey) && adminKey === process.env.BEAM_ADMIN_KEY
 }
 
 export function agentsRouter(db: Database): Hono {
@@ -309,6 +315,7 @@ export function agentsRouter(db: Database): Hono {
       : typeof raw.dh_public_key === 'string' ? raw.dh_public_key.trim()
       : null
 
+    const apiKey = createAgentApiKey(beamId)
     const request: RegisterRequest = {
       beamId,
       org,
@@ -316,6 +323,7 @@ export function agentsRouter(db: Database): Hono {
       displayName,
       capabilities,
       publicKey,
+      apiKeyHash: hashApiKey(apiKey),
       email: email || undefined,
       emailVerified,
       description,
@@ -355,6 +363,7 @@ export function agentsRouter(db: Database): Hono {
       seedAclsFromCatalog(db)
       return c.json({
         ...serializeAgent(agent),
+        apiKey,
         verification_email_sent: verificationEmailSent,
       }, 201)
     } catch (err) {
@@ -480,6 +489,32 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
+  router.delete('/:beamId', (c) => {
+    const beamId = decodeURIComponent(c.req.param('beamId'))
+    if (!BEAM_ID_RE.test(beamId)) {
+      return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    const agent = getAgent(db, beamId)
+    if (!agent) {
+      return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const adminKey = c.req.header('x-admin-key') ?? ''
+    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
+    if (!isAdminRequest(adminKey) && !agentApiKeyMatches(agent, suppliedApiKey)) {
+      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    try {
+      deleteAgent(db, beamId)
+      return new Response(null, { status: 204 })
+    } catch (err) {
+      console.error('Delete agent error:', err)
+      return c.json({ error: 'Failed to delete agent', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   // Toggle visibility (requires signed request or admin key)
   router.patch('/:beamId/visibility', async (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId'))
@@ -507,9 +542,11 @@ export function agentsRouter(db: Database): Hono {
     // Auth: verify Ed25519 signature or admin key
     const signature = typeof body.signature === 'string' ? body.signature : ''
     const adminKey = c.req.header('x-admin-key') ?? ''
-    const isAdmin = adminKey === process.env.BEAM_ADMIN_KEY
+    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
+    const isAdmin = isAdminRequest(adminKey)
+    const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
 
-    if (!isAdmin) {
+    if (!isAdmin && !hasApiKey) {
       const { verifyPayload } = await import('../crypto.js')
       const payload = { beamId, visibility: newVisibility, timestamp: body.timestamp }
       if (!signature || !verifyPayload(payload, signature, agent.public_key)) {
@@ -544,9 +581,11 @@ export function agentsRouter(db: Database): Hono {
 
     // Auth: admin key or Ed25519 signature
     const adminKey = c.req.header('x-admin-key') ?? ''
-    const isAdmin = adminKey === process.env.BEAM_ADMIN_KEY
+    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
+    const isAdmin = isAdminRequest(adminKey)
+    const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
 
-    if (!isAdmin) {
+    if (!isAdmin && !hasApiKey) {
       const { verifyPayload } = await import('../crypto.js')
       const signature = typeof body.signature === 'string' ? body.signature : ''
       const payload = { beamId, action: 'config', timestamp: body.timestamp }

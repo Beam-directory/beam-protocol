@@ -14,6 +14,7 @@ import {
   markAgentDomainVerified,
   updateDomainVerificationStatus,
 } from '../db.js'
+import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
 
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
 
@@ -98,11 +99,22 @@ function buildDomainStatus(agent: AgentRow, verification: DomainVerificationRow 
 export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = resolveTxt): Hono {
   const router = new Hono()
 
+  const requireAgentApiKey = (c: Context, agent: AgentRow): Response | null => {
+    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
+    return agentApiKeyMatches(agent, suppliedApiKey)
+      ? null
+      : c.json({ error: 'Missing or invalid API key', errorCode: 'UNAUTHORIZED' }, 401)
+  }
+
   const startDomainVerification = async (c: Context) => {
     const beamId = decodeURIComponent(c.req.param('beamId'))
     const agent = getAgentOrError(db, c, beamId)
     if (agent instanceof Response) {
       return agent
+    }
+    const authError = requireAgentApiKey(c, agent)
+    if (authError) {
+      return authError
     }
 
     const domainOrError = await parseDomainRequest(c)
@@ -129,6 +141,10 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
     const agent = getAgentOrError(db, c, beamId)
     if (agent instanceof Response) {
       return agent
+    }
+    const authError = requireAgentApiKey(c, agent)
+    if (authError) {
+      return authError
     }
 
     const verification = getLatestDomainVerification(db, beamId)

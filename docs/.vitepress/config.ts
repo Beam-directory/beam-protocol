@@ -4,7 +4,13 @@ export default defineConfig({
   title: 'Beam Protocol',
   description: 'The open communication protocol for AI agents',
   ignoreDeadLinks: true,
+  cleanUrls: true,
+  lastUpdated: true,
+  sitemap: {
+    hostname: 'https://docs.beam.directory',
+  },
   themeConfig: {
+    siteTitle: 'Beam Protocol Docs',
     nav: [
       { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API', link: '/api/typescript' },
