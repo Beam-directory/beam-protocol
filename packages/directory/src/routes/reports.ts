@@ -39,7 +39,7 @@ export function reportsRouter(db: Database): Hono {
   const router = new Hono()
 
   router.post('/:beamId/report', async (c) => {
-    const targetBeamId = decodeURIComponent(c.req.param('beamId'))
+    const targetBeamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(targetBeamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -101,7 +101,7 @@ export function reportsRouter(db: Database): Hono {
   })
 
   router.get('/:beamId/reports', (c) => {
-    const targetBeamId = decodeURIComponent(c.req.param('beamId'))
+    const targetBeamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(targetBeamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }

@@ -501,7 +501,7 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.patch('/:beamId/profile', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -590,7 +590,7 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.get('/:beamId', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -612,7 +612,7 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.post('/:beamId/heartbeat', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -654,7 +654,7 @@ export function agentsRouter(db: Database): Hono {
   })
 
   router.delete('/:beamId', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -681,7 +681,7 @@ export function agentsRouter(db: Database): Hono {
 
   // Toggle visibility (requires signed request or admin key)
   router.patch('/:beamId/visibility', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }

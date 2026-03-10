@@ -49,7 +49,7 @@ export function shieldRouter(db: Database): Hono {
 
   // GET /shield/config/:beamId — Get shield config for an agent
   router.get('/config/:beamId', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const row = db.prepare('SELECT shield_config FROM agents WHERE beam_id = ?').get(beamId) as { shield_config: string | null } | undefined
 
     if (!row) return c.json({ error: 'Agent not found' }, 404)
@@ -60,7 +60,7 @@ export function shieldRouter(db: Database): Hono {
 
   // PATCH /shield/config/:beamId — Update shield config (admin-key or Ed25519 required)
   router.patch('/config/:beamId', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
 
     // Auth: admin key or agent's own Ed25519 signature
     const isAdmin = requireAdmin(c)
@@ -122,7 +122,7 @@ export function shieldRouter(db: Database): Hono {
       return c.json({ error: 'Admin key required', errorCode: 'UNAUTHORIZED' }, 401)
     }
 
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const hours = parseInt(c.req.query('hours') ?? '24', 10)
 
     try {

@@ -152,7 +152,7 @@ export function businessVerificationRouter(db: Database): Hono {
   const router = new Hono()
 
   router.post('/:beamId/verify-business', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -287,7 +287,7 @@ export function businessVerificationRouter(db: Database): Hono {
   })
 
   router.get('/:beamId/business-status', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }

@@ -147,7 +147,7 @@ export function federationRouter(db: Database): Hono {
       return auth
     }
 
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const localOnly = c.req.query('localOnly') === '1'
 
     if (localOnly) {

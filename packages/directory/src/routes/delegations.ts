@@ -21,7 +21,7 @@ export function delegationsRouter(db: Database): Hono {
   const router = new Hono()
 
   router.post('/:beamId/delegate', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -84,7 +84,7 @@ export function delegationsRouter(db: Database): Hono {
   })
 
   router.get('/:beamId/delegations', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
@@ -97,7 +97,7 @@ export function delegationsRouter(db: Database): Hono {
   })
 
   router.delete('/:beamId/delegations/:id', async (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const id = Number.parseInt(c.req.param('id'), 10)
     if (!BEAM_ID_RE.test(beamId) || !Number.isInteger(id) || id < 1) {
       return c.json({ error: 'Invalid delegation identifier', errorCode: 'INVALID_DELEGATION' }, 400)

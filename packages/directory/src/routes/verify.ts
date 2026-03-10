@@ -100,7 +100,7 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
   }
 
   const startDomainVerification = async (c: Context) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const agent = getAgentOrError(db, c, beamId)
     if (agent instanceof Response) {
       return agent
@@ -130,7 +130,7 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
   }
 
   const checkDomainVerification = async (c: Context) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const agent = getAgentOrError(db, c, beamId)
     if (agent instanceof Response) {
       return agent
@@ -191,7 +191,7 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
   router.get('/:beamId/verify/domain/check', checkDomainVerification)
 
   router.get('/:beamId/domain-status', (c) => {
-    const beamId = decodeURIComponent(c.req.param('beamId'))
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const agent = getAgentOrError(db, c, beamId)
     if (agent instanceof Response) {
       return agent
