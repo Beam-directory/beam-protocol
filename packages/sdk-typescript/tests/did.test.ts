@@ -4,7 +4,7 @@ import { BeamDID, CredentialVerifier } from '../src/did.js'
 import { issueBusinessVC, issueDomainVC, issueEmailVC } from '../../directory/src/credentials.js'
 
 describe('BeamDID', () => {
-  const identity = BeamIdentity.generate({ agentName: 'jarvis', orgName: 'coppen' })
+  const identity = BeamIdentity.generate({ agentName: 'jarvis', orgName: 'acme' })
   const did = new BeamDID({ baseUrl: 'https://beam.directory', identity })
 
   afterEach(() => {
@@ -14,9 +14,9 @@ describe('BeamDID', () => {
   it('creates an org-bound DID document', () => {
     const document = did.create({ format: 'org' })
 
-    expect(document.id).toBe('did:beam:coppen:jarvis')
+    expect(document.id).toBe('did:beam:acme:jarvis')
     expect(document.verificationMethod[0]?.type).toBe('Ed25519VerificationKey2020')
-    expect(document.authentication).toContain('did:beam:coppen:jarvis#key-1')
+    expect(document.authentication).toContain('did:beam:acme:jarvis#key-1')
   })
 
   it('creates a personal DID document', () => {
@@ -51,7 +51,7 @@ describe('BeamDID', () => {
 })
 
 describe('Verifiable credentials', () => {
-  const beamId = 'jarvis@coppen.beam.directory'
+  const beamId = 'jarvis@acme.beam.directory'
 
   it('issues and verifies an email VC offline', () => {
     const vc = issueEmailVC(beamId, 'jarvis@example.com')
@@ -70,10 +70,10 @@ describe('Verifiable credentials', () => {
   })
 
   it('issues and verifies a business VC offline', () => {
-    const vc = issueBusinessVC(beamId, { legalName: 'Coppen GmbH', registrationNumber: 'HRB-42' })
+    const vc = issueBusinessVC(beamId, { legalName: 'Acme Corp', registrationNumber: 'HRB-42' })
 
     expect(vc.type).toContain('BusinessVerificationCredential')
-    expect(vc.credentialSubject.business?.['legalName']).toBe('Coppen GmbH')
+    expect(vc.credentialSubject.business?.['legalName']).toBe('Acme Corp')
     expect(CredentialVerifier.verify(vc)).toBe(true)
   })
 

@@ -83,11 +83,11 @@ export function isIntentAllowed(db: Database, input: {
   return rows.some((row) => row.allowed_from === '*' || row.allowed_from === input.fromBeamId)
 }
 
-export function seedAclsFromCatalog(db: Database, org = 'coppen'): void {
+export function seedAclsFromCatalog(db: Database, org = 'demo'): void {
   const intents = loadCatalogIntents()
   if (intents.length === 0) return
 
-  const names = new Set<string>(['jarvis', 'fischer', 'clara', 'james'])
+  const names = new Set<string>(['agent-a', 'agent-b'])
   for (const intent of intents) {
     for (const name of intent.from ?? []) {
       if (name !== '*') names.add(name)

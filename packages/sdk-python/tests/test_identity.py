@@ -7,8 +7,8 @@ from beam_directory.types import BeamIdentityData
 
 class TestBeamIdGeneration:
     def test_generate_produces_valid_org_beam_id(self):
-        identity = BeamIdentity.generate(agent_name="jarvis", org_name="coppen")
-        assert identity.beam_id == "jarvis@coppen.beam.directory"
+        identity = BeamIdentity.generate(agent_name="jarvis", org_name="acme")
+        assert identity.beam_id == "jarvis@acme.beam.directory"
 
     def test_generate_supports_consumer_beam_id(self):
         identity = BeamIdentity.generate(agent_name="alice")
@@ -35,16 +35,16 @@ class TestBeamIdGeneration:
 
 class TestExportImport:
     def test_export_round_trips(self):
-        original = BeamIdentity.generate("jarvis", "coppen")
+        original = BeamIdentity.generate("jarvis", "acme")
         data = original.export()
 
         assert isinstance(data, BeamIdentityData)
-        assert data.beam_id == "jarvis@coppen.beam.directory"
+        assert data.beam_id == "jarvis@acme.beam.directory"
         assert data.public_key_base64 == original.public_key_base64
         assert data.private_key_base64
 
     def test_from_data_restores_identity(self):
-        original = BeamIdentity.generate("jarvis", "coppen")
+        original = BeamIdentity.generate("jarvis", "acme")
         data = original.export()
         restored = BeamIdentity.from_data(data)
 
@@ -52,7 +52,7 @@ class TestExportImport:
         assert restored.public_key_base64 == original.public_key_base64
 
     def test_from_data_can_sign(self):
-        original = BeamIdentity.generate("jarvis", "coppen")
+        original = BeamIdentity.generate("jarvis", "acme")
         data = original.export()
         restored = BeamIdentity.from_data(data)
 
@@ -97,8 +97,8 @@ class TestSigning:
 
 class TestParseBeamId:
     def test_valid_org_beam_id(self):
-        result = BeamIdentity.parse_beam_id("jarvis@coppen.beam.directory")
-        assert result == {"agent": "jarvis", "org": "coppen", "kind": "organization"}
+        result = BeamIdentity.parse_beam_id("jarvis@acme.beam.directory")
+        assert result == {"agent": "jarvis", "org": "acme", "kind": "organization"}
 
     def test_valid_consumer_beam_id(self):
         result = BeamIdentity.parse_beam_id("alice@beam.directory")
@@ -113,13 +113,13 @@ class TestParseBeamId:
         assert result == {"agent": "my_agent", "org": "my_org", "kind": "organization"}
 
     def test_invalid_no_at(self):
-        assert BeamIdentity.parse_beam_id("jarvis.coppen.beam.directory") is None
+        assert BeamIdentity.parse_beam_id("jarvis.acme.beam.directory") is None
 
     def test_invalid_wrong_domain(self):
-        assert BeamIdentity.parse_beam_id("jarvis@coppen.example.com") is None
+        assert BeamIdentity.parse_beam_id("jarvis@acme.example.com") is None
 
     def test_invalid_uppercase(self):
-        assert BeamIdentity.parse_beam_id("Jarvis@Coppen.beam.directory") is None
+        assert BeamIdentity.parse_beam_id("Jarvis@Acme.beam.directory") is None
 
 
 class TestNonce:

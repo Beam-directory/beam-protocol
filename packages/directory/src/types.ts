@@ -142,6 +142,7 @@ export interface RegisterRequest {
   emailVerified?: boolean
   description?: string | null
   logoUrl?: string | null
+  website?: string | null
   verificationTier?: VerificationTier
   visibility?: 'public' | 'unlisted'
   // S4: P2P HTTP direct delivery endpoint
@@ -188,6 +189,7 @@ export interface AgentRow {
   email_token: string | null
   description: string | null
   logo_url: string | null
+  website: string | null
   trust_score: number
   verified: number
   flagged: number

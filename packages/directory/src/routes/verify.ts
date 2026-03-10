@@ -29,6 +29,7 @@ function serializeAgent(row: AgentRow): object {
   return {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
+    email_verified: row.email_verified === 1,
     personal: row.personal === 1,
     verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
@@ -100,6 +101,10 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
   const router = new Hono()
 
   const requireAgentApiKey = (c: Context, agent: AgentRow): Response | null => {
+    if (!agent.api_key_hash) {
+      return null
+    }
+
     const suppliedApiKey = getSuppliedApiKey(c.req.raw)
     return agentApiKeyMatches(agent, suppliedApiKey)
       ? null

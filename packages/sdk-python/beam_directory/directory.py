@@ -31,8 +31,8 @@ class BeamDirectory:
 
         dir = BeamDirectory(DirectoryConfig(base_url="https://api.beam.directory"))
         record = await dir.register(registration)
-        agent  = await dir.lookup("jarvis@coppen.beam.directory")
-        agents = await dir.search(AgentSearchQuery(org="coppen"))
+        agent  = await dir.lookup("jarvis@yourorg.beam.directory")
+        agents = await dir.search(AgentSearchQuery(org="yourorg"))
     """
 
     def __init__(self, config: DirectoryConfig) -> None:

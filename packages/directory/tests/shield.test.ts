@@ -145,7 +145,7 @@ describe('H5: Extended PII detection', () => {
   })
 
   it('detects email in output', () => {
-    const result = detectPII('Contact: tobias@coppen.de for details')
+    const result = detectPII('Contact: user@example.com for details')
     expect(result.found).toBe(true)
     expect(result.matches.some(m => m.type === 'email')).toBe(true)
   })

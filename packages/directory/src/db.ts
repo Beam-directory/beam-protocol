@@ -79,6 +79,7 @@ function initSchema(db: DB): void {
       email_verified INTEGER NOT NULL DEFAULT 0,
       description TEXT,
       logo_url TEXT,
+      website TEXT,
       trust_score REAL NOT NULL DEFAULT 0.5,
       verified INTEGER NOT NULL DEFAULT 0,
       verification_tier TEXT NOT NULL DEFAULT 'basic' CHECK(verification_tier IN ('basic', 'verified', 'business', 'enterprise')),
@@ -379,6 +380,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'email_verified', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agents', 'description', 'TEXT')
   ensureColumn(db, 'agents', 'logo_url', 'TEXT')
+  ensureColumn(db, 'agents', 'website', 'TEXT')
   ensureColumn(db, 'agents', 'api_key_hash', 'TEXT')
   ensureColumn(db, 'agents', 'email_token', 'TEXT')
   ensureColumn(db, 'agents', 'verification_tier', "TEXT NOT NULL DEFAULT 'basic'")
@@ -744,6 +746,7 @@ export function updateAgentProfile(
     verificationTier?: VerificationTier
     description?: string | null
     logoUrl?: string | null
+    website?: string | null
   },
 ): AgentRow | null {
   const existing = getAgent(db, beamId)
@@ -772,6 +775,7 @@ export function updateAgentProfile(
         verification_tier = ?,
         description = ?,
         logo_url = ?,
+        website = ?,
         verified = ?,
         email_token = ?,
         last_seen = ?
@@ -784,6 +788,7 @@ export function updateAgentProfile(
     verificationTier,
     updates.description === undefined ? existing.description : updates.description,
     updates.logoUrl === undefined ? existing.logo_url : updates.logoUrl,
+    updates.website === undefined ? existing.website : updates.website,
     verified,
     emailToken,
     nowIso(),
@@ -911,9 +916,6 @@ export function searchAgents(
 ): AgentRow[] {
   const params: Array<string | number> = []
   const conditions: string[] = []
-
-  // Only show public agents in search results
-  conditions.push("visibility = 'public'")
 
   if (query.personal === true) {
     conditions.push('personal = 1')

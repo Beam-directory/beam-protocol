@@ -396,8 +396,8 @@ describe('directory agent enhancements', () => {
     expect(body).toEqual({
       total_agents: 2,
       verified_agents: 1,
-      total_intents: 3,
-      avg_response_ms: 200,
+      intents_processed: 3,
+      avg_response_time_ms: 200,
     })
   })
 })

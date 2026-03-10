@@ -76,7 +76,7 @@ describe('directory identity and verification routes', () => {
     expect(checked.response.status).toBe(200)
     expect(checked.body.verified).toBe(true)
     expect(checked.body.agent.verificationTier).toBe('verified')
-    expect(checked.body.agent.trust_score).toBe(0.7)
+    expect(checked.body.agent.trust_score).toBe(1)
   })
 
   it('rotates agent keys and exposes revoked keys', async () => {

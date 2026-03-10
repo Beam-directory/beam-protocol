@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { createPublicKey, randomBytes, verify } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
@@ -117,10 +117,39 @@ function serializeAgent(row: AgentRow): object {
     ...agent,
     did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
+    email_verified: row.email_verified === 1,
     personal: row.personal === 1,
     verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
+  }
+}
+
+function isTruthyQueryValue(value: string | undefined | null): boolean {
+  if (!value) {
+    return false
+  }
+
+  const normalized = value.trim().toLowerCase()
+  return normalized === '1' || normalized === 'true' || normalized === 'yes'
+}
+
+function verifySignedUtf8Payload(payload: string, signatureBase64: string, publicKeyBase64: string): boolean {
+  try {
+    const keyObject = createPublicKey({
+      key: Buffer.from(publicKeyBase64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    })
+
+    return verify(
+      null,
+      Buffer.from(payload, 'utf8'),
+      keyObject,
+      Buffer.from(signatureBase64, 'base64'),
+    )
+  } catch {
+    return false
   }
 }
 
@@ -443,6 +472,138 @@ export function agentsRouter(db: Database): Hono {
     } catch (err) {
       console.error('Search error:', err)
       return c.json({ error: 'Search failed', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.get('/browse', (c) => {
+    const capabilityParam = c.req.query('capability')?.trim()
+    const verificationTier = c.req.query('verification_tier')?.trim().toLowerCase()
+    const verifiedOnly = isTruthyQueryValue(c.req.query('verified_only'))
+    const pageParam = c.req.query('page')
+    const limitParam = c.req.query('limit')
+
+    const page = pageParam === undefined ? 1 : Number.parseInt(pageParam, 10)
+    const limit = limitParam === undefined ? 20 : Number.parseInt(limitParam, 10)
+
+    if (!Number.isInteger(page) || page < 1 || !Number.isInteger(limit) || limit < 1) {
+      return c.json({ error: 'page and limit must be positive integers', errorCode: 'INVALID_PARAM' }, 400)
+    }
+
+    if (verificationTier && !ALLOWED_TIERS.has(verificationTier as VerificationTier)) {
+      return c.json({ error: 'verification_tier is invalid', errorCode: 'INVALID_VERIFICATION_TIER' }, 400)
+    }
+
+    try {
+      let rows = searchAgents(db, {
+        capabilities: capabilityParam ? [capabilityParam] : undefined,
+        limit: Math.min(500, page * limit),
+      })
+
+      if (verificationTier) {
+        rows = rows.filter((row) => row.verification_tier === verificationTier)
+      }
+
+      if (verifiedOnly) {
+        rows = rows.filter((row) => row.verified === 1 || row.verification_tier !== 'basic' || row.email_verified === 1)
+      }
+
+      const total = rows.length
+      const start = (page - 1) * limit
+      const agents = rows.slice(start, start + limit).map(serializeAgent)
+
+      return c.json({ agents, total, page, limit })
+    } catch (err) {
+      console.error('Browse error:', err)
+      return c.json({ error: 'Browse failed', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.patch('/:beamId/profile', async (c) => {
+    const beamId = decodeURIComponent(c.req.param('beamId'))
+    if (!BEAM_ID_RE.test(beamId)) {
+      return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    const agent = getAgent(db, beamId)
+    if (!agent) {
+      return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const normalizeOptionalText = (value: unknown): string | null => {
+      if (value == null) {
+        return null
+      }
+      const trimmed = String(value).trim()
+      return trimmed || null
+    }
+
+    const description = raw.description === undefined ? undefined : normalizeOptionalText(raw.description)
+    const logoUrl = raw.logo_url === undefined && raw.logoUrl === undefined
+      ? undefined
+      : normalizeOptionalText(raw.logo_url ?? raw.logoUrl)
+    const website = raw.website === undefined
+      ? undefined
+      : normalizeOptionalText(raw.website)
+
+    for (const [field, value] of [['logo_url', logoUrl], ['website', website]] as const) {
+      if (!value) {
+        continue
+      }
+      try {
+        new URL(value)
+      } catch {
+        return c.json({ error: `${field} must be a valid absolute URL`, errorCode: 'INVALID_URL' }, 400)
+      }
+    }
+
+    const timestamp = c.req.header('x-beam-timestamp')?.trim() ?? ''
+    const nonce = c.req.header('x-beam-nonce')?.trim() ?? ''
+    const signature = c.req.header('x-beam-signature')?.trim() ?? ''
+    if (!timestamp || !nonce || !signature) {
+      return c.json({ error: 'Missing signature headers', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    const payload = JSON.stringify({
+      type: 'agent_profile_update',
+      beamId,
+      profile: {
+        description: description ?? null,
+        logo_url: logoUrl ?? null,
+        website: website ?? null,
+      },
+      timestamp,
+      nonce,
+    })
+
+    if (!verifySignedUtf8Payload(payload, signature, agent.public_key)) {
+      return c.json({ error: 'Invalid signature', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    try {
+      const updated = updateAgentProfile(db, beamId, {
+        description,
+        logoUrl,
+        website,
+      })
+      if (!updated) {
+        return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+      }
+      return c.json(serializeAgent(updated))
+    } catch (err) {
+      console.error('Profile update error:', err)
+      return c.json({ error: 'Failed to update agent profile', errorCode: 'DB_ERROR' }, 500)
     }
   })
 

@@ -176,9 +176,13 @@ export function verifyPayload(payload: unknown, signatureBase64: string, publicK
       type: 'spki',
     })
 
+    const payloadString = typeof payload === 'string'
+      ? payload
+      : canonicalizeJson(payload)
+
     return verify(
       null,
-      Buffer.from(canonicalizeJson(payload), 'utf8'),
+      Buffer.from(payloadString, 'utf8'),
       keyObject,
       Buffer.from(signatureBase64, 'base64')
     )

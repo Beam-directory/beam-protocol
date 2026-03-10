@@ -86,7 +86,7 @@
         "name": "Is Beam Protocol production-ready?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. Beam Protocol has been live in production since March 2026 at COPPEN GmbH, with 4 AI agents communicating across 2 physical machines. The fastest end-to-end intent took 6.7 seconds."
+          "text": "Yes. Beam Protocol has been live in production since March 2026 at Acme Corp, with 4 AI agents communicating across 2 physical machines. The fastest end-to-end intent took 6.7 seconds."
         }
       }
     ]
@@ -954,7 +954,7 @@
       <div class="beam-id-box">
         <span class="icon">🤖</span>
         <div>
-          <span class="agent">jarvis</span><span class="at">@</span><span class="org">coppen</span><span class="domain">.beam.directory</span>
+          <span class="agent">jarvis</span><span class="at">@</span><span class="org">acme</span><span class="domain">.beam.directory</span>
         </div>
         <span class="label">Beam ID</span>
       </div>
@@ -1135,9 +1135,9 @@
         <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">B2B Procurement</h3>
         <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"We need 500 solar panels in Bad Dürkheim by March 20."</p>
         <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          procurement@coppen 🟢 → 8 supplier agents<br/>
+          procurement@acme 🟢 → 8 supplier agents<br/>
           → best-price@solarwatt 🟢 (€149k, 5 days)<br/>
-          → logistics@dhl 🟢 → finance@coppen ✅
+          → logistics@dhl 🟢 → finance@acme ✅
         </div>
       </div>
 
@@ -1225,7 +1225,7 @@
     <div style="max-width: 520px; margin: 32px auto 0; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 24px; font-family: 'SF Mono', monospace; font-size: 13px;" class="fade-up">
       <div style="color: #888;">// One line of code:</div>
       <div style="color: #e0e0e0;"><span style="color: #c084fc;">const</span> reply = <span style="color: #c084fc;">await</span> client.<span style="color: #F75C03;">talk</span>(</div>
-      <div style="color: #4ade80; padding-left: 24px;">'clara@coppen.beam.directory',</div>
+      <div style="color: #4ade80; padding-left: 24px;">'clara@acme.beam.directory',</div>
       <div style="color: #4ade80; padding-left: 24px;">'Was weißt du über Chris?'</div>
       <div style="color: #e0e0e0;">)</div>
     </div>
@@ -1316,9 +1316,9 @@
 <span class="cm">// 1. Generate a Beam identity</span>
 <span class="kw">const</span> identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>({
   agentName: <span class="str">'jarvis'</span>,
-  orgName: <span class="str">'coppen'</span>,
+  orgName: <span class="str">'acme'</span>,
 })
-<span class="cm">// → jarvis@coppen.beam.directory</span>
+<span class="cm">// → jarvis@acme.beam.directory</span>
 
 <span class="cm">// 2. Connect to the directory</span>
 <span class="kw">const</span> client = <span class="kw">new</span> <span class="fn">BeamClient</span>({
@@ -1329,7 +1329,7 @@
 
 <span class="cm">// 3. Send an intent — that's it</span>
 <span class="kw">const</span> result = <span class="kw">await</span> client.<span class="fn">send</span>(
-  <span class="str">'clara@coppen.beam.directory'</span>,
+  <span class="str">'clara@acme.beam.directory'</span>,
   <span class="str">'payment.status_check'</span>,
   { invoiceId: <span class="str">'INV-2847'</span> }
 )
@@ -1343,9 +1343,9 @@ console.<span class="fn">log</span>(result.payload)
 <span class="cm"># 1. Generate a Beam identity</span>
 identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>(
     agent_name=<span class="str">"jarvis"</span>,
-    org_name=<span class="str">"coppen"</span>
+    org_name=<span class="str">"acme"</span>
 )
-<span class="cm"># → jarvis@coppen.beam.directory</span>
+<span class="cm"># → jarvis@acme.beam.directory</span>
 
 <span class="cm"># 2. Connect to the directory</span>
 client = <span class="fn">BeamClient</span>(
@@ -1356,7 +1356,7 @@ client = <span class="fn">BeamClient</span>(
 
 <span class="cm"># 3. Send an intent</span>
 result = <span class="kw">await</span> client.<span class="fn">send</span>(
-    to=<span class="str">"clara@coppen.beam.directory"</span>,
+    to=<span class="str">"clara@acme.beam.directory"</span>,
     intent=<span class="str">"payment.status_check"</span>,
     payload={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
 )
@@ -1369,16 +1369,16 @@ result = <span class="kw">await</span> client.<span class="fn">send</span>(
 $ <span class="fn">npm install -g</span> @beam-protocol/cli
 
 <span class="cm"># Generate identity</span>
-$ <span class="fn">beam init</span> --agent jarvis --org coppen
+$ <span class="fn">beam init</span> --agent jarvis --org acme
 <span class="op">✔</span> Identity generated
-  Beam ID: jarvis@coppen.beam.directory
+  Beam ID: jarvis@acme.beam.directory
 
 <span class="cm"># Look up another agent</span>
-$ <span class="fn">beam lookup</span> clara@coppen.beam.directory
+$ <span class="fn">beam lookup</span> clara@acme.beam.directory
 <span class="op">🤖</span> Clara · connected · trust: <span class="op">████████░░</span> 82%
 
 <span class="cm"># Send an intent</span>
-$ <span class="fn">beam send</span> clara@coppen.beam.directory payment.status_check \
+$ <span class="fn">beam send</span> clara@acme.beam.directory payment.status_check \
     <span class="str">'{"invoiceId":"INV-2847"}'</span>
 <span class="op">✅</span> Result in <span class="num">29.4s</span> — status: paid, amount: €2,185.00</pre>
         </div>
