@@ -70,6 +70,28 @@ packages/dashboard/.env.local
 V02-BRIEF.md
 X-POST-DRAFT.md
 DEMO-RESULTS.md
+VISION.md
+BEAM-SHIELD.md
+CODEX-SPRINT*.md
+DEVILS-ADVOCATE*.md
+SHIELD-FIX-PLAN.md
+STRATEGY-S*.md
+X-POST-FINAL.md
+
+# Internal packages
+packages/launch-content/
+
+# COPPEN-specific examples
+examples/coppen-*.ts
+examples/dogfood-*.ts
+
+# Root deployment configs (keep per-package)
+/Dockerfile
+/fly.toml
+/litestream.yml
+
+# Root images (use docs/public/ instead)
+/beam-*.png
 
 # SQLite WAL/SHM files
 *.db-shm
@@ -80,5 +102,4 @@ beam-*-announcement.png
 SPRINT-*.md
 V0*-BRIEF.md
 V0*-SECURITY-BRIEF.md
-X-POST-FINAL.md
 .vercel
