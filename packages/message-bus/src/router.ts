@@ -2,7 +2,7 @@
  * Beam Message Bus — Hono Router (HTTP API)
  */
 
-import { Hono } from 'hono'
+import { Hono, type Context } from 'hono'
 import type Database from 'better-sqlite3'
 import {
   insertMessage,
@@ -45,10 +45,39 @@ export interface RouterOptions {
 export function createBusRouter(options: RouterOptions): Hono {
   const { db, directoryUrl, rateLimit: maxRate = 10 } = options
   const app = new Hono()
+  const configuredApiKey = process.env['BEAM_BUS_API_KEY'] ?? ''
+  const statsPublic = process.env['BEAM_BUS_STATS_PUBLIC'] === 'true'
+
+  // Auth middleware — Bearer token required for all endpoints (except /stats if BEAM_BUS_STATS_PUBLIC=true)
+  app.use('*', async (c: Context, next) => {
+    if (statsPublic && c.req.path.endsWith('/stats')) {
+      await next()
+      return
+    }
+
+    if (!configuredApiKey) {
+      // No key configured — allow (development mode)
+      await next()
+      return
+    }
+
+    const authHeader = c.req.header('authorization') ?? ''
+    if (authHeader !== `Bearer ${configuredApiKey}`) {
+      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    await next()
+  })
 
   // POST /send
   app.post('/send', async (c) => {
-    const body = await c.req.json() as Record<string, unknown>
+    let body: Record<string, unknown>
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
     const sender = String(body.from ?? body.sender ?? '')
     const recipient = String(body.to ?? '')
     const intent = String(body.intent ?? '')
@@ -57,11 +86,11 @@ export function createBusRouter(options: RouterOptions): Hono {
     const traceId = body.trace_id as string | undefined
 
     if (!sender || !recipient || !intent) {
-      return c.json({ error: 'Missing required fields: from, to, intent' }, 400)
+      return c.json({ error: 'Missing required fields: from, to, intent', errorCode: 'MISSING_REQUIRED_FIELDS' }, 400)
     }
 
     if (!checkRateLimit(sender, maxRate)) {
-      return c.json({ error: `Rate limit exceeded for ${sender} (max ${maxRate}/min)` }, 429)
+      return c.json({ error: `Rate limit exceeded for ${sender} (max ${maxRate}/min)`, errorCode: 'RATE_LIMIT_EXCEEDED' }, 429)
     }
 
     const msgId = insertMessage(db, { sender, recipient, intent, payload, priority, traceId })
@@ -73,20 +102,20 @@ export function createBusRouter(options: RouterOptions): Hono {
     if (result.success) {
       markDelivered(db, msgId)
       console.log(`[beam-bus] ✅ ${sender} → ${recipient} (${intent}) delivered`)
-      return c.json({ message_id: msgId, status: 'delivered', created_at: now })
+      return c.json({ message_id: msgId, status: 'delivered', created_at: now }, 201)
     }
 
     // Schedule retry
     const nextRetry = now + RETRY_BACKOFF[0]
     scheduleRetry(db, msgId, 0, nextRetry, result.error)
     console.log(`[beam-bus] ⏳ ${sender} → ${recipient} (${intent}) queued: ${result.error}`)
-    return c.json({ message_id: msgId, status: 'pending', created_at: now })
+    return c.json({ message_id: msgId, status: 'pending', created_at: now }, 201)
   })
 
   // GET /poll
   app.get('/poll', (c) => {
     const agent = c.req.query('agent')
-    if (!agent) return c.json({ error: 'agent query parameter is required' }, 400)
+    if (!agent) return c.json({ error: 'agent query parameter is required', errorCode: 'MISSING_AGENT' }, 400)
 
     const status = c.req.query('status') ?? 'delivered'
     const limit = Math.min(Number(c.req.query('limit') ?? 10), 100)
@@ -108,18 +137,24 @@ export function createBusRouter(options: RouterOptions): Hono {
 
   // POST /ack
   app.post('/ack', async (c) => {
-    const body = await c.req.json() as Record<string, unknown>
+    let body: Record<string, unknown>
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
     const messageId = String(body.message_id ?? '')
     const status = String(body.status ?? 'acked')
     const response = body.response as Record<string, unknown> | undefined
 
-    if (!messageId) return c.json({ error: 'message_id is required' }, 400)
+    if (!messageId) return c.json({ error: 'message_id is required', errorCode: 'MISSING_MESSAGE_ID' }, 400)
     if (!['acked', 'failed'].includes(status)) {
-      return c.json({ error: 'status must be "acked" or "failed"' }, 400)
+      return c.json({ error: 'status must be "acked" or "failed"', errorCode: 'INVALID_STATUS' }, 400)
     }
 
     const msg = getMessage(db, messageId)
-    if (!msg) return c.json({ error: `Message ${messageId} not found` }, 404)
+    if (!msg) return c.json({ error: `Message ${messageId} not found`, errorCode: 'MESSAGE_NOT_FOUND' }, 404)
 
     if (status === 'acked') {
       markAcked(db, messageId, response)

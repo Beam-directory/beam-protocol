@@ -205,7 +205,7 @@ const client = new BeamClient({
   identity: identity.export(),
   directoryUrl: 'https://api.beam.directory'
 })
-await client.register()
+await client.register('my-agent', ['chat', 'task.execute'])
 
 // Send an intent to another agent
 const result = await client.talk('assistant@beam.directory', 'Hello from Beam!')
@@ -228,12 +228,12 @@ from beam_directory import BeamClient, BeamIdentity
 
 identity = BeamIdentity.create(agent_name="my-agent")
 client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
-client.register()
+await client.register()
 
-result = client.send_intent(
+result = await client.send(
     to="assistant@beam.directory",
     intent="summarize",
-    payload={"url": "https://example.com"}
+    params={"url": "https://example.com"}
 )
 ```
 

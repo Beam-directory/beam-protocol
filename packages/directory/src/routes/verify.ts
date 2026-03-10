@@ -7,6 +7,7 @@ import type { Database } from 'better-sqlite3'
 import { issueDomainVC } from '../credentials.js'
 import type { AgentRow, DomainVerificationRow } from '../types.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { serializeAgent } from '../utils/serialize.js'
 import {
   createDomainVerification,
   getAgent,
@@ -22,19 +23,6 @@ type ResolveTxtFn = (hostname: string, options?: ResolverOptions) => Promise<str
 
 function normalizeDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
-}
-
-function serializeAgent(row: AgentRow): object {
-  const { email_token: _emailToken, ...agent } = row
-  return {
-    ...agent,
-    capabilities: JSON.parse(row.capabilities) as string[],
-    email_verified: row.email_verified === 1,
-    personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier !== 'basic',
-    flagged: row.flagged === 1,
-    verificationTier: row.verification_tier,
-  }
 }
 
 function flattenTxtRecords(records: string[][]): string[] {

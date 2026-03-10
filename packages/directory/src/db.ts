@@ -29,6 +29,7 @@ const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 export function createDatabase(dbPath = process.env.DB_PATH || './beam-directory.db'): DB {
   const db = new Database(dbPath)
   db.pragma('journal_mode = WAL')
+  db.pragma('busy_timeout = 5000')
   db.pragma('foreign_keys = ON')
   initSchema(db)
   return db
@@ -900,20 +901,22 @@ export function getDIDDocument(db: DB, did: string): DIDDocument | null {
   return JSON.parse(row.document) as DIDDocument
 }
 
-/**
- * Search agents with optional filters. Capabilities filtering is done in JavaScript
- * for compatibility with SQLite versions that lack full JSON function support.
- */
-export function searchAgents(
-  db: DB,
-  query: {
-    org?: string
-    personal?: boolean
-    capabilities?: string[]
-    minTrustScore?: number
-    limit?: number
-  },
-): AgentRow[] {
+export interface SearchQuery {
+  org?: string
+  personal?: boolean
+  capabilities?: string[]
+  minTrustScore?: number
+  verificationTier?: VerificationTier
+  verifiedOnly?: boolean
+  limit?: number
+  offset?: number
+}
+
+function escapeLikePattern(value: string): string {
+  return value.replace(/[\\%_]/g, '\\$&')
+}
+
+function buildSearchAgentsWhereClause(query: SearchQuery): { where: string; params: Array<string | number> } {
   const params: Array<string | number> = []
   const conditions: string[] = []
 
@@ -929,31 +932,45 @@ export function searchAgents(
     params.push(query.minTrustScore)
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
-  const limitClause = query.limit !== undefined ? `LIMIT ${Math.max(1, Math.min(500, query.limit))}` : 'LIMIT 100'
-
-  const sql = `SELECT * FROM agents ${where} ORDER BY trust_score DESC ${limitClause}`
-  let rows = db.prepare(sql).all(...params) as AgentRow[]
-
-  if (query.capabilities && query.capabilities.length > 0) {
-    const required = new Set(query.capabilities)
-    rows = rows.filter((row) => {
-      let parsed: unknown
-      try {
-        parsed = JSON.parse(row.capabilities)
-      } catch {
-        return false
-      }
-      if (!Array.isArray(parsed)) return false
-      const agentCaps = new Set(parsed as string[])
-      for (const capability of required) {
-        if (!agentCaps.has(capability)) return false
-      }
-      return true
-    })
+  if (query.verificationTier) {
+    conditions.push('verification_tier = ?')
+    params.push(query.verificationTier)
   }
 
-  return rows
+  if (query.verifiedOnly) {
+    conditions.push('(verified = 1 OR verification_tier != ? OR email_verified = 1)')
+    params.push('basic')
+  }
+
+  if (query.capabilities && query.capabilities.length > 0) {
+    for (const capability of query.capabilities) {
+      conditions.push(`capabilities LIKE ? ESCAPE '\\'`)
+      params.push(`%"${escapeLikePattern(capability)}"%`)
+    }
+  }
+
+  return {
+    where: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  }
+}
+
+export function countSearchAgents(db: DB, query: SearchQuery): number {
+  const { where, params } = buildSearchAgentsWhereClause(query)
+  const row = db.prepare(`SELECT COUNT(*) AS cnt FROM agents ${where}`).get(...params) as { cnt: number }
+  return row.cnt
+}
+
+export function searchAgents(
+  db: DB,
+  query: SearchQuery,
+): AgentRow[] {
+  const { where, params } = buildSearchAgentsWhereClause(query)
+  const limit = query.limit !== undefined ? Math.max(1, Math.min(500, query.limit)) : 100
+  const offset = query.offset !== undefined ? Math.max(0, query.offset) : 0
+  const sql = `SELECT * FROM agents ${where} ORDER BY trust_score DESC, beam_id ASC LIMIT ? OFFSET ?`
+
+  return db.prepare(sql).all(...params, limit, offset) as AgentRow[]
 }
 
 export function updateLastSeen(db: DB, beamId: string): void {

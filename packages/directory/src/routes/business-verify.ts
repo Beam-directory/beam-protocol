@@ -4,6 +4,7 @@ import type { Database } from 'better-sqlite3'
 import type { AgentRow, BusinessVerificationRow } from '../types.js'
 import { issueBusinessVC } from '../credentials.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { serializeAgent } from '../utils/serialize.js'
 import {
   createBusinessVerification,
   getAgent,
@@ -21,18 +22,6 @@ type CompaniesHouseResponse = {
   company_name?: unknown
   company_number?: unknown
   company_status?: unknown
-}
-
-function serializeAgent(row: AgentRow): object {
-  const { email_token: _emailToken, ...agent } = row
-  return {
-    ...agent,
-    capabilities: JSON.parse(row.capabilities) as string[],
-    personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier !== 'basic',
-    flagged: row.flagged === 1,
-    verificationTier: row.verification_tier,
-  }
 }
 
 function parseEvidence(row: BusinessVerificationRow): unknown {

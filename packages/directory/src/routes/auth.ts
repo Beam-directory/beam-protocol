@@ -11,7 +11,11 @@ import { randomBytes, createHmac } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database as DB } from 'better-sqlite3'
 
-const JWT_SECRET = process.env.JWT_SECRET || process.env.BEAM_ADMIN_KEY || 'beam-dev-secret-change-me'
+const _jwtSecret = process.env.JWT_SECRET
+if (!_jwtSecret) {
+  throw new Error('JWT_SECRET environment variable is required')
+}
+const JWT_SECRET: string = _jwtSecret
 const MAGIC_LINK_EXPIRY_MS = 15 * 60 * 1000 // 15 minutes
 const SESSION_EXPIRY_MS = 30 * 24 * 60 * 60 * 1000 // 30 days
 const APP_URL = process.env.APP_URL || 'https://dashboard.beam.directory'

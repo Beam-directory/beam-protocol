@@ -3,9 +3,9 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
-import { toBeamDID } from '../did.js'
 import { sendAgentVerificationEmail } from '../email.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { serializeAgent } from '../utils/serialize.js'
 import {
   createVerificationToken,
   deleteAgent,
@@ -13,6 +13,7 @@ import {
   getAgentDirectoryStats,
   getAgentIntentStats,
   registerAgent,
+  countSearchAgents,
   searchAgents,
   setAgentEmailToken,
   updateAgentProfile,
@@ -109,20 +110,6 @@ function buildBeamId(baseName: string, org: string, personal: boolean, db: Datab
   }
 
   return `${baseName}-${Date.now()}@${suffix}`
-}
-
-function serializeAgent(row: AgentRow): object {
-  const { email_token: _emailToken, api_key_hash: _apiKeyHash, ...agent } = row
-  return {
-    ...agent,
-    did: toBeamDID(row.beam_id),
-    capabilities: JSON.parse(row.capabilities) as string[],
-    email_verified: row.email_verified === 1,
-    personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier !== 'basic',
-    flagged: row.flagged === 1,
-    verificationTier: row.verification_tier,
-  }
 }
 
 function isTruthyQueryValue(value: string | undefined | null): boolean {
@@ -447,12 +434,11 @@ export function agentsRouter(db: Database): Hono {
         personal: orgParam === 'personal',
         capabilities,
         minTrustScore,
+        verificationTier: verificationTier && ALLOWED_TIERS.has(verificationTier as VerificationTier)
+          ? verificationTier as VerificationTier
+          : undefined,
         limit,
       })
-
-      if (verificationTier && ALLOWED_TIERS.has(verificationTier as VerificationTier)) {
-        rows = rows.filter((row) => row.verification_tier === verificationTier)
-      }
 
       if (q) {
         rows = rows.filter((row) => {
@@ -468,7 +454,7 @@ export function agentsRouter(db: Database): Hono {
         })
       }
 
-      return c.json({ agents: rows.map(serializeAgent), total: rows.length })
+      return c.json({ agents: rows.map((row) => serializeAgent(row)), total: rows.length })
     } catch (err) {
       console.error('Search error:', err)
       return c.json({ error: 'Search failed', errorCode: 'DB_ERROR' }, 500)
@@ -494,22 +480,18 @@ export function agentsRouter(db: Database): Hono {
     }
 
     try {
-      let rows = searchAgents(db, {
+      const filters = {
         capabilities: capabilityParam ? [capabilityParam] : undefined,
-        limit: Math.min(500, page * limit),
-      })
-
-      if (verificationTier) {
-        rows = rows.filter((row) => row.verification_tier === verificationTier)
+        verificationTier: verificationTier as VerificationTier | undefined,
+        verifiedOnly,
       }
 
-      if (verifiedOnly) {
-        rows = rows.filter((row) => row.verified === 1 || row.verification_tier !== 'basic' || row.email_verified === 1)
-      }
-
-      const total = rows.length
-      const start = (page - 1) * limit
-      const agents = rows.slice(start, start + limit).map(serializeAgent)
+      const total = countSearchAgents(db, filters)
+      const agents = searchAgents(db, {
+        ...filters,
+        limit: Math.min(500, limit),
+        offset: (page - 1) * limit,
+      }).map((row) => serializeAgent(row))
 
       return c.json({ agents, total, page, limit })
     } catch (err) {
@@ -639,6 +621,27 @@ export function agentsRouter(db: Database): Hono {
       const existing = getAgent(db, beamId)
       if (!existing) {
         return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const timestamp = c.req.header('x-beam-timestamp')?.trim() ?? ''
+      const nonce = c.req.header('x-beam-nonce')?.trim() ?? ''
+      const signature = c.req.header('x-beam-signature')?.trim() ?? ''
+      const adminKey = c.req.header('x-admin-key') ?? ''
+
+      const hasSignatureHeaders = Boolean(timestamp || nonce || signature)
+      if (!hasSignatureHeaders && !isAdminRequest(adminKey)) {
+        return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+      }
+
+      if (hasSignatureHeaders) {
+        if (!timestamp || !nonce || !signature) {
+          return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+        }
+
+        const payload = JSON.stringify({ type: 'heartbeat', beamId, timestamp, nonce })
+        if (!verifySignedUtf8Payload(payload, signature, existing.public_key)) {
+          return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+        }
       }
 
       updateLastSeen(db, beamId)

@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -31,6 +31,10 @@ import type { AgentRow, IntentFrame } from './types.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
 const serverStartedAt = Date.now()
+const DASHBOARD_SESSION_COOKIE = 'beam_dash_session'
+const DASHBOARD_SESSION_TTL_MS = 24 * 60 * 60 * 1000
+
+const dashboardSessions = new Map<string, { expiresAt: number }>()
 
 type WaitlistSignupInput = {
   email: string
@@ -74,10 +78,89 @@ function getAdminKeyFromRequest(c: Context): string {
   return c.req.header('x-admin-key') ?? c.req.query('key') ?? ''
 }
 
+function parseCookieHeader(cookieHeader: string | undefined): Record<string, string> {
+  if (!cookieHeader) {
+    return {}
+  }
+
+  return cookieHeader
+    .split(';')
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .reduce<Record<string, string>>((cookies, part) => {
+      const separatorIndex = part.indexOf('=')
+      if (separatorIndex <= 0) {
+        return cookies
+      }
+
+      const key = part.slice(0, separatorIndex).trim()
+      const value = part.slice(separatorIndex + 1).trim()
+      cookies[key] = value
+      return cookies
+    }, {})
+}
+
+function pruneExpiredDashboardSessions(now = Date.now()): void {
+  for (const [token, session] of dashboardSessions.entries()) {
+    if (session.expiresAt <= now) {
+      dashboardSessions.delete(token)
+    }
+  }
+}
+
+function getDashboardSessionToken(c: Context): string {
+  const cookies = parseCookieHeader(c.req.header('cookie'))
+  return cookies[DASHBOARD_SESSION_COOKIE] ?? ''
+}
+
+function hasValidDashboardSession(c: Context): boolean {
+  pruneExpiredDashboardSessions()
+
+  const sessionToken = getDashboardSessionToken(c)
+  if (!sessionToken) {
+    return false
+  }
+
+  const session = dashboardSessions.get(sessionToken)
+  if (!session) {
+    return false
+  }
+
+  if (session.expiresAt <= Date.now()) {
+    dashboardSessions.delete(sessionToken)
+    return false
+  }
+
+  return true
+}
+
+function createDashboardSession(): string {
+  pruneExpiredDashboardSessions()
+
+  const token = randomBytes(32).toString('hex')
+  dashboardSessions.set(token, { expiresAt: Date.now() + DASHBOARD_SESSION_TTL_MS })
+  return token
+}
+
+function invalidateDashboardSession(c: Context): void {
+  const sessionToken = getDashboardSessionToken(c)
+  if (sessionToken) {
+    dashboardSessions.delete(sessionToken)
+  }
+}
+
+function buildDashboardSessionCookie(token: string, maxAgeSeconds: number): string {
+  return `${DASHBOARD_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}`
+}
+
 function requireAdmin(c: Context): { ok: true; key: string } | Response {
   const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
   if (!configuredKey) {
     return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
+  }
+
+  if (hasValidDashboardSession(c)) {
+    return { ok: true, key: '' }
   }
 
   const suppliedKey = getAdminKeyFromRequest(c)
@@ -180,7 +263,7 @@ function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array
   }
 }
 
-function renderDashboardHtml(adminKey: string): string {
+function renderDashboardHtml(): string {
   return `<!DOCTYPE html>
 <html lang="en">
   <head>
@@ -411,8 +494,6 @@ function renderDashboardHtml(adminKey: string): string {
     </div>
 
     <script>
-      const adminKey = ${JSON.stringify(adminKey)};
-
       function escapeHtml(value) {
         return String(value ?? '')
           .replaceAll('&', '&amp;')
@@ -539,8 +620,8 @@ function renderDashboardHtml(adminKey: string): string {
 
       async function fetchJson(path) {
         const response = await fetch(path, {
-          headers: { 'X-Admin-Key': adminKey },
           cache: 'no-store',
+          credentials: 'same-origin',
         });
 
         if (!response.ok) {
@@ -620,14 +701,32 @@ export function createApp(db: Database): Hono {
     defaultRateLimit: 20,
   }))
 
+  app.post('/dashboard/login', (c) => {
+    const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
+    if (!configuredKey) {
+      return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
+    }
+
+    const suppliedKey = c.req.header('x-admin-key') ?? ''
+    if (!suppliedKey || suppliedKey !== configuredKey) {
+      invalidateDashboardSession(c)
+      c.header('Set-Cookie', buildDashboardSessionCookie('', 0))
+      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+
+    const sessionToken = createDashboardSession()
+    c.header('Cache-Control', 'no-store')
+    c.header('Set-Cookie', buildDashboardSessionCookie(sessionToken, Math.floor(DASHBOARD_SESSION_TTL_MS / 1000)))
+    return c.json({ ok: true, expiresInSeconds: Math.floor(DASHBOARD_SESSION_TTL_MS / 1000) })
+  })
+
   app.get('/dashboard', (c) => {
-    const auth = requireAdmin(c)
-    if (auth instanceof Response) {
-      return auth
+    if (!hasValidDashboardSession(c)) {
+      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
     }
 
     c.header('Cache-Control', 'no-store')
-    return c.html(renderDashboardHtml(auth.key))
+    return c.html(renderDashboardHtml())
   })
 
   app.get('/admin/agents', (c) => {

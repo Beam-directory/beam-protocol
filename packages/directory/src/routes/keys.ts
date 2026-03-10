@@ -1,22 +1,11 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
-import type { AgentKeyRow, AgentRow } from '../types.js'
+import type { AgentKeyRow } from '../types.js'
 import { getAgent, listRevokedAgentKeys, rotateAgentKey } from '../db.js'
 import { verifyPayload } from '../crypto.js'
 import { BEAM_ID_RE } from '../validation.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
-
-function serializeAgent(row: AgentRow): object {
-  const { email_token: _emailToken, ...agent } = row
-  return {
-    ...agent,
-    capabilities: JSON.parse(row.capabilities) as string[],
-    personal: row.personal === 1,
-    verified: row.verified === 1 || row.verification_tier !== 'basic',
-    flagged: row.flagged === 1,
-    verificationTier: row.verification_tier,
-  }
-}
+import { serializeAgent } from '../utils/serialize.js'
 
 function serializeKey(row: AgentKeyRow): object {
   return {
