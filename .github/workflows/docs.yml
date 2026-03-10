@@ -8,6 +8,7 @@ on:
       - 'VISION.md'
       - 'CHANGELOG.md'
       - 'spec/**'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:

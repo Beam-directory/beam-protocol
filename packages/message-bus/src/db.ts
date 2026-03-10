@@ -61,6 +61,15 @@ export function initDatabase(dbPath: string): Database.Database {
   return db
 }
 
+export function cleanTestMessages(db: Database.Database): number {
+  const result = db.prepare(`
+    DELETE FROM beam_messages
+    WHERE sender LIKE ? OR sender LIKE ? OR recipient LIKE ? OR recipient LIKE ?
+  `).run('%@test.%', '%@demo.%', '%@test.%', '%@demo.%')
+
+  return result.changes
+}
+
 export function insertMessage(
   db: Database.Database,
   msg: {

@@ -3,8 +3,13 @@
   "version": "0.1.0",
   "description": "Persistent message bus for Beam Protocol — reliable agent-to-agent communication with retry, audit trail, and guaranteed delivery",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "exports": {
     ".": {
       "import": "./dist/index.js",
@@ -30,8 +35,12 @@
   "license": "Apache-2.0",
   "repository": {
     "type": "git",
-    "url": "https://github.com/Beam-directory/beam-protocol",
+    "url": "https://github.com/Beam-directory/beam-protocol.git",
     "directory": "packages/message-bus"
+  },
+  "homepage": "https://beam.directory",
+  "bugs": {
+    "url": "https://github.com/Beam-directory/beam-protocol/issues"
   },
   "bin": {
     "beam-bus": "dist/server.js"

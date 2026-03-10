@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
+import json
 import time
 from typing import Any, Callable, Coroutine, Optional
+from urllib.parse import urlencode
 
 import httpx
 
 from .directory import BeamDirectory
-from .frames import create_intent_frame, create_result_frame
+from .frames import create_intent_frame, create_result_frame, validate_intent_frame
 from .identity import BeamIdentity
 from .types import (
     AgentProfile,
@@ -43,6 +46,7 @@ class BeamClient:
         self._directory = BeamDirectory(DirectoryConfig(base_url=directory_url))
         self._intent_handlers: dict[str, IntentHandler] = {}
         self._ws_task: Optional[asyncio.Task[None]] = None
+        self._ws_client: Any = None
 
     @classmethod
     def from_config(cls, config: BeamClientConfig) -> "BeamClient":
@@ -208,9 +212,37 @@ class BeamClient:
     def on_intent(self, intent: str) -> Callable[[IntentHandler], IntentHandler]:
         def decorator(fn: IntentHandler) -> IntentHandler:
             self._intent_handlers[intent] = fn
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            if loop and (self._ws_task is None or self._ws_task.done()):
+                self._ws_task = loop.create_task(self._ws_loop())
             return fn
 
         return decorator
+
+    async def connect(self) -> None:
+        if self._ws_task is None or self._ws_task.done():
+            self._ws_task = asyncio.create_task(self._ws_loop())
+        await asyncio.sleep(0)
+
+    async def start(self) -> None:
+        await self.listen()
+
+    async def listen(self) -> None:
+        await self.connect()
+
+    async def disconnect(self) -> None:
+        if self._ws_task is not None:
+            self._ws_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await self._ws_task
+            self._ws_task = None
+        if self._ws_client is not None:
+            with contextlib.suppress(Exception):
+                await self._ws_client.close()
+            self._ws_client = None
 
     async def handle_intent(self, frame: IntentFrame) -> ResultFrame:
         handler = self._intent_handlers.get(frame.intent)
@@ -352,6 +384,50 @@ class BeamClient:
             )
         data: Any = res.json()
         return ResultFrame.from_dict(data)
+
+    async def _ws_loop(self) -> None:
+        try:
+            import websockets
+        except ImportError as exc:
+            raise RuntimeError(
+                'Listening for intents requires the optional dependency: pip install "beam-directory[websocket]"'
+            ) from exc
+
+        ws_url = (
+            self._directory_url.replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .rstrip("/")
+        ) + f"/ws?{urlencode({'beamId': self._identity.beam_id})}"
+
+        try:
+            async with websockets.connect(ws_url) as websocket:
+                self._ws_client = websocket
+
+                async for raw_message in websocket:
+                    if not isinstance(raw_message, str):
+                        continue
+
+                    try:
+                        data = json.loads(raw_message)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if data.get("type") != "intent":
+                        continue
+
+                    frame_data = data.get("frame")
+                    sender_public_key = data.get("senderPublicKey")
+                    if not isinstance(frame_data, dict) or not isinstance(sender_public_key, str):
+                        continue
+
+                    frame = IntentFrame.from_dict(frame_data)
+                    if validate_intent_frame(frame, sender_public_key):
+                        continue
+
+                    result = await self.handle_intent(frame)
+                    await websocket.send(json.dumps({"type": "result", "frame": result.to_dict()}))
+        finally:
+            self._ws_client = None
 
 
 class BeamThread:

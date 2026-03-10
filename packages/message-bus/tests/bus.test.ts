@@ -5,7 +5,7 @@ vi.mock('../src/delivery.js', () => ({
   deliverToDirectory: vi.fn(async () => ({ success: true, error: '' })),
 }))
 
-import { getMessage, initDatabase, insertMessage, markAcked, markDelivered, markFailed } from '../src/db.js'
+import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDelivered, markFailed } from '../src/db.js'
 import { createBusRouter } from '../src/router.js'
 
 describe('message bus', () => {
@@ -243,5 +243,29 @@ describe('message bus', () => {
     expect(blocked.status).toBe(429)
     const body = await blocked.json() as Record<string, unknown>
     expect(body['errorCode']).toBe('RATE_LIMIT_EXCEEDED')
+  })
+
+  it('removes test and demo messages from the database', () => {
+    const keptId = insertMessage(db, {
+      sender: 'alpha@beam.directory',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { keep: true },
+    })
+    insertMessage(db, {
+      sender: 'sender@test.example',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { drop: 'sender' },
+    })
+    insertMessage(db, {
+      sender: 'alpha@beam.directory',
+      recipient: 'recipient@demo.example',
+      intent: 'chat',
+      payload: { drop: 'recipient' },
+    })
+
+    expect(cleanTestMessages(db)).toBe(2)
+    expect(getMessage(db, keptId)?.status).toBe('pending')
   })
 })

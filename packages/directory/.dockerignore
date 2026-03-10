@@ -1,5 +1,4 @@
 node_modules
-src
-*.ts
+dist
 beam-directory.db*
 .env

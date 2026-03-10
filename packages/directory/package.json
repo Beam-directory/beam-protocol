@@ -4,6 +4,12 @@
   "description": "Beam Protocol Directory Server — agent registration, discovery, and intent routing",
   "type": "module",
   "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "README.md"
+  ],
   "scripts": {
     "build": "tsc",
     "dev": "node --watch --experimental-vm-modules dist/index.js",
@@ -30,5 +36,14 @@
   "engines": {
     "node": ">=18.0.0"
   },
-  "license": "Apache-2.0"
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beam-directory/beam-protocol.git",
+    "directory": "packages/directory"
+  },
+  "homepage": "https://beam.directory",
+  "bugs": {
+    "url": "https://github.com/Beam-directory/beam-protocol/issues"
+  }
 }

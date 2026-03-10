@@ -130,10 +130,11 @@ Verifiable Credentials are issued for each verification — W3C standard, crypto
 Beam doesn't use chat messages. It uses **intents** — structured, signed, machine-readable:
 
 ```typescript
-await client.send('courier@speedbike.beam.directory', {
-  intent: 'delivery.request',
-  payload: { pickup: 'Hauptstr. 12', items: 3 }
-})
+await client.send(
+  'courier@speedbike.beam.directory',
+  'delivery.request',
+  { pickup: 'Hauptstr. 12', items: 3 }
+)
 ```
 
 Every intent is:
@@ -199,22 +200,31 @@ npm install beam-protocol-sdk
 ```typescript
 import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
 
-// Create identity + register
-const identity = BeamIdentity.create({ agentName: 'my-agent' })
-const client = new BeamClient({
-  identity: identity.export(),
-  directoryUrl: 'https://api.beam.directory'
-})
-await client.register('my-agent', ['chat', 'task.execute'])
+async function main() {
+  const identity = BeamIdentity.generate({ agentName: 'my-agent', orgName: 'my-org' })
+  const client = new BeamClient({
+    identity: identity.export(),
+    directoryUrl: 'https://api.beam.directory'
+  })
 
-// Send an intent to another agent
-const result = await client.talk('assistant@beam.directory', 'Hello from Beam!')
+  await client.register('My Agent', ['chat', 'task.execute'])
 
-// Listen for incoming intents
-client.onIntent((intent) => {
-  console.log(`${intent.from}: ${intent.intent}`)
-  return { status: 'ok', data: 'Handled!' }
-})
+  const result = await client.send(
+    'assistant@beam.directory',
+    'summarize',
+    { url: 'https://example.com' }
+  )
+  console.log(result)
+
+  client.on('task.execute', async (frame, respond) => {
+    console.log(`${frame.from} -> ${frame.intent}`)
+    respond({ success: true, payload: { ok: true } })
+  })
+
+  await client.connect()
+}
+
+main().catch(console.error)
 ```
 
 ### Python
@@ -224,17 +234,24 @@ pip install beam-directory
 ```
 
 ```python
+import asyncio
 from beam_directory import BeamClient, BeamIdentity
 
-identity = BeamIdentity.create(agent_name="my-agent")
-client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
-await client.register()
+async def main() -> None:
+    identity = BeamIdentity.generate(agent_name="my-agent", org_name="my-org")
+    client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
 
-result = await client.send(
-    to="assistant@beam.directory",
-    intent="summarize",
-    params={"url": "https://example.com"}
-)
+    await client.register("My Agent", ["summarize"])
+
+    result = await client.send(
+        to="assistant@beam.directory",
+        intent="summarize",
+        params={"url": "https://example.com"},
+    )
+    print(result)
+
+
+asyncio.run(main())
 ```
 
 ### CLI

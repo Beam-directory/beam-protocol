@@ -17,14 +17,14 @@
  * ```
  */
 
-export { initDatabase, type BeamMessage, type BusStats } from './db.js'
+export { cleanTestMessages, initDatabase, type BeamMessage, type BusStats } from './db.js'
 export { createBusRouter, type RouterOptions } from './router.js'
 export { startRetryWorker, stopRetryWorker, type WorkerOptions } from './worker.js'
 export { loadIdentities, deliverToDirectory, type DeliveryResult } from './delivery.js'
 
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
-import { initDatabase } from './db.js'
+import { cleanTestMessages, initDatabase } from './db.js'
 import { createBusRouter } from './router.js'
 import { startRetryWorker } from './worker.js'
 import { loadIdentities } from './delivery.js'
@@ -68,6 +68,11 @@ export function createBus(options: BusOptions = {}): Bus {
   return {
     async start() {
       const db = initDatabase(dbPath)
+
+      if (process.env.BEAM_BUS_CLEAN_TEST_DATA === 'true') {
+        const deleted = cleanTestMessages(db)
+        console.log(`[beam-bus] Removed ${deleted} test/demo messages before startup`)
+      }
 
       if (identityPath) {
         loadIdentities(identityPath)
