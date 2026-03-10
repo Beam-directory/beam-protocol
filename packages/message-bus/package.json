@@ -1,0 +1,52 @@
+{
+  "name": "@beam-protocol/message-bus",
+  "version": "0.1.0",
+  "description": "Persistent message bus for Beam Protocol — reliable agent-to-agent communication with retry, audit trail, and guaranteed delivery",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    }
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "start": "node dist/server.js",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "beam",
+    "beam-protocol",
+    "message-bus",
+    "agent-communication",
+    "ai-agents",
+    "message-queue",
+    "retry",
+    "audit-trail"
+  ],
+  "license": "AGPL-3.0-or-later",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beam-directory/beam-protocol",
+    "directory": "packages/message-bus"
+  },
+  "bin": {
+    "beam-bus": "dist/server.js"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.12.0",
+    "better-sqlite3": "^11.0.0",
+    "hono": "^4.0.0"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^7.6.0",
+    "typescript": "^5.4.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
