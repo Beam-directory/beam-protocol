@@ -1,3 +1,4 @@
+import { createPublicKey, verify } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
@@ -15,10 +16,16 @@ import {
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { verifyPayload } from './crypto.js'
+import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
-const connections = new Map<string, WebSocket>()
+type ConnectionSession = {
+  ws: WebSocket
+  authenticatedViaApiKey: boolean
+}
+
+const connections = new Map<string, ConnectionSession>()
 const intentFeedSubscribers = new Set<WebSocket>()
 
 const pendingResults = new Map<string, {
@@ -81,29 +88,34 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       return
     }
 
-    const existingWs = connections.get(beamId)
-    if (existingWs && existingWs.readyState === WebSocket.OPEN) {
-      existingWs.close(1001, 'Replaced by new connection')
+    const authenticatedViaApiKey = agentApiKeyMatches(
+      agent,
+      url.searchParams.get('apiKey')?.trim() || getSuppliedApiKey(req),
+    )
+
+    const existingSession = connections.get(beamId)
+    if (existingSession && existingSession.ws.readyState === WebSocket.OPEN) {
+      existingSession.ws.close(1001, 'Replaced by new connection')
     }
 
-    connections.set(beamId, ws)
+    connections.set(beamId, { ws, authenticatedViaApiKey })
     updateLastSeen(db, beamId)
 
-    sendJson(ws, { type: 'connected', beamId })
+    sendJson(ws, { type: 'connected', beamId, auth: authenticatedViaApiKey ? 'api_key' : 'identity' })
 
     ws.on('message', (data: Buffer) => {
-      void handleMessage(db, beamId, ws, data)
+      void handleMessage(db, beamId, ws, data, { authenticatedViaApiKey })
     })
 
     ws.on('close', () => {
-      if (connections.get(beamId) === ws) {
+      if (connections.get(beamId)?.ws === ws) {
         connections.delete(beamId)
       }
     })
 
     ws.on('error', (err: Error) => {
       console.error(`WebSocket error for ${beamId}:`, err)
-      if (connections.get(beamId) === ws) {
+      if (connections.get(beamId)?.ws === ws) {
         connections.delete(beamId)
       }
     })
@@ -117,13 +129,13 @@ export function getConnectedCount(): number {
 }
 
 export function isAgentConnected(beamId: string): boolean {
-  const ws = connections.get(beamId)
-  return Boolean(ws && ws.readyState === WebSocket.OPEN)
+  const session = connections.get(beamId)
+  return Boolean(session && session.ws.readyState === WebSocket.OPEN)
 }
 
 export function getConnectedBeamIds(): string[] {
   return Array.from(connections.entries())
-    .filter(([, ws]) => ws.readyState === WebSocket.OPEN)
+    .filter(([, session]) => session.ws.readyState === WebSocket.OPEN)
     .map(([beamId]) => beamId)
 }
 
@@ -173,7 +185,8 @@ export async function relayIntentFromHttp(
     return federatedResult
   }
 
-  const recipientWs = connections.get(prepared.to)
+  const recipientSession = connections.get(prepared.to)
+  const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
     finalizeIntentLog(db, {
       nonce: prepared.nonce,
@@ -237,7 +250,8 @@ async function handleMessage(
   db: Database,
   senderBeamId: string,
   senderWs: WebSocket,
-  data: Buffer
+  data: Buffer,
+  auth: { authenticatedViaApiKey: boolean }
 ): Promise<void> {
   let msg: { type: string; frame: IntentFrame | ResultFrame }
 
@@ -254,7 +268,7 @@ async function handleMessage(
   }
 
   if (msg.type === 'intent') {
-    await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame)
+    await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame, auth)
   } else if (msg.type === 'result') {
     handleResult(msg.frame as ResultFrame)
   } else {
@@ -266,7 +280,8 @@ async function handleIntent(
   db: Database,
   senderBeamId: string,
   senderWs: WebSocket,
-  frame: IntentFrame
+  frame: IntentFrame,
+  auth: { authenticatedViaApiKey: boolean }
 ): Promise<void> {
   let prepared: IntentFrame
   try {
@@ -295,7 +310,7 @@ async function handleIntent(
   }
 
   try {
-    enforceSecurityChecks(db, prepared, senderAgent.public_key)
+    enforceSecurityChecks(db, prepared, senderAgent.public_key, { skipSignatureVerification: auth.authenticatedViaApiKey })
   } catch (err) {
     if (err instanceof RelayError && err.code === 'RATE_LIMITED') {
       sendJson(senderWs, {
@@ -351,7 +366,8 @@ async function handleIntent(
     return
   }
 
-  const recipientWs = connections.get(prepared.to)
+  const recipientSession = connections.get(prepared.to)
+  const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
     finalizeIntentLog(db, {
       nonce: prepared.nonce,
@@ -523,7 +539,10 @@ function normalizeAndValidateFrame(frame: IntentFrame): IntentFrame {
   if (typeof frame.timestamp !== 'string' || frame.timestamp.length === 0) {
     throw new RelayError('BAD_REQUEST', 'timestamp is required')
   }
-  if (typeof frame.signature !== 'string' || frame.signature.length === 0) {
+  if (frame.signature !== undefined && typeof frame.signature !== 'string') {
+    throw new RelayError('BAD_REQUEST', 'signature must be a string when provided')
+  }
+  if (frame.signature === '') {
     throw new RelayError('BAD_REQUEST', 'signature is required')
   }
 
@@ -568,12 +587,17 @@ function resolveIntentSender(db: Database, connectedBeamId: string, frame: Inten
   return senderAgent
 }
 
-function enforceSecurityChecks(db: Database, frame: IntentFrame, senderPublicKey: string): void {
+function enforceSecurityChecks(
+  db: Database,
+  frame: IntentFrame,
+  senderPublicKey: string,
+  options: { skipSignatureVerification?: boolean } = {},
+): void {
   if (!checkAgentRateLimit(frame.from, getRateLimitPerMinute())) {
     throw new RelayError('RATE_LIMITED', `Rate limit exceeded for ${frame.from}`)
   }
 
-  if (!verifyIntentSignature(frame, senderPublicKey)) {
+  if (!options.skipSignatureVerification && !verifyIntentSignature(frame, senderPublicKey)) {
     throw new RelayError('BAD_REQUEST', 'Signature verification failed')
   }
 
@@ -611,20 +635,29 @@ function enforceReplayProtection(db: Database, frame: IntentFrame): void {
 }
 
 function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string): boolean {
-  // K4 FIX: Pass object directly to verifyPayload, not JSON.stringify'd string.
-  // verifyPayload() calls canonicalizeJson() internally which handles deterministic serialization.
-  // Previously: JSON.stringify → string → canonicalizeJson(string) = double-encoded.
-  const signedPayload = {
-    type: 'intent' as const,
+  // K5 FIX: Use JSON.stringify with insertion-order keys to match SDK's signFrame().
+  // The SDK signs {type, from, to, intent, payload, timestamp, nonce} via JSON.stringify (NO sorting).
+  // Previously: verifyPayload() called canonicalizeJson() which sorted keys → mismatch with SDK signatures.
+  const signedPayloadStr = JSON.stringify({
+    type: 'intent',
     from: frame.from,
     to: frame.to,
     intent: frame.intent,
     payload: frame.payload,
     timestamp: frame.timestamp,
     nonce: frame.nonce,
-  }
+  })
 
-  return verifyPayload(signedPayload, frame.signature ?? '', senderPublicKeyBase64)
+  try {
+    const keyObject = createPublicKey({
+      key: Buffer.from(senderPublicKeyBase64, 'base64'),
+      format: 'der',
+      type: 'spki',
+    })
+    return verify(null, Buffer.from(signedPayloadStr, 'utf8'), keyObject, Buffer.from(frame.signature ?? '', 'base64'))
+  } catch {
+    return false
+  }
 }
 
 function handleResult(frame: ResultFrame): void {
