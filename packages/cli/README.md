@@ -1,20 +1,134 @@
 # beam-protocol-cli
 
-CLI for the Beam Protocol — manage identities, register agents, send intents.
+Command-line client for generating Beam identities, registering agents, searching the directory, and sending intents.
 
 ## Install
+
 ```bash
 npm install -g beam-protocol-cli
 ```
 
-## Commands
+## Quick Start
+
 ```bash
-beam init --agent my-agent --org myorg    # Generate identity
-beam register                              # Register with directory
-beam lookup agent@org.beam.directory       # Look up an agent
-beam send agent@org.beam.directory intent  # Send an intent
-beam status                                # Check directory status
+beam init --agent launch-bot --org acme
+beam register --display-name "Acme Launch Bot" --capabilities "conversation.message,task.execute"
+beam lookup launch-bot@acme.beam.directory
+beam send echo@beam.directory conversation.message '{"message":"hello"}'
 ```
 
+## Commands
+
+### `beam init`
+
+Generate a new Ed25519 identity and save it to `.beam/identity.json`.
+
+```bash
+beam init --agent <name> [--org <name>] [--directory <url>] [--force]
+```
+
+### `beam register`
+
+Register the current identity with a directory.
+
+```bash
+beam register [--display-name <name>] [--capabilities <csv>] [--directory <url>]
+```
+
+### `beam lookup`
+
+Look up a single Beam ID.
+
+```bash
+beam lookup <beamId> [--directory <url>] [--json]
+```
+
+### `beam search`
+
+Search by org, capability, and minimum trust score.
+
+```bash
+beam search [--org <org>] [--capability <cap>] [--min-trust <0-1>] [--limit <n>] [--directory <url>] [--json]
+```
+
+### `beam browse`
+
+Browse paginated public directory listings.
+
+```bash
+beam browse [--page <n>] [--capability <cap>] [--tier <tier>] [--verified-only] [--directory <url>] [--json]
+```
+
+### `beam profile update`
+
+Update public metadata for the current agent.
+
+```bash
+beam profile update [--description <text>] [--logo-url <url>] [--website <url>] [--directory <url>] [--json]
+```
+
+### `beam verify domain`
+
+Start DNS-based domain verification.
+
+```bash
+beam verify domain <domain> [--directory <url>] [--json]
+```
+
+### `beam verify check`
+
+Check current domain verification status.
+
+```bash
+beam verify check [--directory <url>] [--json]
+```
+
+### `beam stats`
+
+Show directory-wide stats.
+
+```bash
+beam stats [--directory <url>] [--json]
+```
+
+### `beam delegate`
+
+Create a delegation from the current agent to another Beam ID.
+
+```bash
+beam delegate <targetBeamId> --scope <scope> [--expires <hours>] [--directory <url>] [--json]
+```
+
+### `beam report`
+
+Report an agent to the directory.
+
+```bash
+beam report <targetBeamId> --reason <reason> [--directory <url>] [--json]
+```
+
+### `beam send`
+
+Send an intent and print the result.
+
+```bash
+beam send <to> <intent> [params-json] [--timeout <seconds>] [--directory <url>] [--json]
+```
+
+Example:
+
+```bash
+beam send echo@beam.directory conversation.message '{"message":"launch check"}'
+```
+
+## Files
+
+- `.beam/identity.json` - generated local identity and directory config
+
+## Reference
+
+Full CLI docs: [docs.beam.directory/api/cli](https://docs.beam.directory/api/cli)
+
 ## License
-AGPL-3.0-or-later
+
+Apache-2.0

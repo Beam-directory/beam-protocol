@@ -1,21 +1,46 @@
 ---
 name: Bug report
 about: Report a reproducible problem in Beam Protocol
+title: "[Bug] "
 labels: bug
 ---
 
-## Describe the bug
+## Summary
 
-Provide a clear and concise description of the problem.
+Describe the problem in one or two sentences.
 
-## To Reproduce
+## Package
 
-List the steps needed to reproduce the issue.
+Which package is affected?
 
-## Expected behavior
+- `sdk-typescript`
+- `sdk-python`
+- `cli`
+- `directory`
+- `message-bus`
+- other
 
-Describe what you expected to happen instead.
+## Steps to Reproduce
+
+1.
+2.
+3.
+
+## Expected Behavior
+
+What should have happened?
+
+## Actual Behavior
+
+What happened instead? Include exact error messages, logs, or payloads when relevant.
 
 ## Environment
 
-Include relevant details such as OS, Node.js version, package, and Beam Protocol version.
+- Beam Protocol version:
+- Node.js / Python version:
+- OS:
+- Deployment target:
+
+## Additional Context
+
+Add screenshots, traces, config snippets, or links to failing code if they help.

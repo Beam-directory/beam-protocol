@@ -1,73 +1,88 @@
 # Contributing to Beam Protocol
 
-Thanks for your interest in contributing to Beam Protocol.
+Thanks for contributing to Beam Protocol.
 
-Beam Protocol is an open-source agent-to-agent communication protocol. This repository contains the protocol specification, SDKs, developer tools, and related project packages that help contributors build interoperable Beam-compatible software.
+## Ground Rules
 
-## Before you start
+- Keep changes focused and reviewable.
+- Prefer docs and tests alongside behavior changes.
+- Do not commit secrets, private keys, or `.beam/` identities.
+- For security issues, do not open a public issue. Report privately to the maintainers.
 
-- Read the protocol spec in `spec/RFC-0001.md`.
-- For protocol-level changes, start an RFC discussion before opening an implementation PR.
-- Keep contributions focused and easy to review.
+## Development Setup
 
-## Development setup
+```bash
+npm install
+npm run build
+npm test
+```
 
-Beam Protocol uses npm workspaces with multiple packages under `packages/`.
+For the local directory server:
 
-1. Clone the repository:
+```bash
+npm run build --workspace=packages/directory
+JWT_SECRET=local-dev-secret npm run start --workspace=packages/directory
+```
 
-   ```bash
-   git clone https://github.com/beam-directory/beam-protocol.git
-   cd beam-protocol
-   ```
+## Repository Structure
 
-2. Install dependencies at the repository root:
+- `packages/sdk-typescript` - TypeScript SDK
+- `packages/sdk-python` - Python SDK
+- `packages/cli` - Beam CLI
+- `packages/directory` - Beam directory server
+- `packages/message-bus` - persistent relay and retry service
+- `examples` - runnable demos
+- `docs` - documentation site
 
-   ```bash
-   npm install
-   ```
+## Making Changes
 
-3. If you are working on a specific package directly, install dependencies there as needed:
+1. Fork the repo and create a branch from `main`.
+2. Make the smallest coherent change that solves the problem.
+3. Update docs if behavior, commands, or configuration changed.
+4. Run the relevant build and test commands before opening a pull request.
 
-   ```bash
-   cd packages/<package-name>
-   npm install
-   ```
+## Pull Requests
 
-4. Build the workspace:
+Include:
 
-   ```bash
-   npm run build
-   ```
+- what changed
+- why it changed
+- how you validated it
+- any follow-up work or known limitations
 
-5. Run tests:
+Small PRs merge faster than broad refactors.
 
-   ```bash
-   npm test
-   ```
+## Testing
 
-## Reporting bugs
+At minimum, run the checks relevant to the packages you touched.
 
-If you find a bug, please open a GitHub Issue with a clear reproduction, expected behavior, and environment details.
+```bash
+npm run build --workspace=packages/sdk-typescript
+npm run test --workspace=packages/sdk-typescript
 
-## Suggesting features
+npm run build --workspace=packages/directory
+npm run build --workspace=packages/message-bus
+```
 
-If you have an idea for an improvement, please open a GitHub Discussion first so the community can review the problem and proposed direction.
+If you add examples or CLI changes, verify the exact commands in the updated README files.
 
-## Pull request guidelines
+## Commit Style
 
-- Use Conventional Commits for commit messages.
-- Keep each pull request limited to one feature or focused fix.
-- Include or update tests for behavioral changes.
-- Update documentation when the user-facing or developer-facing behavior changes.
-- Protocol changes require RFC discussion and agreement before implementation.
+There is no strict commit format requirement, but good commits are:
 
-## Code style and testing
+- scoped to one change
+- written in imperative mood
+- easy to understand from `git log`
 
-- TypeScript code should remain compatible with strict mode.
-- Use Vitest for tests where test coverage exists or new tests are added.
-- Follow the existing project structure and naming conventions in each package.
+## Issues
 
-## Questions
+When filing bugs, include:
 
-If you are unsure where to start, begin with the spec in `spec/RFC-0001.md`, browse open issues, or start a discussion before implementing a larger change.
+- the package and version
+- Node.js or Python version
+- operating system
+- exact reproduction steps
+- expected vs actual behavior
+- logs, stack traces, or failing payloads when relevant
+
+Feature requests are more useful when they explain the user problem, not only the proposed implementation.

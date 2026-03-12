@@ -1,0 +1,15 @@
+{
+  "name": "beam-protocol-examples",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "hello-world": "tsx hello-world/index.ts",
+    "multi-agent": "tsx multi-agent/index.ts",
+    "webhook-bridge": "tsx webhook-bridge/index.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.20.5",
+    "typescript": "^5.9.0"
+  }
+}

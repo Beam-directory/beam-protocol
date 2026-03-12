@@ -1,17 +1,26 @@
 ---
 name: Feature request
-about: Suggest an improvement for Beam Protocol
+about: Suggest an improvement to Beam Protocol
+title: "[Feature] "
 labels: enhancement
 ---
 
 ## Problem
 
-Describe the problem, pain point, or use case.
+What user or operator problem are you trying to solve?
 
-## Proposed solution
+## Proposed Change
 
-Describe the change you would like to see.
+Describe the behavior you want and the surface area it affects.
 
-## Alternatives considered
+## Why It Matters
 
-Describe any alternative approaches or workarounds you considered.
+Explain the value for users, maintainers, or deployers.
+
+## Alternatives Considered
+
+List workarounds, competing approaches, or why the current behavior is not enough.
+
+## Additional Context
+
+Add API sketches, protocol examples, links, or screenshots if useful.
