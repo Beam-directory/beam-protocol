@@ -142,7 +142,7 @@ export function getConnectedBeamIds(): string[] {
 export async function relayIntentFromHttp(
   db: Database,
   frame: IntentFrame,
-  timeoutMs = 60_000,
+  timeoutMs = Number(process.env.RELAY_TIMEOUT_MS || 120_000),
   options: { sourceDirectory?: string; hopCount?: number } = {}
 ): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)

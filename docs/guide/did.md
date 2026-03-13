@@ -95,7 +95,7 @@ The directory issues W3C Verifiable Credentials for each verification:
   "issuer": "did:beam:beam:directory",
   "credentialSubject": {
     "id": "did:beam:coppen:jarvis",
-    "email": "jarvis@coppen.de",
+    "email": "agent@example.com",
     "verified": true
   }
 }
