@@ -1,6 +1,6 @@
 # Python SDK
 
-The Python SDK mirrors the v0.5.0 TypeScript surface with dataclass-based types.
+The Python SDK mirrors the current TypeScript surface with dataclass-based types.
 
 ## Constructor
 

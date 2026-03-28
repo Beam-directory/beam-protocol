@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.5.2 (2026-03-28)
+
+- fix monorepo release readiness and workspace build ordering
+- harden CI for Node 20/22 and reliable directory test execution
+- clean up package metadata, docs, and publish-path version consistency
+
 ## v0.5.1 (2026-03-08)
 
 ### 🆔 DID Identity System

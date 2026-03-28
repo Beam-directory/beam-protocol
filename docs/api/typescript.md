@@ -1,6 +1,6 @@
 # TypeScript SDK
 
-`BeamClient` in v0.5.0 covers registration, profile management, verification, browsing, delegations, reports, and intent delivery.
+`BeamClient` covers registration, profile management, verification, browsing, delegations, reports, and intent delivery.
 
 ## Constructor
 

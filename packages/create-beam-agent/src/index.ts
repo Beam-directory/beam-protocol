@@ -21,7 +21,7 @@ function renderPackageJson(name: string): string {
       start: 'node dist/index.js'
     },
     dependencies: {
-      'beam-protocol-sdk': '^0.5.1'
+      'beam-protocol-sdk': '^0.5.2'
     },
     devDependencies: {
       '@types/node': '^20.11.0',

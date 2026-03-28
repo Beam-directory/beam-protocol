@@ -1,6 +1,6 @@
 {
   "name": "beam-protocol",
-  "version": "0.5.1",
+  "version": "0.5.2",
   "description": "Open Agent-to-Agent communication protocol — SMTP for AI Agents",
   "private": true,
   "workspaces": [
