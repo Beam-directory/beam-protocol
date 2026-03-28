@@ -34,9 +34,30 @@ jobs:
       - name: Test workspaces
         run: npm test
 
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: docs/package-lock.json
+
+      - name: Install docs dependencies
+        working-directory: docs
+        run: npm ci
+
+      - name: Build docs
+        working-directory: docs
+        run: npm run build
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: monorepo
+    needs: [monorepo, docs]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
