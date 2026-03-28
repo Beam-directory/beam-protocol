@@ -1311,7 +1311,7 @@
 
       <div class="code-body">
         <div class="code-panel active" id="tab-ts">
-<pre><span class="kw">import</span> { <span class="fn">BeamIdentity</span>, <span class="fn">BeamClient</span> } <span class="kw">from</span> <span class="str">'@beam-protocol/sdk'</span>
+<pre><span class="kw">import</span> { <span class="fn">BeamIdentity</span>, <span class="fn">BeamClient</span> } <span class="kw">from</span> <span class="str">'beam-protocol-sdk'</span>
 
 <span class="cm">// 1. Generate a Beam identity</span>
 <span class="kw">const</span> identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>({
@@ -1323,7 +1323,7 @@
 <span class="cm">// 2. Connect to the directory</span>
 <span class="kw">const</span> client = <span class="kw">new</span> <span class="fn">BeamClient</span>({
   identity: identity.<span class="fn">export</span>(),
-  directoryUrl: <span class="str">'wss://dir.beam.directory'</span>,
+  directoryUrl: <span class="str">'https://api.beam.directory'</span>,
 })
 <span class="kw">await</span> client.<span class="fn">connect</span>()
 
@@ -1350,7 +1350,7 @@ identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>
 <span class="cm"># 2. Connect to the directory</span>
 client = <span class="fn">BeamClient</span>(
     identity=identity,
-    directory_url=<span class="str">"wss://dir.beam.directory"</span>
+    directory_url=<span class="str">"https://api.beam.directory"</span>
 )
 <span class="kw">await</span> client.<span class="fn">connect</span>()
 
@@ -1358,7 +1358,7 @@ client = <span class="fn">BeamClient</span>(
 result = <span class="kw">await</span> client.<span class="fn">send</span>(
     to=<span class="str">"clara@acme.beam.directory"</span>,
     intent=<span class="str">"payment.status_check"</span>,
-    payload={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
+    params={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
 )
 <span class="fn">print</span>(result.payload)
 <span class="cm"># → {"status": "paid", "amount": 2185.00}</span></pre>
@@ -1366,7 +1366,7 @@ result = <span class="kw">await</span> client.<span class="fn">send</span>(
 
         <div class="code-panel" id="tab-cli">
 <pre><span class="cm"># Install</span>
-$ <span class="fn">npm install -g</span> @beam-protocol/cli
+$ <span class="fn">npm install -g</span> beam-protocol-cli
 
 <span class="cm"># Generate identity</span>
 $ <span class="fn">beam init</span> --agent jarvis --org acme

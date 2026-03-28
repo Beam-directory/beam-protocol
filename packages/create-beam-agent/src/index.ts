@@ -21,7 +21,7 @@ function renderPackageJson(name: string): string {
       start: 'node dist/index.js'
     },
     dependencies: {
-      'beam-protocol-sdk': '^0.5.0'
+      'beam-protocol-sdk': '^0.5.1'
     },
     devDependencies: {
       '@types/node': '^20.11.0',
@@ -58,20 +58,20 @@ async function main(): Promise<void> {
       type: 'text',
       name: 'agentName',
       message: 'Agent name',
-      validate: (value) => valid(slug(value)) ? true : 'Use letters, numbers, underscores, or hyphens'
+      validate: (value: string) => valid(slug(value)) ? true : 'Use letters, numbers, underscores, or hyphens'
     },
     {
       type: 'text',
       name: 'orgName',
       message: 'Org name',
-      validate: (value) => valid(slug(value)) ? true : 'Use letters, numbers, underscores, or hyphens'
+      validate: (value: string) => valid(slug(value)) ? true : 'Use letters, numbers, underscores, or hyphens'
     },
     {
       type: 'text',
       name: 'directoryUrl',
       message: 'Beam directory URL',
       initial: DEFAULT_DIRECTORY_URL,
-      validate: (value) => value.startsWith('http://') || value.startsWith('https://') ? true : 'Use http:// or https://'
+      validate: (value: string) => value.startsWith('http://') || value.startsWith('https://') ? true : 'Use http:// or https://'
     }
   ], { onCancel: () => { process.exit(1) } })
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module'
 import { Command } from 'commander'
 import chalk from 'chalk'
 import { cmdInit } from './commands/init.js'
@@ -13,7 +14,10 @@ import { cmdVerifyCheck } from './commands/verify-check.js'
 import { cmdStats } from './commands/stats.js'
 import { cmdDelegate } from './commands/delegate.js'
 import { cmdReport } from './commands/report.js'
+import { cmdTalk } from './commands/talk.js'
 
+const require = createRequire(import.meta.url)
+const { version } = require('../package.json') as { version: string }
 const program = new Command()
 
 program
@@ -22,27 +26,38 @@ program
     chalk.bold('Beam Protocol CLI') + '\n' +
     chalk.dim('SMTP for AI Agents — agent identity, registration & intent routing')
   )
-  .version('0.5.0')
+  .version(version)
 
 program
   .command('init')
   .description('Generate a new Beam identity (writes .beam/identity.json)')
-  .requiredOption('-a, --agent <name>', 'Agent name (e.g. jarvis)')
+  .option('-a, --agent <name>', 'Agent name (e.g. jarvis)')
+  .option('-n, --name <name>', 'Alias for --agent')
   .option('-o, --org <name>', 'Organisation name (optional for consumer Beam-IDs)')
   .option('-d, --directory <url>', 'Directory server URL', process.env['BEAM_DIRECTORY_URL'] ?? 'https://api.beam.directory')
   .option('-f, --force', 'Overwrite existing identity')
-  .action(async (opts: { agent: string; org?: string; directory?: string; force?: boolean }) => {
-    await cmdInit(opts)
+  .action(async (opts: { agent?: string; name?: string; org?: string; directory?: string; force?: boolean }) => {
+    const agent = opts.agent ?? opts.name
+    if (!agent) {
+      throw new Error('init requires --agent <name>')
+    }
+
+    await cmdInit({ agent, org: opts.org, directory: opts.directory, force: opts.force })
   })
 
 program
   .command('register')
   .description('Register this agent with a Beam directory')
   .option('-n, --display-name <name>', 'Human-readable display name')
+  .option('--name <name>', 'Alias for --display-name')
   .option('-c, --capabilities <list>', 'Comma-separated capabilities (e.g. query,answer,write)')
   .option('-d, --directory <url>', 'Override directory URL')
-  .action(async (opts: { displayName?: string; capabilities?: string; directory?: string }) => {
-    await cmdRegister(opts)
+  .action(async (opts: { displayName?: string; name?: string; capabilities?: string; directory?: string }) => {
+    await cmdRegister({
+      displayName: opts.displayName ?? opts.name,
+      capabilities: opts.capabilities,
+      directory: opts.directory,
+    })
   })
 
 program
@@ -150,6 +165,18 @@ program
   .option('--json', 'Output raw JSON')
   .action(async (to: string, intent: string, params: string | undefined, opts: { directory?: string; timeout?: string; json?: boolean }) => {
     await cmdSend(to, intent, params, opts)
+  })
+
+program
+  .command('talk <to> <message>')
+  .description('Send a natural-language message via conversation.message')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('-t, --timeout <seconds>', 'Timeout in seconds', '60')
+  .option('-l, --language <language>', 'Language hint, e.g. en or de')
+  .option('-c, --context <json>', 'Optional context JSON object')
+  .option('--json', 'Output raw JSON')
+  .action(async (to: string, message: string, opts: { directory?: string; timeout?: string; language?: string; context?: string; json?: boolean }) => {
+    await cmdTalk(to, message, opts)
   })
 
 program.configureOutput({

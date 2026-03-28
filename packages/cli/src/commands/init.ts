@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamIdentity } from '@beam-protocol/sdk'
+import { BeamIdentity } from 'beam-protocol-sdk'
 import { configExists, saveConfig, DEFAULT_DIRECTORY_URL } from '../config.js'
 
 interface InitOptions {
@@ -56,6 +56,6 @@ export async function cmdInit(options: InitOptions): Promise<void> {
   console.log('')
   console.log(
     chalk.green('Next step:'),
-    `beam register --display-name "${org ? agent : 'My Consumer Agent'}" --capabilities "query,answer"`
+    `beam register --display-name "${org ? agent : 'My Consumer Agent'}" --capabilities "conversation.message,agent.ping"`
   )
 }

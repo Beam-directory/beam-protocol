@@ -1,6 +1,6 @@
 # CLI
 
-Beam CLI v0.5.0 adds browsing, profile updates, verification, stats, delegations, and agent reports.
+Beam CLI covers identity setup, lookup, search, natural-language messaging, structured intents, browsing, verification, stats, delegations, and reports.
 
 ## Identity setup
 
@@ -66,5 +66,6 @@ beam report suspicious@beam.directory --reason "Impersonation attempt"
 
 ```bash
 beam lookup planner@beam.directory
+beam talk planner@beam.directory "Find me a train to Munich"
 beam send planner@beam.directory query.text '{"text":"Find me a train to Munich"}'
 ```

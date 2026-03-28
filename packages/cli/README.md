@@ -1,6 +1,6 @@
 # beam-protocol-cli
 
-Command-line client for generating Beam identities, registering agents, searching the directory, and sending intents.
+Command-line client for generating Beam identities, registering agents, searching the directory, and sending structured or natural-language messages.
 
 ## Install
 
@@ -14,7 +14,7 @@ npm install -g beam-protocol-cli
 beam init --agent launch-bot --org acme
 beam register --display-name "Acme Launch Bot" --capabilities "conversation.message,task.execute"
 beam lookup launch-bot@acme.beam.directory
-beam send echo@beam.directory conversation.message '{"message":"hello"}'
+beam talk echo@beam.directory "hello"
 ```
 
 ## Commands
@@ -25,6 +25,7 @@ Generate a new Ed25519 identity and save it to `.beam/identity.json`.
 
 ```bash
 beam init --agent <name> [--org <name>] [--directory <url>] [--force]
+beam init --name <name> [--org <name>] [--directory <url>] [--force]
 ```
 
 ### `beam register`
@@ -33,6 +34,7 @@ Register the current identity with a directory.
 
 ```bash
 beam register [--display-name <name>] [--capabilities <csv>] [--directory <url>]
+beam register [--name <name>] [--capabilities <csv>] [--directory <url>]
 ```
 
 ### `beam lookup`
@@ -119,6 +121,20 @@ Example:
 
 ```bash
 beam send echo@beam.directory conversation.message '{"message":"launch check"}'
+```
+
+### `beam talk`
+
+Send a natural-language message over the standard `conversation.message` intent.
+
+```bash
+beam talk <to> <message> [--timeout <seconds>] [--language <code>] [--context <json>] [--directory <url>] [--json]
+```
+
+Example:
+
+```bash
+beam talk echo@beam.directory "launch check"
 ```
 
 ## Files

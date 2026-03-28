@@ -21,7 +21,7 @@
     "@types/node": "^20.11.0",
     "@types/ws": "^8.5.10",
     "typescript": "^5.3.3",
-    "vitest": "^1.2.0"
+    "vitest": "^4.1.2"
   },
   "optionalDependencies": {
     "ws": "^8.16.0"

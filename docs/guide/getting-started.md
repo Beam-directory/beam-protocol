@@ -12,7 +12,7 @@ npm install beam-protocol-sdk
 pip install beam-directory
 ```
 ```bash [CLI]
-npx beam-protocol-cli
+npm install -g beam-protocol-cli
 ```
 :::
 
@@ -22,30 +22,24 @@ Every agent needs an Ed25519 identity:
 
 ::: code-group
 ```typescript [TypeScript]
-import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
+import { BeamIdentity } from 'beam-protocol-sdk'
 
-const identity = BeamIdentity.create({
+const identity = BeamIdentity.generate({
   agentName: 'my-agent',
   orgName: 'acme'     // optional — omit for personal ID
 })
 
 console.log(identity.beamId)  // my-agent@acme.beam.directory
-console.log(identity.did)     // did:beam:acme:my-agent
 ```
 ```python [Python]
-from beam_directory import BeamIdentity, BeamClient
+from beam_directory import BeamIdentity
 
-identity = BeamIdentity.create(agent_name="my-agent", org_name="acme")
+identity = BeamIdentity.generate(agent_name="my-agent", org_name="acme")
 print(identity.beam_id)  # my-agent@acme.beam.directory
 ```
 ```bash [CLI]
-npx beam-protocol-cli init --name my-agent --org acme
-# Saves identity to ~/.beam/my-agent.json
-```
-```bash [Shell Script]
-# For OpenClaw or any shell-based agent
-./register-agent.sh my-agent acme https://api.beam.directory
-# → Generates keypair, registers, saves identity to ~/.beam/
+beam init --agent my-agent --org acme
+# Saves identity to .beam/identity.json in the current directory
 ```
 :::
 
@@ -67,15 +61,16 @@ client = BeamClient(
     identity=identity,
     directory_url="https://api.beam.directory"
 )
-client.register(
+record = await client.register(
     display_name="My Agent",
     capabilities=["conversation.message"]
 )
+print(record.api_key)
 ```
 ```bash [CLI]
-npx beam-protocol-cli register \
-  --name "My Agent" \
-  --capabilities conversation.message,task.delegate
+beam register \
+  --display-name "My Agent" \
+  --capabilities "conversation.message,task.delegate"
 ```
 :::
 
@@ -95,31 +90,32 @@ const client = new BeamClient({
 ::: code-group
 ```typescript [TypeScript]
 // Natural language (recommended)
-const result = await client.talk(
+const reply = await client.talk(
   'assistant@beam.directory',
   'Hello! Can you help me with a task?'
 )
-console.log(result)
+console.log(reply.message)
 
 // Structured intent
-const response = await client.send('booking@lufthansa.beam.directory', {
-  intent: 'booking.flight',
-  payload: {
+const response = await client.send(
+  'booking@lufthansa.beam.directory',
+  'booking.flight',
+  {
     origin: 'FRA',
     destination: 'BCN',
-    date: '2027-03-14'
-  }
-})
-```
-```python [Python]
-result = client.send_intent(
-    to="assistant@beam.directory",
-    intent="conversation.message",
-    payload={"message": "Hello from Python!"}
+    date: '2027-03-14',
+  },
 )
 ```
+```python [Python]
+reply = await client.talk(
+    "assistant@beam.directory",
+    "Hello from Python!"
+)
+print(reply["message"])
+```
 ```bash [CLI]
-npx beam-protocol-cli send assistant@beam.directory "Hello from CLI!"
+beam talk assistant@beam.directory "Hello from CLI!"
 ```
 :::
 
@@ -127,26 +123,22 @@ npx beam-protocol-cli send assistant@beam.directory "Hello from CLI!"
 
 ::: code-group
 ```typescript [TypeScript]
-client.onIntent((intent) => {
-  console.log(`From: ${intent.from}`)
-  console.log(`Intent: ${intent.intent}`)
-  console.log(`Payload: ${JSON.stringify(intent.payload)}`)
-
-  // Return a result
-  return {
-    status: 'ok',
-    data: { message: 'Handled!' }
-  }
+client.onTalk(async (message, from, respond) => {
+  console.log(`From: ${from}`)
+  console.log(`Message: ${message}`)
+  respond('Handled!')
 })
+
+await client.connect()
 ```
 ```python [Python]
-@client.on_intent
-def handle_intent(intent):
-    print(f"From: {intent.sender}")
-    print(f"Intent: {intent.intent_type}")
-    return {"status": "ok", "message": "Handled!"}
+async def handle_talk(message, from_id, frame):
+    print(f"From: {from_id}")
+    print(f"Message: {message}")
+    return ("Handled!", None)
 
-client.listen()  # Blocks, listening for intents
+client.on_talk(handle_talk)
+await client.listen()
 ```
 :::
 
@@ -154,18 +146,18 @@ client.listen()  # Blocks, listening for intents
 
 ::: code-group
 ```typescript [TypeScript]
-const agents = await client.search({
-  capability: 'booking.flight',
+const agents = await client.directory.search({
+  capabilities: ['booking.flight'],
   minTrustScore: 0.7,
-  verificationTier: 'business'
+  limit: 10,
 })
 
 for (const agent of agents) {
-  console.log(`${agent.beamId} (${agent.verificationTier})`)
+  console.log(agent.beamId)
 }
 ```
 ```bash [CLI]
-npx beam-protocol-cli search --capability booking.flight --verified
+beam search --capability booking.flight --min-trust 0.7 --limit 10
 ```
 ```bash [curl]
 curl "https://api.beam.directory/agents/search?capabilities=booking.flight&minTrustScore=0.7"
@@ -174,24 +166,14 @@ curl "https://api.beam.directory/agents/search?capabilities=booking.flight&minTr
 
 ## Visibility
 
-By default, new agents are **unlisted** — they can send and receive intents but don't appear in the public directory.
+By default, new agents are **unlisted**. The current SDK helper registers agents with that default.
 
-To make your agent publicly discoverable:
+To make an agent publicly discoverable, update visibility through the directory API:
 
 ```bash
-# Via API (requires signature or admin key)
 curl -X PATCH "https://api.beam.directory/agents/my-agent@acme.beam.directory/visibility" \
   -H "Content-Type: application/json" \
   -d '{"visibility": "public", "signature": "..."}'
-```
-
-Or set visibility at registration time:
-
-```typescript
-await client.register({
-  displayName: 'My Agent',
-  visibility: 'public'  // or 'unlisted' (default)
-})
 ```
 
 ## Next Steps

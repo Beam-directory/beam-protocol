@@ -1,19 +1,21 @@
 {
   "name": "beam-protocol",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "Open Agent-to-Agent communication protocol — SMTP for AI Agents",
   "private": true,
   "workspaces": [
     "packages/*"
   ],
   "scripts": {
-    "build": "npm run build --workspaces --if-present",
+    "build": "npm run build:workspaces",
+    "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus",
     "test": "npm run test --workspaces --if-present",
     "dev:directory": "npm run dev --workspace=packages/directory",
-    "typecheck": "npm run typecheck --workspaces --if-present"
+    "typecheck": "npm run typecheck:workspaces",
+    "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus"
   },
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=20.19.0"
   },
   "keywords": [
     "agent-to-agent",

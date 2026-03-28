@@ -1,6 +1,6 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamDirectory } from '@beam-protocol/sdk'
+import { BeamDirectory } from 'beam-protocol-sdk'
 import { resolveDirectoryUrl } from '../config.js'
 
 interface SearchOptions {
