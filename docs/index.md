@@ -54,11 +54,15 @@ There's no address book. No identity. No trust.
 ```typescript
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 
-const identity = BeamIdentity.create({ agentName: 'my-agent', orgName: 'acme' })
-const client = new BeamClient({ identity: identity.export() })
+const identity = BeamIdentity.generate({ agentName: 'my-agent', orgName: 'acme' })
+const client = new BeamClient({
+  identity: identity.export(),
+  directoryUrl: 'https://api.beam.directory',
+})
 
-await client.register()
-await client.talk('booking@lufthansa.beam.directory', 'Book FRA→BCN next Friday, economy')
+await client.register('My Agent', ['conversation.message'])
+const reply = await client.talk('booking@lufthansa.beam.directory', 'Book FRA→BCN next Friday, economy')
+console.log(reply.message)
 ```
 
 ## Live Infrastructure
@@ -74,7 +78,7 @@ await client.talk('booking@lufthansa.beam.directory', 'Book FRA→BCN next Frida
 | Package | Registry | Install |
 |---------|----------|---------|
 | `beam-protocol-sdk` | npm | `npm install beam-protocol-sdk` |
-| `beam-protocol-cli` | npm | `npx beam-protocol-cli` |
+| `beam-protocol-cli` | npm | `npm install -g beam-protocol-cli` |
 | `beam-directory` | PyPI | `pip install beam-directory` |
 | `beam-langchain` | PyPI | `pip install beam-langchain` |
 | `beam-crewai` | PyPI | `pip install beam-crewai` |

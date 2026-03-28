@@ -7,6 +7,7 @@
     "beam": "./dist/index.js"
   },
   "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "scripts": {
     "build": "tsc",
     "dev": "node --watch dist/index.js",
@@ -14,7 +15,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
-    "@beam-protocol/sdk": "*",
+    "beam-protocol-sdk": "^0.5.1",
     "chalk": "^5.3.0",
     "commander": "^12.0.0",
     "inquirer": "^9.2.15",
@@ -27,6 +28,17 @@
   "engines": {
     "node": ">=18.0.0"
   },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beam-directory/beam-protocol.git",
+    "directory": "packages/cli"
+  },
+  "homepage": "https://beam.directory",
   "license": "Apache-2.0",
   "keywords": [
     "beam-protocol",

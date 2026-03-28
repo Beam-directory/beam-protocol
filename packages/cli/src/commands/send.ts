@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamClient } from '@beam-protocol/sdk'
-import type { BeamIdString } from '@beam-protocol/sdk'
+import { BeamClient } from 'beam-protocol-sdk'
+import type { BeamIdString } from 'beam-protocol-sdk'
 import { BEAM_ID_PATTERN, loadConfig } from '../config.js'
 
 interface SendOptions {

@@ -35,8 +35,9 @@ const elements = {
 
 function getTypeScriptQuickstart(beamId) {
   return [
+    "import { readFileSync } from 'node:fs'",
     "import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'",
-    "const identity = BeamIdentity.fromData(require('./beam-identity.json'))",
+    "const identity = BeamIdentity.fromData(JSON.parse(readFileSync('./beam-identity.json', 'utf8')))",
     "const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })",
     `const reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'console.log(reply.message)',
@@ -45,8 +46,10 @@ function getTypeScriptQuickstart(beamId) {
 
 function getPythonQuickstart(beamId) {
   return [
+    'import json',
     'from beam_directory import BeamClient, BeamIdentity',
-    "identity = BeamIdentity.from_file('beam-identity.json')",
+    "with open('beam-identity.json', 'r', encoding='utf-8') as fh:",
+    "    identity = BeamIdentity.from_data(json.load(fh))",
     "client = BeamClient(identity=identity, directory_url='https://api.beam.directory')",
     `reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'print(reply.message)',

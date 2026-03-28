@@ -4,7 +4,7 @@ Get two agents talking in under 5 minutes.
 
 ## Prerequisites
 
-- Node.js 18+ or Python 3.10+
+- Node.js 20+ or Python 3.10+
 - A terminal
 
 ## Step 1: Start the Directory
@@ -13,9 +13,10 @@ The Directory is the registry where agents find each other.
 
 ```bash
 git clone https://github.com/Beam-directory/beam-protocol.git
-cd beam-protocol/packages/directory
+cd beam-protocol
 npm install
-npm start
+npm run build --workspace=packages/directory
+JWT_SECRET=local-dev-secret npm run start --workspace=packages/directory
 ```
 
 You should see:
@@ -27,7 +28,7 @@ You should see:
 
 ```typescript
 // agent-a.ts
-import { BeamIdentity, BeamClient } from '@beam-protocol/sdk'
+import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
 
 // Generate a new identity (Ed25519 keypair)
 const identity = BeamIdentity.generate({
@@ -41,8 +42,10 @@ console.log(`I am: ${identity.beamId}`)
 // Connect to the directory
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'https://api.beam.directory'
+  directoryUrl: 'http://localhost:3100'
 })
+
+await client.register('Alice', ['greeting.hello'])
 
 await client.connect()
 
@@ -62,7 +65,7 @@ console.log('Alice is listening...')
 
 ```typescript
 // agent-b.ts
-import { BeamIdentity, BeamClient } from '@beam-protocol/sdk'
+import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
 
 const identity = BeamIdentity.generate({
   agentName: 'bob',
@@ -71,10 +74,10 @@ const identity = BeamIdentity.generate({
 
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'https://api.beam.directory'
+  directoryUrl: 'http://localhost:3100'
 })
 
-await client.connect()
+await client.register('Bob', ['conversation.message'])
 
 // Send an intent to Alice
 const result = await client.send(
@@ -106,20 +109,20 @@ That's it. Two agents, talking through Beam Protocol.
 
 ## What Just Happened?
 
-1. Both agents generated **Ed25519 keypairs** (their Beam identities)
-2. Both **registered with the Directory** (via WebSocket)
-3. Bob sent a **signed Intent Frame** to Alice's Beam-ID
-4. The Directory **routed** the message to Alice
-5. Alice processed it and sent back a **signed Result Frame**
-6. All messages were **cryptographically signed** and **replay-protected**
+1. Both agents generated **Ed25519 keypairs**.
+2. Both agents **registered with the local Directory** over HTTP.
+3. Alice connected over **WebSocket** so the Directory could deliver incoming intents.
+4. Bob sent a **signed Intent Frame** to Alice's Beam ID.
+5. Alice processed it and sent back a **signed Result Frame**.
+6. The exchange stayed **cryptographically signed** and **replay-protected** end to end.
 
 ## Next Steps
 
 - Read the [RFC](../spec/RFC-0001.md) for the full protocol specification
 - Explore the [Intent Catalog](../intents/catalog.yaml) for standard intent types
-- Try the [CLI](../packages/cli/) for quick testing: `beam send alice@demo.beam.directory greeting.hello`
+- Try the [CLI](../packages/cli/) for quick testing: `beam talk alice@demo.beam.directory "hello"`
 - Use [Python](../packages/sdk-python/) if that's your stack
-- Check the [production example](../examples/coppen-registration.ts) for a real-world setup
+- Check [examples/hello-world](../examples/hello-world/README.md) or [examples/multi-agent](../examples/multi-agent/README.md) for runnable repo examples
 
 ## Using with Python
 
@@ -132,16 +135,16 @@ identity = BeamIdentity.generate(
 )
 
 client = BeamClient(
-    identity=identity.export(),
-    directory_url="https://api.beam.directory"
+    identity=identity,
+    directory_url="http://localhost:3100"
 )
 
-await client.connect()
+await client.register("Charlie", ["greeting.hello"])
 
 result = await client.send(
     to="alice@demo.beam.directory",
     intent="greeting.hello",
-    payload={"message": "Hello from Python!"}
+    params={"message": "Hello from Python!"}
 )
 
 print(result.payload)
@@ -155,4 +158,4 @@ Your Agent ──► Beam SDK ──► Directory ──► Other Agent
    └── Ed25519 keypair         └── Routes, verifies, tracks trust
 ```
 
-The Directory is the only infrastructure. Everything else is peer-to-peer via the SDK.
+The Directory is the control plane. Agents still exchange signed frames directly over Beam transports.

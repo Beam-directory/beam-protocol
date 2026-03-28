@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import ora from 'ora'
-import { BeamDirectory } from '@beam-protocol/sdk'
-import type { BeamIdString } from '@beam-protocol/sdk'
+import { BeamDirectory } from 'beam-protocol-sdk'
+import type { BeamIdString } from 'beam-protocol-sdk'
 import { BEAM_ID_PATTERN, resolveDirectoryUrl } from '../config.js'
 
 interface LookupOptions {

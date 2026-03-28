@@ -137,28 +137,41 @@ Issued after business registry verification:
 ### TypeScript
 
 ```typescript
-import { BeamIdentity } from 'beam-protocol-sdk'
+import {
+  BeamClient,
+  BeamIdentity,
+  exportIdentity,
+  generateRecoveryPhrase,
+  importIdentity,
+  recoverFromPhrase,
+} from 'beam-protocol-sdk'
 
-// Create identity (generates Ed25519 keypair + DID)
-const identity = BeamIdentity.create({
+const identity = BeamIdentity.generate({
   agentName: 'my-agent',
   orgName: 'acme'
 })
 
-console.log(identity.beamId)  // my-agent@acme.beam.directory
-console.log(identity.did)     // did:beam:acme:my-agent
+const client = new BeamClient({
+  identity: identity.export(),
+  directoryUrl: 'https://api.beam.directory',
+})
+
+const didDocument = client.did.create()
+
+console.log(identity.beamId)   // my-agent@acme.beam.directory
+console.log(didDocument.id)    // did:beam:acme:my-agent
 
 // Export/import for persistence
-const exported = identity.export()
-const restored = BeamIdentity.fromExport(exported)
+const exported = await exportIdentity(identity.export())
+const restored = BeamIdentity.fromData(await importIdentity(exported))
 
 // Encrypted export
-const encrypted = await identity.exportEncrypted('my-password')
-const decrypted = await BeamIdentity.importEncrypted(encrypted, 'my-password')
+const encrypted = await exportIdentity(identity.export(), 'my-password')
+const decrypted = BeamIdentity.fromData(await importIdentity(encrypted, 'my-password'))
 
 // Recovery phrase (BIP-39)
-const phrase = identity.toRecoveryPhrase()
-const recovered = BeamIdentity.fromRecoveryPhrase(phrase)
+const phrase = generateRecoveryPhrase(identity.export())
+const recovered = BeamIdentity.fromData(recoverFromPhrase(phrase, identity.beamId))
 ```
 
 ### Python
@@ -166,9 +179,9 @@ const recovered = BeamIdentity.fromRecoveryPhrase(phrase)
 ```python
 from beam_directory import BeamIdentity
 
-identity = BeamIdentity.create(agent_name="my-agent", org_name="acme")
+identity = BeamIdentity.generate(agent_name="my-agent", org_name="acme")
 print(identity.beam_id)  # my-agent@acme.beam.directory
-print(identity.did)      # did:beam:acme:my-agent
+# DIDs follow the same shape: did:beam:acme:my-agent
 ```
 
 ## Well-Known DID

@@ -157,9 +157,7 @@ function initSchema(db: DB): void {
       completed_at TEXT,
       round_trip_latency_ms INTEGER,
       status TEXT NOT NULL DEFAULT 'pending',
-      error_code TEXT,
-      FOREIGN KEY (from_beam_id) REFERENCES agents(beam_id),
-      FOREIGN KEY (to_beam_id) REFERENCES agents(beam_id)
+      error_code TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_intent_log_requested_at
@@ -413,6 +411,8 @@ function initSchema(db: DB): void {
     SELECT beam_id, public_key, ?, NULL
     FROM agents
   `).run(backfillKeysCreatedAt)
+
+  ensureFederationSafeIntentLog(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
@@ -422,6 +422,76 @@ function ensureColumn(db: DB, tableName: string, columnName: string, definition:
   }
 
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
+}
+
+function ensureFederationSafeIntentLog(db: DB): void {
+  const foreignKeys = db.prepare(`PRAGMA foreign_key_list(intent_log)`).all() as Array<{ table: string }>
+  if (foreignKeys.length === 0) {
+    return
+  }
+
+  db.exec('PRAGMA foreign_keys = OFF')
+
+  try {
+    const migrate = db.transaction(() => {
+      db.exec('ALTER TABLE intent_log RENAME TO intent_log_legacy')
+      db.exec('DROP INDEX IF EXISTS idx_intent_log_requested_at')
+      db.exec('DROP INDEX IF EXISTS idx_intent_log_from_to')
+      db.exec(`
+        CREATE TABLE intent_log (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          nonce TEXT NOT NULL UNIQUE,
+          from_beam_id TEXT NOT NULL,
+          to_beam_id TEXT NOT NULL,
+          intent_type TEXT NOT NULL,
+          requested_at TEXT NOT NULL,
+          completed_at TEXT,
+          round_trip_latency_ms INTEGER,
+          status TEXT NOT NULL DEFAULT 'pending',
+          error_code TEXT
+        );
+      `)
+      db.exec(`
+        INSERT INTO intent_log (
+          id,
+          nonce,
+          from_beam_id,
+          to_beam_id,
+          intent_type,
+          requested_at,
+          completed_at,
+          round_trip_latency_ms,
+          status,
+          error_code
+        )
+        SELECT
+          id,
+          nonce,
+          from_beam_id,
+          to_beam_id,
+          intent_type,
+          requested_at,
+          completed_at,
+          round_trip_latency_ms,
+          status,
+          error_code
+        FROM intent_log_legacy;
+      `)
+      db.exec('DROP TABLE intent_log_legacy')
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_intent_log_requested_at
+          ON intent_log(requested_at DESC);
+      `)
+      db.exec(`
+        CREATE INDEX IF NOT EXISTS idx_intent_log_from_to
+          ON intent_log(from_beam_id, to_beam_id);
+      `)
+    })
+
+    migrate()
+  } finally {
+    db.exec('PRAGMA foreign_keys = ON')
+  }
 }
 
 function nowIso(): string {

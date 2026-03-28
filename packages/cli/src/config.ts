@@ -1,6 +1,6 @@
 import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
-import type { BeamIdentityData } from '@beam-protocol/sdk'
+import type { BeamIdentityData } from 'beam-protocol-sdk'
 
 export interface BeamConfig {
   identity: BeamIdentityData

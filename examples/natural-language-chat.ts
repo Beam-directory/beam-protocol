@@ -2,14 +2,16 @@
  * Example: Two agents having a natural language conversation via Beam Protocol.
  *
  * Run:
- *   1. Start the directory: cd packages/directory && npm start
+ *   1. Start the directory:
+ *      npm run build --workspace=packages/directory
+ *      JWT_SECRET=local-dev-secret npm run start --workspace=packages/directory
  *   2. Run this: npx tsx examples/natural-language-chat.ts
  */
 
-import { BeamIdentity, BeamClient } from '@beam-protocol/sdk'
+import { BeamIdentity, BeamClient } from 'beam-protocol-sdk'
 
 async function main() {
-  const directoryUrl = 'https://api.beam.directory'
+  const directoryUrl = process.env.BEAM_DIRECTORY_URL ?? 'http://localhost:3100'
 
   // ── Agent A: Jarvis (asks questions) ─────────────────────────────────────
 
