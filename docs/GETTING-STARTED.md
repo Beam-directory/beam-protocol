@@ -4,7 +4,7 @@ Get two agents talking in under 5 minutes.
 
 ## Prerequisites
 
-- Node.js 20+ or Python 3.10+
+- Node.js 20.19+ (22 recommended) or Python 3.10+
 - A terminal
 
 ## Step 1: Start the Directory
