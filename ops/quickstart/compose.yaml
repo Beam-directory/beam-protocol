@@ -1,0 +1,98 @@
+services:
+  directory:
+    build:
+      context: ../../packages/directory
+      dockerfile: Dockerfile
+    environment:
+      PORT: "3100"
+      DB_PATH: /data/beam-directory.db
+      JWT_SECRET: ${JWT_SECRET}
+      BEAM_ADMIN_EMAILS: ${BEAM_ADMIN_EMAILS}
+      BEAM_OPERATOR_EMAILS: ${BEAM_OPERATOR_EMAILS:-}
+      BEAM_VIEWER_EMAILS: ${BEAM_VIEWER_EMAILS:-}
+      BEAM_ADMIN_SESSION_TTL_HOURS: ${BEAM_ADMIN_SESSION_TTL_HOURS:-168}
+      BEAM_DASHBOARD_URL: http://localhost:${DASHBOARD_PORT:-5173}
+      BEAM_DIRECTORY_URL: http://localhost:${DIRECTORY_PORT:-3100}
+      PUBLIC_BASE_URL: http://localhost:${DIRECTORY_PORT:-3100}
+      ECHO_AGENT_SECRET: ${ECHO_AGENT_SECRET}
+    ports:
+      - "${DIRECTORY_PORT:-3100}:3100"
+    volumes:
+      - directory-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  message-bus:
+    build:
+      context: ../../packages/message-bus
+      dockerfile: Dockerfile
+    depends_on:
+      directory:
+        condition: service_healthy
+    environment:
+      PORT: "8420"
+      DB_PATH: /data/beam-bus.sqlite
+      DIRECTORY_URL: http://directory:3100
+      RATE_LIMIT: ${BEAM_BUS_RATE_LIMIT:-50}
+      BEAM_BUS_API_KEY: ${BEAM_BUS_API_KEY}
+      BEAM_BUS_STATS_PUBLIC: "true"
+    ports:
+      - "${MESSAGE_BUS_PORT:-8420}:8420"
+    volumes:
+      - message-bus-data:/data
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8420/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  dashboard:
+    build:
+      context: ../../packages/dashboard
+      dockerfile: Dockerfile
+      args:
+        VITE_API_URL: http://localhost:${DIRECTORY_PORT:-3100}
+        VITE_BEAM_BUS_URL: http://localhost:${MESSAGE_BUS_PORT:-8420}
+    depends_on:
+      directory:
+        condition: service_healthy
+      message-bus:
+        condition: service_healthy
+    ports:
+      - "${DASHBOARD_PORT:-5173}:5173"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+  echo-agent:
+    build:
+      context: ../../packages/echo-agent
+      dockerfile: Dockerfile
+    depends_on:
+      directory:
+        condition: service_healthy
+    environment:
+      PORT: "8788"
+      BEAM_DIRECTORY_URL: http://directory:3100
+      ECHO_AGENT_SECRET: ${ECHO_AGENT_SECRET}
+    ports:
+      - "${ECHO_AGENT_PORT:-8788}:8788"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/echo/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 10s
+
+volumes:
+  directory-data:
+  message-bus-data:
+
