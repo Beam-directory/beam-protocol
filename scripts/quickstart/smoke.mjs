@@ -141,7 +141,8 @@ async function main() {
     await waitForHealth(`${runtime.directoryUrl}/health`, 'directory')
     await waitForHealth(`${runtime.messageBusUrl}/health`, 'message bus')
     await waitForHealth(runtime.echoHealthUrl, 'echo agent')
-    const dashboardHtml = await requestText(`${runtime.dashboardUrl}/`)
+    const dashboardResponse = await waitForHealth(`${runtime.dashboardUrl}/`, 'dashboard')
+    const dashboardHtml = await dashboardResponse.text()
     assert.match(dashboardHtml, /Beam Dashboard/u, 'dashboard root did not return the dashboard HTML shell')
 
     logStep('requesting a local admin magic link')
