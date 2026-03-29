@@ -50,6 +50,18 @@ export interface IntentLogRow {
   error_code: string | null
 }
 
+export interface IntentTraceEventRow {
+  id: number
+  nonce: string
+  from_beam_id: string
+  to_beam_id: string
+  intent_type: string
+  stage: string
+  status: string
+  timestamp: string
+  details: string | null
+}
+
 export interface TrustScoreRow {
   id: number
   source_beam_id: string
@@ -98,6 +110,21 @@ export interface AuditLogRow {
   target: string
   timestamp: string
   details: string
+}
+
+export interface ShieldAuditLogRow {
+  id: number
+  nonce: string | null
+  timestamp: string | null
+  sender_beam_id: string | null
+  sender_trust: number | null
+  intent_type: string | null
+  payload_hash: string | null
+  decision: string | null
+  risk_score: number | null
+  response_size: number | null
+  anomaly_flags: string | null
+  created_at: string
 }
 
 export interface DnsCacheRow {

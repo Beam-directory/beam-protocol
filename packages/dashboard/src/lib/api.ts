@@ -1,4 +1,7 @@
 export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
+export type AlertSeverity = 'info' | 'warning' | 'critical'
+export type ExportDataset = 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
+export type ExportFormat = 'json' | 'csv' | 'ndjson'
 
 export interface DirectoryAgent {
   beamId: string
@@ -61,6 +64,253 @@ export interface RecentIntent {
 export interface RecentIntentsResponse {
   intents: RecentIntent[]
   total: number
+}
+
+export interface IntentTraceStage {
+  id: number
+  nonce: string
+  from: string
+  to: string
+  intentType: string
+  stage: string
+  status: string
+  timestamp: string
+  details: Record<string, unknown> | null
+}
+
+export interface AuditEntry {
+  id: number
+  action: string
+  actor: string
+  target: string
+  timestamp: string
+  details: Record<string, unknown> | null
+}
+
+export interface ShieldAuditEntry {
+  id: number
+  nonce: string | null
+  timestamp: string | null
+  senderBeamId: string | null
+  senderTrust: number | null
+  intentType: string | null
+  payloadHash: string | null
+  decision: string | null
+  riskScore: number | null
+  responseSize: number | null
+  anomalyFlags: string[]
+  createdAt: string
+}
+
+export interface AlertItem {
+  id: string
+  severity: AlertSeverity
+  title: string
+  scope: 'network' | 'agent' | 'federation' | 'shield'
+  message: string
+  metric: string
+  value: number
+  threshold: number
+  startedAt: string
+}
+
+export interface OverviewTimelinePoint {
+  bucketStart: string
+  total: number
+  success: number
+  error: number
+  pending: number
+  p95LatencyMs: number | null
+}
+
+export interface ObservabilityOverview {
+  windowHours: number
+  summary: {
+    totalAgents: number
+    liveAgents: number
+    staleAgents: number
+    federatedAgents: number
+    federationPeers: number
+    totalIntents: number
+    successCount: number
+    errorCount: number
+    pendingCount: number
+    avgLatencyMs: number | null
+    p95LatencyMs: number | null
+    successRate: number
+    pendingOlderThan15m: number
+  }
+  timeline: OverviewTimelinePoint[]
+  topIntents: Array<{
+    intentType: string
+    total: number
+    errors: number
+    avgLatencyMs: number | null
+  }>
+  topErrors: Array<{
+    errorCode: string
+    count: number
+    lastSeenAt: string
+  }>
+  alerts: AlertItem[]
+}
+
+export interface IntentTraceResponse {
+  intent: RecentIntent
+  stages: IntentTraceStage[]
+  audit: AuditEntry[]
+  shield: ShieldAuditEntry[]
+}
+
+export interface AuditResponse {
+  entries: AuditEntry[]
+  total: number
+}
+
+export interface AgentHealthResponse {
+  beamId: string
+  windowHours: number
+  summary: {
+    beamId: string
+    displayName: string
+    trustScore: number
+    verificationTier: VerificationTier
+    lastSeen: string
+    sentCount: number
+    receivedCount: number
+    completedCount: number
+    successRate: number
+    errorRate: number
+    avgLatencyMs: number | null
+    p95LatencyMs: number | null
+    uniqueCounterparties: number
+  }
+  timeline: Array<{
+    bucketStart: string
+    sent: number
+    received: number
+    success: number
+    error: number
+    p95LatencyMs: number | null
+  }>
+  counterparties: Array<{
+    beamId: string
+    outbound: number
+    inbound: number
+    errors: number
+  }>
+  intents: Array<{
+    intentType: string
+    total: number
+    errors: number
+    avgLatencyMs: number | null
+  }>
+  errors: Array<{
+    errorCode: string
+    count: number
+    lastSeenAt: string
+  }>
+  usage: {
+    period: string
+    intentCount: number
+    encryptedCount: number
+    directCount: number
+    relayedCount: number
+  }
+  shield: {
+    total: number
+    passed: number
+    held: number
+    rejected: number
+    highRiskCount: number
+  }
+}
+
+export interface FederationHealthResponse {
+  summary: {
+    peerCount: number
+    activePeers: number
+    stalePeers: number
+    cachedAgents: number
+    trustAssertions: number
+    avgPeerTrust: number
+  }
+  peers: Array<{
+    id: number
+    directoryUrl: string
+    trustLevel: number
+    status: string
+    createdAt: string
+    lastSeen: string | null
+    syncedAt: string | null
+    cachedAgents: number
+    lastCachedAt: string | null
+    trustAssertions: number
+    avgEffectiveTrust: number | null
+    lastAssertedAt: string | null
+    stale: boolean
+  }>
+  agents: Array<{
+    beamId: string
+    directoryUrl: string
+    cachedAt: string
+    ttl: number
+    effectiveTrust: number | null
+  }>
+}
+
+export interface ErrorAnalyticsResponse {
+  windowHours: number
+  summary: {
+    totalErrors: number
+    distinctErrorCodes: number
+    timeoutCount: number
+    offlineCount: number
+    deliveryFailedCount: number
+  }
+  timeline: Array<{
+    bucketStart: string
+    total: number
+  }>
+  codes: Array<{
+    errorCode: string
+    count: number
+    lastSeenAt: string
+    avgLatencyMs: number | null
+    affectedSenders: number
+    affectedRecipients: number
+  }>
+  routes: Array<{
+    route: string
+    count: number
+  }>
+}
+
+export interface AlertsResponse {
+  windowHours: number
+  generatedAt: string
+  alerts: AlertItem[]
+  retention: {
+    defaultDays: number
+    datasets: string[]
+  }
+  exports: Array<{
+    dataset: string
+    formats: string[]
+  }>
+}
+
+export interface RetentionResponse {
+  defaultDays: number
+  datasets: string[]
+}
+
+export interface PruneResponse {
+  dataset: string
+  olderThanDays: number
+  deleted: number
+  intents?: number
+  traces?: number
 }
 
 export interface RegisterAgentInput {
@@ -188,12 +438,18 @@ export interface IntentFeedMessage {
   entry?: RecentIntent
 }
 
+export interface ExportDownload {
+  blob: Blob
+  filename: string
+}
+
 const DEFAULT_DIRECTORY_URL = 'https://api.beam.directory'
+const ADMIN_KEY_STORAGE = 'beam-dashboard-admin-key'
 
 export const DIRECTORY_URL = (import.meta.env.VITE_API_URL || DEFAULT_DIRECTORY_URL).replace(/\/$/, '')
 export const DIRECTORY_WS_URL = DIRECTORY_URL.replace(/^http/, 'ws')
 
-class ApiError extends Error {
+export class ApiError extends Error {
   status: number
   errorCode?: string
 
@@ -204,19 +460,66 @@ class ApiError extends Error {
   }
 }
 
-async function request<T>(path: string, init?: RequestInit): Promise<T> {
+export function getStoredAdminKey(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.localStorage.getItem(ADMIN_KEY_STORAGE) ?? ''
+}
+
+export function setStoredAdminKey(value: string): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const trimmed = value.trim()
+  if (trimmed) {
+    window.localStorage.setItem(ADMIN_KEY_STORAGE, trimmed)
+  } else {
+    window.localStorage.removeItem(ADMIN_KEY_STORAGE)
+  }
+}
+
+export function clearStoredAdminKey(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.removeItem(ADMIN_KEY_STORAGE)
+}
+
+export function hasStoredAdminKey(): boolean {
+  return getStoredAdminKey().length > 0
+}
+
+function buildHeaders(initHeaders?: HeadersInit, options?: { admin?: boolean }): Headers {
+  const headers = new Headers(initHeaders ?? {})
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  if (options?.admin) {
+    const adminKey = getStoredAdminKey()
+    if (adminKey) {
+      headers.set('X-Admin-Key', adminKey)
+    }
+  }
+
+  return headers
+}
+
+async function requestRaw(path: string, init?: RequestInit, options?: { admin?: boolean }): Promise<Response> {
   const response = await fetch(`${DIRECTORY_URL}${path}`, {
-    headers: {
-      'Content-Type': 'application/json',
-      ...(init?.headers ?? {}),
-    },
+    credentials: 'include',
     ...init,
+    headers: buildHeaders(init?.headers, options),
   })
 
   if (!response.ok) {
     let payload: { error?: string; errorCode?: string } | null = null
     try {
-      payload = await response.json()
+      payload = await response.clone().json()
     } catch {
       payload = null
     }
@@ -224,11 +527,36 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     throw new ApiError(payload?.error ?? `Request failed with ${response.status}`, response.status, payload?.errorCode)
   }
 
+  return response
+}
+
+async function request<T>(path: string, init?: RequestInit, options?: { admin?: boolean }): Promise<T> {
+  const response = await requestRaw(path, init, options)
   return response.json() as Promise<T>
 }
 
 function withApiKey(apiKey?: string): HeadersInit | undefined {
   return apiKey ? { Authorization: `Bearer ${apiKey}` } : undefined
+}
+
+function buildQuery(params: Record<string, string | number | undefined | null>): string {
+  const query = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue
+    }
+    query.set(key, String(value))
+  }
+
+  const serialized = query.toString()
+  return serialized ? `?${serialized}` : ''
+}
+
+function getFilenameFromResponse(response: Response, dataset: string, format: ExportFormat): string {
+  const disposition = response.headers.get('content-disposition') ?? ''
+  const match = disposition.match(/filename="([^"]+)"/i)
+  return match?.[1] ?? `beam-${dataset}.${format}`
 }
 
 export const directoryApi = {
@@ -281,6 +609,67 @@ export const directoryApi = {
     headers: withApiKey(apiKey),
     body: JSON.stringify(input),
   }),
+  getObservabilityOverview: (hours = 24) => request<ObservabilityOverview>(`/observability/overview?hours=${hours}`, undefined, { admin: true }),
+  searchObservabilityIntents: (params?: {
+    q?: string
+    from?: string
+    to?: string
+    intentType?: string
+    status?: string
+    errorCode?: string
+    limit?: number
+    hours?: number
+  }) => request<RecentIntentsResponse>(`/observability/intents${buildQuery({
+    q: params?.q,
+    from: params?.from,
+    to: params?.to,
+    intentType: params?.intentType,
+    status: params?.status,
+    errorCode: params?.errorCode,
+    limit: params?.limit,
+    hours: params?.hours,
+  })}`, undefined, { admin: true }),
+  getIntentTrace: (nonce: string) => request<IntentTraceResponse>(`/observability/intents/${encodeURIComponent(nonce)}`, undefined, { admin: true }),
+  getAuditLog: (params?: {
+    q?: string
+    action?: string
+    actor?: string
+    target?: string
+    limit?: number
+    hours?: number
+  }) => request<AuditResponse>(`/observability/audit${buildQuery({
+    q: params?.q,
+    action: params?.action,
+    actor: params?.actor,
+    target: params?.target,
+    limit: params?.limit,
+    hours: params?.hours,
+  })}`, undefined, { admin: true }),
+  getAgentHealth: (beamId: string, hours = 24 * 7) => request<AgentHealthResponse>(`/observability/agents/${encodeURIComponent(beamId)}/health?hours=${hours}`, undefined, { admin: true }),
+  getFederationHealth: () => request<FederationHealthResponse>('/observability/federation', undefined, { admin: true }),
+  getErrorAnalytics: (hours = 24 * 7) => request<ErrorAnalyticsResponse>(`/observability/errors?hours=${hours}`, undefined, { admin: true }),
+  getAlerts: (hours = 24) => request<AlertsResponse>(`/observability/alerts?hours=${hours}`, undefined, { admin: true }),
+  getRetention: () => request<RetentionResponse>('/observability/retention', undefined, { admin: true }),
+  pruneObservability: (dataset: string, olderThanDays: number) => request<PruneResponse>('/observability/prune', {
+    method: 'POST',
+    body: JSON.stringify({ dataset, olderThanDays }),
+  }, { admin: true }),
+  downloadObservabilityExport: async (dataset: ExportDataset, format: ExportFormat, params?: {
+    hours?: number
+    limit?: number
+    q?: string
+  }): Promise<ExportDownload> => {
+    const response = await requestRaw(`/observability/export/${dataset}${buildQuery({
+      format,
+      hours: params?.hours,
+      limit: params?.limit,
+      q: params?.q,
+    })}`, undefined, { admin: true })
+    return {
+      blob: await response.blob(),
+      filename: getFilenameFromResponse(response, dataset, format),
+    }
+  },
 }
 
 export function connectIntentFeed(options: {
@@ -305,5 +694,3 @@ export function connectIntentFeed(options: {
 
   return socket
 }
-
-export { ApiError }

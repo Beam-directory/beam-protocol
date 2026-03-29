@@ -15,10 +15,12 @@ import type {
   FederatedTrustRow,
   IntentFrame,
   IntentLogRow,
+  IntentTraceEventRow,
   OrgAgentRow,
   OrgRow,
   ReportRow,
   RegisterRequest,
+  ShieldAuditLogRow,
   TrustScoreRow,
   VerificationTier,
 } from './types.js'
@@ -165,6 +167,24 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_intent_log_from_to
       ON intent_log(from_beam_id, to_beam_id);
+
+    CREATE TABLE IF NOT EXISTS intent_trace_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nonce TEXT NOT NULL,
+      from_beam_id TEXT NOT NULL,
+      to_beam_id TEXT NOT NULL,
+      intent_type TEXT NOT NULL,
+      stage TEXT NOT NULL,
+      status TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      details TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce
+      ON intent_trace_events(nonce, timestamp ASC, id ASC);
+
+    CREATE INDEX IF NOT EXISTS idx_intent_trace_timestamp
+      ON intent_trace_events(timestamp DESC);
 
     CREATE TABLE IF NOT EXISTS trust_scores (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -333,6 +353,7 @@ function initSchema(db: DB): void {
 
     CREATE TABLE IF NOT EXISTS shield_audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      nonce TEXT,
       timestamp TEXT,
       sender_beam_id TEXT,
       sender_trust REAL,
@@ -347,6 +368,7 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_shield_audit_sender ON shield_audit_log(sender_beam_id);
     CREATE INDEX IF NOT EXISTS idx_shield_audit_created ON shield_audit_log(created_at);
+    CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce);
 
     CREATE TABLE IF NOT EXISTS pinned_keys (
       beam_id TEXT NOT NULL,
@@ -396,6 +418,8 @@ function initSchema(db: DB): void {
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
 
   db.prepare(`
     UPDATE agents
@@ -1438,6 +1462,56 @@ export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
   `).all(safeLimit) as IntentLogRow[]
 }
 
+export function appendIntentTraceEvent(
+  db: DB,
+  input: {
+    nonce: string
+    fromBeamId: string
+    toBeamId: string
+    intentType: string
+    stage: string
+    status: string
+    timestamp?: string
+    details?: unknown
+  },
+): IntentTraceEventRow {
+  const timestamp = input.timestamp ?? nowIso()
+  const details = input.details === undefined ? null : JSON.stringify(input.details)
+
+  const result = db.prepare(`
+    INSERT INTO intent_trace_events (
+      nonce,
+      from_beam_id,
+      to_beam_id,
+      intent_type,
+      stage,
+      status,
+      timestamp,
+      details
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.nonce,
+    input.fromBeamId,
+    input.toBeamId,
+    input.intentType,
+    input.stage,
+    input.status,
+    timestamp,
+    details,
+  )
+
+  return db.prepare('SELECT * FROM intent_trace_events WHERE id = ?').get(Number(result.lastInsertRowid)) as IntentTraceEventRow
+}
+
+export function listIntentTraceEvents(db: DB, nonce: string): IntentTraceEventRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM intent_trace_events
+    WHERE nonce = ?
+    ORDER BY timestamp ASC, id ASC
+  `).all(nonce) as IntentTraceEventRow[]
+}
+
 export function getAgentIntentStats(db: DB, beamId: string): AgentIntentStats {
   const row = db.prepare(`
     SELECT
@@ -1615,6 +1689,35 @@ export function listAuditLog(
     ORDER BY timestamp DESC, id DESC
     LIMIT ${limit}
   `).all(...params) as AuditLogRow[]
+}
+
+export function listShieldAuditLog(
+  db: DB,
+  query: { limit?: number; nonce?: string; senderBeamId?: string } = {}
+): ShieldAuditLogRow[] {
+  const limit = Math.max(1, Math.min(500, Math.trunc(query.limit ?? 100)))
+  const conditions: string[] = []
+  const params: string[] = []
+
+  if (query.nonce) {
+    conditions.push('nonce = ?')
+    params.push(query.nonce)
+  }
+
+  if (query.senderBeamId) {
+    conditions.push('sender_beam_id = ?')
+    params.push(query.senderBeamId)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+
+  return db.prepare(`
+    SELECT *
+    FROM shield_audit_log
+    ${where}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit}
+  `).all(...params) as ShieldAuditLogRow[]
 }
 
 export function getDnsCache(db: DB, cacheKey: string, recordType: string): DnsCacheRow | null {

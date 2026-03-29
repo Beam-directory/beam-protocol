@@ -17,16 +17,18 @@ import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
+import { observabilityRouter } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
-import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
+import { finalizeIntentLog, getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores, getDIDDocument, getAgent, logIntentStart, upsertDIDDocument } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import type { AgentRow, IntentFrame } from './types.js'
+import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
@@ -925,6 +927,7 @@ export function createApp(db: Database): Hono {
   app.route('/federation', federationRouter(db))
   app.route('/billing', billingRouter(db))
   app.route('/shield', shieldRouter(db))
+  app.route('/observability', observabilityRouter(db))
   app.route('/keys', revokedKeysRouter(db))
 
   app.post('/acl', async (c) => {
@@ -1128,7 +1131,23 @@ export function createApp(db: Database): Hono {
       // S4: Check if recipient has HTTP endpoint for direct delivery
       const recipientAgent = db.prepare('SELECT http_endpoint, dh_public_key FROM agents WHERE beam_id = ?').get(frame.to) as { http_endpoint: string | null; dh_public_key: string | null } | undefined
       if (recipientAgent?.http_endpoint) {
+        logIntentStart(db, frame)
+        recordIntentStage(db, frame, 'received', 'pending', {
+          transport: 'http',
+          deliveryTarget: 'direct-http',
+        }, frame.timestamp)
+        recordShieldDecision(db, frame, { timestamp: frame.timestamp })
+        recordIntentStage(db, frame, 'validated', 'success', {
+          transport: 'http',
+          deliveryTarget: 'direct-http',
+        })
+        recordIntentStage(db, frame, 'delivery', 'pending', {
+          transport: 'direct-http',
+          endpoint: recipientAgent.http_endpoint,
+        })
+
         try {
+          const startedAt = Date.now()
           const directResponse = await fetch(recipientAgent.http_endpoint, {
             method: 'POST',
             headers: {
@@ -1149,6 +1168,24 @@ export function createApp(db: Database): Hono {
           })
           if (directResponse.ok) {
             const directResult = await directResponse.json() as Record<string, unknown>
+            const latencyMs = Date.now() - startedAt
+            finalizeIntentLog(db, {
+              nonce: frame.nonce,
+              fromBeamId: frame.from,
+              toBeamId: frame.to,
+              success: true,
+              latencyMs,
+            })
+            recordIntentStage(db, frame, 'delivery', 'success', {
+              transport: 'direct-http',
+              endpoint: recipientAgent.http_endpoint,
+              status: directResponse.status,
+              latencyMs,
+            })
+            recordIntentStage(db, frame, 'completed', 'success', {
+              transport: 'direct-http',
+              latencyMs,
+            })
             // Log as direct delivery
             db.prepare(
               `INSERT OR REPLACE INTO usage_metering (beam_id, period, intent_count, direct_count)
@@ -1157,8 +1194,20 @@ export function createApp(db: Database): Hono {
             ).run(frame.from, new Date().toISOString().slice(0, 7), frame.from, new Date().toISOString().slice(0, 7), frame.from, new Date().toISOString().slice(0, 7))
             return c.json({ ...directResult, delivery: 'direct' })
           }
+          recordIntentStage(db, frame, 'delivery', 'error', {
+            transport: 'direct-http',
+            endpoint: recipientAgent.http_endpoint,
+            status: directResponse.status,
+            errorCode: 'DIRECT_HTTP_FAILED',
+          })
           // Direct delivery failed — fall through to WebSocket relay
-        } catch {
+        } catch (err) {
+          recordIntentStage(db, frame, 'delivery', 'error', {
+            transport: 'direct-http',
+            endpoint: recipientAgent.http_endpoint,
+            errorCode: 'DIRECT_HTTP_FAILED',
+            message: err instanceof Error ? err.message : 'Direct delivery failed',
+          })
           // Direct delivery error — fall through to WebSocket relay
         }
       }

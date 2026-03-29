@@ -17,6 +17,7 @@ import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { verifyPayload } from './crypto.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
+import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 
@@ -153,16 +154,52 @@ export async function relayIntentFromHttp(
     throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
   }
 
+  recordIntentStage(db, prepared, 'received', 'pending', {
+    transport: 'http',
+    sourceDirectory,
+    hopCount,
+  }, prepared.timestamp)
+
   const sender = getAgent(db, prepared.from)
   const senderPublicKey = sender?.public_key ?? await resolveSenderPublicKey(db, prepared.from, sourceDirectory)
 
   if (!senderPublicKey) {
+    recordIntentStage(db, prepared, 'sender_lookup', 'error', {
+      sourceDirectory,
+      errorCode: 'UNKNOWN_SENDER',
+    })
     throw new RelayError('BAD_REQUEST', `Sender ${prepared.from} is not registered`)
   }
 
-  enforceSecurityChecks(db, prepared, senderPublicKey)
+  recordIntentStage(db, prepared, 'sender_lookup', 'success', {
+    sourceDirectory,
+    source: sender ? 'local' : 'federated',
+  })
+
+  try {
+    enforceSecurityChecks(db, prepared, senderPublicKey)
+    recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
+    recordIntentStage(db, prepared, 'validated', 'success', {
+      transport: 'http',
+    })
+  } catch (err) {
+    recordShieldDecision(db, prepared, {
+      decision: 'reject',
+      timestamp: prepared.timestamp,
+      extraFlags: [err instanceof RelayError ? err.code : 'INVALID_INTENT'],
+    })
+    recordIntentStage(db, prepared, 'validated', 'error', {
+      transport: 'http',
+      errorCode: err instanceof RelayError ? err.code : 'INVALID_INTENT',
+      message: err instanceof Error ? err.message : 'Rejected by security checks',
+    })
+    throw err
+  }
 
   logIntentStart(db, prepared)
+  recordIntentStage(db, prepared, 'dispatch', 'pending', {
+    deliveryTarget: 'local-or-federated',
+  })
   broadcastIntentFeed({
     nonce: prepared.nonce,
     from: prepared.from,
@@ -177,6 +214,9 @@ export async function relayIntentFromHttp(
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
+    recordIntentStage(db, prepared, 'dispatch', 'pending', {
+      deliveryTarget: 'federation',
+    })
     const federatedResult = await relayIntentToFederatedPeer(db, prepared, timeoutMs, {
       sourceDirectory,
       hopCount,
@@ -196,6 +236,10 @@ export async function relayIntentFromHttp(
       latencyMs: null,
       errorCode: 'OFFLINE',
     })
+    recordIntentStage(db, prepared, 'delivery', 'error', {
+      transport: 'ws',
+      errorCode: 'OFFLINE',
+    })
     broadcastIntentFeed({
       nonce: prepared.nonce,
       from: prepared.from,
@@ -211,6 +255,10 @@ export async function relayIntentFromHttp(
   }
 
   const resultPromise = createResultWaiter(db, prepared, timeoutMs)
+  recordIntentStage(db, prepared, 'delivery', 'pending', {
+    transport: 'ws',
+    timeoutMs,
+  })
 
   try {
     sendJson(recipientWs, {
@@ -227,6 +275,11 @@ export async function relayIntentFromHttp(
       success: false,
       latencyMs: null,
       errorCode: 'DELIVERY_FAILED',
+    })
+    recordIntentStage(db, prepared, 'delivery', 'error', {
+      transport: 'ws',
+      errorCode: 'DELIVERY_FAILED',
+      message: err instanceof Error ? err.message : 'Failed to deliver to recipient socket',
     })
     broadcastIntentFeed({
       nonce: prepared.nonce,
@@ -300,6 +353,12 @@ async function handleIntent(
   try {
     senderAgent = resolveIntentSender(db, senderBeamId, prepared)
   } catch (err) {
+    recordIntentStage(db, prepared, 'sender_lookup', 'error', {
+      transport: 'ws',
+      connectedBeamId: senderBeamId,
+      errorCode: err instanceof RelayError ? err.code : 'UNKNOWN_SENDER',
+      message: err instanceof Error ? err.message : 'Sender is not registered in the directory',
+    })
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
@@ -309,9 +368,35 @@ async function handleIntent(
     return
   }
 
+  recordIntentStage(db, prepared, 'received', 'pending', {
+    transport: 'ws',
+    connectedBeamId: senderBeamId,
+  }, prepared.timestamp)
+  recordIntentStage(db, prepared, 'sender_lookup', 'success', {
+    transport: 'ws',
+    connectedBeamId: senderBeamId,
+    actingOnBehalf: senderBeamId !== prepared.from,
+  })
+
   try {
     enforceSecurityChecks(db, prepared, senderAgent.public_key, { skipSignatureVerification: auth.authenticatedViaApiKey })
+    recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
+    recordIntentStage(db, prepared, 'validated', 'success', {
+      transport: 'ws',
+      authenticatedViaApiKey: auth.authenticatedViaApiKey,
+    })
   } catch (err) {
+    recordShieldDecision(db, prepared, {
+      decision: 'reject',
+      timestamp: prepared.timestamp,
+      extraFlags: [err instanceof RelayError ? err.code : 'INVALID_INTENT'],
+    })
+    recordIntentStage(db, prepared, 'validated', 'error', {
+      transport: 'ws',
+      authenticatedViaApiKey: auth.authenticatedViaApiKey,
+      errorCode: err instanceof RelayError ? err.code : 'INVALID_INTENT',
+      message: err instanceof Error ? err.message : 'Rejected by relay security checks',
+    })
     if (err instanceof RelayError && err.code === 'RATE_LIMITED') {
       sendJson(senderWs, {
         type: 'error',
@@ -333,6 +418,9 @@ async function handleIntent(
   }
 
   logIntentStart(db, prepared)
+  recordIntentStage(db, prepared, 'dispatch', 'pending', {
+    deliveryTarget: 'local-or-federated',
+  })
   broadcastIntentFeed({
     nonce: prepared.nonce,
     from: prepared.from,
@@ -347,6 +435,9 @@ async function handleIntent(
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
+    recordIntentStage(db, prepared, 'dispatch', 'pending', {
+      deliveryTarget: 'federation',
+    })
     try {
       const result = await relayIntentToFederatedPeer(db, prepared, 30_000, {
         sourceDirectory: getLocalDirectoryUrl(),
@@ -377,6 +468,10 @@ async function handleIntent(
       latencyMs: null,
       errorCode: 'OFFLINE',
     })
+    recordIntentStage(db, prepared, 'delivery', 'error', {
+      transport: 'ws',
+      errorCode: 'OFFLINE',
+    })
     broadcastIntentFeed({
       nonce: prepared.nonce,
       from: prepared.from,
@@ -398,13 +493,42 @@ async function handleIntent(
   }
 
   const resultPromise = createResultWaiter(db, prepared, 30_000)
-
-  sendJson(recipientWs, {
-    type: 'intent',
-    frame: prepared,
-    senderPublicKey: senderAgent.public_key,
+  recordIntentStage(db, prepared, 'delivery', 'pending', {
+    transport: 'ws',
+    timeoutMs: 30_000,
     actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
   })
+
+  try {
+    sendJson(recipientWs, {
+      type: 'intent',
+      frame: prepared,
+      senderPublicKey: senderAgent.public_key,
+      actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+    })
+  } catch (err) {
+    clearPendingResult(prepared.nonce)
+    finalizeIntentLog(db, {
+      nonce: prepared.nonce,
+      fromBeamId: prepared.from,
+      toBeamId: prepared.to,
+      success: false,
+      latencyMs: null,
+      errorCode: 'DELIVERY_FAILED',
+    })
+    recordIntentStage(db, prepared, 'delivery', 'error', {
+      transport: 'ws',
+      errorCode: 'DELIVERY_FAILED',
+      message: err instanceof Error ? err.message : 'Failed to deliver to recipient socket',
+    })
+    sendJson(senderWs, {
+      type: 'error',
+      nonce: prepared.nonce,
+      errorCode: 'DELIVERY_FAILED',
+      message: err instanceof Error ? err.message : 'Failed to relay intent',
+    })
+    return
+  }
 
   updateLastSeen(db, senderBeamId)
 
@@ -455,6 +579,9 @@ async function relayIntentToFederatedPeer(
   const peerUrl = resolved?.directoryUrl
 
   if (!resolved || !peerUrl || peerUrl === getLocalDirectoryUrl()) {
+    recordIntentStage(db, frame, 'federation.resolve', 'error', {
+      errorCode: 'OFFLINE',
+    })
     finalizeIntentLog(db, {
       nonce: frame.nonce,
       fromBeamId: frame.from,
@@ -466,8 +593,17 @@ async function relayIntentToFederatedPeer(
     throw new RelayError('OFFLINE', `Agent ${frame.to} is not available locally or through federation`)
   }
 
+  recordIntentStage(db, frame, 'federation.resolve', 'success', {
+    peerUrl,
+    scope: resolved.scope,
+  })
+
   const nextHopCount = options.hopCount + 1
   if (nextHopCount > MAX_FEDERATION_HOPS) {
+    recordIntentStage(db, frame, 'federation.relay', 'error', {
+      errorCode: 'BAD_REQUEST',
+      hopCount: nextHopCount,
+    })
     finalizeIntentLog(db, {
       nonce: frame.nonce,
       fromBeamId: frame.from,
@@ -480,6 +616,10 @@ async function relayIntentToFederatedPeer(
   }
 
   const startedAt = Date.now()
+  recordIntentStage(db, frame, 'federation.relay', 'pending', {
+    peerUrl,
+    hopCount: nextHopCount,
+  })
   const response = await fetch(`${peerUrl}/federation/relay`, {
     method: 'POST',
     headers: getFederationRequestHeaders({
@@ -491,6 +631,12 @@ async function relayIntentToFederatedPeer(
   })
 
   if (!response.ok) {
+    recordIntentStage(db, frame, 'federation.relay', 'error', {
+      peerUrl,
+      hopCount: nextHopCount,
+      errorCode: 'DELIVERY_FAILED',
+      status: response.status,
+    })
     finalizeIntentLog(db, {
       nonce: frame.nonce,
       fromBeamId: frame.from,
@@ -503,6 +649,11 @@ async function relayIntentToFederatedPeer(
   }
 
   const result = await response.json() as ResultFrame
+  recordIntentStage(db, frame, 'federation.relay', result.success ? 'success' : 'error', {
+    peerUrl,
+    hopCount: nextHopCount,
+    errorCode: result.success ? null : (result.errorCode ?? 'RESULT_ERROR'),
+  })
   finalizeIntentLog(db, {
     nonce: frame.nonce,
     fromBeamId: frame.from,
@@ -510,6 +661,12 @@ async function relayIntentToFederatedPeer(
     success: result.success,
     latencyMs: typeof result.latency === 'number' ? result.latency : Date.now() - startedAt,
     errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
+  })
+  recordIntentStage(db, frame, 'completed', result.success ? 'success' : 'error', {
+    transport: 'federation',
+    peerUrl,
+    latencyMs: typeof result.latency === 'number' ? result.latency : Date.now() - startedAt,
+    errorCode: result.success ? null : (result.errorCode ?? 'RESULT_ERROR'),
   })
 
   return result
@@ -681,6 +838,16 @@ function handleResult(frame: ResultFrame): void {
     latencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? 'RESULT_ERROR'),
   })
+  recordIntentStage(pending.db, {
+    nonce: frame.nonce,
+    from: pending.fromBeamId,
+    to: pending.toBeamId,
+    intent: pending.intentType,
+  }, 'completed', frame.success ? 'success' : 'error', {
+    transport: 'ws',
+    latencyMs,
+    errorCode: frame.success ? null : (frame.errorCode ?? 'RESULT_ERROR'),
+  })
   broadcastIntentFeed({
     nonce: frame.nonce,
     from: pending.fromBeamId,
@@ -714,6 +881,12 @@ function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number)
         success: false,
         latencyMs,
         errorCode: 'TIMEOUT',
+      })
+      recordIntentStage(db, frame, 'completed', 'error', {
+        transport: 'ws',
+        latencyMs,
+        errorCode: 'TIMEOUT',
+        timeoutMs,
       })
       broadcastIntentFeed({
         nonce: frame.nonce,
