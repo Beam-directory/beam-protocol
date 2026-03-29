@@ -20,6 +20,7 @@ export default defineConfig({
     sidebar: [
       { text: 'Guide', items: [
         { text: 'Getting Started', link: '/guide/getting-started' },
+        { text: 'Hosted Quickstart', link: '/guide/hosted-quickstart' },
         { text: 'Vision', link: '/guide/vision' },
         { text: 'Use Cases', link: '/guide/use-cases' },
         { text: 'DID Identity', link: '/guide/did' },

@@ -17,13 +17,11 @@ COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist/
 
-RUN mkdir -p /data
-
 ENV NODE_ENV=production
-ENV PORT=8420
-ENV DB_PATH=/data/beam-bus.sqlite
-ENV DIRECTORY_URL=https://api.beam.directory
+ENV PORT=8788
+ENV BEAM_DIRECTORY_URL=http://directory:3100
 
-EXPOSE 8420
+EXPOSE 8788
 
-CMD ["node", "dist/server.js"]
+CMD ["node", "dist/index.js"]
+

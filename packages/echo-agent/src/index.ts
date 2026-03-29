@@ -1,5 +1,5 @@
 import { createServer, type Server } from 'node:http'
-import { BeamClient, BeamDirectory, BeamIdentity, type BeamIdentityData, type IntentFrame } from 'beam-protocol-sdk'
+import { BeamClient, BeamIdentity, type BeamIdentityData } from 'beam-protocol-sdk'
 
 const ECHO_BEAM_ID = 'echo@beam.directory'
 const ECHO_DISPLAY_NAME = 'Beam Echo Agent'
@@ -24,26 +24,30 @@ function createIdentity(): BeamIdentityData {
 }
 
 async function registerEchoAgent(identity: BeamIdentityData): Promise<void> {
-  const directory = new BeamDirectory({
-    baseUrl: directoryUrl,
-    ...(registrationSecret ? { apiKey: registrationSecret } : {}),
+  const response = await fetch(new URL('/agents/register', directoryUrl), {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      ...(registrationSecret ? { Authorization: `Bearer ${registrationSecret}` } : {}),
+    },
+    body: JSON.stringify({
+      beamId: ECHO_BEAM_ID,
+      displayName: ECHO_DISPLAY_NAME,
+      capabilities: ECHO_CAPABILITIES,
+      publicKey: identity.publicKeyBase64,
+      org: 'personal',
+    }),
   })
 
-  await directory.register({
-    beamId: ECHO_BEAM_ID,
-    displayName: ECHO_DISPLAY_NAME,
-    capabilities: ECHO_CAPABILITIES,
-    publicKey: identity.publicKeyBase64,
-    org: 'personal',
-  })
+  if (!response.ok) {
+    const payload = await response.json().catch(() => ({})) as { error?: string }
+    throw new Error(payload.error ?? `Echo agent registration failed with ${response.status}`)
+  }
+
+  await response.json().catch(() => ({}))
 
   state.registered = true
   state.lastRegistrationAt = new Date().toISOString()
-}
-
-function extractMessage(frame: IntentFrame): string {
-  const value = frame.payload?.['message']
-  return typeof value === 'string' ? value : ''
 }
 
 function createHealthServer(): Server {

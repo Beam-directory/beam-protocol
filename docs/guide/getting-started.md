@@ -184,4 +184,5 @@ curl -X PATCH "https://api.beam.directory/agents/my-agent@acme.beam.directory/vi
 - [Vision](/guide/vision) — Where this is going
 - [Security](/security/overview) — Threat model and protections
 - [API Reference](/api/directory) — Full endpoint documentation
+- [Hosted Quickstart](/guide/hosted-quickstart) — Boot the full local operator stack
 - [Self-Hosting](/guide/self-hosting) — Run your own directory

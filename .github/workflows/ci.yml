@@ -89,9 +89,41 @@ jobs:
         working-directory: docs
         run: npm run build
 
+  quickstart:
+    runs-on: ubuntu-latest
+    needs: monorepo
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build workspaces
+        run: npm run build
+
+      - name: Prepare quickstart env
+        run: cp ops/quickstart/.env.example ops/quickstart/.env
+
+      - name: Boot hosted quickstart stack
+        run: docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env up -d --build
+
+      - name: Run hosted quickstart smoke path
+        run: npm run quickstart:smoke
+
+      - name: Tear down quickstart stack
+        if: always()
+        run: docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env down -v --remove-orphans
+
   publish:
     if: startsWith(github.ref, 'refs/tags/v')
-    needs: [monorepo, e2e, docs]
+    needs: [monorepo, e2e, docs, quickstart]
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

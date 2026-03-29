@@ -2,6 +2,8 @@
 
 Beam's directory service is small enough to deploy in a few different ways, depending on how much control you want.
 
+If you want the fastest end-to-end local stack with directory, dashboard, message bus, and a demo agent, start with the [Hosted Quickstart](/guide/hosted-quickstart).
+
 ## Docker
 
 The repository includes a `packages/directory/Dockerfile` for containerized deployments.
