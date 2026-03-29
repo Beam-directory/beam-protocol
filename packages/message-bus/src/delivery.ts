@@ -3,8 +3,8 @@
  */
 
 import { createPrivateKey, sign } from 'node:crypto'
-import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
+import { isRetryableDirectoryError } from './retry.js'
 
 export interface BeamIdentityData {
   beamId: string
@@ -15,6 +15,9 @@ export interface BeamIdentityData {
 export interface DeliveryResult {
   success: boolean
   error: string
+  errorCode?: string
+  retryable: boolean
+  status?: number
 }
 
 /** Loaded identities: beamId → privateKeyBase64 */
@@ -60,12 +63,12 @@ function signPayload(senderBeamId: string, payload: string): string | null {
 export async function deliverToDirectory(
   directoryUrl: string,
   msgId: string,
+  nonce: string,
   sender: string,
   recipient: string,
   intent: string,
   payload: Record<string, unknown>,
 ): Promise<DeliveryResult> {
-  const nonce = randomUUID()
   const timestamp = new Date().toISOString()
 
   // Build frame matching Beam Protocol v1
@@ -111,16 +114,47 @@ export async function deliverToDirectory(
     if (resp.ok) {
       const result = await resp.json() as Record<string, unknown>
       if (result.success) {
-        return { success: true, error: '' }
+        return { success: true, error: '', retryable: false, status: resp.status }
       }
-      return { success: false, error: String(result.error ?? 'Unknown directory error') }
+      const errorCode = typeof result.errorCode === 'string' ? result.errorCode : undefined
+      return {
+        success: false,
+        error: String(result.error ?? errorCode ?? 'Unknown directory error'),
+        errorCode,
+        retryable: isRetryableDirectoryError(errorCode, resp.status),
+        status: resp.status,
+      }
     }
 
-    return { success: false, error: `HTTP ${resp.status}: ${await resp.text()}` }
+    let errorPayload: { error?: string; errorCode?: string } | null = null
+    try {
+      errorPayload = await resp.clone().json() as { error?: string; errorCode?: string }
+    } catch {
+      errorPayload = null
+    }
+
+    const errorCode = errorPayload?.errorCode
+    return {
+      success: false,
+      error: errorPayload?.error ?? `HTTP ${resp.status}: ${await resp.text()}`,
+      errorCode,
+      retryable: isRetryableDirectoryError(errorCode, resp.status),
+      status: resp.status,
+    }
   } catch (err) {
     if (err instanceof Error && err.name === 'AbortError') {
-      return { success: false, error: 'Delivery timeout (30s)' }
+      return {
+        success: false,
+        error: 'Delivery timeout (30s)',
+        errorCode: 'TIMEOUT',
+        retryable: true,
+      }
     }
-    return { success: false, error: `Connection error: ${err}` }
+    return {
+      success: false,
+      error: `Connection error: ${err}`,
+      errorCode: 'DELIVERY_FAILED',
+      retryable: true,
+    }
   }
 }

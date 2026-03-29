@@ -2,11 +2,13 @@ import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/delivery.js', () => ({
-  deliverToDirectory: vi.fn(async () => ({ success: true, error: '' })),
+  deliverToDirectory: vi.fn(async () => ({ success: true, error: '', retryable: false })),
 }))
 
-import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDelivered, markFailed } from '../src/db.js'
+import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDeadLetter, markDelivered, markFailed, scheduleRetry } from '../src/db.js'
+import { deliverToDirectory } from '../src/delivery.js'
 import { createBusRouter } from '../src/router.js'
+import { startRetryWorker, stopRetryWorker } from '../src/worker.js'
 
 describe('message bus', () => {
   let app: Hono
@@ -21,6 +23,7 @@ describe('message bus', () => {
   afterEach(() => {
     db.close()
     vi.clearAllMocks()
+    vi.useRealTimers()
   })
 
   it('roundtrips insertMessage + getMessage', () => {
@@ -33,6 +36,7 @@ describe('message bus', () => {
 
     const message = getMessage(db, id)
     expect(message?.id).toBe(id)
+    expect(message?.nonce).toBeTruthy()
     expect(message?.sender).toBe('alpha@beam.directory')
     expect(JSON.parse(message?.payload ?? '{}')).toEqual({ text: 'hello' })
   })
@@ -52,7 +56,79 @@ describe('message bus', () => {
     expect(response.status).toBe(201)
     const body = await response.json() as Record<string, unknown>
     expect(body['message_id']).toBeTypeOf('string')
+    expect(body['nonce']).toBeTypeOf('string')
     expect(body['status']).toBe('delivered')
+  })
+
+  it('dedupes duplicate sends with the same nonce', async () => {
+    const nonce = 'nonce-dedupe-1'
+    const body = {
+      from: 'alpha@beam.directory',
+      to: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { text: 'hello' },
+      nonce,
+    }
+
+    const first = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+    const firstPayload = await first.json() as Record<string, unknown>
+
+    const second = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    })
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(200)
+    expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledTimes(1)
+    expect(await second.json()).toEqual({
+      message_id: firstPayload['message_id'],
+      nonce,
+      status: 'delivered',
+      created_at: firstPayload['created_at'],
+      retry_count: 0,
+      deduped: true,
+    })
+  })
+
+  it('rejects nonce reuse for a different message body', async () => {
+    const nonce = 'nonce-conflict-1'
+
+    const first = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: 'alpha@beam.directory',
+        to: 'beta@beam.directory',
+        intent: 'chat',
+        payload: { text: 'hello' },
+        nonce,
+      }),
+    })
+
+    const second = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: 'alpha@beam.directory',
+        to: 'beta@beam.directory',
+        intent: 'chat',
+        payload: { text: 'different' },
+        nonce,
+      }),
+    })
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(409)
+    expect(await second.json()).toEqual({
+      error: `Nonce ${nonce} already belongs to a different message`,
+      errorCode: 'NONCE_REUSE_CONFLICT',
+    })
   })
 
   it('returns 400 from /send with malformed JSON', async () => {
@@ -76,6 +152,22 @@ describe('message bus', () => {
     expect(response.status).toBe(400)
     const body = await response.json() as Record<string, unknown>
     expect(body['errorCode']).toBe('MISSING_REQUIRED_FIELDS')
+  })
+
+  it('returns 400 from /send when payload is not an object', async () => {
+    const response = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: 'alpha@beam.directory',
+        to: 'beta@beam.directory',
+        intent: 'chat',
+        payload: ['hello'],
+      }),
+    })
+
+    expect(response.status).toBe(400)
+    expect(await response.json()).toEqual({ error: 'payload must be an object', errorCode: 'INVALID_PAYLOAD' })
   })
 
   it('returns an empty array from /poll when there are no messages', async () => {
@@ -169,6 +261,85 @@ describe('message bus', () => {
     expect(await response.json()).toEqual({ error: 'status must be "acked" or "failed"', errorCode: 'INVALID_STATUS' })
   })
 
+  it('dead-letters non-retryable send failures immediately', async () => {
+    vi.mocked(deliverToDirectory).mockResolvedValueOnce({
+      success: false,
+      error: 'Signature verification failed',
+      errorCode: 'INVALID_INTENT',
+      retryable: false,
+      status: 400,
+    })
+
+    const response = await app.request('http://localhost/v1/beam/send', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        from: 'alpha@beam.directory',
+        to: 'beta@beam.directory',
+        intent: 'chat',
+        payload: { text: 'hello' },
+        nonce: 'dead-letter-now',
+      }),
+    })
+
+    expect(response.status).toBe(201)
+    const body = await response.json() as Record<string, unknown>
+    expect(body['status']).toBe('dead_letter')
+    expect(getMessage(db, String(body['message_id']))?.status).toBe('dead_letter')
+  })
+
+  it('lists dead-lettered messages through the operator endpoint', async () => {
+    const id = insertMessage(db, {
+      nonce: 'dead-letter-list',
+      sender: 'alpha@beam.directory',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { text: 'hello' },
+    })
+    markDeadLetter(db, id, 'boom')
+
+    const response = await app.request('http://localhost/v1/beam/dead-letter')
+
+    expect(response.status).toBe(200)
+    const body = await response.json() as { count: number; messages: Array<Record<string, unknown>> }
+    expect(body.count).toBe(1)
+    expect(body.messages[0]?.id).toBe(id)
+    expect(body.messages[0]?.nonce).toBe('dead-letter-list')
+    expect(body.messages[0]?.status).toBe('dead_letter')
+  })
+
+  it('requeues dead-lettered messages with the original nonce', async () => {
+    const id = insertMessage(db, {
+      nonce: 'requeue-nonce',
+      sender: 'alpha@beam.directory',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { text: 'hello' },
+    })
+    markDeadLetter(db, id, 'boom')
+
+    const response = await app.request(`http://localhost/v1/beam/dead-letter/${id}/requeue`, {
+      method: 'POST',
+    })
+
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({
+      message_id: id,
+      nonce: 'requeue-nonce',
+      status: 'delivered',
+      requeued: true,
+    })
+    expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledWith(
+      'http://directory.test',
+      id,
+      'requeue-nonce',
+      'alpha@beam.directory',
+      'beta@beam.directory',
+      'chat',
+      { text: 'hello' },
+    )
+  })
+
   it('returns correct counts from /stats', async () => {
     const deliveredId = insertMessage(db, {
       sender: 'alpha@beam.directory',
@@ -211,6 +382,7 @@ describe('message bus', () => {
     expect(body['delivered']).toBe(1)
     expect(body['acked']).toBe(1)
     expect(body['failed']).toBe(1)
+    expect(body['dead_letter']).toBe(0)
   })
 
   it('rate limits the 11th message from the same sender', async () => {
@@ -267,5 +439,41 @@ describe('message bus', () => {
 
     expect(cleanTestMessages(db)).toBe(2)
     expect(getMessage(db, keptId)?.status).toBe('pending')
+  })
+
+  it('retries pending messages with a stable nonce and dead-letters after max retries', async () => {
+    vi.useFakeTimers()
+    vi.mocked(deliverToDirectory).mockResolvedValueOnce({
+      success: false,
+      error: 'still offline',
+      errorCode: 'OFFLINE',
+      retryable: true,
+      status: 503,
+    })
+
+    const id = insertMessage(db, {
+      nonce: 'retry-nonce-1',
+      sender: 'alpha@beam.directory',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { text: 'hello' },
+      maxRetries: 2,
+    })
+    scheduleRetry(db, id, 1, (Date.now() / 1000) - 1, 'offline')
+
+    const timer = startRetryWorker({ db, directoryUrl: 'http://directory.test', intervalMs: 50 })
+    await vi.advanceTimersByTimeAsync(50)
+    stopRetryWorker(timer)
+
+    expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledWith(
+      'http://directory.test',
+      id,
+      'retry-nonce-1',
+      'alpha@beam.directory',
+      'beta@beam.directory',
+      'chat',
+      { text: 'hello' },
+    )
+    expect(getMessage(db, id)?.status).toBe('dead_letter')
   })
 })

@@ -4,6 +4,7 @@ import AgentProfilePage from './pages/AgentProfilePage'
 import AgentsPage from './pages/AgentsPage'
 import AlertsPage from './pages/AlertsPage'
 import AuditPage from './pages/AuditPage'
+import DeadLetterPage from './pages/DeadLetterPage'
 import ErrorsPage from './pages/ErrorsPage'
 import FederationPage from './pages/FederationPage'
 import IntentsPage from './pages/IntentsPage'
@@ -26,6 +27,7 @@ export default function App() {
           <Route path="federation" element={<FederationPage />} />
           <Route path="errors" element={<ErrorsPage />} />
           <Route path="alerts" element={<AlertsPage />} />
+          <Route path="dead-letter" element={<DeadLetterPage />} />
           <Route path="register" element={<RegisterPage />} />
           <Route path="settings" element={<SettingsPage />} />
         </Route>

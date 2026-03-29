@@ -159,7 +159,8 @@ function initSchema(db: DB): void {
       completed_at TEXT,
       round_trip_latency_ms INTEGER,
       status TEXT NOT NULL DEFAULT 'pending',
-      error_code TEXT
+      error_code TEXT,
+      result_json TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_intent_log_requested_at
@@ -420,6 +421,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
+  ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
 
   db.prepare(`
     UPDATE agents
@@ -472,7 +474,8 @@ function ensureFederationSafeIntentLog(db: DB): void {
           completed_at TEXT,
           round_trip_latency_ms INTEGER,
           status TEXT NOT NULL DEFAULT 'pending',
-          error_code TEXT
+          error_code TEXT,
+          result_json TEXT
         );
       `)
       db.exec(`
@@ -486,7 +489,8 @@ function ensureFederationSafeIntentLog(db: DB): void {
           completed_at,
           round_trip_latency_ms,
           status,
-          error_code
+          error_code,
+          result_json
         )
         SELECT
           id,
@@ -498,7 +502,8 @@ function ensureFederationSafeIntentLog(db: DB): void {
           completed_at,
           round_trip_latency_ms,
           status,
-          error_code
+          error_code,
+          NULL
         FROM intent_log_legacy;
       `)
       db.exec('DROP TABLE intent_log_legacy')
@@ -1410,7 +1415,8 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
       status = 'pending',
       completed_at = NULL,
       round_trip_latency_ms = NULL,
-      error_code = NULL
+      error_code = NULL,
+      result_json = NULL
   `).run(
     frame.nonce,
     frame.from,
@@ -1429,6 +1435,7 @@ export function finalizeIntentLog(
     success: boolean
     latencyMs: number | null
     errorCode?: string
+    resultJson?: string | null
   },
 ): void {
   const completedAt = nowIso()
@@ -1439,13 +1446,15 @@ export function finalizeIntentLog(
     SET completed_at = ?,
         round_trip_latency_ms = ?,
         status = ?,
-        error_code = ?
+        error_code = ?,
+        result_json = ?
     WHERE nonce = ?
   `).run(
     completedAt,
     input.latencyMs,
     status,
     input.errorCode ?? null,
+    input.resultJson ?? null,
     input.nonce,
   )
 
@@ -1460,6 +1469,17 @@ export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
     ORDER BY requested_at DESC
     LIMIT ?
   `).all(safeLimit) as IntentLogRow[]
+}
+
+export function getIntentLogByNonce(db: DB, nonce: string): IntentLogRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM intent_log
+    WHERE nonce = ?
+    LIMIT 1
+  `).get(nonce) as IntentLogRow | undefined
+
+  return row ?? null
 }
 
 export function appendIntentTraceEvent(

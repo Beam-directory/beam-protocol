@@ -5,9 +5,18 @@ Persistent Beam relay for queued delivery, retries, audit history, and delivery 
 ## What It Does
 
 - stores messages in SQLite
-- retries failed deliveries with exponential backoff
-- exposes HTTP endpoints for send, poll, ack, history, and stats
+- enforces stable nonce-based dedupe end to end
+- retries retryable delivery failures with bounded backoff plus deterministic jitter
+- exposes HTTP endpoints for send, poll, ack, history, stats, and dead-letter inspection
 - can run embedded in another Hono app or as a standalone service
+
+## Delivery Model
+
+- Every bus message gets a persisted `nonce`. If the same `nonce` is submitted again with the same sender, recipient, intent, and payload, the bus returns the existing message instead of redelivering it.
+- Retryable errors from the directory (`OFFLINE`, `TIMEOUT`, `DELIVERY_FAILED`, `DIRECT_HTTP_FAILED`, `IN_PROGRESS`, `RATE_LIMITED`, transport timeouts, and connection errors) are retried.
+- Non-retryable errors (`INVALID_INTENT`, `FORBIDDEN`, `UNAUTHORIZED`, nonce conflicts, and other hard 4xx failures) are dead-lettered immediately.
+- Retry delays use the policy `30s, 60s, 120s, 240s, 480s` with deterministic ±15% jitter derived from the nonce. The `max_retries` limit bounds total attempts, after which the message moves to `dead_letter`.
+- Dead-lettered messages stay queryable through the API and can be manually requeued while keeping the original nonce.
 
 ## Install
 
@@ -58,7 +67,8 @@ Environment variables:
   "from": "alpha@beam.directory",
   "to": "beta@beam.directory",
   "intent": "task.execute",
-  "payload": { "job": "launch-check" }
+  "payload": { "job": "launch-check" },
+  "nonce": "optional-stable-id"
 }
 ```
 
@@ -82,7 +92,15 @@ Filter by sender, recipient, intent, status, and time window.
 
 ### `GET /v1/beam/stats`
 
-Returns totals plus per-agent send/receive counts.
+Returns totals plus per-agent send/receive counts, including `dead_letter`.
+
+### `GET /v1/beam/dead-letter`
+
+Lists terminal failures for operators. Supports `sender`, `recipient`, `intent`, and `limit` query parameters.
+
+### `POST /v1/beam/dead-letter/:id/requeue`
+
+Attempts immediate redelivery for a dead-lettered message while preserving the original nonce. If the downstream failure is still retryable, the bus schedules the message again with the standard retry policy.
 
 ## Deployment
 
