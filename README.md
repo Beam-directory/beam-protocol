@@ -84,6 +84,8 @@ spec/              protocol RFCs and supporting material
 npm install
 npm run build
 npm test
+python3 -m pip install -e packages/sdk-python
+npm run test:e2e
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution workflow, reporting guidelines, and local development expectations.

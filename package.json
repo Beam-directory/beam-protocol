@@ -10,6 +10,7 @@
     "build": "npm run build:workspaces",
     "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus",
     "test": "npm run test --workspaces --if-present",
+    "test:e2e": "node scripts/e2e/run.mjs",
     "dev:directory": "npm run dev --workspace=packages/directory",
     "typecheck": "npm run typecheck:workspaces",
     "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus"
