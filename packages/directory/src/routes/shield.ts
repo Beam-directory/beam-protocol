@@ -5,6 +5,8 @@
 
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
+import { getAdminSessionFromRequest, requireAdminRole, roleSatisfies } from '../admin-auth.js'
+import { logAuditEvent } from '../db.js'
 import { getRecentEvents, getAuditStats } from '../shield/audit.js'
 
 export interface ShieldConfig {
@@ -42,11 +44,6 @@ export function parseShieldConfig(raw: string | null | undefined): ShieldConfig 
 export function shieldRouter(db: Database): Hono {
   const router = new Hono()
 
-  function requireAdmin(c: { req: { header: (name: string) => string | undefined; query: (name: string) => string | undefined } }): boolean {
-    const key = c.req.header('x-admin-key') ?? c.req.query('key') ?? ''
-    return key === process.env.BEAM_ADMIN_KEY
-  }
-
   // GET /shield/config/:beamId — Get shield config for an agent
   router.get('/config/:beamId', (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
@@ -62,14 +59,14 @@ export function shieldRouter(db: Database): Hono {
   router.patch('/config/:beamId', async (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
 
-    // Auth: admin key or agent's own Ed25519 signature
-    const isAdmin = requireAdmin(c)
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
+    const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
     if (!isAdmin) {
       // Check Ed25519 signature auth
       const sigHeader = c.req.header('x-beam-signature')
       const nonceHeader = c.req.header('x-beam-nonce')
       if (!sigHeader || !nonceHeader) {
-        return c.json({ error: 'Admin key or Ed25519 signature required', errorCode: 'UNAUTHORIZED' }, 401)
+        return c.json({ error: 'Admin session or Ed25519 signature required', errorCode: 'UNAUTHORIZED' }, 401)
       }
 
       // Verify signature over beamId + nonce
@@ -113,13 +110,28 @@ export function shieldRouter(db: Database): Hono {
 
     db.prepare('UPDATE agents SET shield_config = ? WHERE beam_id = ?').run(JSON.stringify(updated), beamId)
 
+    if (adminSession) {
+      logAuditEvent(db, {
+        action: 'shield.config.updated',
+        actor: adminSession.email,
+        target: beamId,
+        details: {
+          role: adminSession.role,
+          mode: updated.mode,
+          minTrust: updated.minTrust,
+          rateLimit: updated.rateLimit,
+        },
+      })
+    }
+
     return c.json({ beamId, shield: updated, updated: true })
   })
 
   // GET /shield/audit/:beamId — Recent audit events for a sender
   router.get('/audit/:beamId', (c) => {
-    if (!requireAdmin(c)) {
-      return c.json({ error: 'Admin key required', errorCode: 'UNAUTHORIZED' }, 401)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
     }
 
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
@@ -136,8 +148,9 @@ export function shieldRouter(db: Database): Hono {
 
   // GET /shield/stats — Aggregate shield statistics
   router.get('/stats', (c) => {
-    if (!requireAdmin(c)) {
-      return c.json({ error: 'Admin key required', errorCode: 'UNAUTHORIZED' }, 401)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
     }
 
     const hours = parseInt(c.req.query('hours') ?? '24', 10)

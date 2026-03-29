@@ -1,17 +1,33 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
+import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
 import {
   appendIntentTraceEvent,
+  assignDirectoryRole,
   createDatabase,
   finalizeIntentLog,
   logAuditEvent,
   logIntentStart,
   registerAgent,
 } from './db.js'
+import { getLocalDirectoryUrl } from './federation.js'
 import { logShieldEvent } from './shield/audit.js'
 import type { IntentFrame } from './types.js'
+
+function createAdminHeaders(db: ReturnType<typeof createDatabase>, email = 'ops@example.com', role: 'admin' | 'operator' | 'viewer' = 'admin') {
+  process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+  assignDirectoryRole(db, {
+    userId: email,
+    role,
+    directoryUrl: getLocalDirectoryUrl(),
+  })
+  const session = createAdminSession(db, { email, role })
+  return {
+    Authorization: `Bearer ${session.token}`,
+  }
+}
 
 function registerFixtureAgents(db: ReturnType<typeof createDatabase>) {
   const senderKeys = generateKeyPairSync('ed25519')
@@ -48,9 +64,6 @@ function createFrame(nonce: string, timestamp = new Date().toISOString()): Inten
 }
 
 test('observability trace endpoint returns lifecycle, audit, and shield context', async () => {
-  const previousAdminKey = process.env['BEAM_ADMIN_KEY']
-  process.env['BEAM_ADMIN_KEY'] = 'test-admin'
-
   const db = createDatabase(':memory:')
   try {
     registerFixtureAgents(db)
@@ -112,7 +125,7 @@ test('observability trace endpoint returns lifecycle, audit, and shield context'
 
     const app = createApp(db)
     const response = await app.request(new Request(`http://localhost/observability/intents/${encodeURIComponent(frame.nonce)}`, {
-      headers: { 'x-admin-key': 'test-admin' },
+      headers: createAdminHeaders(db),
     }))
 
     assert.equal(response.status, 200)
@@ -128,15 +141,11 @@ test('observability trace endpoint returns lifecycle, audit, and shield context'
     assert.equal(payload.audit[0]?.action, 'federation.relay')
     assert.equal(payload.shield[0]?.decision, 'hold')
   } finally {
-    process.env['BEAM_ADMIN_KEY'] = previousAdminKey
     db.close()
   }
 })
 
 test('alerts endpoint surfaces elevated error rate and error hotspots', async () => {
-  const previousAdminKey = process.env['BEAM_ADMIN_KEY']
-  process.env['BEAM_ADMIN_KEY'] = 'test-admin'
-
   const db = createDatabase(':memory:')
   try {
     registerFixtureAgents(db)
@@ -156,7 +165,7 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
 
     const app = createApp(db)
     const response = await app.request(new Request('http://localhost/observability/alerts?hours=24', {
-      headers: { 'x-admin-key': 'test-admin' },
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
     }))
 
     assert.equal(response.status, 200)
@@ -165,15 +174,11 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
     assert.ok(payload.alerts.some((alert) => alert.id === 'network-error-rate'))
     assert.ok(payload.alerts.some((alert) => alert.id === 'error-hotspot-timeout'))
   } finally {
-    process.env['BEAM_ADMIN_KEY'] = previousAdminKey
     db.close()
   }
 })
 
 test('prune endpoint removes aged intents and trace records', async () => {
-  const previousAdminKey = process.env['BEAM_ADMIN_KEY']
-  process.env['BEAM_ADMIN_KEY'] = 'test-admin'
-
   const db = createDatabase(':memory:')
   try {
     registerFixtureAgents(db)
@@ -196,7 +201,7 @@ test('prune endpoint removes aged intents and trace records', async () => {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
-        'x-admin-key': 'test-admin',
+        ...createAdminHeaders(db),
       },
       body: JSON.stringify({ dataset: 'intents', olderThanDays: 30 }),
     }))
@@ -212,7 +217,28 @@ test('prune endpoint removes aged intents and trace records', async () => {
     assert.equal(remainingIntents.count, 0)
     assert.equal(remainingTraces.count, 0)
   } finally {
-    process.env['BEAM_ADMIN_KEY'] = previousAdminKey
+    db.close()
+  }
+})
+
+test('prune endpoint rejects read-only sessions', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    registerFixtureAgents(db)
+    const app = createApp(db)
+    const response = await app.request(new Request('http://localhost/observability/prune', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+      },
+      body: JSON.stringify({ dataset: 'intents', olderThanDays: 30 }),
+    }))
+
+    assert.equal(response.status, 403)
+    const payload = await response.json() as { errorCode: string }
+    assert.equal(payload.errorCode, 'FORBIDDEN')
+  } finally {
     db.close()
   }
 })

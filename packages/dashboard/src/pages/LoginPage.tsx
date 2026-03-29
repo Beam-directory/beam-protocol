@@ -1,8 +1,8 @@
 import { useState } from 'react'
-import { useAuth } from '../lib/auth'
+import { useAdminAuth } from '../lib/admin-auth'
 
 export default function LoginPage() {
-  const { login } = useAuth()
+  const { login, config } = useAdminAuth()
   const [email, setEmail] = useState('')
   const [sent, setSent] = useState(false)
   const [error, setError] = useState('')
@@ -16,15 +16,11 @@ export default function LoginPage() {
     
     try {
       const result = await login(email)
-      if (result.ok) {
-        setSent(true)
-        if ((result as any).url) {
-          setDevUrl((result as any).url)
-        }
-      } else {
-        setError(result.error || 'Something went wrong')
+      setSent(true)
+      if (result.url) {
+        setDevUrl(result.url)
       }
-    } catch (err) {
+    } catch {
       setError('Network error. Please try again.')
     } finally {
       setLoading(false)
@@ -60,7 +56,7 @@ export default function LoginPage() {
               Welcome Back
             </h1>
             <p style={{ color: '#52525B', fontSize: '0.9rem', marginBottom: '24px' }}>
-              Sign in to manage your agents.
+              Sign in to access the Beam operator dashboard.
             </p>
 
             <form onSubmit={handleSubmit}>
@@ -119,8 +115,8 @@ export default function LoginPage() {
             </form>
 
             <p style={{ marginTop: '24px', fontSize: '0.82rem', color: '#A1A1AA' }}>
-              We'll send a login link to your email.<br />
-              No password needed.
+              We issue a short-lived admin session after verification.<br />
+              No shared browser key required.
             </p>
           </>
         ) : (
@@ -152,7 +148,7 @@ export default function LoginPage() {
                 borderRadius: '8px',
                 fontSize: '0.82rem',
               }}>
-                <strong>🔧 Dev Mode</strong><br />
+                <strong>🔧 Local Dev</strong><br />
                 <a href={devUrl} style={{ color: '#F75C03', wordBreak: 'break-all' }}>
                   Click to login →
                 </a>
@@ -163,10 +159,9 @@ export default function LoginPage() {
 
         <div style={{ marginTop: '32px', borderTop: '1px solid #E4E4E7', paddingTop: '16px' }}>
           <p style={{ fontSize: '0.82rem', color: '#A1A1AA' }}>
-            Don't have an agent yet?{' '}
-            <a href="https://beam.directory/register.html" style={{ color: '#F75C03' }}>
-              Register one →
-            </a>
+            {config?.emailDelivery
+              ? 'Authorized admins receive a magic link by email.'
+              : 'Without SMTP or Resend, localhost returns the dev magic link directly.'}
           </p>
         </div>
       </div>

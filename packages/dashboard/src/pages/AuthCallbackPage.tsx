@@ -1,10 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { useAuth } from '../lib/auth'
+import { useAdminAuth } from '../lib/admin-auth'
 
 export default function AuthCallbackPage() {
   const [searchParams] = useSearchParams()
-  const { verify } = useAuth()
+  const { verify } = useAdminAuth()
   const navigate = useNavigate()
   const [error, setError] = useState('')
 

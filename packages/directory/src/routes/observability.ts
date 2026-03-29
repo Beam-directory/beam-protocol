@@ -1,7 +1,7 @@
 import { Hono } from 'hono'
-import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
-import { getAgent, listAuditLog, listIntentTraceEvents, listShieldAuditLog } from '../db.js'
+import { requireAdminRole } from '../admin-auth.js'
+import { getAgent, listAuditLog, listIntentTraceEvents, listShieldAuditLog, logAuditEvent } from '../db.js'
 import type {
   AuditLogRow,
   FederationPeerRow,
@@ -37,34 +37,6 @@ type IntentQuery = {
 }
 
 const DEFAULT_RETENTION_DAYS = Math.max(1, Number.parseInt(process.env['BEAM_OBSERVABILITY_RETENTION_DAYS'] ?? '30', 10) || 30)
-
-function getSuppliedAdminKey(c: Context): string {
-  const header = c.req.header('x-admin-key') ?? ''
-  if (header) {
-    return header
-  }
-
-  const authorization = c.req.header('authorization') ?? ''
-  if (authorization.toLowerCase().startsWith('bearer ')) {
-    return authorization.slice(7).trim()
-  }
-
-  return c.req.query('key') ?? ''
-}
-
-function requireAdmin(c: Context): Response | null {
-  const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
-  if (!configuredKey) {
-    return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
-  }
-
-  const suppliedKey = getSuppliedAdminKey(c)
-  if (!suppliedKey || suppliedKey !== configuredKey) {
-    return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
-  }
-
-  return null
-}
 
 function parseLimit(value: string | undefined, fallback: number, max = 500): number {
   const parsed = Number.parseInt(value ?? '', 10)
@@ -1054,8 +1026,8 @@ export function observabilityRouter(db: Database): Hono {
   const router = new Hono()
 
   router.get('/overview', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1069,8 +1041,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/intents', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1092,8 +1064,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/intents/:nonce', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1121,8 +1093,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/audit', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1142,8 +1114,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/agents/:beamId/health', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1157,8 +1129,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/federation', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1166,8 +1138,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/errors', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1175,8 +1147,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/alerts', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1200,8 +1172,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/retention', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1212,8 +1184,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.get('/export/:dataset', (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1280,8 +1252,8 @@ export function observabilityRouter(db: Database): Hono {
   })
 
   router.post('/prune', async (c) => {
-    const auth = requireAdmin(c)
-    if (auth) {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
       return auth
     }
 
@@ -1309,6 +1281,16 @@ export function observabilityRouter(db: Database): Hono {
 
     try {
       const result = pruneDataset(db, dataset, olderThanDays)
+      logAuditEvent(db, {
+        action: 'observability.prune',
+        actor: auth.session.email,
+        target: dataset,
+        details: {
+          olderThanDays,
+          deleted: result.deleted,
+          role: auth.session.role,
+        },
+      })
       return c.json({
         dataset,
         olderThanDays,

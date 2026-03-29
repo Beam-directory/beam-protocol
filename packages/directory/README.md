@@ -39,7 +39,10 @@ Default local endpoints:
 
 - `PORT` - server port, default `3100`
 - `DB_PATH` - SQLite database path, default `./beam-directory.db`
-- `BEAM_ADMIN_KEY` - enables admin and dashboard endpoints
+- `BEAM_ADMIN_EMAILS` - comma-separated bootstrap admin emails
+- `BEAM_OPERATOR_EMAILS` - comma-separated read-only operator emails
+- `BEAM_VIEWER_EMAILS` - comma-separated read-only viewer emails
+- `BEAM_DASHBOARD_URL` - dashboard origin used in admin magic links
 - `BEAM_DIRECTORY_BASE_URL` - DID base URL override
 - `PUBLIC_BASE_URL` - public origin used in verification links
 - `BEAM_RATE_LIMIT_PER_MIN` - global per-agent rate limit override
@@ -71,12 +74,31 @@ npm run build
 docker build -t beam-directory .
 docker run --rm -p 3100:3100 \
   -e JWT_SECRET=local-dev-secret \
-  -e BEAM_ADMIN_KEY=admin-dev-key \
+  -e BEAM_ADMIN_EMAILS=ops@example.com \
+  -e BEAM_DASHBOARD_URL=http://localhost:5173 \
   -v "$PWD/data:/data" \
   beam-directory
 ```
 
 If `LITESTREAM_REPLICA_BUCKET` is set, the container starts with Litestream replication enabled.
+
+## Admin Auth
+
+Directory operator access now uses authenticated admin sessions instead of a pasted static browser key.
+
+Local development:
+
+1. Set `BEAM_ADMIN_EMAILS=you@example.com`
+2. Start the directory with `JWT_SECRET`
+3. Request a magic link through `POST /admin/auth/magic-link`
+4. On `localhost`, the API returns the dev callback URL directly if SMTP/Resend is not configured
+
+Production:
+
+- configure `BEAM_ADMIN_EMAILS` and optional operator/viewer email lists
+- set `BEAM_DASHBOARD_URL` to the real dashboard origin
+- configure `SMTP_*` or `RESEND_API_KEY` for magic-link delivery
+- the dashboard and admin APIs use `/admin/auth/*` plus a short-lived signed session
 
 ## Fly.io
 

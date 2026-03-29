@@ -1,5 +1,6 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
+import { requireAdminRole } from '../admin-auth.js'
 import type { ReportRow } from '../types.js'
 import { createReport, getAgent, getPendingReportCount, listReportsForTarget } from '../db.js'
 import { BEAM_ID_RE } from '../validation.js'
@@ -13,26 +14,6 @@ function serializeReport(row: ReportRow): object {
     createdAt: row.created_at,
     status: row.status,
   }
-}
-
-function requireAdmin(req: Request): { ok: true } | Response {
-  const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
-  if (!configuredKey) {
-    return new Response(JSON.stringify({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }), {
-      status: 503,
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-
-  const suppliedKey = req.headers.get('x-admin-key') ?? ''
-  if (!suppliedKey || suppliedKey !== configuredKey) {
-    return new Response(JSON.stringify({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }), {
-      status: 401,
-      headers: { 'content-type': 'application/json' },
-    })
-  }
-
-  return { ok: true }
 }
 
 export function reportsRouter(db: Database): Hono {
@@ -106,7 +87,7 @@ export function reportsRouter(db: Database): Hono {
       return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
     }
 
-    const admin = requireAdmin(c.req.raw)
+    const admin = requireAdminRole(db, c.req.raw, 'viewer')
     if (admin instanceof Response) {
       return admin
     }

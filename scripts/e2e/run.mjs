@@ -144,12 +144,18 @@ async function runCli(args, cwd, env = {}) {
 }
 
 async function runPython(env) {
+  const pythonPathEntries = [
+    path.join(repoRoot, 'packages/sdk-python'),
+    process.env.PYTHONPATH,
+  ].filter(Boolean)
+
   return execFileAsync('python3', [pythonSenderEntry], {
     cwd: repoRoot,
     env: {
       ...process.env,
       ...env,
       PYTHONUNBUFFERED: '1',
+      PYTHONPATH: pythonPathEntries.join(path.delimiter),
     },
     maxBuffer: 1024 * 1024,
   })
@@ -203,7 +209,6 @@ async function main() {
         PORT: String(directoryPort),
         DB_PATH: directoryDb,
         JWT_SECRET: 'beam-e2e-jwt-secret',
-        BEAM_ADMIN_KEY: 'beam-e2e-admin-key',
       },
     })
 

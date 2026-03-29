@@ -1,4 +1,4 @@
-import { randomBytes, randomUUID } from 'node:crypto'
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -8,6 +8,7 @@ import { cors } from 'hono/cors'
 import { serve } from '@hono/node-server'
 import type { Server as HttpServer } from 'node:http'
 import type { Database } from 'better-sqlite3'
+import { adminAuthRouter } from './routes/admin-auth.js'
 import { agentsRouter } from './routes/agents.js'
 import { billingRouter } from './routes/billing.js'
 import { businessVerificationRouter } from './routes/business-verify.js'
@@ -24,7 +25,8 @@ import { verificationRouter } from './routes/verify.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
-import { getDirectoryRole, listAuditLog, listRecentIntentLogs, listTrustScores, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
+import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
+import { assignDirectoryRole, deleteDirectoryRole, listDirectoryRoles, listAuditLog, listRecentIntentLogs, listTrustScores, logAuditEvent, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import type { AgentRow, IntentFrame } from './types.js'
@@ -32,10 +34,6 @@ import type { AgentRow, IntentFrame } from './types.js'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
 const serverStartedAt = Date.now()
-const DASHBOARD_SESSION_COOKIE = 'beam_dash_session'
-const DASHBOARD_SESSION_TTL_MS = 24 * 60 * 60 * 1000
-
-const dashboardSessions = new Map<string, { expiresAt: number }>()
 
 type WaitlistSignupInput = {
   email: string
@@ -75,103 +73,6 @@ function loadIntentCatalog(): unknown {
   }
 }
 
-function getAdminKeyFromRequest(c: Context): string {
-  return c.req.header('x-admin-key') ?? c.req.query('key') ?? ''
-}
-
-function parseCookieHeader(cookieHeader: string | undefined): Record<string, string> {
-  if (!cookieHeader) {
-    return {}
-  }
-
-  return cookieHeader
-    .split(';')
-    .map((part) => part.trim())
-    .filter(Boolean)
-    .reduce<Record<string, string>>((cookies, part) => {
-      const separatorIndex = part.indexOf('=')
-      if (separatorIndex <= 0) {
-        return cookies
-      }
-
-      const key = part.slice(0, separatorIndex).trim()
-      const value = part.slice(separatorIndex + 1).trim()
-      cookies[key] = value
-      return cookies
-    }, {})
-}
-
-function pruneExpiredDashboardSessions(now = Date.now()): void {
-  for (const [token, session] of dashboardSessions.entries()) {
-    if (session.expiresAt <= now) {
-      dashboardSessions.delete(token)
-    }
-  }
-}
-
-function getDashboardSessionToken(c: Context): string {
-  const cookies = parseCookieHeader(c.req.header('cookie'))
-  return cookies[DASHBOARD_SESSION_COOKIE] ?? ''
-}
-
-function hasValidDashboardSession(c: Context): boolean {
-  pruneExpiredDashboardSessions()
-
-  const sessionToken = getDashboardSessionToken(c)
-  if (!sessionToken) {
-    return false
-  }
-
-  const session = dashboardSessions.get(sessionToken)
-  if (!session) {
-    return false
-  }
-
-  if (session.expiresAt <= Date.now()) {
-    dashboardSessions.delete(sessionToken)
-    return false
-  }
-
-  return true
-}
-
-function createDashboardSession(): string {
-  pruneExpiredDashboardSessions()
-
-  const token = randomBytes(32).toString('hex')
-  dashboardSessions.set(token, { expiresAt: Date.now() + DASHBOARD_SESSION_TTL_MS })
-  return token
-}
-
-function invalidateDashboardSession(c: Context): void {
-  const sessionToken = getDashboardSessionToken(c)
-  if (sessionToken) {
-    dashboardSessions.delete(sessionToken)
-  }
-}
-
-function buildDashboardSessionCookie(token: string, maxAgeSeconds: number): string {
-  return `${DASHBOARD_SESSION_COOKIE}=${token}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAgeSeconds}`
-}
-
-function requireAdmin(c: Context): { ok: true; key: string } | Response {
-  const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
-  if (!configuredKey) {
-    return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
-  }
-
-  if (hasValidDashboardSession(c)) {
-    return { ok: true, key: '' }
-  }
-
-  const suppliedKey = getAdminKeyFromRequest(c)
-  if (!suppliedKey || suppliedKey !== configuredKey) {
-    return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
-  }
-
-  return { ok: true, key: suppliedKey }
-}
-
 function hasFederationAuth(c: Context): boolean {
   if (c.req.header('x-beam-mtls-verified') === 'true') {
     return true
@@ -179,25 +80,6 @@ function hasFederationAuth(c: Context): boolean {
 
   const secret = getFederationSharedSecret()
   return Boolean(secret) && c.req.header('x-beam-federation-secret') === secret
-}
-
-function requireDirectoryAdmin(db: Database, c: Context): { ok: true; actor: string } | Response {
-  const admin = requireAdmin(c)
-  if (!(admin instanceof Response)) {
-    return { ok: true, actor: 'admin-key' }
-  }
-
-  const userId = c.req.header('x-directory-user') ?? c.req.query('user') ?? ''
-  if (!userId) {
-    return admin
-  }
-
-  const role = getDirectoryRole(db, userId, getLocalDirectoryUrl())
-  if (role?.role === 'admin') {
-    return { ok: true, actor: userId }
-  }
-
-  return admin
 }
 
 function tableExists(db: Database, tableName: string): boolean {
@@ -680,9 +562,9 @@ export function createApp(db: Database): Hono {
     allowHeaders: [
       'Content-Type',
       'Authorization',
-      'X-Admin-Key',
       'X-API-Key',
     ],
+    credentials: true,
   }))
 
   app.use('*', createRateLimitMiddleware())
@@ -702,28 +584,12 @@ export function createApp(db: Database): Hono {
     defaultRateLimit: 20,
   }))
 
-  app.post('/dashboard/login', (c) => {
-    const configuredKey = process.env['BEAM_ADMIN_KEY'] ?? ''
-    if (!configuredKey) {
-      return c.json({ error: 'Admin access is not configured', errorCode: 'ADMIN_UNAVAILABLE' }, 503)
-    }
-
-    const suppliedKey = c.req.header('x-admin-key') ?? ''
-    if (!suppliedKey || suppliedKey !== configuredKey) {
-      invalidateDashboardSession(c)
-      c.header('Set-Cookie', buildDashboardSessionCookie('', 0))
-      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
-    }
-
-    const sessionToken = createDashboardSession()
-    c.header('Cache-Control', 'no-store')
-    c.header('Set-Cookie', buildDashboardSessionCookie(sessionToken, Math.floor(DASHBOARD_SESSION_TTL_MS / 1000)))
-    return c.json({ ok: true, expiresInSeconds: Math.floor(DASHBOARD_SESSION_TTL_MS / 1000) })
-  })
+  app.route('/admin/auth', adminAuthRouter(db))
 
   app.get('/dashboard', (c) => {
-    if (!hasValidDashboardSession(c)) {
-      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
     }
 
     c.header('Cache-Control', 'no-store')
@@ -731,7 +597,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/admin/agents', (c) => {
-    const auth = requireAdmin(c)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -756,7 +622,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/admin/intents', (c) => {
-    const auth = requireAdmin(c)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -785,10 +651,16 @@ export function createApp(db: Database): Hono {
   })
 
   app.delete('/admin/waitlist', (c) => {
-    const auth = requireAdmin(c)
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
     if (auth instanceof Response) return auth
     try {
       const result = db.prepare('DELETE FROM waitlist').run()
+      logAuditEvent(db, {
+        action: 'admin.waitlist.cleared',
+        actor: auth.session.email,
+        target: 'waitlist',
+        details: { deleted: result.changes, role: auth.session.role },
+      })
       return c.json({ deleted: result.changes })
     } catch (err) {
       console.error('Admin waitlist clear error:', err)
@@ -797,7 +669,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/admin/waitlist', (c) => {
-    const auth = requireAdmin(c)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -813,7 +685,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/admin/trust', (c) => {
-    const auth = requireAdmin(c)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -837,7 +709,7 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/admin/audit', (c) => {
-    const auth = requireDirectoryAdmin(db, c)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -871,19 +743,22 @@ export function createApp(db: Database): Hono {
 
   // List all agents with connection status (before sub-router to avoid conflict)
   app.get('/directory/agents', (c) => {
-    if (isPrivateDirectoryMode() && !hasFederationAuth(c) && requireAdmin(c) instanceof Response) {
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
+    if (isPrivateDirectoryMode() && !hasFederationAuth(c) && !adminSession) {
       return c.json({ error: 'Directory is private', errorCode: 'PRIVATE_DIRECTORY' }, 403)
     }
 
     try {
-      const includeUnlisted = c.req.query('includeUnlisted') === 'true' && !requireAdmin(c)
-      const publicRows = db.prepare("SELECT * FROM agents WHERE visibility = 'public' ORDER BY trust_score DESC, beam_id ASC").all() as AgentRow[]
+      const includeUnlisted = c.req.query('includeUnlisted') === 'true' && Boolean(adminSession)
+      const rows = includeUnlisted
+        ? db.prepare('SELECT * FROM agents ORDER BY trust_score DESC, beam_id ASC').all() as AgentRow[]
+        : db.prepare("SELECT * FROM agents WHERE visibility = 'public' ORDER BY trust_score DESC, beam_id ASC").all() as AgentRow[]
       const totalCount = (db.prepare('SELECT COUNT(*) as cnt FROM agents').get() as { cnt: number }).cnt
       const connected = new Set(getConnectedBeamIds())
       return c.json({
-        agents: publicRows.map((row) => serializeAgent(row, connected)),
+        agents: rows.map((row) => serializeAgent(row, connected)),
         total: totalCount,
-        listed: publicRows.length,
+        listed: rows.length,
       })
     } catch (err) {
       console.error('List agents error:', err)
@@ -928,6 +803,90 @@ export function createApp(db: Database): Hono {
   app.route('/shield', shieldRouter(db))
   app.route('/observability', observabilityRouter(db))
   app.route('/keys', revokedKeysRouter(db))
+
+  app.get('/admin/roles', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const rows = listDirectoryRoles(db, getLocalDirectoryUrl())
+    return c.json({
+      roles: rows.map((row) => ({
+        email: row.user_id,
+        role: row.role,
+      })),
+      total: rows.length,
+    })
+  })
+
+  app.post('/admin/roles', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const body = await c.req.json().catch(() => ({})) as { email?: string; role?: 'admin' | 'operator' | 'viewer' }
+    const email = String(body.email ?? '').trim().toLowerCase()
+    const role = body.role
+    if (!email || !email.includes('@') || (role !== 'admin' && role !== 'operator' && role !== 'viewer')) {
+      return c.json({ error: 'email and role are required', errorCode: 'INVALID_ROLE_ASSIGNMENT' }, 400)
+    }
+
+    const assigned = assignDirectoryRole(db, {
+      userId: email,
+      role,
+      directoryUrl: getLocalDirectoryUrl(),
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.role.assigned',
+      actor: auth.session.email,
+      target: email,
+      details: {
+        role: assigned.role,
+        directoryUrl: assigned.directory_url,
+      },
+    })
+
+    return c.json({
+      email: assigned.user_id,
+      role: assigned.role,
+      directoryUrl: assigned.directory_url,
+    }, 201)
+  })
+
+  app.delete('/admin/roles/:email', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const email = decodeURIComponent(c.req.param('email') ?? '').trim().toLowerCase()
+    if (!email || !email.includes('@')) {
+      return c.json({ error: 'Valid email required', errorCode: 'INVALID_EMAIL' }, 400)
+    }
+
+    const deleted = deleteDirectoryRole(db, {
+      userId: email,
+      directoryUrl: getLocalDirectoryUrl(),
+    })
+
+    if (!deleted) {
+      return c.json({ error: 'Role assignment not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.role.revoked',
+      actor: auth.session.email,
+      target: email,
+      details: {
+        directoryUrl: getLocalDirectoryUrl(),
+      },
+    })
+
+    return new Response(null, { status: 204 })
+  })
 
   app.post('/acl', async (c) => {
     let body: unknown
@@ -1057,15 +1016,9 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/waitlist', (c) => {
-    const adminKey = process.env['BEAM_ADMIN_KEY']
-    if (!adminKey) {
-      console.error('BEAM_ADMIN_KEY is not configured')
-      return c.json({ error: 'Admin access unavailable', errorCode: 'ADMIN_NOT_CONFIGURED' }, 503)
-    }
-
-    const providedKey = c.req.header('X-Admin-Key')
-    if (providedKey !== adminKey) {
-      return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
     }
 
     try {

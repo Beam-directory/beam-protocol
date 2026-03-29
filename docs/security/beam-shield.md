@@ -27,10 +27,15 @@ Every agent can configure their own security posture via the Shield Config API.
 ### Configuration
 
 ```bash
+# Admin session path for operators
+# 1. POST /admin/auth/magic-link
+# 2. POST /admin/auth/verify
+# 3. reuse the returned bearer token below
+
 # Set whitelist mode (e.g., for internal agent fleet)
 curl -X PATCH https://api.beam.directory/shield/config/agent@org.beam.directory \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Key: your-key" \
+  -H "Authorization: Bearer <admin-session-token>" \
   -d '{
     "mode": "whitelist",
     "allowlist": ["*@org.beam.directory"],
@@ -41,7 +46,7 @@ curl -X PATCH https://api.beam.directory/shield/config/agent@org.beam.directory 
 # Set open mode (e.g., for public-facing agents)
 curl -X PATCH https://api.beam.directory/shield/config/agent@org.beam.directory \
   -H "Content-Type: application/json" \
-  -H "X-Admin-Key: your-key" \
+  -H "Authorization: Bearer <admin-session-token>" \
   -d '{
     "mode": "open",
     "minTrust": 0.3,
@@ -112,7 +117,7 @@ GET /shield/config/:beamId
 
 # Update shield config
 PATCH /shield/config/:beamId
-# Auth: X-Admin-Key header or Ed25519 signature
+# Auth: admin bearer session or Ed25519 signature
 
 # Get audit events for a sender (admin only)
 GET /shield/audit/:beamId?hours=24
