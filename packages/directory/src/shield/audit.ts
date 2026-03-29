@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 
 export interface AuditEvent {
+  nonce?: string | null
   timestamp: string
   senderBeamId: string
   senderTrust: number
@@ -24,11 +25,16 @@ export function hashPayload(payload: unknown): string {
 }
 
 export function logShieldEvent(db: Database, event: AuditEvent): void {
+  if (event.nonce) {
+    db.prepare('DELETE FROM shield_audit_log WHERE nonce = ?').run(event.nonce)
+  }
+
   db.prepare(`
     INSERT INTO shield_audit_log
-    (timestamp, sender_beam_id, sender_trust, intent_type, payload_hash, decision, risk_score, response_size, anomaly_flags, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    (nonce, timestamp, sender_beam_id, sender_trust, intent_type, payload_hash, decision, risk_score, response_size, anomaly_flags, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
+    event.nonce ?? null,
     event.timestamp,
     event.senderBeamId,
     event.senderTrust,
@@ -43,6 +49,7 @@ export function logShieldEvent(db: Database, event: AuditEvent): void {
 }
 
 interface AuditRow {
+  nonce: string | null
   timestamp: string
   sender_beam_id: string
   sender_trust: number
@@ -66,6 +73,7 @@ export function getRecentEvents(
   ).all(beamId, cutoff) as AuditRow[]
 
   return rows.map((r) => ({
+    nonce: r.nonce,
     timestamp: r.timestamp,
     senderBeamId: r.sender_beam_id,
     senderTrust: r.sender_trust,

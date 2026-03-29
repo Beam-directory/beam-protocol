@@ -1,13 +1,19 @@
 import { useEffect, useState } from 'react'
-import { Activity, Bot, Clock3, ShieldCheck } from 'lucide-react'
-import { ApiError, directoryApi, type DirectoryStats, type RecentIntent } from '../lib/api'
-import { formatDateTime, formatLatency, formatNumber, truncateBeamId } from '../lib/utils'
+import { Link } from 'react-router-dom'
+import { ApiError, directoryApi, type ObservabilityOverview } from '../lib/api'
+import { alertSeverityColor, cn, formatLatency, formatNumber, formatPercent } from '../lib/utils'
+import { BarList, EmptyPanel, MetricCard, PageHeader, StatusPill, TimeSeriesChart } from '../components/Observability'
+
+const WINDOW_OPTIONS = [
+  { value: 24, label: '24h' },
+  { value: 24 * 7, label: '7d' },
+]
 
 export default function OverviewPage() {
-  const [stats, setStats] = useState<DirectoryStats | null>(null)
-  const [recentIntents, setRecentIntents] = useState<RecentIntent[]>([])
-  const [error, setError] = useState<string | null>(null)
+  const [hours, setHours] = useState(24)
+  const [overview, setOverview] = useState<ObservabilityOverview | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelled = false
@@ -15,18 +21,13 @@ export default function OverviewPage() {
     async function load() {
       try {
         setLoading(true)
-        const [statsResponse, intentsResponse] = await Promise.all([
-          directoryApi.getAgentStats(),
-          directoryApi.getRecentIntents(6),
-        ])
-
+        const response = await directoryApi.getObservabilityOverview(hours)
         if (cancelled) return
-        setStats(statsResponse)
-        setRecentIntents(intentsResponse.intents)
+        setOverview(response)
         setError(null)
       } catch (err) {
         if (cancelled) return
-        setError(err instanceof ApiError ? err.message : 'Failed to load dashboard overview')
+        setError(err instanceof ApiError ? err.message : 'Failed to load observability overview')
       } finally {
         if (!cancelled) setLoading(false)
       }
@@ -36,66 +37,142 @@ export default function OverviewPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [hours])
 
   return (
     <div className="space-y-6">
-      <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Overview</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Live network stats from the Beam Directory API.</p>
+      <PageHeader
+        title="Overview"
+        description="Network health, throughput, latency, and alert pressure across the Beam directory."
+        actions={(
+          <select className="input-field w-auto min-w-28" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
+            {WINDOW_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
+          </select>
+        )}
+      />
+
+      {error ? (
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          {error}
         </div>
-        {error && <p className="text-sm text-red-600 dark:text-red-400">{error}</p>}
+      ) : null}
+
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label="Total intents" value={loading || !overview ? '—' : formatNumber(overview.summary.totalIntents)} hint={`${hours}h window`} />
+        <MetricCard label="Success rate" value={loading || !overview ? '—' : formatPercent(overview.summary.successRate)} tone={overview && overview.summary.successRate < 0.9 ? 'warning' : 'success'} />
+        <MetricCard label="p95 latency" value={loading || !overview ? '—' : formatLatency(overview.summary.p95LatencyMs)} tone={overview && (overview.summary.p95LatencyMs ?? 0) >= 2000 ? 'warning' : 'default'} />
+        <MetricCard label="Live agents" value={loading || !overview ? '—' : formatNumber(overview.summary.liveAgents)} hint={`${overview ? formatNumber(overview.summary.totalAgents) : '—'} total`} />
+        <MetricCard label="Open alerts" value={loading || !overview ? '—' : formatNumber(overview.alerts.length)} tone={overview && overview.alerts.length > 0 ? 'critical' : 'default'} />
       </section>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <StatCard icon={Bot} label="Total agents" value={loading || !stats ? '—' : formatNumber(stats.total_agents)} />
-        <StatCard icon={ShieldCheck} label="Verified agents" value={loading || !stats ? '—' : formatNumber(stats.verified_agents)} />
-        <StatCard icon={Activity} label="Processed intents" value={loading || !stats ? '—' : formatNumber(stats.intents_processed)} />
-        <StatCard icon={Clock3} label="Avg response" value={loading || !stats ? '—' : formatLatency(stats.avg_response_time_ms)} />
-      </section>
-
-      <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
+      <section className="grid gap-6 xl:grid-cols-[1.4fr,0.8fr]">
         <div className="panel">
-          <div className="panel-title">Verification coverage</div>
-          <div className="mt-5 space-y-4">
+          <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="mb-2 flex items-center justify-between text-sm">
-                <span className="text-slate-600 dark:text-slate-300">Verified share</span>
-                <span className="font-medium">{stats && stats.total_agents > 0 ? `${Math.round((stats.verified_agents / stats.total_agents) * 100)}%` : '0%'}</span>
-              </div>
-              <div className="h-3 rounded-full bg-slate-200 dark:bg-slate-800">
-                <div
-                  className="h-3 rounded-full bg-blue-500 transition-all"
-                  style={{ width: `${stats && stats.total_agents > 0 ? (stats.verified_agents / stats.total_agents) * 100 : 0}%` }}
-                />
-              </div>
+              <div className="panel-title">Intent Timeline</div>
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Throughput, failures, and pending pressure over time.</div>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              <MiniStat label="Verified" value={stats ? formatNumber(stats.verified_agents) : '—'} />
-              <MiniStat label="Unverified" value={stats ? formatNumber(Math.max(stats.total_agents - stats.verified_agents, 0)) : '—'} />
-            </div>
+            <StatusPill
+              label={overview && overview.summary.pendingOlderThan15m > 0 ? `${overview.summary.pendingOlderThan15m} stuck` : 'healthy'}
+              tone={overview && overview.summary.pendingOlderThan15m > 0 ? 'warning' : 'success'}
+            />
+          </div>
+          <div className="mt-5">
+            {loading || !overview ? (
+              <EmptyPanel label="Loading timeseries…" />
+            ) : (
+              <TimeSeriesChart
+                data={overview.timeline}
+                series={[
+                  { key: 'total', label: 'Total', color: '#f97316' },
+                  { key: 'error', label: 'Errors', color: '#ef4444' },
+                  { key: 'pending', label: 'Pending', color: '#f59e0b' },
+                ]}
+              />
+            )}
           </div>
         </div>
 
         <div className="panel">
-          <div className="panel-title">Latest intents</div>
-          <div className="mt-4 space-y-3">
-            {recentIntents.length === 0 ? (
-              <EmptyState label={loading ? 'Loading recent intents…' : 'No intents have been processed yet.'} />
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="panel-title">Top Intents</div>
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Most active intent types in the selected window.</div>
+            </div>
+            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to="/intents">
+              Open feed
+            </Link>
+          </div>
+          <div className="mt-5">
+            {loading || !overview ? (
+              <EmptyPanel label="Loading intent mix…" />
             ) : (
-              recentIntents.map((intent) => (
-                <div key={intent.nonce} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center gap-2 text-sm">
-                    <span className="rounded-full bg-orange-500/10 px-2 py-1 text-xs font-medium text-orange-600 dark:text-orange-300">
-                      {intent.intentType}
+              <BarList items={overview.topIntents.map((entry) => ({ label: entry.intentType, value: entry.total }))} />
+            )}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[0.95fr,1.05fr]">
+        <div className="panel">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="panel-title">Error Pressure</div>
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Most frequent failure codes right now.</div>
+            </div>
+            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to="/errors">
+              Error dashboard
+            </Link>
+          </div>
+          <div className="mt-4 space-y-3">
+            {loading || !overview ? (
+              <EmptyPanel label="Loading error data…" />
+            ) : overview.topErrors.length === 0 ? (
+              <EmptyPanel label="No error codes in the selected window." />
+            ) : (
+              overview.topErrors.map((entry) => (
+                <div key={entry.errorCode} className="rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                  <div className="flex items-center justify-between gap-4">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium">{entry.errorCode}</div>
+                      <div className="text-xs text-slate-500 dark:text-slate-400">{entry.lastSeenAt}</div>
+                    </div>
+                    <div className="text-lg font-semibold">{formatNumber(entry.count)}</div>
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="panel-title">Alert Feed</div>
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Computed network warnings from errors, latency, backlog, and federation drift.</div>
+            </div>
+            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to="/alerts">
+              View all alerts
+            </Link>
+          </div>
+          <div className="mt-4 space-y-3">
+            {loading || !overview ? (
+              <EmptyPanel label="Loading alerts…" />
+            ) : overview.alerts.length === 0 ? (
+              <EmptyPanel label="No active alerts in the selected window." />
+            ) : (
+              overview.alerts.map((alert) => (
+                <div key={alert.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.14em]', alertSeverityColor(alert.severity))}>
+                      {alert.severity}
                     </span>
-                    <span className="text-slate-500 dark:text-slate-400">{formatDateTime(intent.timestamp)}</span>
+                    <span className="text-xs text-slate-500 dark:text-slate-400">{alert.scope}</span>
                   </div>
-                  <div className="mt-2 grid gap-1 text-sm text-slate-600 dark:text-slate-300">
-                    <div>From {truncateBeamId(intent.from)}</div>
-                    <div>To {truncateBeamId(intent.to)}</div>
-                  </div>
+                  <div className="mt-2 text-sm font-medium">{alert.title}</div>
+                  <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{alert.message}</div>
                 </div>
               ))
             )}
@@ -104,41 +181,4 @@ export default function OverviewPage() {
       </section>
     </div>
   )
-}
-
-function StatCard({
-  icon: Icon,
-  label,
-  value,
-}: {
-  icon: typeof Bot
-  label: string
-  value: string
-}) {
-  return (
-    <div className="panel">
-      <div className="flex items-center justify-between">
-        <div>
-          <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
-          <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
-        </div>
-        <div className="rounded-xl bg-orange-500/10 p-3 text-orange-500">
-          <Icon size={18} />
-        </div>
-      </div>
-    </div>
-  )
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="rounded-xl bg-slate-50 p-4 dark:bg-slate-950">
-      <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-1 text-xl font-semibold">{value}</div>
-    </div>
-  )
-}
-
-function EmptyState({ label }: { label: string }) {
-  return <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">{label}</div>
 }

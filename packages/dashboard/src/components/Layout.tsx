@@ -1,14 +1,18 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Activity, Bot, Menu, Moon, Radio, Settings, Sun, UserPlus, X, Zap } from 'lucide-react'
+import { Activity, Bot, Globe2, Menu, Moon, Radio, ScrollText, Settings, Shield, Sun, TriangleAlert, UserPlus, X, Zap } from 'lucide-react'
 import { cn } from '../lib/utils'
 import { useThemeMode } from '../lib/theme'
 
 const NAV_ITEMS = [
   { path: '/', label: 'Overview', icon: Activity, exact: true },
-  { path: '/agents', label: 'Agents', icon: Bot },
-  { path: '/register', label: 'Register', icon: UserPlus },
   { path: '/intents', label: 'Intents', icon: Zap },
+  { path: '/audit', label: 'Audit', icon: ScrollText },
+  { path: '/agents', label: 'Agents', icon: Bot },
+  { path: '/federation', label: 'Federation', icon: Globe2 },
+  { path: '/errors', label: 'Errors', icon: TriangleAlert },
+  { path: '/alerts', label: 'Alerts', icon: Shield },
+  { path: '/register', label: 'Register', icon: UserPlus },
   { path: '/settings', label: 'Settings', icon: Settings },
 ]
 

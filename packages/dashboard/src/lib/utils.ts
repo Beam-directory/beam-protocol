@@ -36,6 +36,11 @@ export function formatNumber(value: number): string {
   return new Intl.NumberFormat().format(value)
 }
 
+export function formatPercent(value?: number | null, digits = 1): string {
+  if (value == null || Number.isNaN(value)) return '—'
+  return `${(value * 100).toFixed(digits)}%`
+}
+
 export function formatDateTime(value?: string | null): string {
   if (!value) return '—'
   const date = new Date(value)
@@ -43,6 +48,17 @@ export function formatDateTime(value?: string | null): string {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: 'medium',
     timeStyle: 'short',
+  }).format(date)
+}
+
+export function formatChartTime(value?: string | null): string {
+  if (!value) return '—'
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return '—'
+  return new Intl.DateTimeFormat(undefined, {
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
   }).format(date)
 }
 
@@ -73,6 +89,39 @@ export function verificationTierColor(tier: string): string {
     default:
       return 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300'
   }
+}
+
+export function intentStatusColor(status: string): string {
+  switch (status) {
+    case 'success':
+      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
+    case 'pending':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+    default:
+      return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+  }
+}
+
+export function alertSeverityColor(severity: string): string {
+  switch (severity) {
+    case 'critical':
+      return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
+    case 'warning':
+      return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
+    default:
+      return 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300'
+  }
+}
+
+export function downloadBlob(blob: Blob, filename: string): void {
+  const url = URL.createObjectURL(blob)
+  const anchor = document.createElement('a')
+  anchor.href = url
+  anchor.download = filename
+  document.body.appendChild(anchor)
+  anchor.click()
+  document.body.removeChild(anchor)
+  window.setTimeout(() => URL.revokeObjectURL(url), 500)
 }
 
 export function toBase64(buffer: ArrayBuffer): string {
