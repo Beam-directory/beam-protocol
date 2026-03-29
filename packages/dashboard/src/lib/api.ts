@@ -49,6 +49,60 @@ export interface DirectoryHealth {
   timestamp: string
 }
 
+export interface BusHealth {
+  status: string
+  service: string
+}
+
+export interface BusStats {
+  total: number
+  pending: number
+  delivered: number
+  acked: number
+  failed: number
+  dead_letter: number
+  by_agent: Record<string, { sent: number; received: number }>
+  last_24h: number
+}
+
+export interface DeadLetterMessage {
+  id: string
+  nonce: string
+  sender: string
+  recipient: string
+  intent: string
+  payload: Record<string, unknown>
+  status: string
+  priority: number
+  retry_count: number
+  max_retries: number
+  next_retry_at: number | null
+  created_at: number
+  delivered_at: number | null
+  acked_at: number | null
+  failed_at: number | null
+  error: string | null
+  response: Record<string, unknown> | null
+  trace_id: string | null
+  metadata: Record<string, unknown> | null
+}
+
+export interface DeadLetterResponse {
+  messages: DeadLetterMessage[]
+  count: number
+}
+
+export interface RequeueDeadLetterResponse {
+  message_id: string
+  nonce: string
+  status: string
+  requeued: boolean
+  retry_count?: number
+  next_retry_at?: number
+  error?: string
+  error_code?: string
+}
+
 export interface RecentIntent {
   nonce: string
   from: string
@@ -445,9 +499,13 @@ export interface ExportDownload {
 
 const DEFAULT_DIRECTORY_URL = 'https://api.beam.directory'
 const ADMIN_KEY_STORAGE = 'beam-dashboard-admin-key'
+const DEFAULT_BUS_URL = (import.meta.env.VITE_BEAM_BUS_URL || 'http://localhost:8420').replace(/\/$/, '')
+const BUS_URL_STORAGE = 'beam-dashboard-bus-url'
+const BUS_API_KEY_STORAGE = 'beam-dashboard-bus-api-key'
 
 export const DIRECTORY_URL = (import.meta.env.VITE_API_URL || DEFAULT_DIRECTORY_URL).replace(/\/$/, '')
 export const DIRECTORY_WS_URL = DIRECTORY_URL.replace(/^http/, 'ws')
+export const BUS_DEFAULT_URL = DEFAULT_BUS_URL
 
 export class ApiError extends Error {
   status: number
@@ -493,6 +551,65 @@ export function hasStoredAdminKey(): boolean {
   return getStoredAdminKey().length > 0
 }
 
+export function getStoredBusUrl(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.localStorage.getItem(BUS_URL_STORAGE) ?? ''
+}
+
+export function setStoredBusUrl(value: string): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const trimmed = value.trim().replace(/\/$/, '')
+  if (trimmed) {
+    window.localStorage.setItem(BUS_URL_STORAGE, trimmed)
+  } else {
+    window.localStorage.removeItem(BUS_URL_STORAGE)
+  }
+}
+
+export function getBusBaseUrl(): string {
+  return getStoredBusUrl() || DEFAULT_BUS_URL
+}
+
+export function getStoredBusApiKey(): string {
+  if (typeof window === 'undefined') {
+    return ''
+  }
+
+  return window.localStorage.getItem(BUS_API_KEY_STORAGE) ?? ''
+}
+
+export function setStoredBusApiKey(value: string): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  const trimmed = value.trim()
+  if (trimmed) {
+    window.localStorage.setItem(BUS_API_KEY_STORAGE, trimmed)
+  } else {
+    window.localStorage.removeItem(BUS_API_KEY_STORAGE)
+  }
+}
+
+export function clearStoredBusConfig(): void {
+  if (typeof window === 'undefined') {
+    return
+  }
+
+  window.localStorage.removeItem(BUS_URL_STORAGE)
+  window.localStorage.removeItem(BUS_API_KEY_STORAGE)
+}
+
+export function hasStoredBusApiKey(): boolean {
+  return getStoredBusApiKey().length > 0
+}
+
 function buildHeaders(initHeaders?: HeadersInit, options?: { admin?: boolean }): Headers {
   const headers = new Headers(initHeaders ?? {})
   if (!headers.has('Content-Type')) {
@@ -532,6 +649,45 @@ async function requestRaw(path: string, init?: RequestInit, options?: { admin?: 
 
 async function request<T>(path: string, init?: RequestInit, options?: { admin?: boolean }): Promise<T> {
   const response = await requestRaw(path, init, options)
+  return response.json() as Promise<T>
+}
+
+function buildBusHeaders(initHeaders?: HeadersInit): Headers {
+  const headers = new Headers(initHeaders ?? {})
+  if (!headers.has('Content-Type')) {
+    headers.set('Content-Type', 'application/json')
+  }
+
+  const apiKey = getStoredBusApiKey()
+  if (apiKey) {
+    headers.set('Authorization', `Bearer ${apiKey}`)
+  }
+
+  return headers
+}
+
+async function requestBusRaw(path: string, init?: RequestInit): Promise<Response> {
+  const response = await fetch(`${getBusBaseUrl()}${path}`, {
+    ...init,
+    headers: buildBusHeaders(init?.headers),
+  })
+
+  if (!response.ok) {
+    let payload: { error?: string; errorCode?: string } | null = null
+    try {
+      payload = await response.clone().json()
+    } catch {
+      payload = null
+    }
+
+    throw new ApiError(payload?.error ?? `Bus request failed with ${response.status}`, response.status, payload?.errorCode)
+  }
+
+  return response
+}
+
+async function requestBus<T>(path: string, init?: RequestInit): Promise<T> {
+  const response = await requestBusRaw(path, init)
   return response.json() as Promise<T>
 }
 
@@ -670,6 +826,25 @@ export const directoryApi = {
       filename: getFilenameFromResponse(response, dataset, format),
     }
   },
+}
+
+export const busApi = {
+  getHealth: () => requestBus<BusHealth>('/health'),
+  getStats: () => requestBus<BusStats>('/v1/beam/stats'),
+  listDeadLetters: (params?: {
+    sender?: string
+    recipient?: string
+    intent?: string
+    limit?: number
+  }) => requestBus<DeadLetterResponse>(`/v1/beam/dead-letter${buildQuery({
+    sender: params?.sender,
+    recipient: params?.recipient,
+    intent: params?.intent,
+    limit: params?.limit,
+  })}`),
+  requeueDeadLetter: (messageId: string) => requestBus<RequeueDeadLetterResponse>(`/v1/beam/dead-letter/${encodeURIComponent(messageId)}/requeue`, {
+    method: 'POST',
+  }),
 }
 
 export function connectIntentFeed(options: {

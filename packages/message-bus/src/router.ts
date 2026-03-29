@@ -2,22 +2,26 @@
  * Beam Message Bus — Hono Router (HTTP API)
  */
 
+import { isDeepStrictEqual } from 'node:util'
 import { Hono, type Context } from 'hono'
 import type Database from 'better-sqlite3'
 import {
   insertMessage,
   markDelivered,
   markAcked,
+  markDeadLetter,
   markFailed,
-  scheduleRetry,
   getMessage,
+  getMessageByNonce,
+  listDeadLetters,
   pollMessages,
   queryHistory,
+  requeueMessage,
+  scheduleRetry,
   getStats,
 } from './db.js'
 import { deliverToDirectory } from './delivery.js'
-
-const RETRY_BACKOFF = [30, 60, 120, 240, 480] // seconds
+import { computeRetryAt } from './retry.js'
 
 /** Rate limiter — in-memory buckets */
 const rateBuckets = new Map<string, number[]>()
@@ -69,6 +73,20 @@ export function createBusRouter(options: RouterOptions): Hono {
     await next()
   })
 
+  function serializeMessage(msg: Record<string, unknown>): Record<string, unknown> {
+    const parsed = { ...msg }
+    for (const field of ['payload', 'response', 'metadata'] as const) {
+      if (parsed[field] && typeof parsed[field] === 'string') {
+        try {
+          parsed[field] = JSON.parse(parsed[field] as string)
+        } catch {
+          // Keep raw string payloads in operator views.
+        }
+      }
+    }
+    return parsed
+  }
+
   // POST /send
   app.post('/send', async (c) => {
     let body: Record<string, unknown>
@@ -81,35 +99,95 @@ export function createBusRouter(options: RouterOptions): Hono {
     const sender = String(body.from ?? body.sender ?? '')
     const recipient = String(body.to ?? '')
     const intent = String(body.intent ?? '')
-    const payload = (body.payload as Record<string, unknown>) ?? {}
+    const payloadCandidate = body.payload
+    const payload = payloadCandidate && typeof payloadCandidate === 'object' && !Array.isArray(payloadCandidate)
+      ? payloadCandidate as Record<string, unknown>
+      : {}
     const priority = Number(body.priority ?? 0)
     const traceId = body.trace_id as string | undefined
+    const nonce = typeof body.nonce === 'string' && body.nonce.trim().length > 0
+      ? body.nonce.trim()
+      : undefined
 
     if (!sender || !recipient || !intent) {
       return c.json({ error: 'Missing required fields: from, to, intent', errorCode: 'MISSING_REQUIRED_FIELDS' }, 400)
+    }
+
+    if (body.payload !== undefined && (typeof body.payload !== 'object' || Array.isArray(body.payload) || body.payload === null)) {
+      return c.json({ error: 'payload must be an object', errorCode: 'INVALID_PAYLOAD' }, 400)
+    }
+
+    if (nonce) {
+      const existing = getMessageByNonce(db, nonce)
+      if (existing) {
+        const sameMessage = existing.sender === sender
+          && existing.recipient === recipient
+          && existing.intent === intent
+          && isDeepStrictEqual(JSON.parse(existing.payload), payload)
+
+        if (!sameMessage) {
+          return c.json({
+            error: `Nonce ${nonce} already belongs to a different message`,
+            errorCode: 'NONCE_REUSE_CONFLICT',
+          }, 409)
+        }
+
+        return c.json({
+          message_id: existing.id,
+          nonce: existing.nonce,
+          status: existing.status,
+          created_at: existing.created_at,
+          retry_count: existing.retry_count,
+          deduped: true,
+        })
+      }
     }
 
     if (!checkRateLimit(sender, maxRate)) {
       return c.json({ error: `Rate limit exceeded for ${sender} (max ${maxRate}/min)`, errorCode: 'RATE_LIMIT_EXCEEDED' }, 429)
     }
 
-    const msgId = insertMessage(db, { sender, recipient, intent, payload, priority, traceId })
+    const msgId = insertMessage(db, { nonce, sender, recipient, intent, payload, priority, traceId })
+    const message = getMessage(db, msgId)
+    const messageNonce = message?.nonce ?? nonce ?? msgId
     const now = Date.now() / 1000
 
     // Attempt immediate delivery
-    const result = await deliverToDirectory(directoryUrl, msgId, sender, recipient, intent, payload)
+    const result = await deliverToDirectory(directoryUrl, msgId, messageNonce, sender, recipient, intent, payload)
 
     if (result.success) {
       markDelivered(db, msgId)
       console.log(`[beam-bus] ✅ ${sender} → ${recipient} (${intent}) delivered`)
-      return c.json({ message_id: msgId, status: 'delivered', created_at: now }, 201)
+      return c.json({ message_id: msgId, nonce: messageNonce, status: 'delivered', created_at: now }, 201)
     }
 
-    // Schedule retry
-    const nextRetry = now + RETRY_BACKOFF[0]
-    scheduleRetry(db, msgId, 0, nextRetry, result.error)
+    if (!result.retryable) {
+      markDeadLetter(db, msgId, result.error)
+      console.log(`[beam-bus] 🪦 ${sender} → ${recipient} (${intent}) dead-lettered: ${result.error}`)
+      return c.json({
+        message_id: msgId,
+        nonce: messageNonce,
+        status: 'dead_letter',
+        created_at: now,
+        error: result.error,
+        error_code: result.errorCode,
+      }, 201)
+    }
+
+    const retryCount = 1
+    const nextRetry = computeRetryAt(retryCount, messageNonce, now)
+    scheduleRetry(db, msgId, retryCount, nextRetry, result.error)
     console.log(`[beam-bus] ⏳ ${sender} → ${recipient} (${intent}) queued: ${result.error}`)
-    return c.json({ message_id: msgId, status: 'pending', created_at: now }, 201)
+    return c.json({
+      message_id: msgId,
+      nonce: messageNonce,
+      status: 'pending',
+      created_at: now,
+      retry_count: retryCount,
+      next_retry_at: nextRetry,
+      error: result.error,
+      error_code: result.errorCode,
+    }, 201)
   })
 
   // GET /poll
@@ -133,6 +211,81 @@ export function createBusRouter(options: RouterOptions): Hono {
     }))
 
     return c.json({ messages, count: messages.length })
+  })
+
+  // GET /dead-letter
+  app.get('/dead-letter', (c) => {
+    const messages = listDeadLetters(db, {
+      sender: c.req.query('sender'),
+      recipient: c.req.query('recipient'),
+      intent: c.req.query('intent'),
+      limit: Math.min(Number(c.req.query('limit') ?? 100), 500),
+    }).map((msg) => serializeMessage(msg as unknown as Record<string, unknown>))
+
+    return c.json({ messages, count: messages.length })
+  })
+
+  // POST /dead-letter/:id/requeue
+  app.post('/dead-letter/:id/requeue', async (c) => {
+    const messageId = c.req.param('id')
+    const message = getMessage(db, messageId)
+
+    if (!message) {
+      return c.json({ error: `Message ${messageId} not found`, errorCode: 'MESSAGE_NOT_FOUND' }, 404)
+    }
+
+    if (!['dead_letter', 'failed'].includes(message.status)) {
+      return c.json({ error: `Message ${messageId} is not in a requeueable state`, errorCode: 'INVALID_STATE' }, 409)
+    }
+
+    requeueMessage(db, messageId)
+    const payload = JSON.parse(message.payload) as Record<string, unknown>
+    const result = await deliverToDirectory(
+      directoryUrl,
+      message.id,
+      message.nonce,
+      message.sender,
+      message.recipient,
+      message.intent,
+      payload,
+    )
+
+    if (result.success) {
+      markDelivered(db, messageId)
+      return c.json({
+        message_id: messageId,
+        nonce: message.nonce,
+        status: 'delivered',
+        requeued: true,
+      })
+    }
+
+    if (!result.retryable) {
+      markDeadLetter(db, messageId, result.error)
+      return c.json({
+        message_id: messageId,
+        nonce: message.nonce,
+        status: 'dead_letter',
+        requeued: true,
+        error: result.error,
+        error_code: result.errorCode,
+      })
+    }
+
+    const retryCount = 1
+    const nextRetry = computeRetryAt(retryCount, message.nonce)
+    scheduleRetry(db, messageId, retryCount, nextRetry, result.error)
+
+    return c.json({
+      message_id: messageId,
+      nonce: message.nonce,
+      status: 'pending',
+      requeued: true,
+      retry_count: retryCount,
+      next_retry_at: nextRetry,
+      error: result.error,
+      error_code: result.errorCode,
+    })
   })
 
   // POST /ack
@@ -177,15 +330,7 @@ export function createBusRouter(options: RouterOptions): Hono {
       limit: Math.min(Number(c.req.query('limit') ?? 50), 500),
     }
 
-    const messages = queryHistory(db, filters).map(msg => {
-      const parsed: Record<string, unknown> = { ...msg }
-      for (const field of ['payload', 'response', 'metadata'] as const) {
-        if (parsed[field] && typeof parsed[field] === 'string') {
-          try { parsed[field] = JSON.parse(parsed[field] as string) } catch {}
-        }
-      }
-      return parsed
-    })
+    const messages = queryHistory(db, filters).map((msg) => serializeMessage(msg as unknown as Record<string, unknown>))
 
     return c.json({ messages, count: messages.length })
   })

@@ -15,6 +15,8 @@ Thanks for contributing to Beam Protocol.
 npm install
 npm run build
 npm test
+python3 -m pip install -e packages/sdk-python
+npm run test:e2e
 ```
 
 For the local directory server:
@@ -65,6 +67,8 @@ npm run build --workspace=packages/message-bus
 ```
 
 If you add examples or CLI changes, verify the exact commands in the updated README files.
+
+Before cutting or approving a release branch, make sure the `e2e` GitHub Actions job is green. It is the cross-stack guard that boots the directory and message bus, then verifies registration, discovery, and `conversation.message` delivery through the TypeScript SDK, Python SDK, and CLI.
 
 ## Commit Style
 

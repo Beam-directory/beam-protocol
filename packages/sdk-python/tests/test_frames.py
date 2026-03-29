@@ -1,5 +1,6 @@
 """Tests for IntentFrame and ResultFrame creation and validation."""
 
+import json
 import time
 
 import pytest
@@ -67,9 +68,57 @@ class TestCreateIntentFrame:
         assert "intent" in d
         assert "from" in d
         assert "to" in d
-        assert "params" in d
+        assert "payload" in d
+        assert "params" not in d
         assert "nonce" in d
         assert "timestamp" in d
+
+    def test_to_dict_uses_payload_wire_format_for_signature(self, identity, recipient_id):
+        frame = create_intent_frame(
+            intent="greet",
+            from_id=identity.beam_id,
+            to_id=recipient_id,
+            params={"message": "hello"},
+            identity=identity,
+        )
+
+        signed_payload = json.dumps(
+            {
+                "type": "intent",
+                "from": frame.from_id,
+                "to": frame.to_id,
+                "intent": frame.intent,
+                "payload": frame.params,
+                "timestamp": frame.timestamp,
+                "nonce": frame.nonce,
+            },
+            separators=(",", ":"),
+        )
+
+        assert BeamIdentity.verify(signed_payload, frame.signature, identity.public_key_base64)
+
+    def test_from_dict_accepts_payload_key(self, recipient_id):
+        identity = BeamIdentity.generate("sender", "testorg")
+        frame = create_intent_frame(
+            intent="query",
+            from_id=identity.beam_id,
+            to_id=recipient_id,
+            params={"q": "hello"},
+        )
+
+        restored = type(frame).from_dict(
+            {
+                "v": frame.v,
+                "intent": frame.intent,
+                "from": frame.from_id,
+                "to": frame.to_id,
+                "payload": {"q": "hello"},
+                "nonce": frame.nonce,
+                "timestamp": frame.timestamp,
+            }
+        )
+
+        assert restored.params == {"q": "hello"}
 
 
 class TestCreateResultFrame:

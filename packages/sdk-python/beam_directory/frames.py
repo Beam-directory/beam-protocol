@@ -18,6 +18,30 @@ def _canonical_json(data: dict[str, Any]) -> str:
     return json.dumps(data, sort_keys=True, separators=(",", ":"))
 
 
+def _intent_signature_payload(
+    *,
+    from_id: BeamIdString,
+    to_id: BeamIdString,
+    intent: str,
+    payload: dict[str, Any],
+    timestamp: str,
+    nonce: str,
+) -> str:
+    """Match the TypeScript SDK's on-wire signature payload exactly."""
+    return json.dumps(
+        {
+            "type": "intent",
+            "from": from_id,
+            "to": to_id,
+            "intent": intent,
+            "payload": payload,
+            "timestamp": timestamp,
+            "nonce": nonce,
+        },
+        separators=(",", ":"),
+    )
+
+
 def create_intent_frame(
     intent: str,
     from_id: BeamIdString,
@@ -42,8 +66,16 @@ def create_intent_frame(
     )
 
     if identity is not None:
-        canonical = _canonical_json(frame.to_dict())
-        frame.signature = identity.sign(canonical)
+        frame.signature = identity.sign(
+            _intent_signature_payload(
+                from_id=frame.from_id,
+                to_id=frame.to_id,
+                intent=frame.intent,
+                payload=frame.params,
+                timestamp=frame.timestamp,
+                nonce=frame.nonce,
+            )
+        )
 
     return frame
 
@@ -125,10 +157,17 @@ def validate_intent_frame(
 
     # Signature check
     if public_key_base64 and frame.signature:
-        frame_dict = frame.to_dict()
-        sig = frame_dict.pop("signature", None)
-        if sig and not BeamIdentity.verify(
-            _canonical_json(frame_dict), sig, public_key_base64
+        if not BeamIdentity.verify(
+            _intent_signature_payload(
+                from_id=frame.from_id,
+                to_id=frame.to_id,
+                intent=frame.intent,
+                payload=frame.params,
+                timestamp=frame.timestamp,
+                nonce=frame.nonce,
+            ),
+            frame.signature,
+            public_key_base64,
         ):
             errors.append("Signature verification failed")
 

@@ -1,14 +1,40 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ApiError, DIRECTORY_URL, clearStoredAdminKey, directoryApi, getStoredAdminKey, hasStoredAdminKey, setStoredAdminKey, type DirectoryHealth, type RetentionResponse } from '../lib/api'
+import {
+  ApiError,
+  BUS_DEFAULT_URL,
+  DIRECTORY_URL,
+  busApi,
+  clearStoredAdminKey,
+  clearStoredBusConfig,
+  directoryApi,
+  getBusBaseUrl,
+  getStoredAdminKey,
+  getStoredBusApiKey,
+  getStoredBusUrl,
+  hasStoredAdminKey,
+  hasStoredBusApiKey,
+  setStoredAdminKey,
+  setStoredBusApiKey,
+  setStoredBusUrl,
+  type BusHealth,
+  type BusStats,
+  type DirectoryHealth,
+  type RetentionResponse,
+} from '../lib/api'
 
 const PRIVATE_KEY_PREFIX = 'beam-dashboard-private-key:'
 
 export default function SettingsPage() {
   const [health, setHealth] = useState<DirectoryHealth | null>(null)
+  const [busHealth, setBusHealth] = useState<BusHealth | null>(null)
+  const [busStats, setBusStats] = useState<BusStats | null>(null)
   const [retention, setRetention] = useState<RetentionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [adminKey, setAdminKey] = useState(() => getStoredAdminKey())
   const [adminStatus, setAdminStatus] = useState<string | null>(hasStoredAdminKey() ? 'Admin key stored locally.' : null)
+  const [busUrl, setBusUrl] = useState(() => getStoredBusUrl() || BUS_DEFAULT_URL)
+  const [busApiKey, setBusApiKey] = useState(() => getStoredBusApiKey())
+  const [busStatus, setBusStatus] = useState<string | null>(hasStoredBusApiKey() || getStoredBusUrl() ? 'Bus configuration stored locally.' : null)
 
   useEffect(() => {
     let cancelled = false
@@ -31,6 +57,23 @@ export default function SettingsPage() {
 
         if (retentionResponse.status === 'fulfilled') {
           setRetention(retentionResponse.value)
+        }
+
+        const [busHealthResponse, busStatsResponse] = await Promise.allSettled([
+          busApi.getHealth(),
+          busApi.getStats(),
+        ])
+
+        if (cancelled) return
+
+        if (busHealthResponse.status === 'fulfilled') {
+          setBusHealth(busHealthResponse.value)
+        }
+
+        if (busStatsResponse.status === 'fulfilled') {
+          setBusStats(busStatsResponse.value)
+        } else if (busStatsResponse.reason instanceof ApiError) {
+          setBusStatus(busStatsResponse.reason.message)
         }
       } catch (err) {
         if (!cancelled) {
@@ -65,6 +108,31 @@ export default function SettingsPage() {
     setAdminStatus('Admin key removed from local storage.')
   }
 
+  async function validateBusConfig() {
+    try {
+      setStoredBusUrl(busUrl)
+      setStoredBusApiKey(busApiKey)
+      const [healthResponse, statsResponse] = await Promise.all([
+        busApi.getHealth(),
+        busApi.getStats(),
+      ])
+      setBusHealth(healthResponse)
+      setBusStats(statsResponse)
+      setBusStatus('Message bus connection validated.')
+    } catch (err) {
+      setBusStatus(err instanceof ApiError ? err.message : 'Message bus validation failed')
+    }
+  }
+
+  function clearBusSettings() {
+    clearStoredBusConfig()
+    setBusUrl(BUS_DEFAULT_URL)
+    setBusApiKey('')
+    setBusHealth(null)
+    setBusStats(null)
+    setBusStatus('Message bus URL and API key removed from local storage.')
+  }
+
   return (
     <div className="space-y-6">
       <section>
@@ -89,10 +157,12 @@ export default function SettingsPage() {
         </div>
 
         <div className="panel space-y-3">
-          <div className="panel-title">Observability retention</div>
-          <InfoRow label="Default days" value={retention ? String(retention.defaultDays) : '—'} />
-          <InfoRow label="Datasets" value={retention?.datasets.join(', ') ?? '—'} />
-          <p className="text-sm text-slate-500 dark:text-slate-400">Retention controls in the Alerts page call the prune endpoint directly and do not rely on local cache.</p>
+          <div className="panel-title">Message bus</div>
+          <InfoRow label="Bus URL" value={getBusBaseUrl()} />
+          <InfoRow label="Health status" value={busHealth?.status ?? 'Unavailable'} />
+          <InfoRow label="Service" value={busHealth?.service ?? '—'} />
+          <InfoRow label="Dead letters" value={busStats ? String(busStats.dead_letter) : '—'} />
+          <InfoRow label="Pending retries" value={busStats ? String(busStats.pending) : '—'} />
         </div>
       </section>
 
@@ -120,10 +190,51 @@ export default function SettingsPage() {
           {adminStatus ? <p className="text-sm text-slate-600 dark:text-slate-300">{adminStatus}</p> : null}
         </div>
 
+        <div className="panel space-y-4">
+          <div className="panel-title">Message bus access</div>
+          <input
+            className="input-field"
+            placeholder={BUS_DEFAULT_URL}
+            type="text"
+            value={busUrl}
+            onChange={(event) => setBusUrl(event.target.value)}
+          />
+          <input
+            className="input-field"
+            placeholder="Paste BEAM_BUS_API_KEY"
+            type="password"
+            value={busApiKey}
+            onChange={(event) => setBusApiKey(event.target.value)}
+          />
+          <div className="flex flex-wrap gap-3">
+            <button className="btn-primary" onClick={() => void validateBusConfig()} type="button">
+              Save & Validate
+            </button>
+            <button className="btn-secondary" onClick={clearBusSettings} type="button">
+              Clear
+            </button>
+          </div>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Dead-letter requests use the configured URL and attach the bus API key as `Authorization: Bearer ...`.
+          </p>
+          {busStatus ? <p className="text-sm text-slate-600 dark:text-slate-300">{busStatus}</p> : null}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-2">
+        <div className="panel space-y-3">
+          <div className="panel-title">Observability retention</div>
+          <InfoRow label="Default days" value={retention ? String(retention.defaultDays) : '—'} />
+          <InfoRow label="Datasets" value={retention?.datasets.join(', ') ?? '—'} />
+          <p className="text-sm text-slate-500 dark:text-slate-400">Retention controls in the Alerts page call the prune endpoint directly and do not rely on local cache.</p>
+        </div>
+
         <div className="panel space-y-3">
           <div className="panel-title">Browser storage</div>
           <InfoRow label="Stored private keys" value={String(storedKeys.length)} />
           <InfoRow label="Admin key" value={hasStoredAdminKey() ? 'Stored' : 'Not stored'} />
+          <InfoRow label="Bus API key" value={hasStoredBusApiKey() ? 'Stored' : 'Not stored'} />
+          <InfoRow label="Bus URL" value={getStoredBusUrl() || BUS_DEFAULT_URL} />
           <p className="text-sm text-slate-500 dark:text-slate-400">Private keys generated on the Register page stay in `localStorage` for this browser profile only.</p>
         </div>
       </section>

@@ -3,10 +3,9 @@
  */
 
 import type Database from 'better-sqlite3'
-import { getPendingRetries, markDelivered, markFailed, scheduleRetry } from './db.js'
+import { getPendingRetries, markDeadLetter, markDelivered, scheduleRetry } from './db.js'
 import { deliverToDirectory } from './delivery.js'
-
-const RETRY_BACKOFF = [30, 60, 120, 240, 480] // seconds
+import { computeRetryAt } from './retry.js'
 
 export interface WorkerOptions {
   db: Database.Database
@@ -29,6 +28,7 @@ export function startRetryWorker(options: WorkerOptions): NodeJS.Timeout {
         const result = await deliverToDirectory(
           directoryUrl,
           msg.id,
+          msg.nonce,
           msg.sender,
           msg.recipient,
           msg.intent,
@@ -38,14 +38,16 @@ export function startRetryWorker(options: WorkerOptions): NodeJS.Timeout {
         if (result.success) {
           markDelivered(db, msg.id)
           console.log(`[beam-bus] ✅ Retry success: ${msg.sender} → ${msg.recipient} (${msg.intent})`)
+        } else if (!result.retryable) {
+          markDeadLetter(db, msg.id, result.error)
+          console.log(`[beam-bus] 🪦 Non-retryable dead letter: ${msg.id.slice(0, 8)}... (${result.error})`)
         } else {
           const newCount = msg.retry_count + 1
           if (newCount >= msg.max_retries) {
-            markFailed(db, msg.id, result.error)
-            console.log(`[beam-bus] ❌ Max retries: ${msg.id.slice(0, 8)}... (${result.error})`)
+            markDeadLetter(db, msg.id, result.error)
+            console.log(`[beam-bus] 🪦 Max retries: ${msg.id.slice(0, 8)}... (${result.error})`)
           } else {
-            const backoffIdx = Math.min(newCount, RETRY_BACKOFF.length - 1)
-            const nextRetry = Date.now() / 1000 + RETRY_BACKOFF[backoffIdx]
+            const nextRetry = computeRetryAt(newCount, msg.nonce)
             scheduleRetry(db, msg.id, newCount, nextRetry, result.error)
           }
         }

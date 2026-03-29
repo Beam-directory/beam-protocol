@@ -7,11 +7,12 @@ import { randomUUID } from 'node:crypto'
 
 export interface BeamMessage {
   id: string
+  nonce: string
   sender: string
   recipient: string
   intent: string
   payload: string  // JSON
-  status: 'pending' | 'delivered' | 'acked' | 'failed' | 'expired'
+  status: 'pending' | 'delivered' | 'acked' | 'failed' | 'dead_letter' | 'expired'
   priority: number
   retry_count: number
   max_retries: number
@@ -34,6 +35,7 @@ export function initDatabase(dbPath: string): Database.Database {
   db.exec(`
     CREATE TABLE IF NOT EXISTS beam_messages (
       id TEXT PRIMARY KEY,
+      nonce TEXT,
       sender TEXT NOT NULL,
       recipient TEXT NOT NULL,
       intent TEXT NOT NULL,
@@ -58,7 +60,24 @@ export function initDatabase(dbPath: string): Database.Database {
     CREATE INDEX IF NOT EXISTS idx_beam_next_retry ON beam_messages(status, next_retry_at);
   `)
 
+  ensureColumn(db, 'beam_messages', 'nonce', 'TEXT')
+  db.prepare(`
+    UPDATE beam_messages
+    SET nonce = id
+    WHERE nonce IS NULL OR nonce = ''
+  `).run()
+  db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_beam_nonce ON beam_messages(nonce)')
+
   return db
+}
+
+function ensureColumn(db: Database.Database, tableName: string, columnName: string, definition: string): void {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  if (columns.some((column) => column.name === columnName)) {
+    return
+  }
+
+  db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
 }
 
 export function cleanTestMessages(db: Database.Database): number {
@@ -73,6 +92,7 @@ export function cleanTestMessages(db: Database.Database): number {
 export function insertMessage(
   db: Database.Database,
   msg: {
+    nonce?: string
     sender: string
     recipient: string
     intent: string
@@ -84,14 +104,16 @@ export function insertMessage(
   }
 ): string {
   const id = randomUUID().replace(/-/g, '')
+  const nonce = msg.nonce?.trim() || randomUUID()
   const now = Date.now() / 1000
 
   db.prepare(`
-    INSERT INTO beam_messages (id, sender, recipient, intent, payload, status, priority,
+    INSERT INTO beam_messages (id, nonce, sender, recipient, intent, payload, status, priority,
                                retry_count, max_retries, created_at, trace_id, metadata)
-    VALUES (?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
   `).run(
     id,
+    nonce,
     msg.sender,
     msg.recipient,
     msg.intent,
@@ -107,23 +129,43 @@ export function insertMessage(
 }
 
 export function markDelivered(db: Database.Database, id: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, delivered_at = ?, error = NULL WHERE id = ?')
+  db.prepare('UPDATE beam_messages SET status = ?, delivered_at = ?, next_retry_at = NULL, error = NULL WHERE id = ?')
     .run('delivered', Date.now() / 1000, id)
 }
 
 export function markFailed(db: Database.Database, id: string, error: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, failed_at = ?, error = ? WHERE id = ?')
+  db.prepare('UPDATE beam_messages SET status = ?, failed_at = ?, next_retry_at = NULL, error = ? WHERE id = ?')
     .run('failed', Date.now() / 1000, error, id)
 }
 
+export function markDeadLetter(db: Database.Database, id: string, error: string): void {
+  db.prepare('UPDATE beam_messages SET status = ?, failed_at = ?, next_retry_at = NULL, error = ? WHERE id = ?')
+    .run('dead_letter', Date.now() / 1000, error, id)
+}
+
 export function markAcked(db: Database.Database, id: string, response?: Record<string, unknown>): void {
-  db.prepare('UPDATE beam_messages SET status = ?, acked_at = ?, response = ? WHERE id = ?')
+  db.prepare('UPDATE beam_messages SET status = ?, acked_at = ?, next_retry_at = NULL, error = NULL, response = ? WHERE id = ?')
     .run('acked', Date.now() / 1000, response ? JSON.stringify(response) : null, id)
 }
 
 export function scheduleRetry(db: Database.Database, id: string, retryCount: number, nextRetryAt: number, error: string): void {
-  db.prepare('UPDATE beam_messages SET retry_count = ?, next_retry_at = ?, error = ? WHERE id = ?')
-    .run(retryCount, nextRetryAt, error, id)
+  db.prepare('UPDATE beam_messages SET status = ?, retry_count = ?, next_retry_at = ?, failed_at = NULL, error = ? WHERE id = ?')
+    .run('pending', retryCount, nextRetryAt, error, id)
+}
+
+export function requeueMessage(db: Database.Database, id: string): void {
+  db.prepare(`
+    UPDATE beam_messages
+    SET status = 'pending',
+        retry_count = 0,
+        next_retry_at = NULL,
+        delivered_at = NULL,
+        acked_at = NULL,
+        failed_at = NULL,
+        error = NULL,
+        response = NULL
+    WHERE id = ?
+  `).run(id)
 }
 
 export function getPendingRetries(db: Database.Database, limit = 10): BeamMessage[] {
@@ -138,6 +180,10 @@ export function getPendingRetries(db: Database.Database, limit = 10): BeamMessag
 
 export function getMessage(db: Database.Database, id: string): BeamMessage | undefined {
   return db.prepare('SELECT * FROM beam_messages WHERE id = ?').get(id) as BeamMessage | undefined
+}
+
+export function getMessageByNonce(db: Database.Database, nonce: string): BeamMessage | undefined {
+  return db.prepare('SELECT * FROM beam_messages WHERE nonce = ?').get(nonce) as BeamMessage | undefined
 }
 
 export function pollMessages(
@@ -189,12 +235,49 @@ export function queryHistory(
     .all(...params) as BeamMessage[]
 }
 
+export function listDeadLetters(
+  db: Database.Database,
+  filters: {
+    sender?: string
+    recipient?: string
+    intent?: string
+    limit?: number
+  } = {},
+): BeamMessage[] {
+  const conditions = [`status = 'dead_letter'`]
+  const params: unknown[] = []
+
+  if (filters.sender) {
+    conditions.push('sender = ?')
+    params.push(filters.sender)
+  }
+  if (filters.recipient) {
+    conditions.push('recipient = ?')
+    params.push(filters.recipient)
+  }
+  if (filters.intent) {
+    conditions.push('intent = ?')
+    params.push(filters.intent)
+  }
+
+  params.push(filters.limit ?? 100)
+
+  return db.prepare(`
+    SELECT *
+    FROM beam_messages
+    WHERE ${conditions.join(' AND ')}
+    ORDER BY failed_at DESC, created_at DESC
+    LIMIT ?
+  `).all(...params) as BeamMessage[]
+}
+
 export interface BusStats {
   total: number
   pending: number
   delivered: number
   acked: number
   failed: number
+  dead_letter: number
   by_agent: Record<string, { sent: number; received: number }>
   last_24h: number
 }
@@ -229,6 +312,7 @@ export function getStats(db: Database.Database): BusStats {
     delivered: statusCounts['delivered'] ?? 0,
     acked: statusCounts['acked'] ?? 0,
     failed: statusCounts['failed'] ?? 0,
+    dead_letter: statusCounts['dead_letter'] ?? 0,
     by_agent: byAgent,
     last_24h: last24h,
   }

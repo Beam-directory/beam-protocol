@@ -43,13 +43,21 @@ class IntentFrame:
     timestamp: str
     signature: Optional[str] = None
 
+    @property
+    def payload(self) -> dict[str, Any]:
+        return self.params
+
+    @payload.setter
+    def payload(self, value: dict[str, Any]) -> None:
+        self.params = value
+
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
             "v": self.v,
             "intent": self.intent,
             "from": self.from_id,
             "to": self.to_id,
-            "params": self.params,
+            "payload": self.params,
             "nonce": self.nonce,
             "timestamp": self.timestamp,
         }
@@ -59,12 +67,14 @@ class IntentFrame:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "IntentFrame":
+        payload = data.get("payload")
+        params = payload if isinstance(payload, dict) else data.get("params", {})
         return cls(
             v=data["v"],
             intent=data["intent"],
             from_id=data["from"],
             to_id=data["to"],
-            params=data.get("params", {}),
+            params=params if isinstance(params, dict) else {},
             nonce=data["nonce"],
             timestamp=data["timestamp"],
             signature=data.get("signature"),

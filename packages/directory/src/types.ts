@@ -48,6 +48,7 @@ export interface IntentLogRow {
   round_trip_latency_ms: number | null
   status: string
   error_code: string | null
+  result_json: string | null
 }
 
 export interface IntentTraceEventRow {
