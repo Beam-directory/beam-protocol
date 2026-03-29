@@ -497,8 +497,34 @@ export interface ExportDownload {
   filename: string
 }
 
+export type AdminRole = 'admin' | 'operator' | 'viewer'
+
+export interface AdminSessionInfo {
+  email: string
+  role: AdminRole
+  expiresAt: string
+  token?: string
+}
+
+export interface AdminAuthConfig {
+  configured: boolean
+  emailDelivery: boolean
+  localDevMagicLinks: boolean
+  sessionTtlSeconds: number
+}
+
+export interface AdminMagicLinkResponse {
+  ok: boolean
+  email: string
+  role: AdminRole
+  expiresAt: string
+  dev: boolean
+  url?: string
+  token?: string
+}
+
 const DEFAULT_DIRECTORY_URL = 'https://api.beam.directory'
-const ADMIN_KEY_STORAGE = 'beam-dashboard-admin-key'
+const ADMIN_SESSION_STORAGE = 'beam-dashboard-admin-session-token'
 const DEFAULT_BUS_URL = (import.meta.env.VITE_BEAM_BUS_URL || 'http://localhost:8420').replace(/\/$/, '')
 const BUS_URL_STORAGE = 'beam-dashboard-bus-url'
 const BUS_API_KEY_STORAGE = 'beam-dashboard-bus-api-key'
@@ -518,37 +544,37 @@ export class ApiError extends Error {
   }
 }
 
-export function getStoredAdminKey(): string {
+export function getStoredAdminSessionToken(): string {
   if (typeof window === 'undefined') {
     return ''
   }
 
-  return window.localStorage.getItem(ADMIN_KEY_STORAGE) ?? ''
+  return window.localStorage.getItem(ADMIN_SESSION_STORAGE) ?? ''
 }
 
-export function setStoredAdminKey(value: string): void {
+export function setStoredAdminSessionToken(value: string): void {
   if (typeof window === 'undefined') {
     return
   }
 
   const trimmed = value.trim()
   if (trimmed) {
-    window.localStorage.setItem(ADMIN_KEY_STORAGE, trimmed)
+    window.localStorage.setItem(ADMIN_SESSION_STORAGE, trimmed)
   } else {
-    window.localStorage.removeItem(ADMIN_KEY_STORAGE)
+    window.localStorage.removeItem(ADMIN_SESSION_STORAGE)
   }
 }
 
-export function clearStoredAdminKey(): void {
+export function clearStoredAdminSessionToken(): void {
   if (typeof window === 'undefined') {
     return
   }
 
-  window.localStorage.removeItem(ADMIN_KEY_STORAGE)
+  window.localStorage.removeItem(ADMIN_SESSION_STORAGE)
 }
 
-export function hasStoredAdminKey(): boolean {
-  return getStoredAdminKey().length > 0
+export function hasStoredAdminSessionToken(): boolean {
+  return getStoredAdminSessionToken().length > 0
 }
 
 export function getStoredBusUrl(): string {
@@ -616,11 +642,9 @@ function buildHeaders(initHeaders?: HeadersInit, options?: { admin?: boolean }):
     headers.set('Content-Type', 'application/json')
   }
 
-  if (options?.admin) {
-    const adminKey = getStoredAdminKey()
-    if (adminKey) {
-      headers.set('X-Admin-Key', adminKey)
-    }
+  const sessionToken = getStoredAdminSessionToken()
+  if (sessionToken && !headers.has('Authorization')) {
+    headers.set('Authorization', `Bearer ${sessionToken}`)
   }
 
   return headers
@@ -826,6 +850,22 @@ export const directoryApi = {
       filename: getFilenameFromResponse(response, dataset, format),
     }
   },
+}
+
+export const adminAuthApi = {
+  getConfig: () => request<AdminAuthConfig>('/admin/auth/config'),
+  requestMagicLink: (email: string) => request<AdminMagicLinkResponse>('/admin/auth/magic-link', {
+    method: 'POST',
+    body: JSON.stringify({ email }),
+  }),
+  verify: (token: string) => request<AdminSessionInfo>('/admin/auth/verify', {
+    method: 'POST',
+    body: JSON.stringify({ token }),
+  }),
+  getSession: () => request<AdminSessionInfo>('/admin/auth/session'),
+  logout: () => request<{ ok: boolean }>('/admin/auth/logout', {
+    method: 'POST',
+  }),
 }
 
 export const busApi = {

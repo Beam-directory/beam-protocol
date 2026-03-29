@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
 import {
   assignDirectoryRole,
@@ -250,30 +251,33 @@ test('federation relay forwards intents with hop counting', async () => {
   }
 })
 
-test('audit log endpoint is admin-only through RBAC', async () => {
+test('audit log endpoint accepts authenticated admin sessions', async () => {
   const db = createDatabase(':memory:')
-  const previousAdminKey = process.env['BEAM_ADMIN_KEY']
   const previousDirectoryUrl = process.env['BEAM_DIRECTORY_URL']
 
-  process.env['BEAM_ADMIN_KEY'] = ''
   process.env['BEAM_DIRECTORY_URL'] = 'https://local.example'
 
   try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
     assignDirectoryRole(db, {
-      userId: 'alice',
+      userId: 'alice@example.com',
       role: 'admin',
       directoryUrl: getLocalDirectoryUrl(),
     })
+    const session = createAdminSession(db, {
+      email: 'alice@example.com',
+      role: 'admin',
+    })
     logAuditEvent(db, {
       action: 'federation.peer.register',
-      actor: 'alice',
+      actor: 'alice@example.com',
       target: 'https://peer.example',
       details: { trustLevel: 0.5 },
     })
 
     const app = createApp(db)
     const response = await app.request(new Request('http://localhost/admin/audit?limit=10', {
-      headers: { 'x-directory-user': 'alice' },
+      headers: { Authorization: `Bearer ${session.token}` },
     }))
 
     assert.equal(response.status, 200)
@@ -281,7 +285,6 @@ test('audit log endpoint is admin-only through RBAC', async () => {
     assert.equal(payload.total, 1)
     assert.equal(payload.entries[0]?.action, 'federation.peer.register')
   } finally {
-    process.env['BEAM_ADMIN_KEY'] = previousAdminKey
     process.env['BEAM_DIRECTORY_URL'] = previousDirectoryUrl
     db.close()
   }

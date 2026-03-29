@@ -67,9 +67,9 @@ No wildcard origins. No `*`.
 | Resource | Auth Method |
 |----------|------------|
 | Intent relay | Ed25519 signature on every frame |
-| Visibility toggle | Ed25519 signature or admin key |
+| Visibility toggle | Ed25519 signature, agent API key, or admin session |
 | Delegations | Ed25519 signature (grantor) |
-| Admin endpoints | `x-admin-key` header |
+| Admin endpoints | Admin session bearer token or dashboard session cookie |
 | Billing webhook | Stripe signature verification (`whsec_*`) |
 | Federation | Mutual TLS / peer registration |
 

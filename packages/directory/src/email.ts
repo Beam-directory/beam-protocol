@@ -94,3 +94,31 @@ export async function sendAgentVerificationEmail(input: {
   console.warn('Email verification disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery')
   return false
 }
+
+export async function sendAdminMagicLinkEmail(input: {
+  email: string
+  url: string
+  role: 'admin' | 'operator' | 'viewer'
+}): Promise<boolean> {
+  const message = {
+    from: process.env['SMTP_FROM'],
+    to: input.email,
+    subject: 'Beam admin sign-in link',
+    text: `Use this Beam admin sign-in link to continue as ${input.role}: ${input.url}`,
+    html: `<p>Use this Beam admin sign-in link to continue as <strong>${input.role}</strong>.</p><p><a href="${input.url}">Sign in to Beam Dashboard</a></p>`,
+  }
+
+  if (process.env['SMTP_HOST']) {
+    const transporter = await createTransport()
+    await transporter.sendMail(message)
+    return true
+  }
+
+  if (process.env['RESEND_API_KEY']) {
+    await sendWithResend(message)
+    return true
+  }
+
+  console.warn('Admin email delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery')
+  return false
+}

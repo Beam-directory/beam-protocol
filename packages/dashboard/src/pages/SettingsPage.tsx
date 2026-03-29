@@ -4,16 +4,13 @@ import {
   BUS_DEFAULT_URL,
   DIRECTORY_URL,
   busApi,
-  clearStoredAdminKey,
   clearStoredBusConfig,
   directoryApi,
   getBusBaseUrl,
-  getStoredAdminKey,
   getStoredBusApiKey,
   getStoredBusUrl,
-  hasStoredAdminKey,
+  hasStoredAdminSessionToken,
   hasStoredBusApiKey,
-  setStoredAdminKey,
   setStoredBusApiKey,
   setStoredBusUrl,
   type BusHealth,
@@ -21,17 +18,17 @@ import {
   type DirectoryHealth,
   type RetentionResponse,
 } from '../lib/api'
+import { useAdminAuth } from '../lib/admin-auth'
 
 const PRIVATE_KEY_PREFIX = 'beam-dashboard-private-key:'
 
 export default function SettingsPage() {
+  const { session, config, logout } = useAdminAuth()
   const [health, setHealth] = useState<DirectoryHealth | null>(null)
   const [busHealth, setBusHealth] = useState<BusHealth | null>(null)
   const [busStats, setBusStats] = useState<BusStats | null>(null)
   const [retention, setRetention] = useState<RetentionResponse | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [adminKey, setAdminKey] = useState(() => getStoredAdminKey())
-  const [adminStatus, setAdminStatus] = useState<string | null>(hasStoredAdminKey() ? 'Admin key stored locally.' : null)
   const [busUrl, setBusUrl] = useState(() => getStoredBusUrl() || BUS_DEFAULT_URL)
   const [busApiKey, setBusApiKey] = useState(() => getStoredBusApiKey())
   const [busStatus, setBusStatus] = useState<string | null>(hasStoredBusApiKey() || getStoredBusUrl() ? 'Bus configuration stored locally.' : null)
@@ -92,22 +89,6 @@ export default function SettingsPage() {
     return Object.keys(localStorage).filter((key) => key.startsWith(PRIVATE_KEY_PREFIX))
   }, [])
 
-  async function validateAdminKey() {
-    try {
-      setStoredAdminKey(adminKey)
-      await directoryApi.getObservabilityOverview(24)
-      setAdminStatus('Admin key validated against observability endpoints.')
-    } catch (err) {
-      setAdminStatus(err instanceof ApiError ? err.message : 'Admin validation failed')
-    }
-  }
-
-  function clearAdminKey() {
-    clearStoredAdminKey()
-    setAdminKey('')
-    setAdminStatus('Admin key removed from local storage.')
-  }
-
   async function validateBusConfig() {
     try {
       setStoredBusUrl(busUrl)
@@ -137,7 +118,7 @@ export default function SettingsPage() {
     <div className="space-y-6">
       <section>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Connection health, admin auth, and browser-stored credentials for observability access.</p>
+        <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">Connection health, admin session state, and browser-stored credentials for observability access.</p>
       </section>
 
       {error ? (
@@ -169,25 +150,19 @@ export default function SettingsPage() {
       <section className="grid gap-4 lg:grid-cols-2">
         <div className="panel space-y-4">
           <div className="panel-title">Admin access</div>
-          <input
-            className="input-field"
-            placeholder="Paste BEAM_ADMIN_KEY"
-            type="password"
-            value={adminKey}
-            onChange={(event) => setAdminKey(event.target.value)}
-          />
+          <InfoRow label="Signed in as" value={session?.email ?? 'No active session'} />
+          <InfoRow label="Role" value={session?.role ?? '—'} />
+          <InfoRow label="Session expires" value={session?.expiresAt ?? '—'} />
+          <InfoRow label="Authorized admins configured" value={config?.configured ? 'Yes' : 'No'} />
+          <InfoRow label="Magic-link delivery" value={config?.emailDelivery ? 'Email provider configured' : 'Local dev / bootstrap only'} />
           <div className="flex flex-wrap gap-3">
-            <button className="btn-primary" onClick={() => void validateAdminKey()} type="button">
-              Save & Validate
-            </button>
-            <button className="btn-secondary" onClick={clearAdminKey} type="button">
-              Clear
+            <button className="btn-secondary" onClick={() => void logout()} type="button">
+              Sign out
             </button>
           </div>
           <p className="text-sm text-slate-500 dark:text-slate-400">
-            The admin key is stored in `localStorage` and attached to `/observability/*` requests as `X-Admin-Key`.
+            Observability requests now use an authenticated admin session instead of a pasted static browser key.
           </p>
-          {adminStatus ? <p className="text-sm text-slate-600 dark:text-slate-300">{adminStatus}</p> : null}
         </div>
 
         <div className="panel space-y-4">
@@ -232,7 +207,7 @@ export default function SettingsPage() {
         <div className="panel space-y-3">
           <div className="panel-title">Browser storage</div>
           <InfoRow label="Stored private keys" value={String(storedKeys.length)} />
-          <InfoRow label="Admin key" value={hasStoredAdminKey() ? 'Stored' : 'Not stored'} />
+          <InfoRow label="Admin session token" value={hasStoredAdminSessionToken() ? 'Stored' : 'Not stored'} />
           <InfoRow label="Bus API key" value={hasStoredBusApiKey() ? 'Stored' : 'Not stored'} />
           <InfoRow label="Bus URL" value={getStoredBusUrl() || BUS_DEFAULT_URL} />
           <p className="text-sm text-slate-500 dark:text-slate-400">Private keys generated on the Register page stay in `localStorage` for this browser profile only.</p>

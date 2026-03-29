@@ -1,6 +1,7 @@
 import { createPublicKey, randomBytes, verify } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
+import { getAdminSessionFromRequest, roleSatisfies } from '../admin-auth.js'
 import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { sendAgentVerificationEmail } from '../email.js'
@@ -138,10 +139,6 @@ function verifySignedUtf8Payload(payload: string, signatureBase64: string, publi
   } catch {
     return false
   }
-}
-
-function isAdminRequest(adminKey: string | undefined): boolean {
-  return Boolean(adminKey) && adminKey === process.env.BEAM_ADMIN_KEY
 }
 
 export function agentsRouter(db: Database): Hono {
@@ -626,10 +623,10 @@ export function agentsRouter(db: Database): Hono {
       const timestamp = c.req.header('x-beam-timestamp')?.trim() ?? ''
       const nonce = c.req.header('x-beam-nonce')?.trim() ?? ''
       const signature = c.req.header('x-beam-signature')?.trim() ?? ''
-      const adminKey = c.req.header('x-admin-key') ?? ''
+      const adminSession = getAdminSessionFromRequest(db, c.req.raw)
 
       const hasSignatureHeaders = Boolean(timestamp || nonce || signature)
-      if (!hasSignatureHeaders && !isAdminRequest(adminKey)) {
+      if (!hasSignatureHeaders && !(adminSession && roleSatisfies(adminSession.role, 'admin'))) {
         return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
       }
 
@@ -664,9 +661,9 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
 
-    const adminKey = c.req.header('x-admin-key') ?? ''
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
     const suppliedApiKey = getSuppliedApiKey(c.req.raw)
-    if (!isAdminRequest(adminKey) && !agentApiKeyMatches(agent, suppliedApiKey)) {
+    if (!(adminSession && roleSatisfies(adminSession.role, 'admin')) && !agentApiKeyMatches(agent, suppliedApiKey)) {
       return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
     }
 
@@ -679,7 +676,7 @@ export function agentsRouter(db: Database): Hono {
     }
   })
 
-  // Toggle visibility (requires signed request or admin key)
+  // Toggle visibility (requires signed request or admin session)
   router.patch('/:beamId/visibility', async (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
@@ -703,18 +700,18 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'visibility must be "public" or "unlisted"', errorCode: 'INVALID_VISIBILITY' }, 400)
     }
 
-    // Auth: verify Ed25519 signature or admin key
+    // Auth: verify Ed25519 signature or admin session
     const signature = typeof body.signature === 'string' ? body.signature : ''
-    const adminKey = c.req.header('x-admin-key') ?? ''
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
     const suppliedApiKey = getSuppliedApiKey(c.req.raw)
-    const isAdmin = isAdminRequest(adminKey)
+    const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
     const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
 
     if (!isAdmin && !hasApiKey) {
       const { verifyPayload } = await import('../crypto.js')
       const payload = { beamId, visibility: newVisibility, timestamp: body.timestamp }
       if (!signature || !verifyPayload(payload, signature, agent.public_key)) {
-        return c.json({ error: 'Invalid signature or missing admin key', errorCode: 'UNAUTHORIZED' }, 401)
+        return c.json({ error: 'Invalid signature or missing admin session', errorCode: 'UNAUTHORIZED' }, 401)
       }
     }
 
@@ -743,10 +740,10 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'Invalid JSON body' }, 400)
     }
 
-    // Auth: admin key or Ed25519 signature
-    const adminKey = c.req.header('x-admin-key') ?? ''
+    // Auth: admin session or Ed25519 signature
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
     const suppliedApiKey = getSuppliedApiKey(c.req.raw)
-    const isAdmin = isAdminRequest(adminKey)
+    const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
     const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
 
     if (!isAdmin && !hasApiKey) {

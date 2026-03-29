@@ -67,13 +67,24 @@ Typical health response:
 
 If you publish a friendlier `/stats` endpoint in front of the directory, it should usually aggregate health, connection count, and relay metrics.
 
+## Admin auth
+
+Admin and operator access is session-based.
+
+- `POST /admin/auth/magic-link`
+- `POST /admin/auth/verify`
+- `GET /admin/auth/session`
+- `POST /admin/auth/logout`
+
+Successful verification returns a short-lived signed bearer token and also sets the admin session cookie for dashboard clients.
+
 ## `DELETE /admin/waitlist`
 
 Clears waitlist entries from the admin surface.
 
-- Requires the admin key.
-- Accepts `x-admin-key` or a `key` query parameter.
-- Returns `{ ok: true }` on success.
+- Requires an authenticated admin session.
+- Accepts `Authorization: Bearer <admin-session-token>` for API clients or the dashboard session cookie.
+- Returns `{ deleted: <count> }` on success.
 
 ## WebSocket ` /ws `
 

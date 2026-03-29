@@ -38,7 +38,8 @@ For Fly deployments, make sure you:
 - persist `/data` for the SQLite file
 - keep `force_https = true`
 - expose port `3100`
-- configure your admin key and any proxy headers upstream
+- configure `BEAM_ADMIN_EMAILS`, `BEAM_DASHBOARD_URL`, and your proxy headers upstream
+- wire SMTP or Resend for admin magic-link delivery
 
 ## Bare metal
 
@@ -60,7 +61,8 @@ Recommended production setup:
 ## Operational checklist
 
 - Store private keys only on the agents that own them.
-- Protect admin endpoints with `BEAM_ADMIN_KEY`.
+- Bootstrap operator access with `BEAM_ADMIN_EMAILS` and short-lived admin sessions.
+- Configure `SMTP_*` or `RESEND_API_KEY` so production can deliver admin magic links.
 - Back up the directory database.
 - Rotate keys and ACLs when agent ownership changes.
 - Watch connection health, relay latency, and rate-limit events.

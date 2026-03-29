@@ -1,7 +1,9 @@
 import { generateKeyPairSync, sign } from 'node:crypto'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
-import { createDatabase, getAgent, registerAgent } from '../src/db.js'
+import { createAdminSession } from '../src/admin-auth.js'
+import { createDatabase, getAgent, registerAgent, assignDirectoryRole } from '../src/db.js'
+import { getLocalDirectoryUrl } from '../src/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from '../src/routes/keys.js'
 import { verificationRouter } from '../src/routes/verify.js'
 import { delegationsRouter } from '../src/routes/delegations.js'
@@ -182,7 +184,7 @@ describe('directory identity and verification routes', () => {
   })
 
   it('accepts reports, blocks duplicates, and flags agents after five pending reports', async () => {
-    vi.stubEnv('BEAM_ADMIN_KEY', 'secret-admin')
+    vi.stubEnv('JWT_SECRET', 'secret-admin-jwt')
 
     const targetIdentity = generateIdentity()
     const targetBeamId = 'target@acme.beam.directory'
@@ -237,8 +239,18 @@ describe('directory identity and verification routes', () => {
     expect(target?.flagged).toBe(1)
     expect(target?.trust_score).toBe(0)
 
+    assignDirectoryRole(db, {
+      userId: 'ops@example.com',
+      role: 'admin',
+      directoryUrl: getLocalDirectoryUrl(),
+    })
+    const adminSession = createAdminSession(db, {
+      email: 'ops@example.com',
+      role: 'admin',
+    })
+
     const listed = await jsonRequest(app, `/agents/${encodeURIComponent(targetBeamId)}/reports`, {
-      headers: { 'x-admin-key': 'secret-admin' },
+      headers: { Authorization: `Bearer ${adminSession.token}` },
     })
     expect(listed.response.status).toBe(200)
     expect(listed.body.total).toBe(5)

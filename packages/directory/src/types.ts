@@ -104,6 +104,25 @@ export interface DirectoryRoleRow {
   directory_url: string
 }
 
+export interface AdminMagicLinkRow {
+  token: string
+  email: string
+  role: 'admin' | 'operator' | 'viewer'
+  created_at: string
+  expires_at: string
+  used: number
+}
+
+export interface AdminSessionRow {
+  id: string
+  email: string
+  role: 'admin' | 'operator' | 'viewer'
+  created_at: string
+  last_seen_at: string
+  expires_at: string
+  revoked_at: string | null
+}
+
 export interface AuditLogRow {
   id: number
   action: string

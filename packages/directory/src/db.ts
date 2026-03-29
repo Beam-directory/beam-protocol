@@ -236,6 +236,31 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_directory_roles_role
       ON directory_roles(role, directory_url);
 
+    CREATE TABLE IF NOT EXISTS admin_magic_links (
+      token TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')),
+      created_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      used INTEGER NOT NULL DEFAULT 0
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_admin_magic_links_email
+      ON admin_magic_links(email, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS admin_sessions (
+      id TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')),
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      revoked_at TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_admin_sessions_email
+      ON admin_sessions(email, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS audit_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       action TEXT NOT NULL,
@@ -1661,6 +1686,36 @@ export function getDirectoryRole(db: DB, userId: string, directoryUrl: string): 
   `).get(userId, directoryUrl) as DirectoryRoleRow | undefined
 
   return row ?? null
+}
+
+export function listDirectoryRoles(
+  db: DB,
+  directoryUrl: string,
+): DirectoryRoleRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM directory_roles
+    WHERE directory_url = ?
+    ORDER BY
+      CASE role
+        WHEN 'admin' THEN 0
+        WHEN 'operator' THEN 1
+        ELSE 2
+      END,
+      user_id ASC
+  `).all(directoryUrl) as DirectoryRoleRow[]
+}
+
+export function deleteDirectoryRole(
+  db: DB,
+  input: { userId: string; directoryUrl: string }
+): boolean {
+  const result = db.prepare(`
+    DELETE FROM directory_roles
+    WHERE user_id = ? AND directory_url = ?
+  `).run(input.userId, input.directoryUrl)
+
+  return result.changes > 0
 }
 
 export function logAuditEvent(

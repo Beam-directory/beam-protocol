@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { ApiError, directoryApi, type AlertsResponse, type ExportDataset, type ExportFormat } from '../lib/api'
 import { EmptyPanel, PageHeader } from '../components/Observability'
+import { useAdminAuth } from '../lib/admin-auth'
 import { alertSeverityColor, cn, downloadBlob, formatDateTime } from '../lib/utils'
 
 const EXPORT_FORMATS: ExportFormat[] = ['json', 'csv', 'ndjson']
 
 export default function AlertsPage() {
+  const { session } = useAdminAuth()
   const [hours, setHours] = useState(24)
   const [data, setData] = useState<AlertsResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -44,6 +46,11 @@ export default function AlertsPage() {
   }
 
   async function handlePrune() {
+    if (session?.role !== 'admin') {
+      setActionState('Only admins can prune observability datasets.')
+      return
+    }
+
     try {
       setActionState(`Pruning ${pruneDataset} older than ${pruneDays} days…`)
       const result = await directoryApi.pruneObservability(pruneDataset, pruneDays)
@@ -164,8 +171,13 @@ export default function AlertsPage() {
                 value={pruneDays}
                 onChange={(event) => setPruneDays(Number(event.target.value))}
               />
-              <button className="btn-primary w-full" onClick={() => void handlePrune()} type="button">
-                Prune Dataset
+              <button
+                className="btn-primary w-full disabled:cursor-not-allowed disabled:opacity-60"
+                disabled={session?.role !== 'admin'}
+                onClick={() => void handlePrune()}
+                type="button"
+              >
+                {session?.role === 'admin' ? 'Prune Dataset' : 'Admin role required'}
               </button>
             </div>
           </div>
