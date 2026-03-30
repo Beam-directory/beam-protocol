@@ -163,6 +163,14 @@ export default function LoginPage() {
               ? 'Authorized admins receive a magic link by email.'
               : 'Without SMTP or Resend, localhost returns the dev magic link directly.'}
           </p>
+          <a
+            href="https://docs.beam.directory/guide/operator-observability"
+            rel="noreferrer"
+            style={{ display: 'inline-block', marginTop: '10px', fontSize: '0.82rem', color: '#F75C03', textDecoration: 'underline' }}
+            target="_blank"
+          >
+            Operator setup guide
+          </a>
         </div>
       </div>
     </div>

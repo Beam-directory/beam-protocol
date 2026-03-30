@@ -100,6 +100,10 @@ Production:
 - configure `SMTP_*` or `RESEND_API_KEY` for magic-link delivery
 - the dashboard and admin APIs use `/admin/auth/*` plus a short-lived signed session
 
+For the full operator workflow, including alerts, traces, audit history, exports, and prune confirmation, see:
+
+- [docs.beam.directory/guide/operator-observability](https://docs.beam.directory/guide/operator-observability)
+
 ## Fly.io
 
 The repo includes [`fly.toml`](./fly.toml):

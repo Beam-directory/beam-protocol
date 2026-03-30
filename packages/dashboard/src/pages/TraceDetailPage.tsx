@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Link, useParams } from 'react-router-dom'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, directoryApi, type IntentTraceResponse } from '../lib/api'
 import { EmptyPanel, PageHeader, StatusPill } from '../components/Observability'
 import { alertSeverityColor, cn, formatDateTime, formatLatency, intentStatusColor, truncateBeamId } from '../lib/utils'
@@ -7,10 +7,12 @@ import { formatIntentLifecycleLabel, intentLifecycleDotColor, intentLifecycleTon
 
 export default function TraceDetailPage() {
   const { nonce } = useParams<{ nonce: string }>()
+  const [searchParams] = useSearchParams()
   const resolvedNonce = nonce ? decodeURIComponent(nonce) : null
   const [trace, setTrace] = useState<IntentTraceResponse | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const alertId = searchParams.get('alert')
 
   useEffect(() => {
     if (!resolvedNonce) return
@@ -55,8 +57,21 @@ export default function TraceDetailPage() {
       <PageHeader
         title="Trace"
         description={`Nonce ${trace.intent.nonce}`}
-        actions={<Link className="btn-secondary" to="/intents">Back to intents</Link>}
+        actions={(
+          <div className="flex flex-wrap gap-2">
+            <Link className="btn-secondary" to="/intents">Back to intents</Link>
+            <Link className="btn-secondary" to={`/audit?target=${encodeURIComponent(trace.intent.nonce)}${alertId ? `&alert=${encodeURIComponent(alertId)}` : ''}`}>
+              Open audit log
+            </Link>
+          </div>
+        )}
       />
+
+      {alertId ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+          This trace was opened from alert <span className="font-mono">{alertId}</span>. Use the audit button above for the matching control-plane history.
+        </div>
+      ) : null}
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
         <div className="panel space-y-3">

@@ -201,7 +201,19 @@ export default function SettingsPage() {
           <div className="panel-title">Observability retention</div>
           <InfoRow label="Default days" value={retention ? String(retention.defaultDays) : '—'} />
           <InfoRow label="Datasets" value={retention?.datasets.join(', ') ?? '—'} />
-          <p className="text-sm text-slate-500 dark:text-slate-400">Retention controls in the Alerts page call the prune endpoint directly and do not rely on local cache.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            Retention controls in the Alerts page now require an admin-only preview plus a typed confirmation phrase before prune is allowed.
+          </p>
+          {retention?.details?.length ? (
+            <div className="space-y-2 rounded-xl bg-slate-50 p-3 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">
+              {retention.details.map((entry) => (
+                <div key={entry.name}>
+                  <span className="font-medium">{entry.name}:</span> {entry.description}
+                  {entry.cascadesTo?.length ? ` Also removes ${entry.cascadesTo.join(', ')}.` : ''}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
 
         <div className="panel space-y-3">
@@ -212,6 +224,21 @@ export default function SettingsPage() {
           <InfoRow label="Bus URL" value={getStoredBusUrl() || BUS_DEFAULT_URL} />
           <p className="text-sm text-slate-500 dark:text-slate-400">Private keys generated on the Register page stay in `localStorage` for this browser profile only.</p>
         </div>
+      </section>
+
+      <section className="panel space-y-3">
+        <div className="panel-title">Operator docs</div>
+        <p className="text-sm text-slate-500 dark:text-slate-400">
+          Admin setup, alert triage, exports, and prune safety are documented end to end in the operator guide.
+        </p>
+        <a
+          className="inline-flex w-fit rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+          href="https://docs.beam.directory/guide/operator-observability"
+          rel="noreferrer"
+          target="_blank"
+        >
+          Open operator guide
+        </a>
       </section>
     </div>
   )

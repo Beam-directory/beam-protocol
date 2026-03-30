@@ -3,6 +3,8 @@ export type AlertSeverity = 'info' | 'warning' | 'critical'
 export type ExportDataset = 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
 export type ExportFormat = 'json' | 'csv' | 'ndjson'
 export type IntentLifecycleStatus = 'received' | 'validated' | 'queued' | 'dispatched' | 'delivered' | 'acked' | 'failed' | 'dead_letter'
+export type AlertMetricUnit = 'ratio' | 'ms' | 'count'
+export type AlertLinkSurface = 'trace' | 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
 
 export interface DirectoryAgent {
   beamId: string
@@ -168,7 +170,28 @@ export interface AlertItem {
   metric: string
   value: number
   threshold: number
+  valueUnit: AlertMetricUnit
   startedAt: string
+  thresholdExplanation: string
+  severityReason: string
+  links: AlertLink[]
+  sampleTraces: AlertTraceSample[]
+}
+
+export interface AlertLink {
+  label: string
+  href: string
+  surface: AlertLinkSurface
+}
+
+export interface AlertTraceSample {
+  nonce: string
+  from: string
+  to: string
+  intentType: string
+  requestedAt: string
+  status: IntentLifecycleStatus
+  errorCode: string | null
 }
 
 export interface OverviewTimelinePoint {
@@ -349,17 +372,20 @@ export interface AlertsResponse {
   alerts: AlertItem[]
   retention: {
     defaultDays: number
+    minimumDays: number
+    confirmPhrasePrefix: string
     datasets: string[]
+    details: ObservabilityDatasetInfo[]
   }
-  exports: Array<{
-    dataset: string
-    formats: string[]
-  }>
+  exports: ExportCatalogEntry[]
 }
 
 export interface RetentionResponse {
   defaultDays: number
+  minimumDays: number
+  confirmPhrasePrefix: string
   datasets: string[]
+  details: ObservabilityDatasetInfo[]
 }
 
 export interface PruneResponse {
@@ -368,6 +394,26 @@ export interface PruneResponse {
   deleted: number
   intents?: number
   traces?: number
+}
+
+export interface PrunePreviewResponse {
+  dataset: string
+  olderThanDays: number
+  wouldDelete: number
+  intents?: number
+  traces?: number
+}
+
+export interface ObservabilityDatasetInfo {
+  name: string
+  description: string
+  cascadesTo?: string[]
+}
+
+export interface ExportCatalogEntry {
+  dataset: string
+  formats: string[]
+  description: string
 }
 
 export interface RegisterAgentInput {
@@ -833,9 +879,17 @@ export const directoryApi = {
   getErrorAnalytics: (hours = 24 * 7) => request<ErrorAnalyticsResponse>(`/observability/errors?hours=${hours}`, undefined, { admin: true }),
   getAlerts: (hours = 24) => request<AlertsResponse>(`/observability/alerts?hours=${hours}`, undefined, { admin: true }),
   getRetention: () => request<RetentionResponse>('/observability/retention', undefined, { admin: true }),
-  pruneObservability: (dataset: string, olderThanDays: number) => request<PruneResponse>('/observability/prune', {
+  previewPruneObservability: (dataset: string, olderThanDays: number) => request<PrunePreviewResponse>(`/observability/prune-preview${buildQuery({
+    dataset,
+    olderThanDays,
+  })}`, undefined, { admin: true }),
+  pruneObservability: (
+    dataset: string,
+    olderThanDays: number,
+    confirmation: { confirmDataset: string; confirmPhrase: string },
+  ) => request<PruneResponse>('/observability/prune', {
     method: 'POST',
-    body: JSON.stringify({ dataset, olderThanDays }),
+    body: JSON.stringify({ dataset, olderThanDays, ...confirmation }),
   }, { admin: true }),
   downloadObservabilityExport: async (dataset: ExportDataset, format: ExportFormat, params?: {
     hours?: number

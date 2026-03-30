@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
+import AlertCard from '../components/AlertCard'
 import { ApiError, directoryApi, type ObservabilityOverview } from '../lib/api'
-import { alertSeverityColor, cn, formatLatency, formatNumber, formatPercent } from '../lib/utils'
+import { formatLatency, formatNumber, formatPercent } from '../lib/utils'
 import { BarList, EmptyPanel, MetricCard, PageHeader, StatusPill, TimeSeriesChart } from '../components/Observability'
 
 const WINDOW_OPTIONS = [
@@ -164,16 +165,7 @@ export default function OverviewPage() {
               <EmptyPanel label="No active alerts in the selected window." />
             ) : (
               overview.alerts.map((alert) => (
-                <div key={alert.id} className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.14em]', alertSeverityColor(alert.severity))}>
-                      {alert.severity}
-                    </span>
-                    <span className="text-xs text-slate-500 dark:text-slate-400">{alert.scope}</span>
-                  </div>
-                  <div className="mt-2 text-sm font-medium">{alert.title}</div>
-                  <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{alert.message}</div>
-                </div>
+                <AlertCard key={alert.id} alert={alert} compact />
               ))
             )}
           </div>
