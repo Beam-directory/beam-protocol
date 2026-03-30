@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam Protocol | Verified Partner Handoffs for AI Agents</title>
+  <title>Beam | Safe AI Handoffs Between Companies</title>
   <meta
     name="description"
-    content="Beam gives one company's agent a verifiable way to hand work to another company's agent with signed messages, traceable nonces, and operator-visible recovery."
+    content="Beam helps one company safely hand work to another company's AI. You can see what was sent, who handled it, what came back, and where it got stuck."
   />
-  <meta property="og:title" content="Beam Protocol | Verified Partner Handoffs for AI Agents" />
+  <meta property="og:title" content="Beam | Safe AI Handoffs Between Companies" />
   <meta
     property="og:description"
-    content="Run the Acme to Northwind hosted demo, inspect the trace, and see how Beam handles verified agent-to-agent partner handoffs."
+    content="Run Beam's hosted demo to see one company hand work to another company's AI with clear proof, retries, and operator visibility."
   />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory" />
@@ -19,10 +19,10 @@
   <meta property="og:site_name" content="Beam Protocol" />
   <meta property="og:locale" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Beam Protocol | Verified Partner Handoffs for AI Agents" />
+  <meta name="twitter:title" content="Beam | Safe AI Handoffs Between Companies" />
   <meta
     name="twitter:description"
-    content="Verified partner handoffs for AI agents with signed messages, replay protection, and operator-visible traces."
+    content="Beam helps companies pass AI work across team and partner boundaries without losing proof, context, or control."
   />
   <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <link rel="canonical" href="https://beam.directory/" />
@@ -58,7 +58,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Beam Protocol",
-    "description": "Verified partner handoffs for AI agents with signed messages, traceable nonces, and operator-visible recovery paths.",
+    "description": "Beam helps one company safely hand work to another company's AI with clear identity, delivery proof, and operator visibility.",
     "url": "https://beam.directory",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Cross-platform",
@@ -76,11 +76,11 @@
     "codeRepository": "https://github.com/Beam-directory/beam-protocol",
     "programmingLanguage": ["TypeScript", "Python"],
     "featureList": [
-      "Beam IDs",
-      "Ed25519 signed intents and results",
-      "Replay protection",
-      "Operator-visible traces",
-      "Dead-letter inspection",
+      "Cross-company AI handoffs",
+      "Known company and agent identities",
+      "Visible delivery and reply history",
+      "Retry and recovery tracking",
+      "Operator dashboard",
       "Hosted demo quickstart"
     ]
   }
@@ -1609,17 +1609,17 @@
       <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">Menu</button>
 
       <ul class="nav-links" id="navLinks">
-        <li><a href="#workflow">Workflow</a></li>
-        <li><a href="#operators">Operators</a></li>
-        <li><a href="#paths">Paths</a></li>
-        <li><a href="#start">Start</a></li>
+        <li><a href="#workflow">How it works</a></li>
+        <li><a href="#operators">If something breaks</a></li>
+        <li><a href="#paths">Next step</a></li>
+        <li><a href="#start">Demo</a></li>
         <li><a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a></li>
         <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">GitHub</a></li>
       </ul>
 
       <div class="nav-actions">
-        <a class="btn btn-ghost" href="/register.html">Register Agent</a>
-        <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run Hosted Demo</a>
+        <a class="btn btn-ghost" href="/register.html">Register your agent</a>
+        <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
       </div>
     </nav>
   </div>
@@ -1628,35 +1628,34 @@
     <section class="hero">
       <div class="hero-layout">
         <div class="hero-copy reveal visible">
-          <div class="eyebrow">Hosted beta · Beam 0.7 direction</div>
+          <div class="eyebrow">For real partner work</div>
           <div class="brand-word">Beam Protocol</div>
-          <h1>One <span>company agent</span> hands work to another.</h1>
+          <h1>Let one company's AI ask another company to do real work.</h1>
           <p>
-            Beam is the trust layer for partner-facing AI workflows. Give agents Beam IDs,
-            signed intents, replay protection, and operator-visible traces so
-            <code>procurement@acme</code> can hand work to <code>partner-desk@northwind</code>
-            without shared API keys or blind trust.
+            Beam is the shared layer for cross-company AI workflows. A request leaves your team,
+            reaches the other company, and stays visible the whole way. You can see who handled it,
+            what came back, and where it stalled.
           </p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
-            <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
+            <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Watch the demo path</a>
+            <a class="btn btn-secondary" href="/hosted-beta.html">Talk to us about your workflow</a>
           </div>
           <div class="hero-proof">
             <div class="proof-item">
-              <strong>15.81s</strong>
-              <span>Measured clean-start bring-up on the local hosted demo path.</span>
+              <strong>One shared handoff path</strong>
+              <span>Both companies can point at the same request, reply, and status history.</span>
             </div>
             <div class="proof-item">
-              <strong>0 alerts</strong>
-              <span>Recorded on the latest hosted-demo dogfood pass.</span>
+              <strong>Real demo in minutes</strong>
+              <span>The hosted quickstart brings up the exact handoff and dashboard shown on this site.</span>
             </div>
             <div class="proof-item">
-              <strong>0 dead letters</strong>
-              <span>Healthy baseline for the canonical Acme to Northwind flow.</span>
+              <strong>Clear proof when things go wrong</strong>
+              <span>Beam shows retries, stuck work, and operator traces instead of hiding failure in glue code.</span>
             </div>
             <div class="proof-item">
-              <strong>beam/1</strong>
-              <span>Compatibility fixtures now verified across TypeScript and Python.</span>
+              <strong>Built for real teams</strong>
+              <span>Start with the demo, register your own agent, or move into a hosted beta for one live workflow.</span>
             </div>
           </div>
         </div>
@@ -1675,40 +1674,39 @@
 
             <div class="signal-node procurement">
               <strong>Acme procurement</strong>
-              <span>Starts a quote request with a signed Beam frame and a traceable nonce.</span>
-              <em>quote.request</em>
+              <span>Asks Northwind for a real quote.</span>
+              <em>request starts</em>
             </div>
 
             <div class="signal-node directory">
               <strong>Beam directory</strong>
-              <span>Identity, ACL, replay window, lifecycle stages, audit, observability.</span>
-              <em>validate + route</em>
+              <span>Checks who is allowed to talk, then routes the work.</span>
+              <em>check + route</em>
             </div>
 
             <div class="signal-node partner">
               <strong>Northwind partner desk</strong>
-              <span>Receives the request, asks warehouse, and returns the signed quote.</span>
-              <em>signed result</em>
+              <span>Gets the request, coordinates the answer, and sends the quote back.</span>
+              <em>reply sent</em>
             </div>
 
             <div class="signal-node warehouse">
               <strong>Warehouse check</strong>
-              <span>Confirms stock and ship window before the quote is finalized.</span>
-              <em>inventory.check</em>
+              <span>Confirms stock and timing before the quote is finalized.</span>
+              <em>stock confirmed</em>
             </div>
 
             <div class="signal-node finance">
               <strong>Finance preflight</strong>
-              <span>Async acceptance routed through the message bus for durable partner workflows.</span>
-              <em>accepted</em>
+              <span>Gets the follow-up and can respond later without losing the thread.</span>
+              <em>follow-up accepted</em>
             </div>
 
             <div class="signal-legend">
-              <div class="signal-pill">Beam IDs</div>
-              <div class="signal-pill">Ed25519 signatures</div>
-              <div class="signal-pill">Nonce traces</div>
-              <div class="signal-pill">Retry and dead-letter</div>
-              <div class="signal-pill">Operator runbook</div>
+              <div class="signal-pill">Known company identities</div>
+              <div class="signal-pill">Visible handoff history</div>
+              <div class="signal-pill">Retries when work stalls</div>
+              <div class="signal-pill">Operator proof</div>
             </div>
           </div>
         </div>
@@ -1718,24 +1716,24 @@
     <div class="trust-strip">
       <div class="trust-rail reveal">
         <div>
-          <strong>Verified addresses</strong>
-          <span>Every agent gets a Beam ID and a DID-facing identity surface.</span>
+          <strong>Known participants</strong>
+          <span>You know which company or agent sent the work and which one received it.</span>
         </div>
         <div>
-          <strong>Signed handoffs</strong>
-          <span>Intents and results are signed end to end instead of relying on shared secrets.</span>
+          <strong>Tamper-resistant proof</strong>
+          <span>Requests and replies carry proof instead of relying on scattered shared secrets.</span>
         </div>
         <div>
-          <strong>Replay protection</strong>
-          <span>Timestamps and nonces prevent silent replays or duplicate delivery surprises.</span>
+          <strong>Fewer duplicate surprises</strong>
+          <span>Beam is built to prevent silent replays and repeated handoffs from hiding in the background.</span>
         </div>
         <div>
-          <strong>Operator visibility</strong>
-          <span>Traces, audit entries, alerts, dead letters, and retention controls live in one surface.</span>
+          <strong>One place to investigate</strong>
+          <span>Traces, alerts, audit history, and stuck work live in one operator surface.</span>
         </div>
         <div>
-          <strong>Hosted demo first</strong>
-          <span>The fastest path is a seeded local environment, not a long architecture talk.</span>
+          <strong>Demo before integration</strong>
+          <span>The fastest way to understand Beam is to run the real demo, not read a long architecture memo.</span>
         </div>
       </div>
     </div>
@@ -1743,11 +1741,11 @@
     <section id="workflow">
       <div class="container">
         <div class="section-head reveal">
-          <div class="kicker">One workflow on purpose</div>
-          <h2>Beam gets sharper when the story stays narrow.</h2>
+          <div class="kicker">One clear use case</div>
+          <h2>Beam is easiest to understand when the story stays concrete.</h2>
           <p>
-            The current wedge is not "all agents everywhere." It is one company handing work to
-            another company's agent, with enough trust and observability to survive real operations.
+            Beam is not trying to be everything for every AI tool. The clearest starting point is one
+            company handing work to another company with enough trust and visibility to survive real operations.
           </p>
         </div>
 
@@ -1755,37 +1753,33 @@
           <div class="workflow-steps reveal">
             <div class="workflow-step">
               <div>
-                <h3>Acme starts the handoff</h3>
+                <h3>Acme asks for work</h3>
                 <p>
-                  <code>procurement@acme.beam.directory</code> sends
-                  <code>quote.request</code> with a signed payload, timestamp, and nonce.
+                  Acme sends Northwind a quote request instead of emailing, polling, and guessing what happened next.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Beam validates and routes</h3>
+                <h3>Beam checks and routes it</h3>
                 <p>
-                  The directory resolves identities, checks ACLs, enforces replay protection,
-                  and records lifecycle stages for operators.
+                  Beam confirms who is talking to whom, routes the request, and records the handoff for later proof.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Northwind completes the work</h3>
+                <h3>Northwind finishes the job</h3>
                 <p>
-                  The partner desk fans into <code>inventory.check</code>, assembles the quote,
-                  and sends a signed result back to Acme.
+                  Northwind checks stock, prepares the quote, and sends the answer back through the same path.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Finance gets an async preflight</h3>
+                <h3>Follow-up work stays attached</h3>
                 <p>
-                  The message bus accepts <code>purchase.preflight</code> for durable follow-up,
-                  with retries and dead-letter visibility when the path degrades.
+                  Finance can pick up the next step later without losing the thread, and Beam still shows retries or failures.
                 </p>
               </div>
             </div>
@@ -1796,23 +1790,23 @@
               <span>Canonical demo</span>
               <strong>Acme to Northwind</strong>
             </div>
-            <div class="brief-headline">A real handoff beats a vague protocol claim.</div>
+            <div class="brief-headline">A real handoff is easier to trust than a protocol slogan.</div>
             <div class="brief-copy">
-              The public surface should let a buyer or engineer answer three questions fast:
-              what Beam is for, why it is safer than ad hoc API glue, and how quickly they can prove it locally.
+              The site should answer three questions fast: what Beam is for, why it is safer than ad hoc glue,
+              and how quickly a team can prove it on its own machine.
             </div>
             <ul class="brief-list">
               <li>
-                <strong>Start with the hosted quickstart</strong>
+                <strong>Start with the hosted demo</strong>
                 <span>Directory, dashboard, message bus, and seeded demo agents come up together.</span>
               </li>
               <li>
-                <strong>Follow one nonce end to end</strong>
-                <span>Trace the quote, inspect the warehouse check, and verify the finance preflight.</span>
+                <strong>Follow one request end to end</strong>
+                <span>Trace the quote, inspect the warehouse check, and verify the finance follow-up.</span>
               </li>
               <li>
-                <strong>Use reports as proof, not slogans</strong>
-                <span>Readiness and clean-start onboarding reports now live in the repo.</span>
+                <strong>Use proof, not adjectives</strong>
+                <span>The repo already includes readiness and clean-start reports instead of hand-wavy claims.</span>
               </li>
             </ul>
           </aside>
@@ -1825,34 +1819,34 @@
         <div class="operator-layout">
           <div class="operator-copy reveal">
             <div class="section-head" style="margin-bottom: 0;">
-              <div class="kicker">Operator reality</div>
-              <h2>When the handoff gets weird, Beam stays inspectable.</h2>
+              <div class="kicker">If something breaks</div>
+              <h2>Beam is built so operators can see what happened.</h2>
             </div>
             <p>
-              A2A infrastructure only matters when the partner path is late, repeated, blocked, or half-complete.
-              Beam already leans into that operator surface instead of pretending the happy path is enough.
+              Most cross-company automation fails quietly. Beam is designed so an operator can tell where the request stopped,
+              what retried, and whether the other side ever answered.
             </p>
             <div class="operator-snippets">
               <div class="operator-snippet">
                 <span>Overview</span>
-                <strong>Check the baseline before you chase one nonce.</strong>
-                <p>Healthy runs should show the same zero-alert, zero-dead-letter baseline used in the hosted demo reports.</p>
+                <strong>Check whether the system is healthy first.</strong>
+                <p>Healthy runs should look like the same zero-alert, zero-dead-letter baseline shown in the hosted demo.</p>
               </div>
               <div class="operator-snippet">
                 <span>Intents</span>
-                <strong>Follow the handoff by nonce and lifecycle state.</strong>
-                <p>Move from <code>received</code> to <code>acked</code> without guessing which transport or retry path actually fired.</p>
+                <strong>Open one request and follow it step by step.</strong>
+                <p>You can see when the handoff arrived, when it was delivered, and whether it ever finished cleanly.</p>
               </div>
               <div class="operator-snippet">
-                <span>Dead letter</span>
-                <strong>See where a partner workflow stopped being healthy.</strong>
-                <p>When finance or partner delivery degrades, the operator surface stays explicit about retries, terminal failures, and recovery.</p>
+                <span>Recovery</span>
+                <strong>See where the workflow stopped being healthy.</strong>
+                <p>When delivery degrades, Beam stays explicit about retries, terminal failures, and what to do next.</p>
               </div>
             </div>
             <ul>
-              <li>Trace every handoff by nonce, including lifecycle stages and delivery path.</li>
-              <li>Inspect audit entries, shield blocks, rate limits, alerts, and dead letters in one flow.</li>
-              <li>Run the operator runbook against the same canonical demo used in quickstart and dogfood.</li>
+              <li>Trace every handoff from first request to final reply.</li>
+              <li>Inspect alerts, audit history, rate limits, and dead letters in one place.</li>
+              <li>Use the same operator runbook that powers the demo and dogfood path.</li>
             </ul>
           </div>
 
@@ -1885,7 +1879,7 @@
             </div>
             <div class="proof-footnote">
               <span>Captured from the local quickstart stack with a real admin session, not a design mock.</span>
-              <span>Best next step: run the hosted demo, then compare your own workflow against this exact surface.</span>
+              <span>Best next step: run the demo, then compare your own workflow against this exact surface.</span>
             </div>
           </div>
         </div>
@@ -1895,11 +1889,11 @@
     <section id="paths">
       <div class="container">
         <div class="section-head reveal">
-          <div class="kicker">Choose the next Beam path</div>
-          <h2>Pick the proof depth that matches where you are.</h2>
+          <div class="kicker">Choose your next step</div>
+          <h2>Pick the Beam path that matches where you are.</h2>
           <p>
-            Beam should not force every visitor into the same next step. Some teams need proof,
-            some need a real identity, and some want a managed beta conversation around one workflow.
+            Not everyone needs the same next action. Some teams want a fast proof, some want to wire a real agent,
+            and some want help standing up one live workflow.
           </p>
         </div>
 
@@ -1907,7 +1901,7 @@
           <div class="stack-column reveal">
             <div class="stack-kicker">01 · prove the handoff</div>
             <h3>Start with the hosted demo.</h3>
-            <p>Bring up the seeded Acme-to-Northwind flow, inspect the dashboard trace, and verify the async finance preflight end to end.</p>
+            <p>Bring up the Acme-to-Northwind flow, inspect the dashboard, and watch one request move across teams end to end.</p>
             <ul>
               <li>Directory, dashboard, message bus, and demo agents boot together.</li>
               <li>The canonical quote request, warehouse check, and finance preflight are already seeded.</li>
@@ -1917,12 +1911,12 @@
               <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/operator-runbook">See operator runbook</a>
             </div>
-            <div class="stack-note">Best first stop for most engineers, founders, and buyers.</div>
+            <div class="stack-note">Best first stop for most people evaluating Beam.</div>
           </div>
           <div class="stack-column reveal">
             <div class="stack-kicker">02 · wire your own agent</div>
-            <h3>Register a real identity.</h3>
-            <p>Generate the Beam ID, signing key, optional direct-delivery endpoint, and smoke-test snippets for your own agent.</p>
+            <h3>Register your own agent.</h3>
+            <p>Generate a Beam address, create the keys you need, and run a simple smoke test with your own setup.</p>
             <ul>
               <li>Personal or company-scoped IDs with Beam-native addressing.</li>
               <li>Ed25519 signing keys, optional X25519 encryption, and optional HTTP delivery.</li>
@@ -1932,12 +1926,12 @@
               <a class="btn btn-secondary" href="/register.html">Register real agent</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/getting-started">Read SDK docs</a>
             </div>
-            <div class="stack-note">Best when the hosted demo already makes sense and you want to integrate.</div>
+            <div class="stack-note">Best when the demo already makes sense and you want to integrate.</div>
           </div>
           <div class="stack-column reveal">
             <div class="stack-kicker">03 · request hosted beta</div>
             <h3>Bring Beam into a partner workflow.</h3>
-            <p>If you want a managed directory, dashboard surface, and onboarding around a real B2B handoff, start with a short hosted-beta intake instead of a generic email thread.</p>
+            <p>If you want help standing this up around one real B2B handoff, start with a short hosted-beta intake instead of a generic email thread.</p>
             <ul>
               <li>Hosted directory and dashboard path instead of only self-hosting.</li>
               <li>Partner-handoff onboarding scoped to one real workflow, not a vague platform pitch.</li>
@@ -1947,7 +1941,7 @@
               <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
             </div>
-            <div class="stack-note">Best for teams that want Beam to feel operational immediately.</div>
+            <div class="stack-note">Best for teams that want Beam to feel operational quickly.</div>
           </div>
         </div>
       </div>
@@ -1956,11 +1950,11 @@
     <section id="stack">
       <div class="container">
         <div class="section-head reveal">
-          <div class="kicker">What ships today</div>
-          <h2>Beam already has the surfaces a buyer asks for next.</h2>
+          <div class="kicker">What exists today</div>
+          <h2>Beam already has the pieces people ask for after the first demo.</h2>
           <p>
-            Once the use case lands, the repo now backs it with operator tooling, compatibility work,
-            and demo infrastructure instead of leaving the story at protocol ambition.
+            Once the use case lands, Beam already has the operator tooling, compatibility work,
+            and demo infrastructure behind it instead of stopping at a protocol idea.
           </p>
         </div>
 
@@ -1968,10 +1962,10 @@
           <div class="stack-column reveal">
             <div class="stack-kicker">Directory and trust</div>
             <h3>Identity and policy stay explicit.</h3>
-            <p>Identity, ACLs, nonce lifecycle, admin sessions, audit, shield policy, and observability APIs.</p>
+            <p>Beam keeps company identity, routing rules, and operator history visible instead of burying them in custom glue.</p>
             <ul>
               <li>Beam IDs and DID resolution</li>
-              <li>Signed HTTP and WebSocket handoffs</li>
+              <li>Verified HTTP and WebSocket handoffs</li>
               <li>Public endpoint abuse controls</li>
               <li>Trace and audit APIs for operators</li>
             </ul>
@@ -1979,7 +1973,7 @@
           <div class="stack-column reveal">
             <div class="stack-kicker">Durable routing</div>
             <h3>Async work does not disappear into glue code.</h3>
-            <p>Message bus semantics for retries, dedupe, restart recovery, and dead-letter handling.</p>
+            <p>Retries, dedupe, restart recovery, and dead-letter handling are part of the product surface, not an afterthought.</p>
             <ul>
               <li>Nonce dedupe and retry backoff</li>
               <li>Delivery accepted vs terminal ack semantics</li>
@@ -1990,7 +1984,7 @@
           <div class="stack-column reveal">
             <div class="stack-kicker">SDKs and demo surface</div>
             <h3>The proof path is already operationalized.</h3>
-            <p>TypeScript, Python, CLI, dashboard, docs, public site, and a seeded hosted demo path.</p>
+            <p>TypeScript, Python, CLI, dashboard, docs, public site, and the seeded hosted demo already point at the same story.</p>
             <ul>
               <li>Archived compatibility fixtures in CI</li>
               <li>Hosted quickstart and dogfood scripts</li>
@@ -2008,16 +2002,16 @@
           <div class="start-copy">
             <div class="section-head" style="margin-bottom: 0;">
               <div class="kicker">Fastest path</div>
-              <h2>Start Beam from the demo, not from theory.</h2>
+              <h2>Start with the demo, not with theory.</h2>
             </div>
             <p>
-              The cleanest evaluation path is a seeded local environment that proves the end-to-end story in minutes.
-              That is the right onboarding bar for Beam now.
+              The fastest way to understand Beam is a seeded local environment that proves the end-to-end story in minutes.
+              That is the right onboarding bar right now.
             </p>
             <ul>
-              <li>Boot directory, dashboard, message bus, and hosted demo agents together.</li>
+              <li>Boot the directory, dashboard, message bus, and hosted demo agents together.</li>
               <li>Seed the Acme and Northwind identities without manual database work.</li>
-              <li>Run the quote request, inspect the trace, and verify the async finance preflight.</li>
+              <li>Run the quote request, inspect the trace, and verify the finance follow-up.</li>
             </ul>
           </div>
 
@@ -2045,16 +2039,15 @@
       <div class="container">
         <div class="closing-panel reveal">
           <div>
-            <h2>Pick the next Beam step, then prove it fast.</h2>
+            <h2>Choose the next Beam step, then prove it quickly.</h2>
           </div>
           <div>
             <p>
-              The public surface should now do three jobs without friction: show the canonical handoff,
-              expose the operator proof, and make the right next CTA obvious for evaluation, integration, or hosted beta.
+              Beam should be easy to understand at a glance: what it does, how to prove it, and what the next action is for your team.
             </p>
             <div class="closing-actions">
-              <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
-              <a class="btn btn-secondary" href="/register.html">Register real agent</a>
+              <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
+              <a class="btn btn-secondary" href="/register.html">Register your agent</a>
               <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
             </div>
           </div>
