@@ -6,6 +6,7 @@ import AgentsPage from './pages/AgentsPage'
 import AlertsPage from './pages/AlertsPage'
 import AuthCallbackPage from './pages/AuthCallbackPage'
 import AuditPage from './pages/AuditPage'
+import BetaRequestsPage from './pages/BetaRequestsPage'
 import DeadLetterPage from './pages/DeadLetterPage'
 import ErrorsPage from './pages/ErrorsPage'
 import FederationPage from './pages/FederationPage'
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="federation" element={<FederationPage />} />
             <Route path="errors" element={<ErrorsPage />} />
             <Route path="alerts" element={<AlertsPage />} />
+            <Route path="beta-requests" element={<BetaRequestsPage />} />
             <Route path="dead-letter" element={<DeadLetterPage />} />
             <Route path="register" element={<RegisterPage />} />
             <Route path="settings" element={<SettingsPage />} />

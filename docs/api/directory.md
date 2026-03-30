@@ -142,9 +142,91 @@ PATCH /shield/policies/public-endpoints
 
 The policy covers registration, discovery, DID resolution, `POST /intents/send`, admin auth, and key mutation limits, plus trusted IP / trusted Beam ID overrides.
 
+## Hosted beta intake
+
+Public hosted beta intake stays on the compatibility-safe `POST /waitlist` path.
+
+Example request:
+
+```json
+{
+  "email": "ops@northwind.systems",
+  "source": "hosted-beta-page",
+  "company": "Northwind Systems",
+  "agentCount": 6,
+  "workflowType": "hosted-beta-partner-handoff",
+  "workflowSummary": "Procurement asks partner operations for stock, then finance approves the async quote."
+}
+```
+
+Successful responses return:
+
+- `status`: `registered` or `already_registered`
+- `request`: the canonical hosted beta request record
+- `nextStep`: human-readable operator follow-up guidance
+
+The canonical request payload now includes:
+
+- `id`
+- `email`
+- `source`
+- `company`
+- `agentCount`
+- `workflowType`
+- `workflowSummary`
+- `requestStatus`
+- `owner`
+- `operatorNotes`
+- `createdAt`
+- `updatedAt`
+
+Stable request statuses are:
+
+- `new`
+- `reviewing`
+- `contacted`
+- `scheduled`
+- `active`
+- `closed`
+
+## Admin hosted beta workflow
+
+Operators can work the hosted beta queue through:
+
+```text
+GET   /admin/beta-requests
+GET   /admin/beta-requests/:id
+PATCH /admin/beta-requests/:id
+GET   /admin/beta-requests/export?format=json|csv
+```
+
+List filtering currently supports:
+
+- `q`
+- `status`
+- `owner`
+- `source`
+- `workflowType`
+- `limit`
+
+`PATCH /admin/beta-requests/:id` accepts:
+
+```json
+{
+  "status": "reviewing",
+  "owner": "operator@beam.directory",
+  "operatorNotes": "Intro email sent, follow-up call pending."
+}
+```
+
+All hosted beta admin endpoints require an authenticated admin session and accept either:
+
+- `Authorization: Bearer <admin-session-token>`
+- the dashboard admin session cookie
+
 ## `DELETE /admin/waitlist`
 
-Clears waitlist entries from the admin surface.
+Clears waitlist and hosted beta intake entries from the legacy admin surface.
 
 - Requires an authenticated admin session.
 - Accepts `Authorization: Bearer <admin-session-token>` for API clients or the dashboard session cookie.

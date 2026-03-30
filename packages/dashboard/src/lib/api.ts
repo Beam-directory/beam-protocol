@@ -5,6 +5,8 @@ export type ExportFormat = 'json' | 'csv' | 'ndjson'
 export type IntentLifecycleStatus = 'received' | 'validated' | 'queued' | 'dispatched' | 'delivered' | 'acked' | 'failed' | 'dead_letter'
 export type AlertMetricUnit = 'ratio' | 'ms' | 'count'
 export type AlertLinkSurface = 'trace' | 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
+export type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
+export type BetaRequestExportFormat = 'json' | 'csv'
 
 export interface DirectoryAgent {
   beamId: string
@@ -515,25 +517,68 @@ export interface WaitlistSignupInput {
   source?: string
   company?: string
   agentCount?: number
+  workflowType?: string
+  workflowSummary?: string
 }
 
 export interface WaitlistSignupResponse {
   ok: boolean
-  email: string
-  createdAt: string
+  status: 'registered' | 'already_registered'
+  request: BetaRequest
+  nextStep: string
 }
 
-export interface WaitlistEntry {
+export interface BetaRequest {
+  id: number
   email: string
   source: string | null
   company: string | null
   agentCount: number | null
+  workflowType: string | null
+  workflowSummary: string | null
+  requestStatus: BetaRequestStatus
+  owner: string | null
+  operatorNotes: string | null
   createdAt: string
+  updatedAt: string
 }
 
+export type WaitlistEntry = BetaRequest
+
 export interface WaitlistListResponse {
-  waitlist: WaitlistEntry[]
+  waitlist: BetaRequest[]
+  signups?: BetaRequest[]
+  requests?: BetaRequest[]
   total: number
+  summary?: BetaRequestSummary
+}
+
+export interface BetaRequestSummary {
+  total: number
+  active: number
+  unowned: number
+  byStatus: Record<BetaRequestStatus, number>
+}
+
+export interface BetaRequestListResponse {
+  requests: BetaRequest[]
+  total: number
+  summary: BetaRequestSummary
+}
+
+export interface BetaRequestDetailResponse {
+  request: BetaRequest
+}
+
+export interface BetaRequestUpdateInput {
+  status?: BetaRequestStatus
+  owner?: string | null
+  operatorNotes?: string | null
+}
+
+export interface BetaRequestUpdateResponse {
+  ok: boolean
+  request: BetaRequest
 }
 
 export interface IntentFeedMessage {
@@ -825,7 +870,50 @@ export const directoryApi = {
     method: 'POST',
     body: JSON.stringify(input),
   }),
-  listWaitlist: () => request<WaitlistListResponse>('/waitlist'),
+  listWaitlist: () => request<WaitlistListResponse>('/waitlist', undefined, { admin: true }),
+  listBetaRequests: (params?: {
+    q?: string
+    status?: BetaRequestStatus
+    owner?: string
+    source?: string
+    workflowType?: string
+    limit?: number
+  }) => request<BetaRequestListResponse>(`/admin/beta-requests${buildQuery({
+    q: params?.q,
+    status: params?.status,
+    owner: params?.owner,
+    source: params?.source,
+    workflowType: params?.workflowType,
+    limit: params?.limit,
+  })}`, undefined, { admin: true }),
+  getBetaRequest: (id: number) => request<BetaRequestDetailResponse>(`/admin/beta-requests/${id}`, undefined, { admin: true }),
+  updateBetaRequest: (id: number, input: BetaRequestUpdateInput) => request<BetaRequestUpdateResponse>(`/admin/beta-requests/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  downloadBetaRequestsExport: async (format: BetaRequestExportFormat, params?: {
+    q?: string
+    status?: BetaRequestStatus
+    owner?: string
+    source?: string
+    workflowType?: string
+    limit?: number
+  }): Promise<ExportDownload> => {
+    const response = await requestRaw(`/admin/beta-requests/export${buildQuery({
+      format,
+      q: params?.q,
+      status: params?.status,
+      owner: params?.owner,
+      source: params?.source,
+      workflowType: params?.workflowType,
+      limit: params?.limit,
+    })}`, undefined, { admin: true })
+
+    return {
+      blob: await response.blob(),
+      filename: getFilenameFromResponse(response, 'beta-requests', format),
+    }
+  },
   createOrg: (input: OrgRegistrationInput) => request<OrgRegistrationResponse>('/orgs', {
     method: 'POST',
     body: JSON.stringify(input),

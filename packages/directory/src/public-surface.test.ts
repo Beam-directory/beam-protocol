@@ -1,7 +1,26 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
-import { createDatabase } from './db.js'
+import { assignDirectoryRole, createDatabase } from './db.js'
+import { getLocalDirectoryUrl } from './federation.js'
+
+function createAdminHeaders(
+  db: ReturnType<typeof createDatabase>,
+  email = 'ops@example.com',
+  role: 'admin' | 'operator' | 'viewer' = 'admin',
+) {
+  process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+  assignDirectoryRole(db, {
+    userId: email,
+    role,
+    directoryUrl: getLocalDirectoryUrl(),
+  })
+  const session = createAdminSession(db, { email, role })
+  return {
+    Authorization: `Bearer ${session.token}`,
+  }
+}
 
 test('cors allows production public-site and loopback dashboard origins', async () => {
   const db = createDatabase(':memory:')
@@ -55,14 +74,18 @@ test('waitlist signups are idempotent by email and preserve the original created
     const first = await firstResponse.json() as {
       ok: boolean
       status: string
-      createdAt: string
-      company: string
-      agentCount: number
+      request: {
+        createdAt: string
+        company: string
+        agentCount: number
+        requestStatus: string
+      }
     }
     assert.equal(first.ok, true)
     assert.equal(first.status, 'registered')
-    assert.equal(first.company, 'Acme')
-    assert.equal(first.agentCount, 8)
+    assert.equal(first.request.company, 'Acme')
+    assert.equal(first.request.agentCount, 8)
+    assert.equal(first.request.requestStatus, 'new')
 
     const secondResponse = await app.request(new Request('http://localhost/waitlist', {
       method: 'POST',
@@ -82,17 +105,19 @@ test('waitlist signups are idempotent by email and preserve the original created
     const second = await secondResponse.json() as {
       ok: boolean
       status: string
-      createdAt: string
-      company: string
-      agentCount: number
-      source: string
+      request: {
+        createdAt: string
+        company: string
+        agentCount: number
+        source: string
+      }
     }
     assert.equal(second.ok, true)
     assert.equal(second.status, 'already_registered')
-    assert.equal(second.company, 'Acme Renewed')
-    assert.equal(second.agentCount, 14)
-    assert.equal(second.source, 'hosted-beta-follow-up')
-    assert.equal(second.createdAt, first.createdAt)
+    assert.equal(second.request.company, 'Acme Renewed')
+    assert.equal(second.request.agentCount, 14)
+    assert.equal(second.request.source, 'hosted-beta-follow-up')
+    assert.equal(second.request.createdAt, first.request.createdAt)
 
     const row = db.prepare(`
       SELECT COUNT(*) AS count, company, agent_count, source, created_at
@@ -110,7 +135,114 @@ test('waitlist signups are idempotent by email and preserve the original created
     assert.equal(row.company, 'Acme Renewed')
     assert.equal(row.agent_count, 14)
     assert.equal(row.source, 'hosted-beta-follow-up')
-    assert.equal(row.created_at, first.createdAt)
+    assert.equal(row.created_at, first.request.createdAt)
+  } finally {
+    db.close()
+  }
+})
+
+test('hosted beta requests can be created publicly, reviewed by operators, and exported', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+
+    const createResponse = await app.request(new Request('http://localhost/waitlist', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        Origin: 'https://beam.directory',
+      },
+      body: JSON.stringify({
+        email: 'buyer@example.com',
+        source: 'hosted-beta-page',
+        company: 'Northwind Systems',
+        agentCount: 6,
+        workflowType: 'hosted-beta-partner-handoff',
+        workflowSummary: 'Procurement asks partner operations for stock, then finance approves the async quote.',
+      }),
+    }))
+
+    assert.equal(createResponse.status, 201)
+    const created = await createResponse.json() as {
+      ok: boolean
+      request: {
+        id: number
+        source: string
+        workflowType: string
+        workflowSummary: string
+        requestStatus: string
+      }
+      nextStep: string
+    }
+    assert.equal(created.ok, true)
+    assert.equal(created.request.source, 'hosted-beta-page')
+    assert.equal(created.request.workflowType, 'hosted-beta-partner-handoff')
+    assert.match(created.request.workflowSummary, /Procurement/)
+    assert.equal(created.request.requestStatus, 'new')
+    assert.match(created.nextStep, /review/i)
+
+    const listResponse = await app.request(new Request('http://localhost/admin/beta-requests?status=new', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(listResponse.status, 200)
+
+    const listed = await listResponse.json() as {
+      total: number
+      requests: Array<{
+        id: number
+        email: string
+        workflowSummary: string
+        requestStatus: string
+      }>
+      summary: {
+        total: number
+        byStatus: Record<string, number>
+      }
+    }
+    assert.equal(listed.total, 1)
+    assert.equal(listed.summary.total, 1)
+    assert.equal(listed.summary.byStatus['new'], 1)
+    assert.equal(listed.requests[0]?.email, 'buyer@example.com')
+    assert.match(listed.requests[0]?.workflowSummary ?? '', /finance approves/)
+
+    const updateResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'operator@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'reviewing',
+        owner: 'operator@example.com',
+        operatorNotes: 'Intro email sent, follow-up call pending.',
+      }),
+    }))
+    assert.equal(updateResponse.status, 200)
+
+    const updated = await updateResponse.json() as {
+      ok: boolean
+      request: {
+        requestStatus: string
+        owner: string
+        operatorNotes: string
+      }
+    }
+    assert.equal(updated.ok, true)
+    assert.equal(updated.request.requestStatus, 'reviewing')
+    assert.equal(updated.request.owner, 'operator@example.com')
+    assert.match(updated.request.operatorNotes, /Intro email/)
+
+    const exportResponse = await app.request(new Request('http://localhost/admin/beta-requests/export?format=csv', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(exportResponse.status, 200)
+    assert.equal(exportResponse.headers.get('content-type'), 'text/csv; charset=utf-8')
+    const csv = await exportResponse.text()
+    assert.match(csv, /workflow_summary/)
+    assert.match(csv, /Northwind Systems/)
+    assert.match(csv, /operator@example.com/)
   } finally {
     db.close()
   }

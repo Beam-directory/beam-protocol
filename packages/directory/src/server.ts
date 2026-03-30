@@ -49,6 +49,25 @@ type WaitlistSignupInput = {
   source: string | null
   company: string | null
   agentCount: number | null
+  workflowType: string | null
+  workflowSummary: string | null
+}
+
+type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
+
+type BetaRequestUpdateInput = {
+  status?: BetaRequestStatus
+  owner?: string | null
+  operatorNotes?: string | null
+}
+
+type BetaRequestFilters = {
+  q?: string
+  status?: string
+  owner?: string
+  source?: string
+  workflowType?: string
+  limit?: number
 }
 
 type WaitlistRow = {
@@ -57,7 +76,80 @@ type WaitlistRow = {
   source: string | null
   company: string | null
   agent_count: number | null
+  workflow_type: string | null
+  workflow_summary: string | null
+  status: string
+  owner: string | null
+  operator_notes: string | null
   created_at: string
+  updated_at: string
+}
+
+const BETA_REQUEST_STATUSES: BetaRequestStatus[] = ['new', 'reviewing', 'contacted', 'scheduled', 'active', 'closed']
+const BETA_REQUEST_STATUS_SET = new Set<string>(BETA_REQUEST_STATUSES)
+
+function normalizeOptionalString(value: unknown): string | null {
+  return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function normalizeBetaRequestStatus(value: unknown): BetaRequestStatus | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!BETA_REQUEST_STATUS_SET.has(normalized)) {
+    return null
+  }
+
+  return normalized as BetaRequestStatus
+}
+
+function serializeBetaRequest(row: WaitlistRow) {
+  return {
+    id: row.id,
+    email: row.email,
+    source: row.source,
+    company: row.company,
+    agentCount: row.agent_count,
+    workflowType: row.workflow_type,
+    workflowSummary: row.workflow_summary,
+    requestStatus: normalizeBetaRequestStatus(row.status) ?? 'new',
+    owner: row.owner,
+    operatorNotes: row.operator_notes,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function getBetaRequestNextStep(status: string): string {
+  switch (status) {
+    case 'reviewing':
+      return 'Beam is reviewing the workflow and assigning an operator.'
+    case 'contacted':
+      return 'Beam will follow up directly on the request by email.'
+    case 'scheduled':
+      return 'Beam has a follow-up call or working session queued for this request.'
+    case 'active':
+      return 'This request is in an active hosted beta rollout.'
+    case 'closed':
+      return 'This request is closed. Submit a fresh intake if the workflow changed materially.'
+    default:
+      return 'Beam will review the workflow, assign an owner, and follow up with the next concrete step.'
+  }
+}
+
+function escapeCsvValue(value: string | number | null | undefined): string {
+  if (value == null) {
+    return ''
+  }
+
+  const text = String(value)
+  if (!/[",\n]/.test(text)) {
+    return text
+  }
+
+  return `"${text.replaceAll('"', '""')}"`
 }
 
 const PUBLIC_CORS_ORIGINS = new Set([
@@ -136,7 +228,195 @@ function getTableColumns(db: Database, tableName: string): Set<string> {
   return new Set(rows.map((row) => row.name))
 }
 
-function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array<{ email: string; company: string | null; signupDate: string | null }>; total: number } {
+function getBetaRequestWhereClause(filters: {
+  q?: string
+  status?: string
+  owner?: string
+  source?: string
+  workflowType?: string
+} = {}): { whereSql: string; params: unknown[] } {
+  const params: unknown[] = []
+  const conditions: string[] = []
+
+  if (filters.q) {
+    const needle = `%${filters.q.trim()}%`
+    conditions.push(`(
+      email LIKE ?
+      OR COALESCE(company, '') LIKE ?
+      OR COALESCE(source, '') LIKE ?
+      OR COALESCE(workflow_type, '') LIKE ?
+      OR COALESCE(workflow_summary, '') LIKE ?
+      OR COALESCE(owner, '') LIKE ?
+      OR COALESCE(operator_notes, '') LIKE ?
+    )`)
+    params.push(needle, needle, needle, needle, needle, needle, needle)
+  }
+
+  if (filters.status && BETA_REQUEST_STATUS_SET.has(filters.status)) {
+    conditions.push('status = ?')
+    params.push(filters.status)
+  }
+
+  if (filters.owner) {
+    conditions.push('COALESCE(owner, \'\') LIKE ?')
+    params.push(`%${filters.owner.trim()}%`)
+  }
+
+  if (filters.source) {
+    conditions.push('COALESCE(source, \'\') LIKE ?')
+    params.push(`%${filters.source.trim()}%`)
+  }
+
+  if (filters.workflowType) {
+    conditions.push('COALESCE(workflow_type, \'\') LIKE ?')
+    params.push(`%${filters.workflowType.trim()}%`)
+  }
+
+  return {
+    whereSql: conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '',
+    params,
+  }
+}
+
+function listBetaRequestRows(db: Database, filters: {
+  q?: string
+  status?: string
+  owner?: string
+  source?: string
+  workflowType?: string
+  limit?: number
+} = {}): { rows: WaitlistRow[]; total: number } {
+  const limit = Math.min(Math.max(Number(filters.limit ?? 200) || 200, 1), 5000)
+  const { whereSql, params } = getBetaRequestWhereClause(filters)
+  const orderBy = `
+    ORDER BY CASE status
+      WHEN 'new' THEN 0
+      WHEN 'reviewing' THEN 1
+      WHEN 'contacted' THEN 2
+      WHEN 'scheduled' THEN 3
+      WHEN 'active' THEN 4
+      WHEN 'closed' THEN 5
+      ELSE 6
+    END ASC,
+    datetime(updated_at) DESC,
+    datetime(created_at) DESC,
+    id DESC
+  `
+
+  const rows = db.prepare(`
+    SELECT
+      id,
+      email,
+      source,
+      company,
+      agent_count,
+      workflow_type,
+      workflow_summary,
+      status,
+      owner,
+      operator_notes,
+      created_at,
+      updated_at
+    FROM waitlist
+    ${whereSql}
+    ${orderBy}
+    LIMIT ?
+  `).all(...params, limit) as WaitlistRow[]
+
+  const total = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM waitlist
+    ${whereSql}
+  `).get(...params) as { count: number } | undefined)?.count ?? rows.length
+
+  return { rows, total }
+}
+
+function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
+  const row = db.prepare(`
+    SELECT
+      id,
+      email,
+      source,
+      company,
+      agent_count,
+      workflow_type,
+      workflow_summary,
+      status,
+      owner,
+      operator_notes,
+      created_at,
+      updated_at
+    FROM waitlist
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WaitlistRow | undefined
+
+  return row ?? null
+}
+
+function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
+  const byStatus = Object.fromEntries(BETA_REQUEST_STATUSES.map((status) => [status, 0])) as Record<BetaRequestStatus, number>
+  let unowned = 0
+  let active = 0
+
+  for (const row of rows) {
+    const status = normalizeBetaRequestStatus(row.status) ?? 'new'
+    byStatus[status] += 1
+    if (!row.owner) {
+      unowned += 1
+    }
+    if (status !== 'closed') {
+      active += 1
+    }
+  }
+
+  return {
+    total,
+    active,
+    unowned,
+    byStatus,
+  }
+}
+
+function buildBetaRequestCsv(rows: WaitlistRow[]): string {
+  const headers = [
+    'id',
+    'email',
+    'company',
+    'source',
+    'workflow_type',
+    'workflow_summary',
+    'agent_count',
+    'status',
+    'owner',
+    'operator_notes',
+    'created_at',
+    'updated_at',
+  ]
+
+  const lines = [headers.join(',')]
+  for (const row of rows) {
+    lines.push([
+      row.id,
+      row.email,
+      row.company,
+      row.source,
+      row.workflow_type,
+      row.workflow_summary,
+      row.agent_count,
+      row.status,
+      row.owner,
+      row.operator_notes,
+      row.created_at,
+      row.updated_at,
+    ].map((value) => escapeCsvValue(value as string | number | null | undefined)).join(','))
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array<{ email: string; company: string | null; signupDate: string | null; status: string | null; owner: string | null }>; total: number } {
   if (!tableExists(db, 'waitlist')) {
     return { available: false, waitlist: [], total: 0 }
   }
@@ -161,6 +441,12 @@ function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array
       : columns.has('createdAt')
         ? 'createdAt'
         : 'NULL'
+  const statusExpr = columns.has('status')
+    ? 'status'
+    : 'NULL'
+  const ownerExpr = columns.has('owner')
+    ? 'owner'
+    : 'NULL'
   const orderByExpr = columns.has('created_at')
     ? 'created_at'
     : columns.has('signup_date')
@@ -173,10 +459,12 @@ function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array
     SELECT
       ${emailExpr} AS email,
       ${companyExpr} AS company,
-      ${signupDateExpr} AS signupDate
+      ${signupDateExpr} AS signupDate,
+      ${statusExpr} AS status,
+      ${ownerExpr} AS owner
     FROM waitlist
     ORDER BY ${orderByExpr} DESC
-  `).all() as Array<{ email: string; company: string | null; signupDate: string | null }>
+  `).all() as Array<{ email: string; company: string | null; signupDate: string | null; status: string | null; owner: string | null }>
 
   return {
     available: true,
@@ -703,6 +991,206 @@ export function createApp(db: Database): Hono {
     }
   })
 
+  app.get('/admin/beta-requests', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    try {
+      const filters: BetaRequestFilters = {
+        q: c.req.query('q') ?? undefined,
+        status: c.req.query('status') ?? undefined,
+        owner: c.req.query('owner') ?? undefined,
+        source: c.req.query('source') ?? undefined,
+        workflowType: c.req.query('workflowType') ?? undefined,
+        limit: c.req.query('limit') ? Number.parseInt(c.req.query('limit') as string, 10) : undefined,
+      }
+
+      const { rows, total } = listBetaRequestRows(db, filters)
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        requests: rows.map((row) => serializeBetaRequest(row)),
+        total,
+        summary: summarizeBetaRequests(rows, total),
+      })
+    } catch (err) {
+      console.error('Admin beta requests error:', err)
+      return c.json({ error: 'Failed to load beta requests', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/beta-requests/export', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const format = (c.req.query('format') ?? 'json').trim().toLowerCase()
+    if (format !== 'json' && format !== 'csv') {
+      return c.json({ error: 'format must be json or csv', errorCode: 'INVALID_EXPORT_FORMAT' }, 400)
+    }
+
+    try {
+      const filters: BetaRequestFilters = {
+        q: c.req.query('q') ?? undefined,
+        status: c.req.query('status') ?? undefined,
+        owner: c.req.query('owner') ?? undefined,
+        source: c.req.query('source') ?? undefined,
+        workflowType: c.req.query('workflowType') ?? undefined,
+        limit: c.req.query('limit') ? Number.parseInt(c.req.query('limit') as string, 10) : 5000,
+      }
+
+      const { rows, total } = listBetaRequestRows(db, filters)
+      const timestamp = new Date().toISOString().replaceAll(':', '-')
+
+      logAuditEvent(db, {
+        action: 'admin.beta_requests.exported',
+        actor: auth.session.email,
+        target: 'beta_requests',
+        details: {
+          format,
+          total,
+          filters,
+          role: auth.session.role,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      if (format === 'csv') {
+        c.header('Content-Type', 'text/csv; charset=utf-8')
+        c.header('Content-Disposition', `attachment; filename="beam-beta-requests-${timestamp}.csv"`)
+        return c.body(buildBetaRequestCsv(rows))
+      }
+
+      c.header('Content-Type', 'application/json; charset=utf-8')
+      c.header('Content-Disposition', `attachment; filename="beam-beta-requests-${timestamp}.json"`)
+      return c.body(JSON.stringify({
+        exportedAt: new Date().toISOString(),
+        total,
+        summary: summarizeBetaRequests(rows, total),
+        requests: rows.map((row) => serializeBetaRequest(row)),
+      }, null, 2))
+    } catch (err) {
+      console.error('Admin beta request export error:', err)
+      return c.json({ error: 'Failed to export beta requests', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/beta-requests/:id', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const id = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: 'Invalid beta request id', errorCode: 'INVALID_BETA_REQUEST_ID' }, 400)
+    }
+
+    try {
+      const row = getBetaRequestById(db, id)
+      if (!row) {
+        return c.json({ error: 'Beta request not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+      c.header('Cache-Control', 'no-store')
+      return c.json({ request: serializeBetaRequest(row) })
+    } catch (err) {
+      console.error('Admin beta request detail error:', err)
+      return c.json({ error: 'Failed to load beta request', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.patch('/admin/beta-requests/:id', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const id = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: 'Invalid beta request id', errorCode: 'INVALID_BETA_REQUEST_ID' }, 400)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const patch: BetaRequestUpdateInput = {}
+
+    if ('status' in raw) {
+      const status = normalizeBetaRequestStatus(raw.status)
+      if (!status) {
+        return c.json({ error: 'Invalid beta request status', errorCode: 'INVALID_BETA_REQUEST_STATUS' }, 400)
+      }
+      patch.status = status
+    }
+
+    if ('owner' in raw) {
+      patch.owner = normalizeOptionalString(raw.owner)
+    }
+
+    if ('operatorNotes' in raw) {
+      patch.operatorNotes = normalizeOptionalString(raw.operatorNotes)
+    }
+
+    if (!('status' in patch) && !('owner' in patch) && !('operatorNotes' in patch)) {
+      return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
+    }
+
+    try {
+      const existing = getBetaRequestById(db, id)
+      if (!existing) {
+        return c.json({ error: 'Beta request not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const nextStatus = patch.status ?? (normalizeBetaRequestStatus(existing.status) ?? 'new')
+      const nextOwner = 'owner' in patch ? patch.owner ?? null : existing.owner
+      const nextOperatorNotes = 'operatorNotes' in patch ? patch.operatorNotes ?? null : existing.operator_notes
+      const updatedAt = new Date().toISOString()
+
+      db.prepare(`
+        UPDATE waitlist
+        SET status = ?, owner = ?, operator_notes = ?, updated_at = ?
+        WHERE id = ?
+      `).run(nextStatus, nextOwner, nextOperatorNotes, updatedAt, id)
+
+      const updated = getBetaRequestById(db, id)
+      if (!updated) {
+        return c.json({ error: 'Beta request not found after update', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.beta_request.updated',
+        actor: auth.session.email,
+        target: String(id),
+        details: {
+          role: auth.session.role,
+          status: nextStatus,
+          owner: nextOwner,
+          operatorNotesChanged: 'operatorNotes' in patch,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        request: serializeBetaRequest(updated),
+      })
+    } catch (err) {
+      console.error('Admin beta request update error:', err)
+      return c.json({ error: 'Failed to update beta request', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   app.get('/admin/waitlist', (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
@@ -1017,18 +1505,28 @@ export function createApp(db: Database): Hono {
       return c.json({ error: 'A valid email is required', errorCode: 'INVALID_EMAIL' }, 400)
     }
 
+    const workflowType = normalizeOptionalString(raw.workflowType)
+      ?? (
+        typeof raw.source === 'string' && raw.source.trim().startsWith('hosted-beta-')
+          ? raw.source.trim()
+          : null
+      )
+    const workflowSummary = normalizeOptionalString(raw.workflowSummary) ?? normalizeOptionalString(raw.notes)
+
     const signup: WaitlistSignupInput = {
       email,
       source,
       company,
       agentCount,
+      workflowType,
+      workflowSummary,
     }
 
-    const createdAt = new Date().toISOString()
+    const timestamp = new Date().toISOString()
 
     try {
       const existing = db.prepare(`
-        SELECT id, email, source, company, agent_count, created_at
+        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, created_at, updated_at
         FROM waitlist
         WHERE email = ?
         ORDER BY created_at DESC, id DESC
@@ -1039,43 +1537,106 @@ export function createApp(db: Database): Hono {
         const nextSource = signup.source ?? existing.source
         const nextCompany = signup.company ?? existing.company
         const nextAgentCount = signup.agentCount ?? existing.agent_count
+        const nextWorkflowType = signup.workflowType ?? existing.workflow_type
+        const nextWorkflowSummary = signup.workflowSummary ?? existing.workflow_summary
+        const nextStatus = (normalizeBetaRequestStatus(existing.status) ?? 'new') === 'closed'
+          ? 'new'
+          : (normalizeBetaRequestStatus(existing.status) ?? 'new')
 
         db.prepare(`
           UPDATE waitlist
-          SET source = ?, company = ?, agent_count = ?
+          SET source = ?, company = ?, agent_count = ?, workflow_type = ?, workflow_summary = ?, status = ?, updated_at = ?
           WHERE id = ?
-        `).run(nextSource, nextCompany, nextAgentCount, existing.id)
+        `).run(nextSource, nextCompany, nextAgentCount, nextWorkflowType, nextWorkflowSummary, nextStatus, timestamp, existing.id)
+
+        const updated = getBetaRequestById(db, existing.id)
+        if (!updated) {
+          return c.json({ error: 'Failed to load updated beta request', errorCode: 'DB_ERROR' }, 500)
+        }
 
         return c.json({
           ok: true,
           status: 'already_registered',
-          id: existing.id,
-          email: existing.email,
-          source: nextSource,
-          company: nextCompany,
-          agentCount: nextAgentCount,
-          createdAt: existing.created_at,
+          id: updated.id,
+          email: updated.email,
+          source: updated.source,
+          company: updated.company,
+          agentCount: updated.agent_count,
+          workflowType: updated.workflow_type,
+          workflowSummary: updated.workflow_summary,
+          requestStatus: normalizeBetaRequestStatus(updated.status) ?? 'new',
+          owner: updated.owner,
+          operatorNotes: updated.operator_notes,
+          createdAt: updated.created_at,
+          updatedAt: updated.updated_at,
+          request: serializeBetaRequest(updated),
+          nextStep: getBetaRequestNextStep(updated.status),
         }, 200)
       }
 
       const result = db.prepare(`
-        INSERT INTO waitlist (email, source, company, agent_count, created_at)
-        VALUES (?, ?, ?, ?, ?)
-      `).run(signup.email, signup.source, signup.company, signup.agentCount, createdAt)
+        INSERT INTO waitlist (
+          email,
+          source,
+          company,
+          agent_count,
+          workflow_type,
+          workflow_summary,
+          status,
+          owner,
+          operator_notes,
+          created_at,
+          updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, 'new', NULL, NULL, ?, ?)
+      `).run(
+        signup.email,
+        signup.source,
+        signup.company,
+        signup.agentCount,
+        signup.workflowType,
+        signup.workflowSummary,
+        timestamp,
+        timestamp,
+      )
 
       console.log(
-        `[waitlist] new signup email=${signup.email} source=${signup.source ?? '-'} company=${signup.company ?? '-'} agentCount=${signup.agentCount ?? '-'} createdAt=${createdAt}`
+        `[waitlist] new signup email=${signup.email} source=${signup.source ?? '-'} company=${signup.company ?? '-'} agentCount=${signup.agentCount ?? '-'} workflowType=${signup.workflowType ?? '-'} createdAt=${timestamp}`
       )
+
+      logAuditEvent(db, {
+        action: 'beta_request.created',
+        actor: signup.email,
+        target: signup.company ?? signup.email,
+        details: {
+          source: signup.source,
+          workflowType: signup.workflowType,
+          agentCount: signup.agentCount,
+        },
+      })
+
+      const created = getBetaRequestById(db, Number(result.lastInsertRowid))
+      if (!created) {
+        return c.json({ error: 'Failed to load saved beta request', errorCode: 'DB_ERROR' }, 500)
+      }
 
       return c.json({
         ok: true,
         status: 'registered',
-        id: Number(result.lastInsertRowid),
-        email: signup.email,
-        source: signup.source,
-        company: signup.company,
-        agentCount: signup.agentCount,
-        createdAt,
+        id: created.id,
+        email: created.email,
+        source: created.source,
+        company: created.company,
+        agentCount: created.agent_count,
+        workflowType: created.workflow_type,
+        workflowSummary: created.workflow_summary,
+        requestStatus: normalizeBetaRequestStatus(created.status) ?? 'new',
+        owner: created.owner,
+        operatorNotes: created.operator_notes,
+        createdAt: created.created_at,
+        updatedAt: created.updated_at,
+        request: serializeBetaRequest(created),
+        nextStep: getBetaRequestNextStep(created.status),
       }, 201)
     } catch (err) {
       console.error('Waitlist signup error:', err)
@@ -1090,30 +1651,14 @@ export function createApp(db: Database): Hono {
     }
 
     try {
-      const rows = db.prepare(`
-        SELECT id, email, source, company, agent_count, created_at
-        FROM waitlist
-        ORDER BY created_at DESC, id DESC
-      `).all() as WaitlistRow[]
+      const { rows, total } = listBetaRequestRows(db, { limit: 5000 })
 
       return c.json({
-        waitlist: rows.map((row) => ({
-          id: row.id,
-          email: row.email,
-          source: row.source,
-          company: row.company,
-          agentCount: row.agent_count,
-          createdAt: row.created_at,
-        })),
-        signups: rows.map((row) => ({
-          id: row.id,
-          email: row.email,
-          source: row.source,
-          company: row.company,
-          agentCount: row.agent_count,
-          createdAt: row.created_at,
-        })),
-        total: rows.length,
+        waitlist: rows.map((row) => serializeBetaRequest(row)),
+        signups: rows.map((row) => serializeBetaRequest(row)),
+        requests: rows.map((row) => serializeBetaRequest(row)),
+        total,
+        summary: summarizeBetaRequests(rows, total),
       })
     } catch (err) {
       console.error('List waitlist error:', err)
