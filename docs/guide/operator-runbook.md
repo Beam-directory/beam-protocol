@@ -5,6 +5,7 @@ This runbook is the shortest path from "something looks wrong" to a concrete Bea
 Use it together with:
 
 - [Hosted Quickstart](/guide/hosted-quickstart) for a local seeded demo stack
+- [Design-Partner Onboarding Pack](/guide/design-partner-onboarding) for buyer expectations, evaluation prep, and follow-up templates
 - [Operator Observability](/guide/operator-observability) for dashboards, exports, and retention controls
 - [Intent Lifecycle](/guide/intent-lifecycle) for status semantics
 
@@ -20,6 +21,8 @@ Use the inbox for two classes of work:
 
 - hosted beta requests that still need assignment, contact, or a next action
 - critical alerts that need triage, acknowledgement, and an explicit follow-up
+
+When the signal is a hosted beta request, pair the inbox with the [Design-Partner Onboarding Pack](/guide/design-partner-onboarding). The pack gives you the shared expectations and reply templates for `new`, `reviewing`, `contacted`, `scheduled`, `active`, and `closed` request states.
 
 The shortest daily loop is:
 
