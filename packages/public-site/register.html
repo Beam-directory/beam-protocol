@@ -681,6 +681,72 @@
       margin-bottom: 8px;
     }
 
+    .success-paths {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+
+    .success-path {
+      text-align: left;
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+      align-content: start;
+    }
+
+    .success-path .path-label {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .success-path h3 {
+      font-size: 1rem;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+    }
+
+    .success-path p {
+      margin: 0;
+      color: var(--text-secondary);
+      font-size: 0.84rem;
+      line-height: 1.65;
+    }
+
+    .success-path .path-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      margin-top: 2px;
+    }
+
+    .success-path .path-links a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text);
+      font-size: 0.78rem;
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .success-path .path-links a.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      border-color: transparent;
+      color: white;
+    }
+
     .quickstart-grid {
       display: grid;
       grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -772,6 +838,7 @@
       .steps { padding-left: 20px; padding-right: 20px; }
       .success-beam-row,
       .success-links { flex-direction: column; }
+      .success-paths,
       .quickstart-grid { grid-template-columns: 1fr; }
       .top-actions,
       .intro-actions { flex-direction: column; }
@@ -1015,8 +1082,37 @@
         <div id="success-details" class="success-section" style="font-size: 0.82rem; color: var(--text-secondary);">
         </div>
         <div class="success-section" style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.65;">
-          <h3>Recommended next step</h3>
-          Beam's canonical proof path is still the hosted Acme-to-Northwind demo. Use the snippets below for smoke testing your new identity, then compare it against the hosted quickstart if you need the full operator story.
+          <h3>Choose the next proof path</h3>
+          Registration proves identity, not the whole Beam story. Use the path below that matches what you need to confirm next: operator visibility, canonical demo proof, or a direct identity smoke test.
+        </div>
+        <div class="success-paths">
+          <div class="success-path">
+            <div class="path-label">01 · operator view</div>
+            <h3>See the dashboard path</h3>
+            <p>If you operate a directory or want to understand Beam as an operator, start from the dashboard login and the observability guide.</p>
+            <div class="path-links">
+              <a class="primary" href="https://dashboard.beam.directory/login" target="_blank" rel="noreferrer">Open dashboard login</a>
+              <a href="https://docs.beam.directory/guide/operator-observability" target="_blank" rel="noreferrer">Operator observability</a>
+            </div>
+          </div>
+          <div class="success-path">
+            <div class="path-label">02 · canonical proof</div>
+            <h3>Compare against the hosted demo</h3>
+            <p>The Acme-to-Northwind handoff is still the canonical Beam proof. Use it when you want to compare your new agent path against the full operator story.</p>
+            <div class="path-links">
+              <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run hosted demo</a>
+              <a href="https://docs.beam.directory/guide/partner-handoff" target="_blank" rel="noreferrer">Read partner handoff</a>
+            </div>
+          </div>
+          <div class="success-path">
+            <div class="path-label">03 · identity smoke</div>
+            <h3>Smoke test this Beam ID</h3>
+            <p>Use the CLI or browser playground when you only need to prove that the registered identity can send a signed message successfully.</p>
+            <div class="path-links">
+              <a class="primary" href="#" id="copy-cli-link">Copy CLI smoke command</a>
+              <a href="/playground.html">Open browser playground</a>
+            </div>
+          </div>
         </div>
         <div class="quickstart-grid">
           <div class="quickstart-card">
@@ -1029,10 +1125,8 @@
           </div>
         </div>
         <div class="success-links">
-          <a href="https://docs.beam.directory/guide/hosted-quickstart" class="link-primary">Run Hosted Demo</a>
-          <a href="#" class="link-secondary" id="copy-cli-link">Copy CLI Smoke Command</a>
-          <a href="/playground.html" class="link-secondary">Open Browser Playground</a>
           <a href="https://docs.beam.directory/guide/getting-started" class="link-secondary" target="_blank" rel="noreferrer">Read SDK Docs</a>
+          <a href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta" class="link-secondary">Talk Hosted Beta</a>
           <a href="/" class="link-secondary">Back to Landing</a>
         </div>
       </div>
