@@ -9,7 +9,10 @@
   "scripts": {
     "build": "npm run build:workspaces",
     "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus",
+    "demo:seed": "node scripts/demo/seed-hosted-demo.mjs",
+    "demo:run": "node scripts/demo/run-hosted-demo.mjs",
     "dogfood:partner-handoff": "node scripts/dogfood/partner-handoff.mjs",
+    "dogfood:hosted-demo": "node scripts/demo/dogfood-hosted-demo.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "node scripts/e2e/run.mjs",

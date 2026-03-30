@@ -17,6 +17,21 @@ The current directory family is `beam/1`.
 - `payload` is canonical for intent bodies; current SDKs still accept legacy `params`
 - breaking request validation, signature input, or required-field changes require a new protocol family rather than a silent patch
 
+For async handoffs, use the lifecycle terms consistently:
+
+- `delivered` means the recipient accepted delivery
+- `acked` means the work reached terminal completion for that transport path
+
+The recommended application payload for accepted-but-not-terminal async work is:
+
+```json
+{
+  "accepted": true,
+  "acknowledgement": "accepted",
+  "terminal": false
+}
+```
+
 ## `POST /register`
 
 In the current server implementation, agent registration is exposed as `POST /agents/register`.

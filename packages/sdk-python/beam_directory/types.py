@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, field
 from typing import Any, Literal, Optional
 
 BeamIdString = str
@@ -42,6 +42,7 @@ class IntentFrame:
     nonce: str
     timestamp: str
     signature: Optional[str] = None
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     @property
     def payload(self) -> dict[str, Any]:
@@ -63,12 +64,14 @@ class IntentFrame:
         }
         if self.signature is not None:
             data["signature"] = self.signature
+        data.update(self.extra_fields)
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "IntentFrame":
         payload = data.get("payload")
         params = payload if isinstance(payload, dict) else data.get("params", {})
+        known_fields = {"v", "intent", "from", "to", "payload", "params", "nonce", "timestamp", "signature"}
         return cls(
             v=data["v"],
             intent=data["intent"],
@@ -78,6 +81,7 @@ class IntentFrame:
             nonce=data["nonce"],
             timestamp=data["timestamp"],
             signature=data.get("signature"),
+            extra_fields={key: value for key, value in data.items() if key not in known_fields},
         )
 
 
@@ -92,6 +96,7 @@ class ResultFrame:
     error_code: Optional[str] = None
     latency: Optional[int] = None
     signature: Optional[str] = None
+    extra_fields: dict[str, Any] = field(default_factory=dict)
 
     def to_dict(self) -> dict[str, Any]:
         data: dict[str, Any] = {
@@ -110,10 +115,12 @@ class ResultFrame:
             data["latency"] = self.latency
         if self.signature is not None:
             data["signature"] = self.signature
+        data.update(self.extra_fields)
         return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ResultFrame":
+        known_fields = {"v", "success", "nonce", "timestamp", "payload", "error", "errorCode", "latency", "signature"}
         return cls(
             v=data["v"],
             success=data["success"],
@@ -124,6 +131,7 @@ class ResultFrame:
             error_code=data.get("errorCode"),
             latency=data.get("latency"),
             signature=data.get("signature"),
+            extra_fields={key: value for key, value in data.items() if key not in known_fields},
         )
 
 

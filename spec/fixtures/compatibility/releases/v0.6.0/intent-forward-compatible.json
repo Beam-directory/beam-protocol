@@ -1,0 +1,29 @@
+{
+  "release": "0.6.0",
+  "kind": "intent",
+  "signedBy": {
+    "beamId": "procurement@acme.beam.directory",
+    "publicKeyBase64": "MCowBQYDK2VwAyEAQYvLymXtml/R0LTxPO7RlIZBV/WyfVi2RowyLoNwVuw="
+  },
+  "frame": {
+    "v": "1",
+    "intent": "quote.request",
+    "from": "procurement@acme.beam.directory",
+    "to": "partner-desk@northwind.beam.directory",
+    "payload": {
+      "project": "Mannheim rooftop rollout",
+      "sku": "INV-240",
+      "quantity": 240,
+      "shipTo": "Mannheim, DE",
+      "neededBy": "2026-04-03",
+      "priority": "high"
+    },
+    "nonce": "compat-release-v0-6-0-intent",
+    "timestamp": "2026-03-30T15:00:00.000Z",
+    "relayHint": {
+      "route": "direct-http",
+      "expectedOrg": "northwind"
+    },
+    "signature": "wvZ2iDZZ0mIxCUVjrUvSvGOnjFTrNYZptrZsD7ZIhrKlea2Galr6o+gMGDYrgw0IkcCLkNbG6O9LUxgbNxHADQ=="
+  }
+}

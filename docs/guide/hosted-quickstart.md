@@ -1,13 +1,13 @@
 # Hosted Quickstart
 
-This guide boots a usable local Beam stack with Docker Compose in about 15 minutes:
+This guide boots the exact local hosted-demo stack used for Beam's canonical Acme to Northwind partner handoff in about 15 minutes:
 
-- Beam Directory on `http://localhost:3100`
-- Beam Dashboard on `http://localhost:5173`
-- Beam Message Bus on `http://localhost:8420`
-- Echo Agent on `http://localhost:8788`
+- Beam Directory on `http://localhost:43100`
+- Beam Dashboard on `http://localhost:43173`
+- Beam Message Bus on `http://localhost:43220`
+- Hosted Demo Agents on `http://localhost:43290`
 
-It is the fastest way to validate admin login, agent registration, discovery, and a real `conversation.message` exchange before shipping `0.6.0`.
+It is the fastest way to validate admin login, seeded demo identities, the canonical `quote.request` handoff, and the async finance preflight fan-out before shipping Beam changes.
 
 ## Prerequisites
 
@@ -15,16 +15,14 @@ It is the fastest way to validate admin login, agent registration, discovery, an
 - Node.js `20.19+`
 - npm `10+`
 
-## 1. Clone And Install
+## 1. Clone The Repo
 
 ```bash
 git clone https://github.com/Beam-directory/beam-protocol.git
 cd beam-protocol
-npm ci
-npm run build
 ```
 
-`npm run build` prepares the local CLI and SDK used by the smoke path.
+For the hosted demo path, Docker builds the required images itself. You only need `npm ci` and `npm run build` if you plan to work on the local workspaces or run the standalone cross-stack tests.
 
 ## 2. Copy The Quickstart Env
 
@@ -36,9 +34,12 @@ Default local values:
 
 - `BEAM_ADMIN_EMAILS=ops@beam.local`
 - `BEAM_BUS_API_KEY=beam-local-bus-key`
-- `ECHO_AGENT_SECRET=beam-local-echo-secret`
+- `DIRECTORY_PORT=43100`
+- `DASHBOARD_PORT=43173`
+- `MESSAGE_BUS_PORT=43220`
+- `DEMO_AGENT_PORT=43290`
 
-Change them if you want different local credentials or ports.
+The quickstart defaults use higher localhost ports to avoid common collisions with existing dev servers. Change them if you want different local credentials or ports.
 
 ## 3. Start The Stack
 
@@ -54,17 +55,17 @@ The stack builds Linux-native images for every service, so it works cleanly on m
 ## 4. Check Health
 
 ```bash
-curl http://localhost:3100/health
-curl http://localhost:8420/health
-curl http://localhost:8788/echo/health
-open http://localhost:5173/login
+curl http://localhost:43100/health
+curl http://localhost:43220/health
+curl http://localhost:43290/health
+open http://localhost:43173/login
 ```
 
 Expected results:
 
 - directory returns `{"status":"ok",...}`
 - message bus returns `{"status":"ok","service":"beam-message-bus"}`
-- echo agent returns `{"status":"ok",...}`
+- hosted demo agents return `{"status":"ok",...}`
 - dashboard shows the Beam login page
 
 ## 5. Run The 15-Minute Smoke Path
@@ -76,21 +77,54 @@ npm run quickstart:smoke
 The smoke path verifies:
 
 - local admin magic-link issue and session creation
-- dashboard callback URL generation
-- CLI identity creation
-- agent registration
-- lookup-based discovery of `echo@beam.directory`
-- `beam talk` round-trip to the echo agent
+- seeded Acme and Northwind demo identities
+- the canonical `quote.request -> inventory.check -> purchase.preflight` flow
+- quote trace reachability through the admin observability API
+- async acknowledgement semantics for the finance preflight
 - message-bus stats reachability
 
-## 6. Manual Operator Flow
+## 6. Reseed The Demo Identities
+
+The hosted demo uses committed demo-only identities under [`ops/quickstart/demo-identities.json`](https://github.com/Beam-directory/beam-protocol/blob/main/ops/quickstart/demo-identities.json). They are safe for local demo use only and must not be reused in production.
+
+To reapply registrations and ACLs without touching SQLite directly:
+
+```bash
+npm run demo:seed
+```
+
+This ensures the same four demo agents are present:
+
+- `procurement@acme.beam.directory`
+- `partner-desk@northwind.beam.directory`
+- `warehouse@northwind.beam.directory`
+- `finance@acme.beam.directory`
+
+## 7. Run The Canonical Hosted Handoff
+
+```bash
+npm run demo:run
+```
+
+Expected outcome:
+
+- quote total `44160`
+- supplier `partner-desk@northwind.beam.directory`
+- finance preflight bus status `delivered`
+- finance acknowledgement payload `accepted`
+
+`delivered` on the async finance notification is intentional: the bus accepted delivery, but the transport does not mark terminal `acked` unless a polled consumer later calls `POST /v1/beam/ack`.
+
+That status comes from the message bus response itself. The downstream finance intent can still continue to `acked` inside the directory trace if the connected consumer responds immediately, so use the dashboard trace as the source of truth for terminal lifecycle.
+
+## 8. Manual Operator Flow
 
 Request a local dev magic link:
 
 ```bash
-curl -X POST http://localhost:3100/admin/auth/magic-link \
+curl -X POST http://localhost:43100/admin/auth/magic-link \
   -H "Content-Type: application/json" \
-  -H "Origin: http://localhost:5173" \
+  -H "Origin: http://localhost:43173" \
   -d '{"email":"ops@beam.local"}'
 ```
 
@@ -103,30 +137,32 @@ On localhost without SMTP or Resend, the response includes:
 Open the returned `url` in the browser or exchange the token directly:
 
 ```bash
-curl -X POST http://localhost:3100/admin/auth/verify \
+curl -X POST http://localhost:43100/admin/auth/verify \
   -H "Content-Type: application/json" \
   -d '{"token":"paste-token-here"}'
 ```
 
-Create a sender agent and talk to the echo agent:
+After login, run the demo and inspect the resulting nonce:
 
 ```bash
-mkdir -p /tmp/beam-quickstart
-cd /tmp/beam-quickstart
-npx --no-install beam init --agent demo --org quickstart --directory http://localhost:3100 --force
-npx --no-install beam register --display-name "Quickstart Demo" --capabilities "conversation.message" --directory http://localhost:3100
-npx --no-install beam lookup echo@beam.directory --directory http://localhost:3100
-npx --no-install beam talk echo@beam.directory "Hello from the hosted quickstart" --directory http://localhost:3100
+npm run demo:run
 ```
+
+Then use the dashboard in this order:
+
+- `Intents` → open the returned quote nonce
+- `Audit` → confirm the matching control-plane events
+- `Dead Letters` → verify the queue is empty for the clean path
+- `Alerts` → inspect heuristics and export options
 
 If you want Dead Letter operations in the dashboard, open `Settings` and paste:
 
-- Bus URL: `http://localhost:8420`
+- Bus URL: `http://localhost:43220`
 - Bus API key: the `BEAM_BUS_API_KEY` value from `ops/quickstart/.env`
 
-For the full operator workflow after login, including alert investigation, exports, and prune safeguards, continue with the [Operator Observability](/guide/operator-observability) guide.
+For the full operator workflow after login, continue with [Operator Observability](/guide/operator-observability) and the [Operator Runbook](/guide/operator-runbook).
 
-## 7. Tear Down
+## 9. Tear Down
 
 ```bash
 docker compose \
@@ -137,7 +173,8 @@ docker compose \
 
 ## Troubleshooting
 
-- If `quickstart:smoke` fails before the CLI step, verify `npm run build` completed locally.
+- If `quickstart:smoke` fails before the demo run, inspect `docker compose logs demo-agents directory message-bus`.
 - If the dashboard loads but login fails, make sure `BEAM_ADMIN_EMAILS` in `ops/quickstart/.env` matches the email you request.
-- If the echo agent stays unhealthy, rebuild after changing `ECHO_AGENT_SECRET` so the directory and agent use the same secret.
+- If the demo agents stay unhealthy, inspect `docker compose logs demo-agents` and confirm `ops/quickstart/demo-identities.json` is present in the repo checkout.
+- If the finance preflight never reaches `delivered`, confirm `BEAM_BUS_API_KEY` is present and the message bus can read `IDENTITY_PATH=/app/demo-identities.json`.
 - If Docker reused stale images, rerun with `docker compose ... up -d --build --force-recreate`.

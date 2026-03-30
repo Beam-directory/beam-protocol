@@ -149,6 +149,8 @@
       },
       "response": {
         "accepted": { "type": "boolean" },
+        "acknowledgement": { "type": "string", "enum": ["accepted", "completed"] },
+        "terminal": { "type": "boolean" },
         "reviewedBy": { "type": "string" }
       }
     },
@@ -165,6 +167,8 @@
       },
       "response": {
         "accepted": { "type": "boolean" },
+        "acknowledgement": { "type": "string", "enum": ["accepted", "completed"] },
+        "terminal": { "type": "boolean" },
         "estimatedCompletion": { "type": "string" },
         "result": { "type": "string" }
       }

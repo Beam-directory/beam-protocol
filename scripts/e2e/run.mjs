@@ -329,6 +329,36 @@ async function main() {
 
       assert.equal(sendResult.status, 'delivered', 'Message bus did not report a delivered send')
 
+      const polled = await requestJson(
+        `${messageBusUrl}/poll?agent=${encodeURIComponent(receiver.beamId)}&status=delivered&limit=5`,
+        {
+          headers: { 'Authorization': `Bearer ${beamBusApiKey}` },
+        },
+      )
+
+      const deliveredMessage = polled.messages.find((message) => (
+        message.sender === busSender.beamId && message.intent === 'conversation.message'
+      ))
+      assert(deliveredMessage, 'Message bus poll did not expose the delivered async handoff')
+
+      const ack = await requestJson(`${messageBusUrl}/ack`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${beamBusApiKey}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message_id: deliveredMessage.id,
+          status: 'acked',
+          response: {
+            acknowledgement: 'completed',
+            handledBy: receiver.beamId,
+          },
+        }),
+      })
+
+      assert.equal(ack.status, 'acked', 'Message bus ack did not transition to acked')
+
       const history = await requestJson(
         `${messageBusUrl}/history?sender=${encodeURIComponent(busSender.beamId)}&recipient=${encodeURIComponent(receiver.beamId)}&limit=5`,
         {
@@ -336,7 +366,7 @@ async function main() {
         },
       )
 
-      assert(history.messages.some((message) => message.status === 'delivered' && message.intent === 'conversation.message'), 'Message bus history did not contain the delivered message')
+      assert(history.messages.some((message) => message.status === 'acked' && message.intent === 'conversation.message'), 'Message bus history did not contain the acked async message')
 
       const stats = await requestJson(`${messageBusUrl}/stats`)
       assert(stats.total >= 1, 'Message bus stats did not record the delivered message')

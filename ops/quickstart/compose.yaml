@@ -11,12 +11,11 @@ services:
       BEAM_OPERATOR_EMAILS: ${BEAM_OPERATOR_EMAILS:-}
       BEAM_VIEWER_EMAILS: ${BEAM_VIEWER_EMAILS:-}
       BEAM_ADMIN_SESSION_TTL_HOURS: ${BEAM_ADMIN_SESSION_TTL_HOURS:-168}
-      BEAM_DASHBOARD_URL: http://localhost:${DASHBOARD_PORT:-5173}
-      BEAM_DIRECTORY_URL: http://localhost:${DIRECTORY_PORT:-3100}
-      PUBLIC_BASE_URL: http://localhost:${DIRECTORY_PORT:-3100}
-      ECHO_AGENT_SECRET: ${ECHO_AGENT_SECRET}
+      BEAM_DASHBOARD_URL: http://localhost:${DASHBOARD_PORT:-43173}
+      BEAM_DIRECTORY_URL: http://localhost:${DIRECTORY_PORT:-43100}
+      PUBLIC_BASE_URL: http://localhost:${DIRECTORY_PORT:-43100}
     ports:
-      - "${DIRECTORY_PORT:-3100}:3100"
+      - "${DIRECTORY_PORT:-43100}:3100"
     volumes:
       - directory-data:/data
     healthcheck:
@@ -37,13 +36,15 @@ services:
       PORT: "8420"
       DB_PATH: /data/beam-bus.sqlite
       DIRECTORY_URL: http://directory:3100
+      IDENTITY_PATH: /app/demo-identities.json
       RATE_LIMIT: ${BEAM_BUS_RATE_LIMIT:-50}
       BEAM_BUS_API_KEY: ${BEAM_BUS_API_KEY}
       BEAM_BUS_STATS_PUBLIC: "true"
     ports:
-      - "${MESSAGE_BUS_PORT:-8420}:8420"
+      - "${MESSAGE_BUS_PORT:-43220}:8420"
     volumes:
       - message-bus-data:/data
+      - ./demo-identities.json:/app/demo-identities.json:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8420/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -56,15 +57,15 @@ services:
       context: ../../packages/dashboard
       dockerfile: Dockerfile
       args:
-        VITE_API_URL: http://localhost:${DIRECTORY_PORT:-3100}
-        VITE_BEAM_BUS_URL: http://localhost:${MESSAGE_BUS_PORT:-8420}
+        VITE_API_URL: http://localhost:${DIRECTORY_PORT:-43100}
+        VITE_BEAM_BUS_URL: http://localhost:${MESSAGE_BUS_PORT:-43220}
     depends_on:
       directory:
         condition: service_healthy
       message-bus:
         condition: service_healthy
     ports:
-      - "${DASHBOARD_PORT:-5173}:5173"
+      - "${DASHBOARD_PORT:-43173}:5173"
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5173/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -72,21 +73,25 @@ services:
       retries: 20
       start_period: 10s
 
-  echo-agent:
+  demo-agents:
     build:
       context: ../..
-      dockerfile: ops/quickstart/echo-agent.Dockerfile
+      dockerfile: ops/quickstart/demo-agents.Dockerfile
     depends_on:
       directory:
         condition: service_healthy
+      message-bus:
+        condition: service_healthy
     environment:
-      PORT: "8788"
+      PORT: "8790"
       BEAM_DIRECTORY_URL: http://directory:3100
-      ECHO_AGENT_SECRET: ${ECHO_AGENT_SECRET}
+      BEAM_BUS_URL: http://message-bus:8420/v1/beam
+      BEAM_BUS_API_KEY: ${BEAM_BUS_API_KEY}
+      DEMO_IDENTITY_PATH: /app/demo-identities.json
     ports:
-      - "${ECHO_AGENT_PORT:-8788}:8788"
+      - "${DEMO_AGENT_PORT:-43290}:8790"
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8788/echo/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:8790/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
       timeout: 3s
       retries: 20

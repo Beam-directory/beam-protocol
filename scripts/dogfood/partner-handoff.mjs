@@ -262,6 +262,8 @@ async function main() {
         success: true,
         payload: {
           accepted: true,
+          acknowledgement: 'accepted',
+          terminal: false,
           reviewedBy: finance.beamId,
         },
       })
@@ -410,11 +412,11 @@ async function main() {
       findings: [
         'The Acme to Northwind quote workflow completed end to end with a traceable nonce and no dead letters.',
         'A message-bus finance notification delivered successfully during the same run, so direct request/response and queued fan-out both worked in one scenario.',
-        'Alerts stayed empty for this clean run; release readiness still depends on continued coverage for degraded or cross-version paths.',
+        'Alerts stayed empty for this clean run; the remaining work is in hosted demo polish, operator runbooks, and public onboarding clarity.',
       ],
       followUps: [
-        'Add signed archival compatibility fixtures from previous released versions instead of only parser-level fixtures.',
-        'Define an explicit async acknowledgement pattern for message-bus initiated requests where the sender does not keep a pending result.',
+        'Keep the hosted quickstart and public docs aligned with this same partner handoff.',
+        'Expand operator investigation guidance for the common degraded paths caught by alerts or dead letters.',
       ],
     }
 

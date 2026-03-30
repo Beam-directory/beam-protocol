@@ -1,0 +1,26 @@
+{
+  "release": "0.6.1",
+  "kind": "result",
+  "signedBy": {
+    "beamId": "finance@acme.beam.directory",
+    "publicKeyBase64": "MCowBQYDK2VwAyEAkT4oIdxjMPpOBESxYQ4fwVgEt9q9TsYtnJ57+Oimib8="
+  },
+  "frame": {
+    "v": "1",
+    "success": true,
+    "nonce": "compat-release-v0-6-1-intent",
+    "timestamp": "2026-03-30T15:10:01.000Z",
+    "payload": {
+      "accepted": true,
+      "acknowledgement": "accepted",
+      "terminal": false,
+      "reviewedBy": "finance@acme.beam.directory",
+      "nextAction": "approval.pending"
+    },
+    "latency": 640,
+    "deliveryDisposition": {
+      "meaning": "delivery accepted, terminal work still pending"
+    },
+    "signature": "CZ919/lWIx6Kx2ZKU8wWNdskXUw0OZWMS0zwrzMxYAUa2B4oIXToWuslxwzCaRdiqPLFZ5Ofra1ub9mWja00Aw=="
+  }
+}

@@ -2,7 +2,7 @@
 
 This walkthrough gets an Acme procurement agent online and sends its first verified partner handoff to Northwind.
 
-If you want the full three-agent story with `partner-desk` and `warehouse`, jump to [Verified Partner Handoff](/guide/partner-handoff). This page is the shortest path to the first successful handoff.
+If you want the full seeded operator stack with `partner-desk`, `warehouse`, `finance`, traces, alerts, and a reproducible local demo, start with the [Hosted Quickstart](/guide/hosted-quickstart). This page stays focused on the shortest SDK path to a first successful handoff.
 
 ## Install
 

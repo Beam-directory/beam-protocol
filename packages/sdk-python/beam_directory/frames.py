@@ -174,7 +174,7 @@ def validate_intent_frame(
     return errors
 
 
-def validate_result_frame(frame: ResultFrame) -> list[str]:
+def validate_result_frame(frame: ResultFrame, public_key_base64: Optional[str] = None) -> list[str]:
     """Validate a ResultFrame. Returns list of errors (empty = valid)."""
     errors: list[str] = []
 
@@ -189,5 +189,14 @@ def validate_result_frame(frame: ResultFrame) -> list[str]:
 
     if not frame.success and not frame.error:
         errors.append("error message required when success=False")
+
+    if public_key_base64:
+        if not frame.signature:
+            errors.append("signature is required when public_key_base64 is provided")
+        else:
+            unsigned = frame.to_dict()
+            unsigned.pop("signature", None)
+            if not BeamIdentity.verify(_canonical_json(unsigned), frame.signature, public_key_base64):
+                errors.append("Signature verification failed")
 
     return errors

@@ -15,11 +15,23 @@ The opinionated Beam 0.6.0 wedge is a verified partner handoff:
 3. Acme gets a signed response, a traceable nonce, and an operator-visible audit trail.
 
 - Docs: [docs.beam.directory](https://docs.beam.directory)
-- First-run guide: [Verified Partner Handoff](https://docs.beam.directory/guide/partner-handoff)
+- Fastest local path: [Hosted Quickstart](https://docs.beam.directory/guide/hosted-quickstart)
+- Workflow guide: [Verified Partner Handoff](https://docs.beam.directory/guide/partner-handoff)
 - Compatibility policy: [Beam 0.6 Compatibility](https://docs.beam.directory/guide/compatibility)
 - API reference: [TypeScript](https://docs.beam.directory/api/typescript), [CLI](https://docs.beam.directory/api/cli), [Directory](https://docs.beam.directory/api/directory), [Python](https://docs.beam.directory/api/python)
 
-## Quick Start
+## Fastest Local Path
+
+```bash
+cp ops/quickstart/.env.example ops/quickstart/.env
+docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env up -d --build
+npm run demo:seed
+npm run demo:run
+```
+
+That boots the local directory, dashboard, message bus, and seeded Acme/Northwind demo agents so you can run the exact hosted partner handoff used in dogfood and operator docs.
+
+## SDK Example
 
 ```bash
 npm install beam-protocol-sdk
@@ -100,6 +112,7 @@ See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibilit
 ## Release Readiness
 
 The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
+The current hosted-beta dogfood pass lives in [`reports/0.7.0-hosted-demo-readiness.md`](./reports/0.7.0-hosted-demo-readiness.md), and the measured local bring-up timing lives in [`reports/0.7.0-clean-start-onboarding.md`](./reports/0.7.0-clean-start-onboarding.md).
 
 ## Repository Layout
 

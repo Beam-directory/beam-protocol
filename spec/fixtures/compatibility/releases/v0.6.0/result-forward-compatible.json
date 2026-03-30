@@ -1,0 +1,36 @@
+{
+  "release": "0.6.0",
+  "kind": "result",
+  "signedBy": {
+    "beamId": "partner-desk@northwind.beam.directory",
+    "publicKeyBase64": "MCowBQYDK2VwAyEAxiVryjO8XPVaAJ7TD1WaM/n0g3NcfeHwl8+JYbOYL34="
+  },
+  "frame": {
+    "v": "1",
+    "success": true,
+    "nonce": "compat-release-v0-6-0-intent",
+    "timestamp": "2026-03-30T15:00:02.000Z",
+    "payload": {
+      "quotedUnitPriceEur": 184,
+      "totalPriceEur": 44160,
+      "supplier": "partner-desk@northwind.beam.directory",
+      "inventory": {
+        "available": true,
+        "confidence": "high",
+        "shipWindow": "Thu 08:00-12:00 CET"
+      }
+    },
+    "latency": 1820,
+    "traceSummary": {
+      "stages": [
+        "received",
+        "validated",
+        "dispatched",
+        "delivered",
+        "acked"
+      ],
+      "retryCount": 0
+    },
+    "signature": "uPYMRiDNi9irpkq//O0/9M7ZAzsrJq9UP4iYIg9bdoWRmJNTt+06RYLTF/UqyRO8AWz2YnPB8NMX5Sd7jvbSDA=="
+  }
+}

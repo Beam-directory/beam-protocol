@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { ApiError, busApi, getBusBaseUrl, type DeadLetterMessage } from '../lib/api'
 import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
 import { formatDateTime, formatNumber } from '../lib/utils'
@@ -176,7 +177,11 @@ export default function DeadLetterPage() {
               <tbody>
                 {messages.map((message) => (
                   <tr key={message.id} className="border-t border-slate-200 align-top dark:border-slate-800">
-                    <td className="table-cell font-mono text-xs">{message.nonce}</td>
+                    <td className="table-cell font-mono text-xs">
+                      <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/intents/${encodeURIComponent(message.nonce)}`}>
+                        {message.nonce}
+                      </Link>
+                    </td>
                     <td className="table-cell">
                       <div className="font-medium">{message.sender}</div>
                       <div className="text-slate-500 dark:text-slate-400">{message.recipient}</div>
@@ -195,14 +200,19 @@ export default function DeadLetterPage() {
                     </td>
                     <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">{previewPayload(message.payload)}</td>
                     <td className="table-cell">
-                      <button
-                        className="btn-secondary"
-                        disabled={requeueingId === message.id}
-                        onClick={() => void handleRequeue(message.id)}
-                        type="button"
-                      >
-                        {requeueingId === message.id ? 'Requeueing…' : 'Requeue'}
-                      </button>
+                      <div className="flex flex-wrap gap-2">
+                        <Link className="btn-secondary" to={`/intents/${encodeURIComponent(message.nonce)}`}>
+                          Trace
+                        </Link>
+                        <button
+                          className="btn-secondary"
+                          disabled={requeueingId === message.id}
+                          onClick={() => void handleRequeue(message.id)}
+                          type="button"
+                        >
+                          {requeueingId === message.id ? 'Requeueing…' : 'Requeue'}
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
