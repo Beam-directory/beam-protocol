@@ -31,6 +31,8 @@ export async function cmdStats(options: StatsOptions): Promise<void> {
     console.log(`${chalk.cyan('Intents:')}      ${stats.intentsProcessed}`)
     if (stats.consumerAgents !== undefined) console.log(`${chalk.cyan('Consumers:')}    ${stats.consumerAgents}`)
     if (stats.version) console.log(`${chalk.cyan('Version:')}      ${stats.version}`)
+    if (stats.gitSha) console.log(`${chalk.cyan('Git SHA:')}      ${stats.gitSha.slice(0, 12)}`)
+    if (stats.deployedAt) console.log(`${chalk.cyan('Deployed:')}     ${stats.deployedAt}`)
     console.log('')
   } catch (err) {
     spinner.fail('Stats failed')

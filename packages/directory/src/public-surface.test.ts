@@ -247,3 +247,66 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     db.close()
   }
 })
+
+test('health, stats, and release endpoint expose consistent live release metadata', async () => {
+  const db = createDatabase(':memory:')
+  const originalVersion = process.env['BEAM_RELEASE_VERSION']
+  const originalSha = process.env['BEAM_RELEASE_SHA']
+  const originalDeployedAt = process.env['BEAM_DEPLOYED_AT']
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    process.env['BEAM_RELEASE_VERSION'] = '0.6.1-test'
+    process.env['BEAM_RELEASE_SHA'] = 'abcdef1234567890abcdef1234567890abcdef12'
+    process.env['BEAM_DEPLOYED_AT'] = '2026-03-30T19:00:00.000Z'
+
+    const app = createApp(db)
+
+    const [healthResponse, statsResponse, releaseResponse] = await Promise.all([
+      app.request('http://localhost/health'),
+      app.request('http://localhost/stats'),
+      app.request('http://localhost/release'),
+    ])
+
+    assert.equal(healthResponse.status, 200)
+    assert.equal(statsResponse.status, 200)
+    assert.equal(releaseResponse.status, 200)
+
+    const health = await healthResponse.json() as {
+      version: string
+      gitSha: string
+      deployedAt: string
+      release: { version: string; gitSha: string; gitShaShort: string; deployedAt: string }
+    }
+    const stats = await statsResponse.json() as {
+      version: string
+      gitSha: string
+      deployedAt: string
+      release: { version: string; gitSha: string; gitShaShort: string; deployedAt: string }
+    }
+    const release = await releaseResponse.json() as {
+      release: { version: string; gitSha: string; gitShaShort: string; deployedAt: string }
+    }
+
+    assert.equal(health.version, '0.6.1-test')
+    assert.equal(stats.version, '0.6.1-test')
+    assert.equal(release.release.version, '0.6.1-test')
+    assert.equal(health.gitSha, 'abcdef1234567890abcdef1234567890abcdef12')
+    assert.equal(stats.gitSha, 'abcdef1234567890abcdef1234567890abcdef12')
+    assert.equal(release.release.gitShaShort, 'abcdef1')
+    assert.equal(health.deployedAt, '2026-03-30T19:00:00.000Z')
+    assert.deepEqual(health.release, stats.release)
+    assert.deepEqual(stats.release, release.release)
+  } finally {
+    if (originalVersion === undefined) delete process.env['BEAM_RELEASE_VERSION']
+    else process.env['BEAM_RELEASE_VERSION'] = originalVersion
+
+    if (originalSha === undefined) delete process.env['BEAM_RELEASE_SHA']
+    else process.env['BEAM_RELEASE_SHA'] = originalSha
+
+    if (originalDeployedAt === undefined) delete process.env['BEAM_DEPLOYED_AT']
+    else process.env['BEAM_DEPLOYED_AT'] = originalDeployedAt
+
+    db.close()
+  }
+})

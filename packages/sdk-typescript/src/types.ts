@@ -85,6 +85,14 @@ export interface DirectoryStats {
   uptime?: number
   waitlistSize?: number
   version?: string
+  gitSha?: string | null
+  deployedAt?: string
+  release?: {
+    version: string
+    gitSha: string | null
+    gitShaShort?: string | null
+    deployedAt: string
+  }
 }
 
 export interface Delegation {

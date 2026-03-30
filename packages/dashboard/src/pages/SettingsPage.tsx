@@ -16,6 +16,7 @@ import {
   type BusHealth,
   type BusStats,
   type DirectoryHealth,
+  type RootStatsResponse,
   type RetentionResponse,
 } from '../lib/api'
 import { useAdminAuth } from '../lib/admin-auth'
@@ -25,6 +26,7 @@ const PRIVATE_KEY_PREFIX = 'beam-dashboard-private-key:'
 export default function SettingsPage() {
   const { session, config, logout } = useAdminAuth()
   const [health, setHealth] = useState<DirectoryHealth | null>(null)
+  const [rootStats, setRootStats] = useState<RootStatsResponse | null>(null)
   const [busHealth, setBusHealth] = useState<BusHealth | null>(null)
   const [busStats, setBusStats] = useState<BusStats | null>(null)
   const [retention, setRetention] = useState<RetentionResponse | null>(null)
@@ -38,8 +40,9 @@ export default function SettingsPage() {
 
     async function load() {
       try {
-        const [healthResponse, retentionResponse] = await Promise.allSettled([
+        const [healthResponse, statsResponse, retentionResponse] = await Promise.allSettled([
           directoryApi.getHealth(),
+          directoryApi.getRootStats(),
           directoryApi.getRetention(),
         ])
 
@@ -50,6 +53,10 @@ export default function SettingsPage() {
           setError(null)
         } else if (healthResponse.reason instanceof ApiError) {
           setError(healthResponse.reason.message)
+        }
+
+        if (statsResponse.status === 'fulfilled') {
+          setRootStats(statsResponse.value)
         }
 
         if (retentionResponse.status === 'fulfilled') {
@@ -84,6 +91,23 @@ export default function SettingsPage() {
       cancelled = true
     }
   }, [])
+
+  const releaseTruthMatches = useMemo(() => {
+    const healthVersion = health?.release?.version ?? health?.version ?? null
+    const healthSha = health?.release?.gitSha ?? health?.gitSha ?? null
+    const healthDeployedAt = health?.release?.deployedAt ?? health?.deployedAt ?? null
+    const statsVersion = rootStats?.release?.version ?? rootStats?.version ?? null
+    const statsSha = rootStats?.release?.gitSha ?? rootStats?.gitSha ?? null
+    const statsDeployedAt = rootStats?.release?.deployedAt ?? rootStats?.deployedAt ?? null
+
+    if (!healthVersion || !statsVersion) {
+      return null
+    }
+
+    return healthVersion === statsVersion
+      && (healthSha ?? '') === (statsSha ?? '')
+      && (healthDeployedAt ?? '') === (statsDeployedAt ?? '')
+  }, [health, rootStats])
 
   const storedKeys = useMemo(() => {
     return Object.keys(localStorage).filter((key) => key.startsWith(PRIVATE_KEY_PREFIX))
@@ -135,6 +159,13 @@ export default function SettingsPage() {
           <InfoRow label="Protocol" value={health?.protocol ?? '—'} />
           <InfoRow label="Connected agents" value={health ? String(health.connectedAgents) : '—'} />
           <InfoRow label="Last heartbeat" value={health?.timestamp ?? '—'} />
+          <InfoRow label="Release version" value={health?.release?.version ?? health?.version ?? '—'} />
+          <InfoRow label="Git SHA" value={health?.release?.gitShaShort ?? health?.gitSha ?? '—'} />
+          <InfoRow label="Deployed at" value={health?.release?.deployedAt ?? health?.deployedAt ?? '—'} />
+          <InfoRow
+            label="Release truth"
+            value={releaseTruthMatches == null ? 'Unavailable' : releaseTruthMatches ? 'health/stats match' : 'drift detected'}
+          />
         </div>
 
         <div className="panel space-y-3">
@@ -231,14 +262,24 @@ export default function SettingsPage() {
         <p className="text-sm text-slate-500 dark:text-slate-400">
           Admin setup, alert triage, exports, and prune safety are documented end to end in the operator guide.
         </p>
-        <a
-          className="inline-flex w-fit rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
-          href="https://docs.beam.directory/guide/operator-observability"
-          rel="noreferrer"
-          target="_blank"
-        >
-          Open operator guide
-        </a>
+        <div className="flex flex-wrap gap-3">
+          <a
+            className="inline-flex w-fit rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            href="https://docs.beam.directory/guide/operator-observability"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open operator guide
+          </a>
+          <a
+            className="inline-flex w-fit rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition-colors hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+            href="https://beam.directory/status.html"
+            rel="noreferrer"
+            target="_blank"
+          >
+            Open release status
+          </a>
+        </div>
       </section>
     </div>
   )

@@ -89,6 +89,16 @@ function normalizeProfile(raw: Record<string, unknown>): AgentProfile {
 }
 
 function normalizeStats(raw: Record<string, unknown>): DirectoryStats {
+  const releaseRaw = raw['release']
+  const release = releaseRaw && typeof releaseRaw === 'object' && !Array.isArray(releaseRaw)
+    ? {
+        version: getString(releaseRaw as Record<string, unknown>, 'version') ?? getString(raw, 'version') ?? '',
+        gitSha: getString(releaseRaw as Record<string, unknown>, 'gitSha', 'git_sha') ?? null,
+        gitShaShort: getString(releaseRaw as Record<string, unknown>, 'gitShaShort', 'git_sha_short') ?? null,
+        deployedAt: getString(releaseRaw as Record<string, unknown>, 'deployedAt', 'deployed_at') ?? '',
+      }
+    : undefined
+
   return {
     totalAgents: getNumber(raw, 'totalAgents', 'total_agents', 'agents') ?? 0,
     verifiedAgents: getNumber(raw, 'verifiedAgents', 'verified_agents') ?? 0,
@@ -96,7 +106,10 @@ function normalizeStats(raw: Record<string, unknown>): DirectoryStats {
     consumerAgents: getNumber(raw, 'consumerAgents', 'consumer_agents'),
     uptime: getNumber(raw, 'uptime', 'uptimeSeconds', 'uptime_seconds'),
     waitlistSize: getNumber(raw, 'waitlistSize', 'waitlist_size'),
-    version: getString(raw, 'version'),
+    version: getString(raw, 'version') ?? release?.version,
+    gitSha: getString(raw, 'gitSha', 'git_sha') ?? release?.gitSha ?? null,
+    deployedAt: getString(raw, 'deployedAt', 'deployed_at') ?? release?.deployedAt,
+    release,
   }
 }
 

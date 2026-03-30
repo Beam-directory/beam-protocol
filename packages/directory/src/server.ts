@@ -38,6 +38,7 @@ import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
 import { assignDirectoryRole, deleteDirectoryRole, getAgent, getDIDDocument, listAgentKeys, listAuditLog, listDirectoryRoles, listRecentIntentLogs, listTrustScores, logAuditEvent, upsertDIDDocument } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
+import { getReleaseInfo } from './release.js'
 import type { AgentRow, IntentFrame } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -877,6 +878,7 @@ function renderDashboardHtml(): string {
 
 export function createApp(db: Database): Hono {
   const app = new Hono()
+  const releaseInfo = getReleaseInfo(serverStartedAt)
   seedAclsFromCatalog(db)
 
   app.use('*', cors({
@@ -1785,6 +1787,10 @@ export function createApp(db: Database): Hono {
         connectedAgents: getConnectedCount(),
         timestamp,
         uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+        version: releaseInfo.version,
+        gitSha: releaseInfo.gitSha,
+        deployedAt: releaseInfo.deployedAt,
+        release: releaseInfo,
         db: {
           status: row?.ok === 1 ? 'ok' : 'error',
         },
@@ -1796,12 +1802,24 @@ export function createApp(db: Database): Hono {
         connectedAgents: getConnectedCount(),
         timestamp,
         uptimeSeconds: Math.floor((Date.now() - serverStartedAt) / 1000),
+        version: releaseInfo.version,
+        gitSha: releaseInfo.gitSha,
+        deployedAt: releaseInfo.deployedAt,
+        release: releaseInfo,
         db: {
           status: 'error',
           message: error instanceof Error ? error.message : 'Unknown database error',
         },
       }, 503)
     }
+  })
+
+  app.get('/release', (c) => {
+    return c.json({
+      protocol: 'beam/1',
+      release: releaseInfo,
+      reportedAt: new Date().toISOString(),
+    })
   })
 
   app.get('/stats', (c) => {
@@ -1835,7 +1853,10 @@ export function createApp(db: Database): Hono {
       intentsProcessed,
       uptime: Math.floor(process.uptime()),
       waitlistSize,
-      version: '0.5.0',
+      version: releaseInfo.version,
+      gitSha: releaseInfo.gitSha,
+      deployedAt: releaseInfo.deployedAt,
+      release: releaseInfo,
     })
   })
 

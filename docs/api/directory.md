@@ -98,11 +98,31 @@ Typical health response:
   "status": "ok",
   "protocol": "beam/1",
   "connectedAgents": 12,
-  "timestamp": "2026-03-08T12:00:00.000Z"
+  "timestamp": "2026-03-08T12:00:00.000Z",
+  "version": "0.6.1",
+  "gitSha": "abcdef1234567890abcdef1234567890abcdef12",
+  "deployedAt": "2026-03-30T19:00:00.000Z",
+  "release": {
+    "version": "0.6.1",
+    "gitSha": "abcdef1234567890abcdef1234567890abcdef12",
+    "gitShaShort": "abcdef1",
+    "deployedAt": "2026-03-30T19:00:00.000Z"
+  }
 }
 ```
 
 If you publish a friendlier `/stats` endpoint in front of the directory, it should usually aggregate health, connection count, and relay metrics.
+The current built-in `/stats` endpoint now exposes the same release metadata, so `health` and `stats` can be compared for deploy-truth drift.
+
+## `GET /release`
+
+For a small operator-facing release-truth check, the directory also exposes:
+
+```text
+GET /release
+```
+
+It returns the current protocol family plus the live release metadata (`version`, `gitSha`, `gitShaShort`, `deployedAt`).
 
 ## Admin auth
 

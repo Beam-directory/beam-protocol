@@ -52,6 +52,29 @@ export interface DirectoryHealth {
   protocol: string
   connectedAgents: number
   timestamp: string
+  uptimeSeconds?: number
+  version?: string
+  gitSha?: string | null
+  deployedAt?: string
+  release?: DirectoryReleaseInfo
+}
+
+export interface DirectoryReleaseInfo {
+  version: string
+  gitSha: string | null
+  gitShaShort: string | null
+  deployedAt: string
+}
+
+export interface RootStatsResponse {
+  agents: number
+  intentsProcessed: number
+  uptime: number
+  waitlistSize: number
+  version: string
+  gitSha?: string | null
+  deployedAt?: string
+  release?: DirectoryReleaseInfo
 }
 
 export interface BusHealth {
@@ -835,7 +858,7 @@ function getFilenameFromResponse(response: Response, dataset: string, format: Ex
 
 export const directoryApi = {
   getHealth: () => request<DirectoryHealth>('/health'),
-  getRootStats: () => request<{ agents: number; intentsProcessed: number; uptime: number; waitlistSize: number; version: string }>('/stats'),
+  getRootStats: () => request<RootStatsResponse>('/stats'),
   getAgentStats: () => request<DirectoryStats>('/agents/stats'),
   searchAgents: (params?: {
     q?: string
