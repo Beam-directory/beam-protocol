@@ -16,6 +16,7 @@ import type {
   IntentFrame,
   IntentLogRow,
   IntentTraceEventRow,
+  OperatorNotificationRow,
   OrgAgentRow,
   OrgRow,
   ReportRow,
@@ -162,12 +163,42 @@ function initSchema(db: DB): void {
       status TEXT NOT NULL DEFAULT 'new',
       owner TEXT,
       operator_notes TEXT,
+      next_action TEXT,
+      last_contact_at TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
       ON waitlist(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS operator_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      source_type TEXT NOT NULL CHECK(source_type IN ('beta_request', 'critical_alert')),
+      source_key TEXT NOT NULL UNIQUE,
+      beta_request_id INTEGER,
+      alert_id TEXT,
+      severity TEXT NOT NULL CHECK(severity IN ('info', 'warning', 'critical')),
+      title TEXT NOT NULL,
+      message TEXT NOT NULL,
+      href TEXT,
+      status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'acknowledged', 'acted')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      acknowledged_at TEXT,
+      acted_at TEXT,
+      actor TEXT,
+      details_json TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_operator_notifications_status
+      ON operator_notifications(status, updated_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_operator_notifications_source
+      ON operator_notifications(source_type, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_operator_notifications_beta_request
+      ON operator_notifications(beta_request_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS intent_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -471,14 +502,28 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'waitlist', 'status', "TEXT NOT NULL DEFAULT 'new'")
   ensureColumn(db, 'waitlist', 'owner', 'TEXT')
   ensureColumn(db, 'waitlist', 'operator_notes', 'TEXT')
+  ensureColumn(db, 'waitlist', 'next_action', 'TEXT')
+  ensureColumn(db, 'waitlist', 'last_contact_at', 'TEXT')
   ensureColumn(db, 'waitlist', 'updated_at', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_status ON waitlist(status, created_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_owner ON waitlist(owner, created_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_last_contact ON waitlist(last_contact_at, updated_at DESC)')
   db.prepare(`
     UPDATE waitlist
     SET status = COALESCE(NULLIF(status, ''), 'new'),
         updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
   `).run()
+  db.prepare(`
+    UPDATE waitlist
+    SET last_contact_at = CASE
+      WHEN COALESCE(NULLIF(last_contact_at, ''), '') = '' AND status IN ('contacted', 'scheduled', 'active')
+        THEN updated_at
+      ELSE last_contact_at
+    END
+  `).run()
+  db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_status ON operator_notifications(status, updated_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_source ON operator_notifications(source_type, created_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_beta_request ON operator_notifications(beta_request_id, created_at DESC)')
   ensureIntentLogSchema(db)
   ensureColumn(db, 'intent_trace_events', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce ON intent_trace_events(nonce, timestamp ASC, id ASC)')
@@ -2126,6 +2171,258 @@ export function listAuditLog(
     ORDER BY timestamp DESC, id DESC
     LIMIT ${limit}
   `).all(...params) as AuditLogRow[]
+}
+
+export function getOperatorNotificationById(db: DB, id: number): OperatorNotificationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM operator_notifications
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OperatorNotificationRow | undefined
+
+  return row ?? null
+}
+
+export function getOperatorNotificationBySourceKey(db: DB, sourceKey: string): OperatorNotificationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM operator_notifications
+    WHERE source_key = ?
+    LIMIT 1
+  `).get(sourceKey) as OperatorNotificationRow | undefined
+
+  return row ?? null
+}
+
+export function listOperatorNotificationsBySourceKeys(db: DB, sourceKeys: string[]): OperatorNotificationRow[] {
+  const uniqueKeys = [...new Set(sourceKeys.map((value) => value.trim()).filter(Boolean))]
+  if (uniqueKeys.length === 0) {
+    return []
+  }
+
+  const placeholders = uniqueKeys.map(() => '?').join(', ')
+  return db.prepare(`
+    SELECT *
+    FROM operator_notifications
+    WHERE source_key IN (${placeholders})
+    ORDER BY created_at DESC, id DESC
+  `).all(...uniqueKeys) as OperatorNotificationRow[]
+}
+
+export function listOperatorNotifications(
+  db: DB,
+  query: {
+    limit?: number
+    status?: string
+    sourceType?: string
+    betaRequestId?: number
+    q?: string
+  } = {},
+): OperatorNotificationRow[] {
+  const limit = Math.max(1, Math.min(500, Math.trunc(query.limit ?? 100)))
+  const conditions: string[] = []
+  const params: Array<string | number> = []
+
+  if (query.status) {
+    conditions.push('status = ?')
+    params.push(query.status)
+  }
+
+  if (query.sourceType) {
+    conditions.push('source_type = ?')
+    params.push(query.sourceType)
+  }
+
+  if (query.betaRequestId) {
+    conditions.push('beta_request_id = ?')
+    params.push(query.betaRequestId)
+  }
+
+  if (query.q) {
+    const needle = `%${query.q.trim()}%`
+    conditions.push(`(
+      title LIKE ?
+      OR message LIKE ?
+      OR COALESCE(actor, '') LIKE ?
+      OR COALESCE(alert_id, '') LIKE ?
+      OR COALESCE(source_key, '') LIKE ?
+    )`)
+    params.push(needle, needle, needle, needle, needle)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  return db.prepare(`
+    SELECT *
+    FROM operator_notifications
+    ${where}
+    ORDER BY CASE status
+      WHEN 'new' THEN 0
+      WHEN 'acknowledged' THEN 1
+      WHEN 'acted' THEN 2
+      ELSE 3
+    END ASC,
+    datetime(updated_at) DESC,
+    id DESC
+    LIMIT ${limit}
+  `).all(...params) as OperatorNotificationRow[]
+}
+
+export function countOperatorNotifications(
+  db: DB,
+  query: { status?: string; sourceType?: string } = {},
+): number {
+  const conditions: string[] = []
+  const params: string[] = []
+
+  if (query.status) {
+    conditions.push('status = ?')
+    params.push(query.status)
+  }
+
+  if (query.sourceType) {
+    conditions.push('source_type = ?')
+    params.push(query.sourceType)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  return (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM operator_notifications
+    ${where}
+  `).get(...params) as { count: number } | undefined)?.count ?? 0
+}
+
+export function upsertOperatorNotification(
+  db: DB,
+  input: {
+    sourceType: OperatorNotificationRow['source_type']
+    sourceKey: string
+    betaRequestId?: number | null
+    alertId?: string | null
+    severity: OperatorNotificationRow['severity']
+    title: string
+    message: string
+    href?: string | null
+    details?: unknown
+    resetStatus?: boolean
+  },
+): OperatorNotificationRow {
+  const now = nowIso()
+  const existing = getOperatorNotificationBySourceKey(db, input.sourceKey)
+  const details = input.details === undefined ? null : JSON.stringify(input.details)
+
+  if (existing) {
+    const nextStatus = input.resetStatus ? 'new' : existing.status
+    const acknowledgedAt = input.resetStatus ? null : existing.acknowledged_at
+    const actedAt = input.resetStatus ? null : existing.acted_at
+    const actor = input.resetStatus ? null : existing.actor
+
+    db.prepare(`
+      UPDATE operator_notifications
+      SET source_type = ?,
+          beta_request_id = ?,
+          alert_id = ?,
+          severity = ?,
+          title = ?,
+          message = ?,
+          href = ?,
+          status = ?,
+          updated_at = ?,
+          acknowledged_at = ?,
+          acted_at = ?,
+          actor = ?,
+          details_json = ?
+      WHERE id = ?
+    `).run(
+      input.sourceType,
+      input.betaRequestId ?? existing.beta_request_id,
+      input.alertId ?? existing.alert_id,
+      input.severity,
+      input.title,
+      input.message,
+      input.href ?? existing.href,
+      nextStatus,
+      now,
+      acknowledgedAt,
+      actedAt,
+      actor,
+      details,
+      existing.id,
+    )
+
+    return getOperatorNotificationById(db, existing.id) as OperatorNotificationRow
+  }
+
+  const result = db.prepare(`
+    INSERT INTO operator_notifications (
+      source_type,
+      source_key,
+      beta_request_id,
+      alert_id,
+      severity,
+      title,
+      message,
+      href,
+      status,
+      created_at,
+      updated_at,
+      acknowledged_at,
+      acted_at,
+      actor,
+      details_json
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, NULL, NULL, NULL, ?)
+  `).run(
+    input.sourceType,
+    input.sourceKey,
+    input.betaRequestId ?? null,
+    input.alertId ?? null,
+    input.severity,
+    input.title,
+    input.message,
+    input.href ?? null,
+    now,
+    now,
+    details,
+  )
+
+  return getOperatorNotificationById(db, Number(result.lastInsertRowid)) as OperatorNotificationRow
+}
+
+export function updateOperatorNotificationStatus(
+  db: DB,
+  input: {
+    id: number
+    status: OperatorNotificationRow['status']
+    actor: string
+  },
+): OperatorNotificationRow | null {
+  const existing = getOperatorNotificationById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  const now = nowIso()
+  const acknowledgedAt = input.status === 'new'
+    ? null
+    : input.status === 'acknowledged'
+      ? (existing.acknowledged_at ?? now)
+      : (existing.acknowledged_at ?? now)
+  const actedAt = input.status === 'acted' ? now : null
+  const actor = input.status === 'new' ? null : input.actor
+
+  db.prepare(`
+    UPDATE operator_notifications
+    SET status = ?,
+        updated_at = ?,
+        acknowledged_at = ?,
+        acted_at = ?,
+        actor = ?
+    WHERE id = ?
+  `).run(input.status, now, acknowledgedAt, actedAt, actor, input.id)
+
+  return getOperatorNotificationById(db, input.id)
 }
 
 export function listShieldAuditLog(

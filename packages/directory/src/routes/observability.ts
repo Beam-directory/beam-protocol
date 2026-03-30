@@ -1,7 +1,15 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
-import { getAgent, listAuditLog, listIntentTraceEvents, listShieldAuditLog, logAuditEvent } from '../db.js'
+import {
+  getAgent,
+  listAuditLog,
+  listIntentTraceEvents,
+  listOperatorNotificationsBySourceKeys,
+  listShieldAuditLog,
+  logAuditEvent,
+  upsertOperatorNotification,
+} from '../db.js'
 import {
   classifyIntentLifecycle,
   isIntentLifecycleFailure,
@@ -15,6 +23,7 @@ import type {
   FederationPeerRow,
   IntentLogRow,
   IntentTraceEventRow,
+  OperatorNotificationStatus,
   ShieldAuditLogRow,
 } from '../types.js'
 
@@ -45,7 +54,7 @@ type AlertTraceSample = {
   errorCode: string | null
 }
 
-type AlertItem = {
+export type AlertItem = {
   id: string
   severity: AlertSeverity
   title: string
@@ -60,6 +69,8 @@ type AlertItem = {
   severityReason: string
   links: AlertLink[]
   sampleTraces: AlertTraceSample[]
+  notificationId?: number | null
+  notificationStatus?: OperatorNotificationStatus | null
 }
 
 type IntentQuery = {
@@ -997,7 +1008,7 @@ function buildAlertLinks(
   ]
 }
 
-function buildAlerts(db: Database, windowHours: number): AlertItem[] {
+export function buildAlerts(db: Database, windowHours: number): AlertItem[] {
   const overview = buildOverviewPayload(db, windowHours)
   const errors = buildErrorsPayload(db, windowHours)
   const federation = buildFederationPayload(db)
@@ -1324,6 +1335,51 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
   })
 }
 
+function criticalAlertNotificationSourceKey(alertId: string): string {
+  return `critical-alert:${alertId}`
+}
+
+export function buildAlertsWithNotificationState(db: Database, windowHours: number): AlertItem[] {
+  const alerts = buildAlerts(db, windowHours)
+  const criticalAlerts = alerts.filter((alert) => alert.severity === 'critical')
+
+  for (const alert of criticalAlerts) {
+    upsertOperatorNotification(db, {
+      sourceType: 'critical_alert',
+      sourceKey: criticalAlertNotificationSourceKey(alert.id),
+      alertId: alert.id,
+      severity: alert.severity,
+      title: alert.title,
+      message: alert.message,
+      href: alert.links[0]?.href ?? '/alerts',
+      details: {
+        scope: alert.scope,
+        metric: alert.metric,
+        startedAt: alert.startedAt,
+        sampleTraces: alert.sampleTraces.map((sample) => sample.nonce),
+      },
+    })
+  }
+
+  const notifications = new Map(
+    listOperatorNotificationsBySourceKeys(
+      db,
+      criticalAlerts.map((alert) => criticalAlertNotificationSourceKey(alert.id)),
+    ).map((entry) => [entry.source_key, entry]),
+  )
+
+  return alerts.map((alert) => {
+    const notification = notifications.get(criticalAlertNotificationSourceKey(alert.id))
+    return notification
+      ? {
+        ...alert,
+        notificationId: notification.id,
+        notificationStatus: notification.status,
+      }
+      : alert
+  })
+}
+
 function createSyntheticTrace(intent: IntentLogRow): Array<ReturnType<typeof serializeTraceEvent>> {
   const lifecycleStatus = normalizeIntentLifecycleStatus(intent.status) ?? 'received'
   const stages: Array<ReturnType<typeof serializeTraceEvent>> = [
@@ -1457,7 +1513,7 @@ export function observabilityRouter(db: Database): Hono {
 
     const windowHours = parseHours(c.req.query('hours'), 24)
     const overview = buildOverviewPayload(db, windowHours)
-    const alerts = buildAlerts(db, windowHours)
+    const alerts = buildAlertsWithNotificationState(db, windowHours)
     return c.json({
       ...overview,
       alerts: alerts.slice(0, 5),
@@ -1580,7 +1636,7 @@ export function observabilityRouter(db: Database): Hono {
     return c.json({
       windowHours,
       generatedAt: new Date().toISOString(),
-      alerts: buildAlerts(db, windowHours),
+      alerts: buildAlertsWithNotificationState(db, windowHours),
       retention: {
         defaultDays: DEFAULT_RETENTION_DAYS,
         minimumDays: 1,

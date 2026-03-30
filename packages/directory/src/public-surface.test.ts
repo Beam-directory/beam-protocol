@@ -79,6 +79,12 @@ test('waitlist signups are idempotent by email and preserve the original created
         company: string
         agentCount: number
         requestStatus: string
+        stage: string
+        nextAction: string
+        lastContactAt: string | null
+        attentionFlags: string[]
+        notificationStatus: string
+        notificationId: number
       }
     }
     assert.equal(first.ok, true)
@@ -86,6 +92,12 @@ test('waitlist signups are idempotent by email and preserve the original created
     assert.equal(first.request.company, 'Acme')
     assert.equal(first.request.agentCount, 8)
     assert.equal(first.request.requestStatus, 'new')
+    assert.equal(first.request.stage, 'new')
+    assert.equal(first.request.lastContactAt, null)
+    assert.ok(first.request.nextAction.length > 0)
+    assert.deepEqual(first.request.attentionFlags, ['unowned'])
+    assert.equal(first.request.notificationStatus, 'new')
+    assert.ok(first.request.notificationId > 0)
 
     const secondResponse = await app.request(new Request('http://localhost/waitlist', {
       method: 'POST',
@@ -110,6 +122,8 @@ test('waitlist signups are idempotent by email and preserve the original created
         company: string
         agentCount: number
         source: string
+        stage: string
+        notificationStatus: string
       }
     }
     assert.equal(second.ok, true)
@@ -118,6 +132,8 @@ test('waitlist signups are idempotent by email and preserve the original created
     assert.equal(second.request.agentCount, 14)
     assert.equal(second.request.source, 'hosted-beta-follow-up')
     assert.equal(second.request.createdAt, first.request.createdAt)
+    assert.equal(second.request.stage, 'new')
+    assert.equal(second.request.notificationStatus, 'new')
 
     const row = db.prepare(`
       SELECT COUNT(*) AS count, company, agent_count, source, created_at
@@ -173,6 +189,10 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         workflowType: string
         workflowSummary: string
         requestStatus: string
+        stage: string
+        notificationId: number
+        notificationStatus: string
+        attentionFlags: string[]
       }
       nextStep: string
     }
@@ -181,9 +201,13 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(created.request.workflowType, 'hosted-beta-partner-handoff')
     assert.match(created.request.workflowSummary, /Procurement/)
     assert.equal(created.request.requestStatus, 'new')
+    assert.equal(created.request.stage, 'new')
+    assert.ok(created.request.notificationId > 0)
+    assert.equal(created.request.notificationStatus, 'new')
+    assert.deepEqual(created.request.attentionFlags, ['unowned'])
     assert.match(created.nextStep, /review/i)
 
-    const listResponse = await app.request(new Request('http://localhost/admin/beta-requests?status=new', {
+    const listResponse = await app.request(new Request('http://localhost/admin/beta-requests?status=new&attention=unowned&sort=attention', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
     }))
     assert.equal(listResponse.status, 200)
@@ -195,17 +219,52 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         email: string
         workflowSummary: string
         requestStatus: string
+        attentionFlags: string[]
+        notificationStatus: string
       }>
       summary: {
         total: number
+        unowned: number
+        stale: number
+        needsAttention: number
         byStatus: Record<string, number>
       }
     }
     assert.equal(listed.total, 1)
     assert.equal(listed.summary.total, 1)
+    assert.equal(listed.summary.unowned, 1)
+    assert.equal(listed.summary.stale, 0)
+    assert.equal(listed.summary.needsAttention, 1)
     assert.equal(listed.summary.byStatus['new'], 1)
     assert.equal(listed.requests[0]?.email, 'buyer@example.com')
     assert.match(listed.requests[0]?.workflowSummary ?? '', /finance approves/)
+    assert.deepEqual(listed.requests[0]?.attentionFlags ?? [], ['unowned'])
+    assert.equal(listed.requests[0]?.notificationStatus, 'new')
+
+    const inboxResponse = await app.request(new Request('http://localhost/admin/operator-notifications?source=beta_request&status=new', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(inboxResponse.status, 200)
+
+    const inboxPayload = await inboxResponse.json() as {
+      total: number
+      notifications: Array<{
+        id: number
+        betaRequestId: number | null
+        status: string
+        sourceType: string
+      }>
+      summary: {
+        byStatus: Record<string, number>
+        bySource: Record<string, number>
+      }
+    }
+    assert.equal(inboxPayload.total, 1)
+    assert.equal(inboxPayload.summary.byStatus['new'], 1)
+    assert.equal(inboxPayload.summary.bySource['beta_request'], 1)
+    assert.equal(inboxPayload.notifications[0]?.betaRequestId, created.request.id)
+    assert.equal(inboxPayload.notifications[0]?.status, 'new')
+    assert.equal(inboxPayload.notifications[0]?.sourceType, 'beta_request')
 
     const updateResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
       method: 'PATCH',
@@ -225,14 +284,66 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
       ok: boolean
       request: {
         requestStatus: string
+        stage: string
         owner: string
         operatorNotes: string
+        notificationStatus: string
+        attentionFlags: string[]
       }
     }
     assert.equal(updated.ok, true)
     assert.equal(updated.request.requestStatus, 'reviewing')
+    assert.equal(updated.request.stage, 'reviewing')
     assert.equal(updated.request.owner, 'operator@example.com')
     assert.match(updated.request.operatorNotes, /Intro email/)
+    assert.equal(updated.request.notificationStatus, 'acknowledged')
+    assert.deepEqual(updated.request.attentionFlags, [])
+
+    const contactTimestamp = '2026-03-30T20:15:00.000Z'
+    const contactResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'operator@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'contacted',
+        nextAction: 'Schedule a 30 minute pilot review with procurement and finance.',
+        lastContactAt: contactTimestamp,
+      }),
+    }))
+    assert.equal(contactResponse.status, 200)
+
+    const contacted = await contactResponse.json() as {
+      ok: boolean
+      request: {
+        requestStatus: string
+        nextAction: string
+        lastContactAt: string | null
+        notificationStatus: string
+      }
+    }
+    assert.equal(contacted.ok, true)
+    assert.equal(contacted.request.requestStatus, 'contacted')
+    assert.equal(contacted.request.nextAction, 'Schedule a 30 minute pilot review with procurement and finance.')
+    assert.equal(contacted.request.lastContactAt, contactTimestamp)
+    assert.equal(contacted.request.notificationStatus, 'acted')
+
+    const actedInboxResponse = await app.request(new Request('http://localhost/admin/operator-notifications?source=beta_request&status=acted', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(actedInboxResponse.status, 200)
+
+    const actedInbox = await actedInboxResponse.json() as {
+      total: number
+      notifications: Array<{
+        betaRequestId: number | null
+        status: string
+      }>
+    }
+    assert.equal(actedInbox.total, 1)
+    assert.equal(actedInbox.notifications[0]?.betaRequestId, created.request.id)
+    assert.equal(actedInbox.notifications[0]?.status, 'acted')
 
     const exportResponse = await app.request(new Request('http://localhost/admin/beta-requests/export?format=csv', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
@@ -241,8 +352,14 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(exportResponse.headers.get('content-type'), 'text/csv; charset=utf-8')
     const csv = await exportResponse.text()
     assert.match(csv, /workflow_summary/)
+    assert.match(csv, /next_action/)
+    assert.match(csv, /last_contact_at/)
+    assert.match(csv, /notification_status/)
+    assert.match(csv, /attention_flags/)
     assert.match(csv, /Northwind Systems/)
     assert.match(csv, /operator@example.com/)
+    assert.match(csv, /Schedule a 30 minute pilot review/)
+    assert.match(csv, /acted/)
   } finally {
     db.close()
   }

@@ -8,9 +8,29 @@ Use it together with:
 - [Operator Observability](/guide/operator-observability) for dashboards, exports, and retention controls
 - [Intent Lifecycle](/guide/intent-lifecycle) for status semantics
 
+## Operator Inbox First
+
+Start the day in `Inbox` before drilling into traces.
+
+- `new` means nobody has acknowledged the request or alert yet.
+- `acknowledged` means an operator has taken ownership or triaged the signal.
+- `acted` means the next concrete step or remediation was already recorded.
+
+Use the inbox for two classes of work:
+
+- hosted beta requests that still need assignment, contact, or a next action
+- critical alerts that need triage, acknowledgement, and an explicit follow-up
+
+The shortest daily loop is:
+
+1. Open `Inbox`.
+2. Filter to `new`.
+3. Acknowledge or act on each signal.
+4. Jump into `Beta Requests`, `Alerts`, or the linked trace from there.
+
 ## The Default Investigation Loop
 
-1. Start from `Alerts` or the nonce you already have.
+1. Start from `Inbox`, `Alerts`, or the nonce you already have.
 2. Open the trace and note the current lifecycle status.
 3. Confirm related audit or Shield events.
 4. Check `Dead Letters` only if the nonce is terminal or obviously retrying.
@@ -108,5 +128,7 @@ In the seeded hosted demo:
 - async finance preflight may stay in `delivered`
 - dead-letter count stays `0`
 - alerts stay empty for the clean path
+- inbox contains no lingering `new` critical-alert signals after triage
+- hosted beta requests should move from `new` to `acknowledged` or `acted` once an owner and next action exist
 
 If those assumptions drift, use this runbook before editing code or SQLite directly.

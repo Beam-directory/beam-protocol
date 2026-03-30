@@ -39,6 +39,7 @@ export default function AlertCard({
         <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium uppercase tracking-[0.14em]', alertSeverityColor(alert.severity))}>
           {alert.severity}
         </span>
+        {alert.notificationStatus ? <StatusPill label={`signal ${alert.notificationStatus}`} tone={alert.notificationStatus === 'acted' ? 'success' : alert.notificationStatus === 'acknowledged' ? 'default' : 'warning'} /> : null}
         <span className="text-xs text-slate-500 dark:text-slate-400">{alert.scope}</span>
         <span className="text-xs text-slate-500 dark:text-slate-400">{formatDateTime(alert.startedAt)}</span>
       </div>
@@ -86,6 +87,14 @@ export default function AlertCard({
 
       {visibleLinks.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
+          {alert.notificationId ? (
+            <Link
+              className="rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
+              to="/inbox"
+            >
+              Open inbox signal
+            </Link>
+          ) : null}
           {visibleLinks.map((link) => (
             <Link
               key={`${alert.id}-${link.label}-${link.href}`}

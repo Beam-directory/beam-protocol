@@ -6,7 +6,10 @@ export type IntentLifecycleStatus = 'received' | 'validated' | 'queued' | 'dispa
 export type AlertMetricUnit = 'ratio' | 'ms' | 'count'
 export type AlertLinkSurface = 'trace' | 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
 export type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
+export type BetaRequestAttention = 'unowned' | 'stale'
 export type BetaRequestExportFormat = 'json' | 'csv'
+export type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
+export type OperatorNotificationSource = 'beta_request' | 'critical_alert'
 
 export interface DirectoryAgent {
   beamId: string
@@ -201,6 +204,8 @@ export interface AlertItem {
   severityReason: string
   links: AlertLink[]
   sampleTraces: AlertTraceSample[]
+  notificationId?: number | null
+  notificationStatus?: OperatorNotificationStatus | null
 }
 
 export interface AlertLink {
@@ -560,8 +565,16 @@ export interface BetaRequest {
   workflowType: string | null
   workflowSummary: string | null
   requestStatus: BetaRequestStatus
+  stage: BetaRequestStatus
   owner: string | null
   operatorNotes: string | null
+  nextAction: string | null
+  lastContactAt: string | null
+  stale: boolean
+  staleReason: string | null
+  attentionFlags: BetaRequestAttention[]
+  notificationId: number | null
+  notificationStatus: OperatorNotificationStatus | null
   createdAt: string
   updatedAt: string
 }
@@ -580,6 +593,8 @@ export interface BetaRequestSummary {
   total: number
   active: number
   unowned: number
+  stale: number
+  needsAttention: number
   byStatus: Record<BetaRequestStatus, number>
 }
 
@@ -597,11 +612,49 @@ export interface BetaRequestUpdateInput {
   status?: BetaRequestStatus
   owner?: string | null
   operatorNotes?: string | null
+  nextAction?: string | null
+  lastContactAt?: string | null
 }
 
 export interface BetaRequestUpdateResponse {
   ok: boolean
   request: BetaRequest
+}
+
+export interface OperatorNotification {
+  id: number
+  sourceType: OperatorNotificationSource
+  sourceKey: string
+  betaRequestId: number | null
+  alertId: string | null
+  severity: AlertSeverity
+  title: string
+  message: string
+  href: string | null
+  status: OperatorNotificationStatus
+  createdAt: string
+  updatedAt: string
+  acknowledgedAt: string | null
+  actedAt: string | null
+  actor: string | null
+  details: Record<string, unknown> | null
+}
+
+export interface OperatorNotificationSummary {
+  total: number
+  byStatus: Record<OperatorNotificationStatus, number>
+  bySource: Record<OperatorNotificationSource, number>
+}
+
+export interface OperatorNotificationListResponse {
+  notifications: OperatorNotification[]
+  total: number
+  summary: OperatorNotificationSummary
+}
+
+export interface OperatorNotificationUpdateResponse {
+  ok: boolean
+  notification: OperatorNotification
 }
 
 export interface IntentFeedMessage {
@@ -900,6 +953,8 @@ export const directoryApi = {
     owner?: string
     source?: string
     workflowType?: string
+    attention?: BetaRequestAttention
+    sort?: 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
     limit?: number
   }) => request<BetaRequestListResponse>(`/admin/beta-requests${buildQuery({
     q: params?.q,
@@ -907,6 +962,8 @@ export const directoryApi = {
     owner: params?.owner,
     source: params?.source,
     workflowType: params?.workflowType,
+    attention: params?.attention,
+    sort: params?.sort,
     limit: params?.limit,
   })}`, undefined, { admin: true }),
   getBetaRequest: (id: number) => request<BetaRequestDetailResponse>(`/admin/beta-requests/${id}`, undefined, { admin: true }),
@@ -920,6 +977,8 @@ export const directoryApi = {
     owner?: string
     source?: string
     workflowType?: string
+    attention?: BetaRequestAttention
+    sort?: 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
     limit?: number
   }): Promise<ExportDownload> => {
     const response = await requestRaw(`/admin/beta-requests/export${buildQuery({
@@ -929,6 +988,8 @@ export const directoryApi = {
       owner: params?.owner,
       source: params?.source,
       workflowType: params?.workflowType,
+      attention: params?.attention,
+      sort: params?.sort,
       limit: params?.limit,
     })}`, undefined, { admin: true })
 
@@ -937,6 +998,25 @@ export const directoryApi = {
       filename: getFilenameFromResponse(response, 'beta-requests', format),
     }
   },
+  listOperatorNotifications: (params?: {
+    q?: string
+    status?: OperatorNotificationStatus
+    source?: OperatorNotificationSource
+    limit?: number
+    hours?: number
+  }) => request<OperatorNotificationListResponse>(`/admin/operator-notifications${buildQuery({
+    q: params?.q,
+    status: params?.status,
+    source: params?.source,
+    limit: params?.limit,
+    hours: params?.hours,
+  })}`, undefined, { admin: true }),
+  updateOperatorNotification: (id: number, input: {
+    status: OperatorNotificationStatus
+  }) => request<OperatorNotificationUpdateResponse>(`/admin/operator-notifications/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   createOrg: (input: OrgRegistrationInput) => request<OrgRegistrationResponse>('/orgs', {
     method: 'POST',
     body: JSON.stringify(input),
