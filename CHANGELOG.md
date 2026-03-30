@@ -1,5 +1,20 @@
 # Changelog
 
+## v0.8.0 (draft)
+
+### Buyer Path
+- keep Beam on one plain-language path: landing page -> guided evaluation -> hosted pilot request
+- treat hosted beta as a guided design-partner engagement around one narrow workflow
+
+### Operator Workflow
+- tighten alert, dead-letter, and recovery shortcuts around owner and next action
+- add first-party funnel analytics and repo-visible dry-run evidence for buyer and operator flows
+- fix live CORS allowlists for the real dashboard production URL on both Directory and Message Bus
+
+### Release Control
+- add repo-visible `0.8.0` dry-run reports, cut checklist, and release-notes draft
+- keep `0.8.0` as a no-go until the live operator auth blocker is resolved
+
 ## v0.7.0 (2026-03-30)
 
 ### Hosted Beta
