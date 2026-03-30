@@ -18,7 +18,7 @@ import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
-import { observabilityRouter } from './routes/observability.js'
+import { buildAlertsWithNotificationState, observabilityRouter } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
@@ -35,11 +35,28 @@ import {
 } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
-import { assignDirectoryRole, deleteDirectoryRole, getAgent, getDIDDocument, listAgentKeys, listAuditLog, listDirectoryRoles, listRecentIntentLogs, listTrustScores, logAuditEvent, upsertDIDDocument } from './db.js'
+import {
+  assignDirectoryRole,
+  deleteDirectoryRole,
+  getAgent,
+  getDIDDocument,
+  getOperatorNotificationBySourceKey,
+  listAgentKeys,
+  listAuditLog,
+  listDirectoryRoles,
+  listOperatorNotifications,
+  listOperatorNotificationsBySourceKeys,
+  listRecentIntentLogs,
+  listTrustScores,
+  logAuditEvent,
+  updateOperatorNotificationStatus,
+  upsertDIDDocument,
+  upsertOperatorNotification,
+} from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
-import type { AgentRow, IntentFrame } from './types.js'
+import type { AgentRow, IntentFrame, OperatorNotificationRow } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
@@ -55,11 +72,17 @@ type WaitlistSignupInput = {
 }
 
 type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
+type BetaRequestAttention = 'unowned' | 'stale'
+type BetaRequestSort = 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
+type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
+type OperatorNotificationSource = 'beta_request' | 'critical_alert'
 
 type BetaRequestUpdateInput = {
   status?: BetaRequestStatus
   owner?: string | null
   operatorNotes?: string | null
+  nextAction?: string | null
+  lastContactAt?: string | null
 }
 
 type BetaRequestFilters = {
@@ -68,7 +91,17 @@ type BetaRequestFilters = {
   owner?: string
   source?: string
   workflowType?: string
+  attention?: string
+  sort?: string
   limit?: number
+}
+
+type OperatorNotificationFilters = {
+  q?: string
+  status?: string
+  source?: string
+  limit?: number
+  hours?: number
 }
 
 type WaitlistRow = {
@@ -82,15 +115,54 @@ type WaitlistRow = {
   status: string
   owner: string | null
   operator_notes: string | null
+  next_action: string | null
+  last_contact_at: string | null
   created_at: string
   updated_at: string
 }
 
 const BETA_REQUEST_STATUSES: BetaRequestStatus[] = ['new', 'reviewing', 'contacted', 'scheduled', 'active', 'closed']
 const BETA_REQUEST_STATUS_SET = new Set<string>(BETA_REQUEST_STATUSES)
+const BETA_REQUEST_SORTS: BetaRequestSort[] = ['attention', 'updated_desc', 'created_desc', 'stage', 'owner', 'last_contact_desc']
+const BETA_REQUEST_SORT_SET = new Set<string>(BETA_REQUEST_SORTS)
+const BETA_REQUEST_ATTENTION_SET = new Set<BetaRequestAttention>(['unowned', 'stale'])
+const OPERATOR_NOTIFICATION_STATUSES: OperatorNotificationStatus[] = ['new', 'acknowledged', 'acted']
+const OPERATOR_NOTIFICATION_STATUS_SET = new Set<string>(OPERATOR_NOTIFICATION_STATUSES)
+const OPERATOR_NOTIFICATION_SOURCES: OperatorNotificationSource[] = ['beta_request', 'critical_alert']
+const OPERATOR_NOTIFICATION_SOURCE_SET = new Set<string>(OPERATOR_NOTIFICATION_SOURCES)
+const BETA_REQUEST_STALE_HOURS: Record<BetaRequestStatus, number | null> = {
+  new: 24,
+  reviewing: 24,
+  contacted: 72,
+  scheduled: 120,
+  active: 96,
+  closed: null,
+}
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function normalizeOptionalIsoDateTime(value: unknown): string | null {
+  if (value == null || value === '') {
+    return null
+  }
+
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) {
+    return null
+  }
+
+  return date.toISOString()
 }
 
 function normalizeBetaRequestStatus(value: unknown): BetaRequestStatus | null {
@@ -106,7 +178,137 @@ function normalizeBetaRequestStatus(value: unknown): BetaRequestStatus | null {
   return normalized as BetaRequestStatus
 }
 
-function serializeBetaRequest(row: WaitlistRow) {
+function normalizeBetaRequestAttention(value: unknown): BetaRequestAttention | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!BETA_REQUEST_ATTENTION_SET.has(normalized as BetaRequestAttention)) {
+    return null
+  }
+
+  return normalized as BetaRequestAttention
+}
+
+function normalizeBetaRequestSort(value: unknown): BetaRequestSort {
+  if (typeof value !== 'string') {
+    return 'attention'
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!BETA_REQUEST_SORT_SET.has(normalized)) {
+    return 'attention'
+  }
+
+  return normalized as BetaRequestSort
+}
+
+function normalizeOperatorNotificationStatus(value: unknown): OperatorNotificationStatus | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!OPERATOR_NOTIFICATION_STATUS_SET.has(normalized)) {
+    return null
+  }
+
+  return normalized as OperatorNotificationStatus
+}
+
+function normalizeOperatorNotificationSource(value: unknown): OperatorNotificationSource | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!OPERATOR_NOTIFICATION_SOURCE_SET.has(normalized)) {
+    return null
+  }
+
+  return normalized as OperatorNotificationSource
+}
+
+function betaRequestNotificationSourceKey(id: number): string {
+  return `beta-request:${id}`
+}
+
+function getBetaRequestContactTimestamp(row: WaitlistRow): string {
+  return row.last_contact_at ?? row.updated_at ?? row.created_at
+}
+
+function getBetaRequestAttention(row: WaitlistRow) {
+  const stage = normalizeBetaRequestStatus(row.status) ?? 'new'
+  const attentionFlags: BetaRequestAttention[] = []
+
+  if (stage !== 'closed' && !row.owner) {
+    attentionFlags.push('unowned')
+  }
+
+  let stale = false
+  let staleReason: string | null = null
+  const thresholdHours = BETA_REQUEST_STALE_HOURS[stage]
+  const contactTimestamp = getBetaRequestContactTimestamp(row)
+
+  if (thresholdHours != null) {
+    const contactTime = new Date(contactTimestamp).getTime()
+    if (!Number.isNaN(contactTime)) {
+      const ageHours = (Date.now() - contactTime) / (1000 * 60 * 60)
+      if (ageHours >= thresholdHours) {
+        stale = true
+        staleReason = row.last_contact_at
+          ? `No operator contact has been recorded for ${thresholdHours}+ hours in the ${stage} stage.`
+          : `This request has sat in the ${stage} stage for ${thresholdHours}+ hours without a recorded operator contact.`
+        attentionFlags.push('stale')
+      }
+    }
+  }
+
+  return {
+    stage,
+    stale,
+    staleReason,
+    attentionFlags,
+  }
+}
+
+function serializeOperatorNotification(row: OperatorNotificationRow) {
+  let details: unknown = null
+  if (row.details_json) {
+    try {
+      details = JSON.parse(row.details_json)
+    } catch {
+      details = null
+    }
+  }
+
+  return {
+    id: row.id,
+    sourceType: row.source_type,
+    sourceKey: row.source_key,
+    betaRequestId: row.beta_request_id,
+    alertId: row.alert_id,
+    severity: row.severity,
+    title: row.title,
+    message: row.message,
+    href: row.href,
+    status: row.status,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    acknowledgedAt: row.acknowledged_at,
+    actedAt: row.acted_at,
+    actor: row.actor,
+    details,
+  }
+}
+
+function serializeBetaRequest(
+  row: WaitlistRow,
+  notification?: OperatorNotificationRow | null,
+) {
+  const attention = getBetaRequestAttention(row)
+  const nextAction = row.next_action ?? getBetaRequestNextStep(row.status)
   return {
     id: row.id,
     email: row.email,
@@ -115,9 +317,17 @@ function serializeBetaRequest(row: WaitlistRow) {
     agentCount: row.agent_count,
     workflowType: row.workflow_type,
     workflowSummary: row.workflow_summary,
-    requestStatus: normalizeBetaRequestStatus(row.status) ?? 'new',
+    requestStatus: attention.stage,
+    stage: attention.stage,
     owner: row.owner,
     operatorNotes: row.operator_notes,
+    nextAction,
+    lastContactAt: row.last_contact_at,
+    stale: attention.stale,
+    staleReason: attention.staleReason,
+    attentionFlags: attention.attentionFlags,
+    notificationId: notification?.id ?? null,
+    notificationStatus: notification?.status ?? null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -259,8 +469,12 @@ function getBetaRequestWhereClause(filters: {
   }
 
   if (filters.owner) {
-    conditions.push('COALESCE(owner, \'\') LIKE ?')
-    params.push(`%${filters.owner.trim()}%`)
+    if (filters.owner.trim().toLowerCase() === 'unassigned') {
+      conditions.push(`COALESCE(owner, '') = ''`)
+    } else {
+      conditions.push('COALESCE(owner, \'\') LIKE ?')
+      params.push(`%${filters.owner.trim()}%`)
+    }
   }
 
   if (filters.source) {
@@ -285,25 +499,12 @@ function listBetaRequestRows(db: Database, filters: {
   owner?: string
   source?: string
   workflowType?: string
+  attention?: string
+  sort?: string
   limit?: number
-} = {}): { rows: WaitlistRow[]; total: number } {
+} = {}): { rows: WaitlistRow[]; total: number; allRows: WaitlistRow[] } {
   const limit = Math.min(Math.max(Number(filters.limit ?? 200) || 200, 1), 5000)
   const { whereSql, params } = getBetaRequestWhereClause(filters)
-  const orderBy = `
-    ORDER BY CASE status
-      WHEN 'new' THEN 0
-      WHEN 'reviewing' THEN 1
-      WHEN 'contacted' THEN 2
-      WHEN 'scheduled' THEN 3
-      WHEN 'active' THEN 4
-      WHEN 'closed' THEN 5
-      ELSE 6
-    END ASC,
-    datetime(updated_at) DESC,
-    datetime(created_at) DESC,
-    id DESC
-  `
-
   const rows = db.prepare(`
     SELECT
       id,
@@ -316,21 +517,26 @@ function listBetaRequestRows(db: Database, filters: {
       status,
       owner,
       operator_notes,
+      next_action,
+      last_contact_at,
       created_at,
       updated_at
     FROM waitlist
     ${whereSql}
-    ${orderBy}
-    LIMIT ?
-  `).all(...params, limit) as WaitlistRow[]
+  `).all(...params) as WaitlistRow[]
 
-  const total = (db.prepare(`
-    SELECT COUNT(*) AS count
-    FROM waitlist
-    ${whereSql}
-  `).get(...params) as { count: number } | undefined)?.count ?? rows.length
+  const attentionFilter = normalizeBetaRequestAttention(filters.attention)
+  const filteredRows = attentionFilter
+    ? rows.filter((row) => getBetaRequestAttention(row).attentionFlags.includes(attentionFilter))
+    : rows
 
-  return { rows, total }
+  const sort = normalizeBetaRequestSort(filters.sort)
+  const sortedRows = [...filteredRows].sort((left, right) => compareBetaRequestRows(left, right, sort))
+  return {
+    rows: sortedRows.slice(0, limit),
+    total: sortedRows.length,
+    allRows: sortedRows,
+  }
 }
 
 function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
@@ -346,6 +552,8 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
       status,
       owner,
       operator_notes,
+      next_action,
+      last_contact_at,
       created_at,
       updated_at
     FROM waitlist
@@ -356,18 +564,70 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
   return row ?? null
 }
 
+function compareStageOrder(left: BetaRequestStatus, right: BetaRequestStatus): number {
+  return BETA_REQUEST_STATUSES.indexOf(left) - BETA_REQUEST_STATUSES.indexOf(right)
+}
+
+function compareBetaRequestRows(left: WaitlistRow, right: WaitlistRow, sort: BetaRequestSort): number {
+  const leftAttention = getBetaRequestAttention(left)
+  const rightAttention = getBetaRequestAttention(right)
+  const leftStage = leftAttention.stage
+  const rightStage = rightAttention.stage
+  const leftUpdated = Date.parse(left.updated_at) || 0
+  const rightUpdated = Date.parse(right.updated_at) || 0
+  const leftCreated = Date.parse(left.created_at) || 0
+  const rightCreated = Date.parse(right.created_at) || 0
+  const leftContact = Date.parse(getBetaRequestContactTimestamp(left)) || 0
+  const rightContact = Date.parse(getBetaRequestContactTimestamp(right)) || 0
+
+  switch (sort) {
+    case 'owner': {
+      const leftOwner = left.owner?.toLowerCase() ?? ''
+      const rightOwner = right.owner?.toLowerCase() ?? ''
+      if (!leftOwner && rightOwner) return -1
+      if (leftOwner && !rightOwner) return 1
+      return leftOwner.localeCompare(rightOwner) || rightUpdated - leftUpdated
+    }
+    case 'stage':
+      return compareStageOrder(leftStage, rightStage) || rightUpdated - leftUpdated
+    case 'created_desc':
+      return rightCreated - leftCreated
+    case 'last_contact_desc':
+      return rightContact - leftContact
+    case 'updated_desc':
+      return rightUpdated - leftUpdated
+    case 'attention':
+    default: {
+      const leftAttentionScore = Number(leftAttention.attentionFlags.includes('unowned')) * 2 + Number(leftAttention.attentionFlags.includes('stale'))
+      const rightAttentionScore = Number(rightAttention.attentionFlags.includes('unowned')) * 2 + Number(rightAttention.attentionFlags.includes('stale'))
+      return rightAttentionScore - leftAttentionScore
+        || compareStageOrder(leftStage, rightStage)
+        || rightUpdated - leftUpdated
+        || rightCreated - leftCreated
+    }
+  }
+}
+
 function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
   const byStatus = Object.fromEntries(BETA_REQUEST_STATUSES.map((status) => [status, 0])) as Record<BetaRequestStatus, number>
   let unowned = 0
   let active = 0
+  let stale = 0
+  let needsAttention = 0
 
   for (const row of rows) {
-    const status = normalizeBetaRequestStatus(row.status) ?? 'new'
-    byStatus[status] += 1
-    if (!row.owner) {
+    const attention = getBetaRequestAttention(row)
+    byStatus[attention.stage] += 1
+    if (attention.attentionFlags.includes('unowned')) {
       unowned += 1
     }
-    if (status !== 'closed') {
+    if (attention.attentionFlags.includes('stale')) {
+      stale += 1
+    }
+    if (attention.attentionFlags.length > 0) {
+      needsAttention += 1
+    }
+    if (attention.stage !== 'closed') {
       active += 1
     }
   }
@@ -376,11 +636,16 @@ function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
     total,
     active,
     unowned,
+    stale,
+    needsAttention,
     byStatus,
   }
 }
 
-function buildBetaRequestCsv(rows: WaitlistRow[]): string {
+function buildBetaRequestCsv(
+  rows: WaitlistRow[],
+  notificationsBySourceKey = new Map<string, OperatorNotificationRow>(),
+): string {
   const headers = [
     'id',
     'email',
@@ -392,12 +657,19 @@ function buildBetaRequestCsv(rows: WaitlistRow[]): string {
     'status',
     'owner',
     'operator_notes',
+    'next_action',
+    'last_contact_at',
+    'notification_status',
+    'stale',
+    'attention_flags',
     'created_at',
     'updated_at',
   ]
 
   const lines = [headers.join(',')]
   for (const row of rows) {
+    const attention = getBetaRequestAttention(row)
+    const notification = notificationsBySourceKey.get(betaRequestNotificationSourceKey(row.id))
     lines.push([
       row.id,
       row.email,
@@ -409,12 +681,117 @@ function buildBetaRequestCsv(rows: WaitlistRow[]): string {
       row.status,
       row.owner,
       row.operator_notes,
+      row.next_action ?? getBetaRequestNextStep(row.status),
+      row.last_contact_at,
+      notification?.status ?? null,
+      attention.stale ? 'true' : 'false',
+      attention.attentionFlags.join('|'),
       row.created_at,
       row.updated_at,
     ].map((value) => escapeCsvValue(value as string | number | null | undefined)).join(','))
   }
 
   return `${lines.join('\n')}\n`
+}
+
+function getBetaRequestNotifications(
+  db: Database,
+  rows: WaitlistRow[],
+): Map<string, OperatorNotificationRow> {
+  const notifications = listOperatorNotificationsBySourceKeys(
+    db,
+    rows.map((row) => betaRequestNotificationSourceKey(row.id)),
+  )
+
+  return new Map(notifications.map((entry) => [entry.source_key, entry]))
+}
+
+function getBetaRequestNotificationStatus(row: WaitlistRow): OperatorNotificationStatus | null {
+  const stage = normalizeBetaRequestStatus(row.status) ?? 'new'
+  if (stage === 'new') {
+    return 'new'
+  }
+
+  if (row.last_contact_at || row.next_action || stage === 'contacted' || stage === 'scheduled' || stage === 'active' || stage === 'closed') {
+    return 'acted'
+  }
+
+  if (row.owner || stage === 'reviewing') {
+    return 'acknowledged'
+  }
+
+  return 'new'
+}
+
+function ensureBetaRequestNotification(
+  db: Database,
+  row: WaitlistRow,
+  resetStatus = false,
+): OperatorNotificationRow {
+  const companyLabel = row.company ?? row.email
+  const workflowLabel = row.workflow_type
+    ? row.workflow_type.replace(/^hosted-beta-/, '').replaceAll('-', ' ')
+    : 'workflow review'
+  const messageParts = [
+    workflowLabel,
+    row.agent_count != null ? `${row.agent_count} agent${row.agent_count === 1 ? '' : 's'}` : null,
+    row.workflow_summary ?? null,
+  ].filter((part): part is string => Boolean(part))
+
+  return upsertOperatorNotification(db, {
+    sourceType: 'beta_request',
+    sourceKey: betaRequestNotificationSourceKey(row.id),
+    betaRequestId: row.id,
+    severity: 'warning',
+    title: `Hosted beta request from ${companyLabel}`,
+    message: messageParts.join(' · '),
+    href: `/beta-requests?id=${row.id}`,
+    resetStatus,
+    details: {
+      email: row.email,
+      company: row.company,
+      workflowType: row.workflow_type,
+      stage: normalizeBetaRequestStatus(row.status) ?? 'new',
+      nextAction: row.next_action ?? getBetaRequestNextStep(row.status),
+    },
+  })
+}
+
+function syncBetaRequestNotificationStatus(
+  db: Database,
+  row: WaitlistRow,
+  actor: string,
+): OperatorNotificationRow | null {
+  const existing = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(row.id))
+  if (!existing) {
+    return null
+  }
+
+  const targetStatus = getBetaRequestNotificationStatus(row)
+  if (!targetStatus || existing.status === targetStatus) {
+    return existing
+  }
+
+  return updateOperatorNotificationStatus(db, {
+    id: existing.id,
+    status: targetStatus,
+    actor,
+  })
+}
+
+function summarizeOperatorNotifications(rows: OperatorNotificationRow[]) {
+  return {
+    total: rows.length,
+    byStatus: {
+      new: rows.filter((row) => row.status === 'new').length,
+      acknowledged: rows.filter((row) => row.status === 'acknowledged').length,
+      acted: rows.filter((row) => row.status === 'acted').length,
+    },
+    bySource: {
+      beta_request: rows.filter((row) => row.source_type === 'beta_request').length,
+      critical_alert: rows.filter((row) => row.source_type === 'critical_alert').length,
+    },
+  }
 }
 
 function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array<{ email: string; company: string | null; signupDate: string | null; status: string | null; owner: string | null }>; total: number } {
@@ -1006,15 +1383,18 @@ export function createApp(db: Database): Hono {
         owner: c.req.query('owner') ?? undefined,
         source: c.req.query('source') ?? undefined,
         workflowType: c.req.query('workflowType') ?? undefined,
+        attention: c.req.query('attention') ?? undefined,
+        sort: c.req.query('sort') ?? undefined,
         limit: c.req.query('limit') ? Number.parseInt(c.req.query('limit') as string, 10) : undefined,
       }
 
-      const { rows, total } = listBetaRequestRows(db, filters)
+      const { rows, total, allRows } = listBetaRequestRows(db, filters)
+      const notifications = getBetaRequestNotifications(db, rows)
       c.header('Cache-Control', 'no-store')
       return c.json({
-        requests: rows.map((row) => serializeBetaRequest(row)),
+        requests: rows.map((row) => serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))),
         total,
-        summary: summarizeBetaRequests(rows, total),
+        summary: summarizeBetaRequests(allRows, total),
       })
     } catch (err) {
       console.error('Admin beta requests error:', err)
@@ -1040,10 +1420,13 @@ export function createApp(db: Database): Hono {
         owner: c.req.query('owner') ?? undefined,
         source: c.req.query('source') ?? undefined,
         workflowType: c.req.query('workflowType') ?? undefined,
+        attention: c.req.query('attention') ?? undefined,
+        sort: c.req.query('sort') ?? undefined,
         limit: c.req.query('limit') ? Number.parseInt(c.req.query('limit') as string, 10) : 5000,
       }
 
-      const { rows, total } = listBetaRequestRows(db, filters)
+      const { rows, total, allRows } = listBetaRequestRows(db, filters)
+      const notifications = getBetaRequestNotifications(db, rows)
       const timestamp = new Date().toISOString().replaceAll(':', '-')
 
       logAuditEvent(db, {
@@ -1062,7 +1445,7 @@ export function createApp(db: Database): Hono {
       if (format === 'csv') {
         c.header('Content-Type', 'text/csv; charset=utf-8')
         c.header('Content-Disposition', `attachment; filename="beam-beta-requests-${timestamp}.csv"`)
-        return c.body(buildBetaRequestCsv(rows))
+        return c.body(buildBetaRequestCsv(rows, notifications))
       }
 
       c.header('Content-Type', 'application/json; charset=utf-8')
@@ -1070,8 +1453,8 @@ export function createApp(db: Database): Hono {
       return c.body(JSON.stringify({
         exportedAt: new Date().toISOString(),
         total,
-        summary: summarizeBetaRequests(rows, total),
-        requests: rows.map((row) => serializeBetaRequest(row)),
+        summary: summarizeBetaRequests(allRows, total),
+        requests: rows.map((row) => serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))),
       }, null, 2))
     } catch (err) {
       console.error('Admin beta request export error:', err)
@@ -1095,8 +1478,9 @@ export function createApp(db: Database): Hono {
       if (!row) {
         return c.json({ error: 'Beta request not found', errorCode: 'NOT_FOUND' }, 404)
       }
+      const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(row.id))
       c.header('Cache-Control', 'no-store')
-      return c.json({ request: serializeBetaRequest(row) })
+      return c.json({ request: serializeBetaRequest(row, notification) })
     } catch (err) {
       console.error('Admin beta request detail error:', err)
       return c.json({ error: 'Failed to load beta request', errorCode: 'DB_ERROR' }, 500)
@@ -1144,7 +1528,19 @@ export function createApp(db: Database): Hono {
       patch.operatorNotes = normalizeOptionalString(raw.operatorNotes)
     }
 
-    if (!('status' in patch) && !('owner' in patch) && !('operatorNotes' in patch)) {
+    if ('nextAction' in raw) {
+      patch.nextAction = normalizeOptionalString(raw.nextAction)
+    }
+
+    if ('lastContactAt' in raw) {
+      const lastContactAt = normalizeOptionalIsoDateTime(raw.lastContactAt)
+      if (raw.lastContactAt != null && raw.lastContactAt !== '' && !lastContactAt) {
+        return c.json({ error: 'Invalid lastContactAt timestamp', errorCode: 'INVALID_LAST_CONTACT' }, 400)
+      }
+      patch.lastContactAt = lastContactAt
+    }
+
+    if (!('status' in patch) && !('owner' in patch) && !('operatorNotes' in patch) && !('nextAction' in patch) && !('lastContactAt' in patch)) {
       return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
     }
 
@@ -1157,18 +1553,27 @@ export function createApp(db: Database): Hono {
       const nextStatus = patch.status ?? (normalizeBetaRequestStatus(existing.status) ?? 'new')
       const nextOwner = 'owner' in patch ? patch.owner ?? null : existing.owner
       const nextOperatorNotes = 'operatorNotes' in patch ? patch.operatorNotes ?? null : existing.operator_notes
+      const nextAction = 'nextAction' in patch ? patch.nextAction ?? null : existing.next_action
+      let nextLastContactAt = 'lastContactAt' in patch ? patch.lastContactAt ?? null : existing.last_contact_at
       const updatedAt = new Date().toISOString()
+
+      if (!('lastContactAt' in patch) && ['contacted', 'scheduled', 'active'].includes(nextStatus) && !nextLastContactAt) {
+        nextLastContactAt = updatedAt
+      }
 
       db.prepare(`
         UPDATE waitlist
-        SET status = ?, owner = ?, operator_notes = ?, updated_at = ?
+        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, updated_at = ?
         WHERE id = ?
-      `).run(nextStatus, nextOwner, nextOperatorNotes, updatedAt, id)
+      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, updatedAt, id)
 
       const updated = getBetaRequestById(db, id)
       if (!updated) {
         return c.json({ error: 'Beta request not found after update', errorCode: 'NOT_FOUND' }, 404)
       }
+
+      syncBetaRequestNotificationStatus(db, updated, auth.session.email)
+      const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(updated.id))
 
       logAuditEvent(db, {
         action: 'admin.beta_request.updated',
@@ -1179,18 +1584,110 @@ export function createApp(db: Database): Hono {
           status: nextStatus,
           owner: nextOwner,
           operatorNotesChanged: 'operatorNotes' in patch,
+          nextActionChanged: 'nextAction' in patch,
+          lastContactChanged: 'lastContactAt' in patch,
         },
       })
 
       c.header('Cache-Control', 'no-store')
       return c.json({
         ok: true,
-        request: serializeBetaRequest(updated),
+        request: serializeBetaRequest(updated, notification),
       })
     } catch (err) {
       console.error('Admin beta request update error:', err)
       return c.json({ error: 'Failed to update beta request', errorCode: 'DB_ERROR' }, 500)
     }
+  })
+
+  app.get('/admin/operator-notifications', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    try {
+      const filters: OperatorNotificationFilters = {
+        q: c.req.query('q') ?? undefined,
+        status: normalizeOperatorNotificationStatus(c.req.query('status')) ?? undefined,
+        source: normalizeOperatorNotificationSource(c.req.query('source')) ?? undefined,
+        limit: c.req.query('limit') ? Number.parseInt(c.req.query('limit') as string, 10) : undefined,
+        hours: c.req.query('hours') ? Number.parseInt(c.req.query('hours') as string, 10) : undefined,
+      }
+
+      buildAlertsWithNotificationState(db, Number.isFinite(filters.hours) ? Math.max(1, filters.hours as number) : 24)
+      const rows = listOperatorNotifications(db, {
+        q: filters.q,
+        status: filters.status,
+        sourceType: filters.source,
+        limit: Math.min(Math.max(Number(filters.limit ?? 200) || 200, 1), 5000),
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        notifications: rows.map((row) => serializeOperatorNotification(row)),
+        total: rows.length,
+        summary: summarizeOperatorNotifications(rows),
+      })
+    } catch (err) {
+      console.error('Operator notifications error:', err)
+      return c.json({ error: 'Failed to load operator notifications', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.patch('/admin/operator-notifications/:id', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const id = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: 'Invalid operator notification id', errorCode: 'INVALID_NOTIFICATION_ID' }, 400)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const status = normalizeOperatorNotificationStatus((body as Record<string, unknown>).status)
+    if (!status) {
+      return c.json({ error: 'Invalid operator notification status', errorCode: 'INVALID_NOTIFICATION_STATUS' }, 400)
+    }
+
+    const updated = updateOperatorNotificationStatus(db, {
+      id,
+      status,
+      actor: auth.session.email,
+    })
+    if (!updated) {
+      return c.json({ error: 'Operator notification not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.operator_notification.updated',
+      actor: auth.session.email,
+      target: String(id),
+      details: {
+        status,
+        role: auth.session.role,
+        sourceType: updated.source_type,
+        sourceKey: updated.source_key,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      notification: serializeOperatorNotification(updated),
+    })
   })
 
   app.get('/admin/waitlist', (c) => {
@@ -1528,7 +2025,7 @@ export function createApp(db: Database): Hono {
 
     try {
       const existing = db.prepare(`
-        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, created_at, updated_at
+        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, created_at, updated_at
         FROM waitlist
         WHERE email = ?
         ORDER BY created_at DESC, id DESC
@@ -1544,6 +2041,7 @@ export function createApp(db: Database): Hono {
         const nextStatus = (normalizeBetaRequestStatus(existing.status) ?? 'new') === 'closed'
           ? 'new'
           : (normalizeBetaRequestStatus(existing.status) ?? 'new')
+        const resetNotification = nextStatus === 'new' && (normalizeBetaRequestStatus(existing.status) ?? 'new') === 'closed'
 
         db.prepare(`
           UPDATE waitlist
@@ -1555,6 +2053,11 @@ export function createApp(db: Database): Hono {
         if (!updated) {
           return c.json({ error: 'Failed to load updated beta request', errorCode: 'DB_ERROR' }, 500)
         }
+
+        if (resetNotification) {
+          ensureBetaRequestNotification(db, updated, true)
+        }
+        const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(updated.id))
 
         return c.json({
           ok: true,
@@ -1569,10 +2072,12 @@ export function createApp(db: Database): Hono {
           requestStatus: normalizeBetaRequestStatus(updated.status) ?? 'new',
           owner: updated.owner,
           operatorNotes: updated.operator_notes,
+          nextAction: updated.next_action ?? getBetaRequestNextStep(updated.status),
+          lastContactAt: updated.last_contact_at,
           createdAt: updated.created_at,
           updatedAt: updated.updated_at,
-          request: serializeBetaRequest(updated),
-          nextStep: getBetaRequestNextStep(updated.status),
+          request: serializeBetaRequest(updated, notification),
+          nextStep: updated.next_action ?? getBetaRequestNextStep(updated.status),
         }, 200)
       }
 
@@ -1587,10 +2092,12 @@ export function createApp(db: Database): Hono {
           status,
           owner,
           operator_notes,
+          next_action,
+          last_contact_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'new', NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL, NULL, ?, ?)
       `).run(
         signup.email,
         signup.source,
@@ -1621,6 +2128,7 @@ export function createApp(db: Database): Hono {
       if (!created) {
         return c.json({ error: 'Failed to load saved beta request', errorCode: 'DB_ERROR' }, 500)
       }
+      const notification = ensureBetaRequestNotification(db, created, true)
 
       return c.json({
         ok: true,
@@ -1635,10 +2143,12 @@ export function createApp(db: Database): Hono {
         requestStatus: normalizeBetaRequestStatus(created.status) ?? 'new',
         owner: created.owner,
         operatorNotes: created.operator_notes,
+        nextAction: created.next_action ?? getBetaRequestNextStep(created.status),
+        lastContactAt: created.last_contact_at,
         createdAt: created.created_at,
         updatedAt: created.updated_at,
-        request: serializeBetaRequest(created),
-        nextStep: getBetaRequestNextStep(created.status),
+        request: serializeBetaRequest(created, notification),
+        nextStep: created.next_action ?? getBetaRequestNextStep(created.status),
       }, 201)
     } catch (err) {
       console.error('Waitlist signup error:', err)
@@ -1653,14 +2163,15 @@ export function createApp(db: Database): Hono {
     }
 
     try {
-      const { rows, total } = listBetaRequestRows(db, { limit: 5000 })
+      const { rows, total, allRows } = listBetaRequestRows(db, { limit: 5000 })
+      const notifications = getBetaRequestNotifications(db, rows)
 
       return c.json({
-        waitlist: rows.map((row) => serializeBetaRequest(row)),
-        signups: rows.map((row) => serializeBetaRequest(row)),
-        requests: rows.map((row) => serializeBetaRequest(row)),
+        waitlist: rows.map((row) => serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))),
+        signups: rows.map((row) => serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))),
+        requests: rows.map((row) => serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))),
         total,
-        summary: summarizeBetaRequests(rows, total),
+        summary: summarizeBetaRequests(allRows, total),
       })
     } catch (err) {
       console.error('List waitlist error:', err)

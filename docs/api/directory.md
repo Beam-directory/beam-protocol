@@ -195,8 +195,16 @@ The canonical request payload now includes:
 - `workflowType`
 - `workflowSummary`
 - `requestStatus`
+- `stage`
 - `owner`
 - `operatorNotes`
+- `nextAction`
+- `lastContactAt`
+- `stale`
+- `staleReason`
+- `attentionFlags`
+- `notificationId`
+- `notificationStatus`
 - `createdAt`
 - `updatedAt`
 
@@ -227,6 +235,8 @@ List filtering currently supports:
 - `owner`
 - `source`
 - `workflowType`
+- `attention` (`unowned` or `stale`)
+- `sort` (`attention`, `updated_desc`, `created_desc`, `stage`, `owner`, `last_contact_desc`)
 - `limit`
 
 `PATCH /admin/beta-requests/:id` accepts:
@@ -235,9 +245,48 @@ List filtering currently supports:
 {
   "status": "reviewing",
   "owner": "operator@beam.directory",
-  "operatorNotes": "Intro email sent, follow-up call pending."
+  "operatorNotes": "Intro email sent, follow-up call pending.",
+  "nextAction": "Prepare a 30 minute buyer walkthrough.",
+  "lastContactAt": "2026-03-31T09:30:00.000Z"
 }
 ```
+
+The response request record carries the same pipeline fields plus notification state, so operators can tell whether a request is still `new`, already `acknowledged`, or fully `acted` on.
+
+Hosted beta export includes:
+
+- `next_action`
+- `last_contact_at`
+- `notification_status`
+- `stale`
+- `attention_flags`
+
+## Operator notifications
+
+Operator-visible intake and incident signals are exposed through:
+
+```text
+GET   /admin/operator-notifications
+PATCH /admin/operator-notifications/:id
+```
+
+`GET /admin/operator-notifications` supports:
+
+- `q`
+- `status` (`new`, `acknowledged`, `acted`)
+- `source` (`beta_request`, `critical_alert`)
+- `limit`
+- `hours` to control the critical-alert window that is synced before listing
+
+Example patch:
+
+```json
+{
+  "status": "acknowledged"
+}
+```
+
+Critical alerts from observability reuse the same notification path. The `notificationStatus` and `notificationId` fields also appear on critical alert payloads from `GET /observability/overview` and `GET /observability/alerts`.
 
 All hosted beta admin endpoints require an authenticated admin session and accept either:
 

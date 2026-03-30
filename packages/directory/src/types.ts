@@ -134,6 +134,29 @@ export interface AuditLogRow {
   details: string
 }
 
+export type OperatorNotificationSource = 'beta_request' | 'critical_alert'
+export type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
+export type OperatorNotificationSeverity = 'info' | 'warning' | 'critical'
+
+export interface OperatorNotificationRow {
+  id: number
+  source_type: OperatorNotificationSource
+  source_key: string
+  beta_request_id: number | null
+  alert_id: string | null
+  severity: OperatorNotificationSeverity
+  title: string
+  message: string
+  href: string | null
+  status: OperatorNotificationStatus
+  created_at: string
+  updated_at: string
+  acknowledged_at: string | null
+  acted_at: string | null
+  actor: string | null
+  details_json: string | null
+}
+
 export interface ShieldAuditLogRow {
   id: number
   nonce: string | null

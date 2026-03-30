@@ -12,6 +12,7 @@ import ErrorsPage from './pages/ErrorsPage'
 import FederationPage from './pages/FederationPage'
 import IntentsPage from './pages/IntentsPage'
 import LoginPage from './pages/LoginPage'
+import OperatorInboxPage from './pages/OperatorInboxPage'
 import OverviewPage from './pages/OverviewPage'
 import RegisterPage from './pages/RegisterPage'
 import SettingsPage from './pages/SettingsPage'
@@ -55,6 +56,7 @@ export default function App() {
             <Route path="federation" element={<FederationPage />} />
             <Route path="errors" element={<ErrorsPage />} />
             <Route path="alerts" element={<AlertsPage />} />
+            <Route path="inbox" element={<OperatorInboxPage />} />
             <Route path="beta-requests" element={<BetaRequestsPage />} />
             <Route path="dead-letter" element={<DeadLetterPage />} />
             <Route path="register" element={<RegisterPage />} />

@@ -191,6 +191,8 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
         thresholdExplanation: string
         links: Array<{ href: string }>
         sampleTraces: Array<{ nonce: string }>
+        notificationId?: number | null
+        notificationStatus?: string | null
       }>
     }
 
@@ -204,12 +206,93 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
     assert.match(errorRateAlert.thresholdExplanation, /10%/)
     assert.ok(errorRateAlert.links.some((link) => link.href.includes('/intents?')))
     assert.equal(errorRateAlert.sampleTraces[0]?.nonce, 'error-9')
+    assert.ok((errorRateAlert.notificationId ?? 0) > 0)
+    assert.equal(errorRateAlert.notificationStatus, 'new')
 
     assert.ok(hotspotAlert)
     if (!hotspotAlert) {
       throw new Error('Expected error-hotspot-timeout alert to exist')
     }
     assert.ok(hotspotAlert.links.some((link) => link.href.includes('/audit?')))
+    assert.ok((hotspotAlert.notificationId ?? 0) > 0)
+    assert.equal(hotspotAlert.notificationStatus, 'new')
+
+    const inboxResponse = await app.request(new Request('http://localhost/admin/operator-notifications?source=critical_alert&status=new', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(inboxResponse.status, 200)
+
+    const inbox = await inboxResponse.json() as {
+      total: number
+      notifications: Array<{
+        id: number
+        alertId: string | null
+        status: string
+      }>
+      summary: {
+        byStatus: Record<string, number>
+        bySource: Record<string, number>
+      }
+    }
+    assert.equal(inbox.total, 2)
+    assert.equal(inbox.summary.byStatus['new'], 2)
+    assert.equal(inbox.summary.bySource['critical_alert'], 2)
+
+    const errorRateNotification = inbox.notifications.find((entry) => entry.alertId === 'network-error-rate')
+    const hotspotNotification = inbox.notifications.find((entry) => entry.alertId === 'error-hotspot-timeout')
+    assert.ok(errorRateNotification)
+    assert.ok(hotspotNotification)
+
+    const acknowledgeResponse = await app.request(new Request(`http://localhost/admin/operator-notifications/${errorRateNotification?.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'operator@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'acknowledged' }),
+    }))
+    assert.equal(acknowledgeResponse.status, 200)
+
+    const actedResponse = await app.request(new Request(`http://localhost/admin/operator-notifications/${hotspotNotification?.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'operator@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ status: 'acted' }),
+    }))
+    assert.equal(actedResponse.status, 200)
+
+    const inboxAfterUpdateResponse = await app.request(new Request('http://localhost/admin/operator-notifications?source=critical_alert', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(inboxAfterUpdateResponse.status, 200)
+    const inboxAfterUpdate = await inboxAfterUpdateResponse.json() as {
+      summary: {
+        byStatus: Record<string, number>
+      }
+      notifications: Array<{
+        alertId: string | null
+        status: string
+      }>
+    }
+    assert.equal(inboxAfterUpdate.summary.byStatus['acknowledged'], 1)
+    assert.equal(inboxAfterUpdate.summary.byStatus['acted'], 1)
+    assert.equal(inboxAfterUpdate.notifications.find((entry) => entry.alertId === 'network-error-rate')?.status, 'acknowledged')
+    assert.equal(inboxAfterUpdate.notifications.find((entry) => entry.alertId === 'error-hotspot-timeout')?.status, 'acted')
+
+    const refreshedAlertsResponse = await app.request(new Request('http://localhost/observability/alerts?hours=24', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(refreshedAlertsResponse.status, 200)
+    const refreshedAlerts = await refreshedAlertsResponse.json() as {
+      alerts: Array<{
+        id: string
+        notificationStatus?: string | null
+      }>
+    }
+    assert.equal(refreshedAlerts.alerts.find((alert) => alert.id === 'network-error-rate')?.notificationStatus, 'acknowledged')
+    assert.equal(refreshedAlerts.alerts.find((alert) => alert.id === 'error-hotspot-timeout')?.notificationStatus, 'acted')
   } finally {
     db.close()
   }
