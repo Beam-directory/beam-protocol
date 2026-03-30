@@ -210,3 +210,74 @@ test('createDatabase migrates legacy Fly volumes without nonce columns', () => {
     rmSync(root, { force: true, recursive: true })
   }
 })
+
+test('createDatabase migrates legacy waitlist tables before creating status indexes', () => {
+  const { root, dbPath } = createTempDbPath()
+  const legacyDb = new Database(dbPath)
+
+  try {
+    legacyDb.exec(`
+      CREATE TABLE waitlist (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        email TEXT NOT NULL,
+        source TEXT,
+        company TEXT,
+        agent_count INTEGER,
+        created_at TEXT NOT NULL
+      );
+
+      INSERT INTO waitlist (
+        email,
+        source,
+        company,
+        agent_count,
+        created_at
+      ) VALUES (
+        'ops@legacy.example',
+        'hosted-beta',
+        'Legacy Co',
+        3,
+        '2026-03-30T18:00:00.000Z'
+      );
+    `)
+  } finally {
+    legacyDb.close()
+  }
+
+  const db = createDatabase(dbPath)
+
+  try {
+    const waitlistColumns = db.prepare('PRAGMA table_info(waitlist)').all() as Array<{ name: string }>
+    assert.ok(waitlistColumns.some((column) => column.name === 'status'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'owner'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'operator_notes'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'updated_at'))
+
+    const waitlistRow = db.prepare(`
+      SELECT email, status, owner, operator_notes, updated_at, created_at
+      FROM waitlist
+      LIMIT 1
+    `).get() as {
+      email: string
+      status: string
+      owner: string | null
+      operator_notes: string | null
+      updated_at: string
+      created_at: string
+    } | undefined
+
+    assert.ok(waitlistRow)
+    assert.equal(waitlistRow?.email, 'ops@legacy.example')
+    assert.equal(waitlistRow?.status, 'new')
+    assert.equal(waitlistRow?.owner ?? null, null)
+    assert.equal(waitlistRow?.operator_notes ?? null, null)
+    assert.equal(waitlistRow?.updated_at, waitlistRow?.created_at)
+
+    const indexes = db.prepare("PRAGMA index_list('waitlist')").all() as Array<{ name: string }>
+    assert.ok(indexes.some((index) => index.name === 'idx_waitlist_status'))
+    assert.ok(indexes.some((index) => index.name === 'idx_waitlist_owner'))
+  } finally {
+    db.close()
+    rmSync(root, { force: true, recursive: true })
+  }
+})
