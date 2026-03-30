@@ -1,0 +1,958 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Guided Beam Evaluation — Beam Protocol</title>
+  <meta
+    name="description"
+    content="See the guided Beam evaluation path from first proof to hosted pilot, without starting in the repo."
+  />
+  <meta property="og:title" content="Guided Beam Evaluation — Beam Protocol" />
+  <meta
+    property="og:description"
+    content="One public path from Beam landing page to real proof: see the handoff, inspect the operator evidence, then decide whether one live workflow deserves a pilot."
+  />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/guided-evaluation.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Guided Beam Evaluation — Beam Protocol" />
+  <meta
+    name="twitter:description"
+    content="See how Beam proves one cross-company AI handoff before asking you for a broader rollout."
+  />
+  <meta name="twitter:image" content="https://beam.directory/og-image.png" />
+  <link rel="canonical" href="https://beam.directory/guided-evaluation.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="preload"
+    as="style"
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+    rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
+  />
+  <noscript>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </noscript>
+  <style>
+    :root {
+      --paper: #f6f0e7;
+      --paper-strong: #fff8f0;
+      --ink: #1c130d;
+      --ink-soft: #4f4337;
+      --ink-muted: #7d7065;
+      --line: rgba(42, 26, 16, 0.12);
+      --line-strong: rgba(42, 26, 16, 0.22);
+      --surface: rgba(255, 252, 247, 0.88);
+      --surface-strong: rgba(255, 252, 247, 0.96);
+      --surface-dark: #231711;
+      --accent: #f15a24;
+      --accent-soft: #ff8d58;
+      --accent-fog: rgba(241, 90, 36, 0.14);
+      --green: #1f8f5f;
+      --green-fog: rgba(31, 143, 95, 0.12);
+      --amber: #b86b0f;
+      --amber-fog: rgba(184, 107, 15, 0.12);
+      --shadow-soft: 0 28px 80px rgba(56, 29, 11, 0.08);
+      --shadow-hero: 0 56px 140px rgba(70, 33, 10, 0.16);
+      --radius-xl: 34px;
+      --radius-lg: 24px;
+      --radius-md: 18px;
+      --radius-sm: 12px;
+      --font-display: "Space Grotesk", sans-serif;
+      --font-body: "Space Grotesk", sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
+      --max: 1180px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 14%, rgba(255, 203, 161, 0.38), transparent 24%),
+        radial-gradient(circle at 86% 12%, rgba(241, 90, 36, 0.12), transparent 20%),
+        linear-gradient(180deg, #f8f3ec 0%, #f4eee6 48%, #f6f0e7 100%);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(28, 19, 13, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(28, 19, 13, 0.03) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle at center, black 18%, transparent 88%);
+      opacity: 0.5;
+      pointer-events: none;
+      z-index: -1;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .container {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar-shell {
+      padding: 22px 0 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      background: rgba(36, 24, 17, 0.82);
+      color: #fff8f1;
+      box-shadow: 0 20px 44px rgba(34, 18, 8, 0.12);
+      backdrop-filter: blur(16px);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(140deg, var(--accent-soft), var(--accent));
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 14px 30px rgba(241, 90, 36, 0.25);
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 2px;
+      line-height: 1;
+    }
+
+    .brand-copy strong {
+      font-size: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-copy span {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 248, 241, 0.7);
+    }
+
+    .top-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .top-links a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: rgba(255, 248, 241, 0.88);
+      font-size: 0.88rem;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .top-links a:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, 0.24);
+    }
+
+    .top-links a.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      border-color: transparent;
+      color: white;
+      font-weight: 700;
+    }
+
+    main {
+      padding: 28px 0 100px;
+    }
+
+    .hero-shell {
+      display: grid;
+      grid-template-columns: minmax(0, 0.88fr) minmax(360px, 1.12fr);
+      gap: 26px;
+      align-items: stretch;
+    }
+
+    .hero-copy,
+    .hero-visual,
+    .section-panel,
+    .closing-panel {
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .hero-copy {
+      padding: 38px;
+      background:
+        radial-gradient(circle at top left, rgba(255, 205, 167, 0.36), transparent 26%),
+        linear-gradient(162deg, #241711 0%, #3d2215 44%, #6f3518 100%);
+      color: #fff8f1;
+    }
+
+    .hero-visual {
+      padding: 22px;
+      background:
+        linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(255, 252, 247, 0.9)),
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.12), transparent 26%);
+    }
+
+    .eyebrow,
+    .section-kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .eyebrow {
+      margin-bottom: 16px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: rgba(255, 248, 241, 0.86);
+    }
+
+    .eyebrow::before,
+    .section-kicker::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 7px rgba(255, 141, 89, 0.12);
+    }
+
+    .section-kicker {
+      margin-bottom: 14px;
+      border: 1px solid rgba(241, 90, 36, 0.12);
+      background: rgba(241, 90, 36, 0.08);
+      color: var(--accent);
+    }
+
+    h1,
+    h2,
+    h3,
+    strong {
+      font-family: var(--font-display);
+      letter-spacing: -0.04em;
+    }
+
+    h1 {
+      font-size: clamp(2.7rem, 5vw, 4.9rem);
+      line-height: 0.92;
+      max-width: 11ch;
+    }
+
+    .hero-copy p {
+      max-width: 34rem;
+      margin-top: 18px;
+      color: rgba(255, 248, 241, 0.84);
+      font-size: 1.04rem;
+    }
+
+    .hero-actions,
+    .closing-actions,
+    .proof-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 50px;
+      padding: 0 18px;
+      border-radius: 999px;
+      font-weight: 600;
+      transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      color: white;
+      box-shadow: 0 18px 34px rgba(241, 90, 36, 0.24);
+    }
+
+    .btn-secondary {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: #fff8f1;
+      background: rgba(255, 255, 255, 0.06);
+    }
+
+    .btn-ghost {
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--ink);
+    }
+
+    .hero-points {
+      display: grid;
+      gap: 12px;
+      margin-top: 26px;
+    }
+
+    .hero-point {
+      display: grid;
+      gap: 4px;
+      padding: 14px 16px;
+      border-radius: var(--radius-md);
+      background: rgba(255, 255, 255, 0.07);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+    }
+
+    .hero-point strong {
+      font-size: 1rem;
+      color: white;
+    }
+
+    .hero-point span {
+      color: rgba(255, 248, 241, 0.78);
+      font-size: 0.94rem;
+    }
+
+    .visual-grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .visual-shot {
+      overflow: hidden;
+      border-radius: calc(var(--radius-lg) + 2px);
+      border: 1px solid var(--line-strong);
+      background: white;
+      box-shadow: var(--shadow-hero);
+    }
+
+    .visual-shot img {
+      width: 100%;
+      height: auto;
+    }
+
+    .visual-copy {
+      display: grid;
+      gap: 8px;
+      padding: 18px;
+    }
+
+    .visual-copy strong {
+      font-size: 1.16rem;
+      color: var(--ink);
+    }
+
+    .visual-copy p {
+      color: var(--ink-soft);
+      font-size: 0.96rem;
+    }
+
+    .proof-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .proof-pill {
+      display: grid;
+      gap: 5px;
+      padding: 14px 15px;
+      border-radius: var(--radius-md);
+      border: 1px solid var(--line);
+      background: var(--surface);
+    }
+
+    .proof-pill strong {
+      font-size: 0.94rem;
+    }
+
+    .proof-pill span {
+      color: var(--ink-soft);
+      font-size: 0.88rem;
+    }
+
+    .section {
+      margin-top: 34px;
+    }
+
+    .section-panel {
+      padding: 30px;
+      background: var(--surface-strong);
+    }
+
+    .section-head {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 24px;
+    }
+
+    .section-head h2 {
+      font-size: clamp(2.1rem, 4.2vw, 3.4rem);
+      line-height: 0.95;
+      max-width: 12ch;
+    }
+
+    .section-head p {
+      max-width: 48rem;
+      color: var(--ink-soft);
+      font-size: 1rem;
+    }
+
+    .steps-grid,
+    .evidence-grid,
+    .expect-grid,
+    .pack-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .steps-grid {
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+    }
+
+    .evidence-grid {
+      grid-template-columns: minmax(0, 1.06fr) minmax(0, 0.94fr);
+      align-items: start;
+    }
+
+    .expect-grid,
+    .pack-grid {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .step-card,
+    .expect-card,
+    .pack-card,
+    .evidence-card {
+      border-radius: var(--radius-lg);
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.64);
+      padding: 20px;
+    }
+
+    .step-card .count,
+    .expect-card .count {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    .step-card h3,
+    .expect-card h3,
+    .pack-card h3,
+    .evidence-card h3 {
+      font-size: 1.34rem;
+      line-height: 1.02;
+      margin-bottom: 10px;
+    }
+
+    .step-card p,
+    .expect-card p,
+    .pack-card p,
+    .evidence-card p {
+      color: var(--ink-soft);
+      font-size: 0.96rem;
+    }
+
+    .step-card ul,
+    .expect-card ul,
+    .pack-card ul,
+    .evidence-card ul {
+      margin-top: 14px;
+      display: grid;
+      gap: 10px;
+      padding-left: 18px;
+      color: var(--ink-soft);
+    }
+
+    .evidence-side {
+      display: grid;
+      gap: 16px;
+    }
+
+    .evidence-card {
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.88), rgba(255, 249, 243, 0.78));
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 14px;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      font-size: 0.78rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    .status-pill.success {
+      background: var(--green-fog);
+      color: var(--green);
+    }
+
+    .status-pill.warning {
+      background: var(--amber-fog);
+      color: var(--amber);
+    }
+
+    .status-pill.default {
+      background: rgba(28, 19, 13, 0.06);
+      color: var(--ink-soft);
+    }
+
+    .timeline {
+      display: grid;
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .timeline-row {
+      display: grid;
+      grid-template-columns: 118px minmax(0, 1fr);
+      gap: 14px;
+      align-items: start;
+      padding: 14px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .timeline-row:first-child {
+      border-top: none;
+      padding-top: 0;
+    }
+
+    .timeline-row strong {
+      font-size: 0.82rem;
+      font-family: var(--font-mono);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .timeline-row span {
+      color: var(--ink-soft);
+      font-size: 0.94rem;
+    }
+
+    .closing-panel {
+      margin-top: 34px;
+      padding: 32px;
+      background:
+        linear-gradient(160deg, rgba(255, 252, 247, 0.92), rgba(255, 247, 240, 0.86)),
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.12), transparent 26%);
+    }
+
+    .closing-panel h2 {
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      line-height: 0.96;
+      max-width: 12ch;
+    }
+
+    .closing-panel p {
+      margin-top: 14px;
+      max-width: 42rem;
+      color: var(--ink-soft);
+    }
+
+    footer {
+      padding: 0 0 24px;
+    }
+
+    .footer-inner {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 12px;
+      color: var(--ink-muted);
+      font-size: 0.9rem;
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    @media (max-width: 1080px) {
+      .hero-shell,
+      .evidence-grid,
+      .expect-grid,
+      .pack-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .steps-grid,
+      .proof-strip {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 720px) {
+      .container,
+      .footer-inner {
+        width: min(var(--max), calc(100% - 28px));
+      }
+
+      .topbar {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .top-links {
+        width: 100%;
+      }
+
+      .top-links a {
+        flex: 1 1 160px;
+      }
+
+      .hero-copy,
+      .hero-visual,
+      .section-panel,
+      .closing-panel {
+        padding: 22px;
+      }
+
+      .timeline-row {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-actions .btn,
+      .closing-actions .btn,
+      .proof-links .btn {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar-shell">
+    <div class="container">
+      <nav class="topbar">
+        <a class="brand" href="/">
+          <div class="brand-mark">B</div>
+          <div class="brand-copy">
+            <strong>beam.directory</strong>
+            <span>Guided evaluation</span>
+          </div>
+        </a>
+
+        <div class="top-links">
+          <a href="/">Home</a>
+          <a href="/hosted-beta.html">Request pilot</a>
+          <a class="primary" href="https://docs.beam.directory/guide/design-partner-onboarding">Onboarding pack</a>
+        </div>
+      </nav>
+    </div>
+  </div>
+
+  <main>
+    <div class="container">
+      <section class="hero-shell">
+        <div class="hero-copy">
+          <div class="eyebrow">One public evaluation path</div>
+          <h1>See the Beam proof before you commit to a pilot.</h1>
+          <p>
+            This is the shortest public path from curiosity to evidence. In one guided evaluation,
+            you see one company hand work to another, inspect the operator proof, and decide whether
+            one live workflow is worth a hosted pilot.
+          </p>
+
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="/hosted-beta.html">Request a guided pilot</a>
+            <a class="btn btn-secondary" href="https://docs.beam.directory/guide/design-partner-onboarding">Open the onboarding pack</a>
+          </div>
+
+          <div class="hero-points">
+            <div class="hero-point">
+              <strong>No repo detour required</strong>
+              <span>The buyer path stays on Beam surfaces from first read to first proof.</span>
+            </div>
+            <div class="hero-point">
+              <strong>Real operator evidence</strong>
+              <span>The screenshots and evidence blocks below come from the actual seeded Beam environment.</span>
+            </div>
+            <div class="hero-point">
+              <strong>One workflow, one owner, one next step</strong>
+              <span>The goal is not a platform tour. The goal is to decide whether one handoff deserves a real pilot.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="visual-grid">
+            <figure class="visual-shot">
+              <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing a healthy baseline with no active alerts and no stuck work." />
+              <figcaption class="visual-copy">
+                <strong>Healthy baseline before the first live workflow</strong>
+                <p>The current seeded Beam path starts with a clean operating surface: visible agents, low latency, and no hidden failure pressure.</p>
+              </figcaption>
+            </figure>
+
+            <div class="proof-strip">
+              <div class="proof-pill">
+                <strong>0 active alerts</strong>
+                <span>Operators start from a clean baseline instead of an unknown system state.</span>
+              </div>
+              <div class="proof-pill">
+                <strong>1 traceable handoff</strong>
+                <span>The same request can be inspected from sender to reply.</span>
+              </div>
+              <div class="proof-pill">
+                <strong>Shared proof</strong>
+                <span>Both sides can point to the same request, status, and next action.</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-panel">
+          <div class="section-head">
+            <div class="section-kicker">What happens in the evaluation</div>
+            <h2>Fifteen minutes to decide whether Beam is worth a real pilot.</h2>
+            <p>
+              The path is intentionally narrow. Beam works best when the first conversation stays
+              grounded in one concrete handoff and one visible proof surface.
+            </p>
+          </div>
+
+          <div class="steps-grid">
+            <div class="step-card">
+              <div class="count">01 · understand the job</div>
+              <h3>Name the first handoff.</h3>
+              <p>Start with one company asking another company to do one piece of work that actually matters.</p>
+              <ul>
+                <li>Who sends the work</li>
+                <li>Who receives it</li>
+                <li>What “done” looks like</li>
+              </ul>
+            </div>
+
+            <div class="step-card">
+              <div class="count">02 · inspect the proof</div>
+              <h3>See the operator evidence.</h3>
+              <p>Beam should show the baseline, the trace, and the next action clearly enough that a non-developer can follow it.</p>
+              <ul>
+                <li>Healthy overview before the handoff</li>
+                <li>Trace detail for one request</li>
+                <li>Follow-up and async status still attached</li>
+              </ul>
+            </div>
+
+            <div class="step-card">
+              <div class="count">03 · decide the next step</div>
+              <h3>Either stop or scope one pilot.</h3>
+              <p>If the proof does not map to your workflow, stop. If it does, scope one narrow hosted pilot with one operator owner.</p>
+              <ul>
+                <li>No vague platform rollout</li>
+                <li>No multi-team project plan first</li>
+                <li>One owner and one next action</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-panel">
+          <div class="section-head">
+            <div class="section-kicker">Proof assets</div>
+            <h2>This is the evidence Beam should keep intact.</h2>
+            <p>
+              The screenshots are real. The evidence blocks below are the reusable proof pack we
+              expect to survive from demo into design-partner conversations.
+            </p>
+          </div>
+
+          <div class="evidence-grid">
+            <figure class="visual-shot">
+              <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace showing a quote request from arrival to completion." />
+              <figcaption class="visual-copy">
+                <strong>Request-level trace from the canonical Acme to Northwind handoff</strong>
+                <p>One request stays legible from arrival to reply. The same operator surface is what Beam carries into a hosted pilot.</p>
+              </figcaption>
+            </figure>
+
+            <div class="evidence-side">
+              <div class="evidence-card">
+                <h3>What a buyer should be able to say back</h3>
+                <p>“Beam helps one company’s AI hand work to another company’s AI, and if it stalls, we can still see what happened.”</p>
+                <div class="status-row">
+                  <div class="status-pill success">shared proof</div>
+                  <div class="status-pill default">known sender</div>
+                  <div class="status-pill default">known receiver</div>
+                </div>
+              </div>
+
+              <div class="evidence-card">
+                <h3>What the operator evidence should prove</h3>
+                <div class="timeline">
+                  <div class="timeline-row">
+                    <strong>baseline</strong>
+                    <span>Healthy system with no active alert pressure before the live handoff starts.</span>
+                  </div>
+                  <div class="timeline-row">
+                    <strong>trace</strong>
+                    <span>One request visible from first send to final reply, including async follow-up.</span>
+                  </div>
+                  <div class="timeline-row">
+                    <strong>ownership</strong>
+                    <span>One operator can tell who owns the next step and whether the request is new, acknowledged, or acted on.</span>
+                  </div>
+                </div>
+              </div>
+
+              <div class="evidence-card">
+                <h3>What you get after the evaluation</h3>
+                <ul>
+                  <li>A decision on whether one live workflow deserves a pilot.</li>
+                  <li>A shared description of sender, receiver, owner, and success condition.</li>
+                  <li>A concrete next action instead of an open-ended beta conversation.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section">
+        <div class="section-panel">
+          <div class="section-head">
+            <div class="section-kicker">Before the call</div>
+            <h2>What we need before we schedule anything.</h2>
+            <p>
+              Beam gets sharper when the onboarding expectations are explicit. The pack below is
+              what design-partner calls should use before the first walkthrough starts.
+            </p>
+          </div>
+
+          <div class="pack-grid">
+            <div class="pack-card">
+              <h3>Bring one workflow, not a wishlist.</h3>
+              <p>Tell us the first cross-company handoff that matters enough to deserve a paper trail.</p>
+              <ul>
+                <li>One sender and one recipient</li>
+                <li>One business reason the handoff matters</li>
+                <li>One person who owns the outcome</li>
+              </ul>
+            </div>
+
+            <div class="pack-card">
+              <h3>Know what a “good first win” looks like.</h3>
+              <p>The evaluation is not complete when a message moves. It is complete when the proof surface answers whether Beam helped.</p>
+              <ul>
+                <li>What should the receiving side return</li>
+                <li>What would count as operator proof</li>
+                <li>What the next action would be if the fit is real</li>
+              </ul>
+            </div>
+          </div>
+
+          <div class="proof-links">
+            <a class="btn btn-primary" href="/hosted-beta.html">Request a guided pilot</a>
+            <a class="btn btn-ghost" href="https://docs.beam.directory/guide/design-partner-onboarding">Open full onboarding pack</a>
+          </div>
+        </div>
+      </section>
+
+      <section class="closing-panel">
+        <div class="section-kicker">Next step</div>
+        <h2>If the proof maps cleanly to your workflow, scope one pilot.</h2>
+        <p>
+          The right Beam next step is small: one hosted pilot, one operator owner, one workflow that
+          matters. If the fit is not there yet, stop at the evaluation and keep the scope honest.
+        </p>
+        <div class="closing-actions">
+          <a class="btn btn-primary" href="/hosted-beta.html">Request hosted beta</a>
+          <a class="btn btn-ghost" href="/">Back to the landing page</a>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div>Beam Protocol · guided evaluation path for cross-company AI work</div>
+      <div class="footer-links">
+        <a href="/hosted-beta.html">Hosted beta</a>
+        <a href="https://docs.beam.directory/guide/design-partner-onboarding">Onboarding pack</a>
+        <a href="https://docs.beam.directory">Docs</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

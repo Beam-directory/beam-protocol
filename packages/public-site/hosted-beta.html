@@ -707,8 +707,8 @@
         </a>
 
         <div class="top-links">
-          <a href="https://docs.beam.directory/guide/hosted-quickstart">Hosted Demo</a>
-          <a href="https://docs.beam.directory">Docs</a>
+          <a href="/guided-evaluation.html">Guided evaluation</a>
+          <a href="https://docs.beam.directory/guide/design-partner-onboarding">Onboarding pack</a>
           <a class="primary" href="#faq">Common questions</a>
         </div>
       </nav>
@@ -723,7 +723,8 @@
           <h1>Request a guided Beam pilot for one real workflow.</h1>
           <p>
             If your AI needs another company's AI to do something real, Beam can scope a small
-            pilot around that handoff. We start narrow, prove it, and only expand if it works.
+            pilot around that handoff. We start narrow, prove it, set expectations up front, and
+            only expand if it works.
           </p>
           <ul>
             <li>One workflow first, not a platform rollout.</li>
@@ -745,7 +746,7 @@
             </div>
             <div class="metric">
               <strong>Guided rollout</strong>
-              <span>Beam helps scope the first evaluation and the next concrete step after it.</span>
+              <span>Beam helps scope the first evaluation, shares the onboarding pack, and sets the next concrete step after it.</span>
             </div>
           </div>
         </div>
@@ -795,7 +796,7 @@
 
             <div class="submit-row">
               <button class="btn primary" id="submit-button" type="submit">Request hosted beta</button>
-              <a class="btn ghost" href="https://docs.beam.directory/guide/hosted-quickstart">See the demo first</a>
+              <a class="btn ghost" href="/guided-evaluation.html">See the guided evaluation first</a>
             </div>
           </form>
 
@@ -844,7 +845,7 @@
           <h2>Use hosted beta for one narrow rollout, then widen only after it works.</h2>
         </div>
 
-        <div class="expect-grid">
+          <div class="expect-grid">
           <div class="expect-card">
             <div class="section-kicker">01 · what you get</div>
             <h3>Managed Beam surfaces</h3>
@@ -877,7 +878,23 @@
               <li>Treat pricing and rollout as workflow-scoped, not as an open-ended beta promise.</li>
             </ul>
           </div>
-        </div>
+          </div>
+
+          <div class="proof-grid" style="margin-top: 18px;">
+            <div class="expect-card">
+              <div class="section-kicker">Before the call</div>
+              <h3>Every serious evaluation starts with the same pack.</h3>
+              <p>The onboarding pack sets scope, prerequisites, proof expectations, and common operator follow-up states before anyone is on a call.</p>
+              <ul>
+                <li>One workflow, one owner, one success condition</li>
+                <li>What proof Beam should show during the walkthrough</li>
+                <li>What happens after the call if the fit is real</li>
+              </ul>
+              <div class="submit-row" style="margin-top: 18px;">
+                <a class="btn ghost" href="https://docs.beam.directory/guide/design-partner-onboarding">Open onboarding pack</a>
+              </div>
+            </div>
+          </div>
       </section>
 
       <section class="faq-section" id="faq">
@@ -996,7 +1013,7 @@
           dateStyle: 'medium',
           timeStyle: 'short',
         }) : null
-        const nextStep = payload.nextStep || 'Beam will review the workflow and follow up with the next concrete step.'
+        const nextStep = payload.nextStep || 'Beam will review the workflow, send the onboarding pack, and follow up with the next concrete step.'
 
         if (payload.status === 'already_registered') {
           setStatus(
@@ -1004,6 +1021,7 @@
             `<strong>You are already on the hosted beta list.</strong><br />` +
             `Beam refreshed the latest workflow context for <code>${email}</code> and kept the original intake.` +
             `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
             (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original intake: ${createdAt}</span>` : ''),
           )
         } else {
@@ -1012,6 +1030,7 @@
             `<strong>Hosted beta request recorded.</strong><br />` +
             `Beam queued <strong>${workflowLabel}</strong> for <strong>${company}</strong>.` +
             `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
             (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Recorded: ${createdAt}</span>` : ''),
           )
           form.reset()

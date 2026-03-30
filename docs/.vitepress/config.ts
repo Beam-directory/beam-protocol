@@ -20,6 +20,7 @@ export default defineConfig({
     sidebar: [
       { text: 'Guide', items: [
         { text: 'Verified Partner Handoff', link: '/guide/partner-handoff' },
+        { text: 'Design-Partner Onboarding Pack', link: '/guide/design-partner-onboarding' },
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Hosted Quickstart', link: '/guide/hosted-quickstart' },
         { text: 'Compatibility', link: '/guide/compatibility' },

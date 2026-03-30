@@ -40,6 +40,9 @@ const SORT_OPTIONS = [
 
 type SortOption = typeof SORT_OPTIONS[number]['value']
 
+const ONBOARDING_PACK_URL = 'https://docs.beam.directory/guide/design-partner-onboarding'
+const GUIDED_EVALUATION_URL = 'https://beam.directory/guided-evaluation.html'
+
 export default function BetaRequestsPage() {
   const { session } = useAdminAuth()
   const [searchParams, setSearchParams] = useSearchParams()
@@ -479,6 +482,41 @@ export default function BetaRequestsPage() {
               </>
             )}
           </div>
+
+          <div className="panel space-y-4">
+            <div className="panel-title">Onboarding pack</div>
+            <p className="text-sm text-slate-500 dark:text-slate-400">
+              Keep external evaluations on the same script: public proof first, then the onboarding pack, then the stage-specific follow-up template.
+            </p>
+            <div className="grid gap-3">
+              <a
+                className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
+                href={GUIDED_EVALUATION_URL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open guided evaluation
+              </a>
+              <a
+                className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
+                href={ONBOARDING_PACK_URL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open onboarding pack
+              </a>
+              {selectedRequest ? (
+                <a
+                  className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
+                  href={`${ONBOARDING_PACK_URL}${templateAnchorForStage(selectedRequest.stage)}`}
+                  rel="noreferrer"
+                  target="_blank"
+                >
+                  Open template for {selectedRequest.stage}
+                </a>
+              ) : null}
+            </div>
+          </div>
         </div>
       </section>
     </div>
@@ -543,4 +581,22 @@ function toDateTimeLocalValue(value?: string | null): string {
   const offset = date.getTimezoneOffset()
   const localDate = new Date(date.getTime() - offset * 60_000)
   return localDate.toISOString().slice(0, 16)
+}
+
+function templateAnchorForStage(stage: BetaRequestStatus): string {
+  switch (stage) {
+    case 'reviewing':
+      return '#template-reviewing'
+    case 'contacted':
+      return '#template-contacted'
+    case 'scheduled':
+      return '#template-scheduled'
+    case 'active':
+      return '#template-active'
+    case 'closed':
+      return '#template-closed'
+    case 'new':
+    default:
+      return '#template-new'
+  }
 }
