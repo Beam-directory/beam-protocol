@@ -1,6 +1,6 @@
 {
   "name": "@beam-protocol/message-bus",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "Persistent message bus for Beam Protocol — reliable agent-to-agent communication with retry, audit trail, and guaranteed delivery",
   "type": "module",
   "main": "./dist/index.js",

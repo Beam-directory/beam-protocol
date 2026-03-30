@@ -74,8 +74,8 @@ services:
 
   echo-agent:
     build:
-      context: ../../packages/echo-agent
-      dockerfile: Dockerfile
+      context: ../..
+      dockerfile: ops/quickstart/echo-agent.Dockerfile
     depends_on:
       directory:
         condition: service_healthy
@@ -95,4 +95,3 @@ services:
 volumes:
   directory-data:
   message-bus-data:
-

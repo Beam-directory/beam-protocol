@@ -1,5 +1,11 @@
 # Changelog
 
+## v0.6.1 (2026-03-30)
+
+### Quickstart
+- fix the hosted quickstart bootstrap so the `echo-agent` Docker build installs the local `beam-protocol-sdk` tarball from the repo instead of requiring a pre-published npm version
+- keep the local quickstart reproducible before the npm publish step runs in CI
+
 ## v0.6.0 (2026-03-30)
 
 ### Release Direction

@@ -1,6 +1,6 @@
 {
   "name": "beam-protocol-sdk",
-  "version": "0.6.0",
+  "version": "0.6.1",
   "description": "TypeScript SDK for verified B2B handoffs over Beam",
   "type": "module",
   "main": "./dist/index.js",
