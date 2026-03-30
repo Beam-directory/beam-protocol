@@ -1,5 +1,26 @@
 # Changelog
 
+## v0.7.0 (draft)
+
+### Hosted Beta
+- align Beam around a hosted beta for verified B2B handoffs instead of an open-ended protocol pitch
+- keep landing page, hosted beta intake, quickstart, docs, and demo flow on the same hosted evaluation path
+
+### Operator Workflow
+- add a dedicated hosted-beta request queue with stable request status, owner, notes, and export surfaces
+- improve operator-facing proof across trace, audit, alerts, dead letters, and hosted-beta review
+
+### Reliability and Security
+- harden retries, dead-letter handling, restart recovery, key lifecycle, and abuse controls for the hosted-beta baseline
+- keep cross-stack compatibility fixtures and test coverage across directory, CLI, TypeScript SDK, Python SDK, and message bus
+
+### Release Control
+- add repo-visible RC and cut artifacts for `0.7.0`
+- expose live release truth on the API, status page, dashboard, SDK, and CLI so deploy drift is visible before tagging
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `0.7.0` remains on `beam/1`.
+
 ## v0.6.1 (2026-03-30)
 
 ### Quickstart
