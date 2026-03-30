@@ -1,6 +1,6 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
-import { findAgentByHandle, getAgent, getDIDDocument } from '../db.js'
+import { findAgentByHandle, getAgent, getDIDDocument, listAgentKeys } from '../db.js'
 import { configureDIDResolver, generateDirectoryDIDDocument, resolveDIDWithFallbacks } from '../did.js'
 
 export function didRouter(db: Database): Hono {
@@ -8,6 +8,7 @@ export function didRouter(db: Database): Hono {
     getStoredDocument: (did) => getDIDDocument(db, did),
     getAgentByBeamId: (beamId) => getAgent(db, beamId),
     findAgentByHandle: (handle) => findAgentByHandle(db, handle),
+    listAgentKeysByBeamId: (beamId) => listAgentKeys(db, beamId),
   })
 
   const router = new Hono()

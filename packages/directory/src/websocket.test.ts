@@ -9,7 +9,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { createAcl } from './acl.js'
-import { createDatabase, getIntentLogByNonce, listIntentTraceEvents, registerAgent } from './db.js'
+import { createDatabase, getIntentLogByNonce, listIntentTraceEvents, registerAgent, rotateAgentKey } from './db.js'
 import {
   createWebSocketServer,
   expireRecoveredIntentTimeouts,
@@ -231,6 +231,52 @@ test('relayIntentFromHttp caches direct HTTP results by nonce and suppresses dup
     })
 
     assert.equal(directCalls, 1)
+  } finally {
+    db.close()
+  }
+})
+
+test('relayIntentFromHttp rejects intents signed by a rotated-out key', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const rotatedSender = createFixtureAgent('sender@local.beam.directory')
+  const receiver = createFixtureAgent('receiver@local.beam.directory')
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, receiver, {
+      displayName: 'Receiver',
+      httpEndpoint: 'https://direct.example/beam',
+    })
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: TEST_INTENT,
+      allowedFrom: sender.beamId,
+    })
+
+    rotateAgentKey(db, sender.beamId, rotatedSender.publicKeyBase64)
+
+    const staleFrame = createSignedFrame(sender, receiver.beamId)
+    await withFetchStub(async () => {
+      throw new Error('stale key should fail before delivery')
+    }, async () => {
+      await assert.rejects(
+        relayIntentFromHttp(db, staleFrame, 1_000),
+        (error: unknown) => error instanceof RelayError && error.code === 'BAD_REQUEST',
+      )
+    })
+
+    const freshFrame = createSignedFrame(rotatedSender, receiver.beamId)
+    await withFetchStub(async () => new Response(JSON.stringify({
+      success: true,
+      payload: { rotated: true },
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }), async () => {
+      const result = await relayIntentFromHttp(db, freshFrame, 1_000)
+      assert.equal(result.success, true)
+    })
   } finally {
     db.close()
   }

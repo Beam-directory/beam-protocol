@@ -1,10 +1,11 @@
 import { BeamIdentity } from './identity.js'
 import { BeamDirectory } from './directory.js'
 import { BeamCredentialsClient, BeamDID } from './did.js'
-import { createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
+import { canonicalizeFrame, createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import { beamIdFromApiKey } from './api-key.js'
 import type {
   AgentProfile,
+  AgentKeyState,
   AgentRecord,
   BeamClientConfig,
   BeamIdString,
@@ -15,6 +16,7 @@ import type {
   DomainVerification,
   IntentFrame,
   KeyRotationResult,
+  KeyRevocationResult,
   Report,
   ResultFrame,
   BeamIdentityData,
@@ -140,10 +142,42 @@ export class BeamClient {
     }
 
     const identity = newKeyPair instanceof BeamIdentity ? newKeyPair : BeamIdentity.fromData(newKeyPair)
+    const timestamp = new Date().toISOString()
+    const signaturePayload = canonicalizeFrame({
+      action: 'keys.rotate',
+      beamId: this._beamId,
+      newPublicKey: identity.publicKeyBase64,
+      timestamp,
+    })
     const rotationProof = this._identity ? this._identity.sign(JSON.stringify(identity.publicKeyBase64)) : undefined
-    const result = await this._directory.rotateKeys(this._beamId, identity.publicKeyBase64, rotationProof)
+    const signature = this._identity ? this._identity.sign(signaturePayload) : undefined
+    const result = await this._directory.rotateKeys(this._beamId, identity.publicKeyBase64, {
+      rotationProof,
+      signature,
+      timestamp,
+    })
     this._identity = identity
     return result
+  }
+
+  async listKeys(): Promise<AgentKeyState> {
+    return this._directory.listKeys(this._beamId)
+  }
+
+  async revokeKey(publicKey: string): Promise<KeyRevocationResult> {
+    if (!this._identity && !this._apiKey) {
+      throw new Error('revokeKey() requires identity or apiKey auth')
+    }
+
+    const timestamp = new Date().toISOString()
+    const signaturePayload = canonicalizeFrame({
+      action: 'keys.revoke',
+      beamId: this._beamId,
+      publicKey,
+      timestamp,
+    })
+    const signature = this._identity ? this._identity.sign(signaturePayload) : undefined
+    return this._directory.revokeKey(this._beamId, publicKey, { signature, timestamp })
   }
 
   async browse(page = 1, filters: BrowseFilters = {}): Promise<BrowseResult> {

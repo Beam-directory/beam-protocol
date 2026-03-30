@@ -51,6 +51,7 @@ export interface AgentRecord extends AgentRegistration {
   verified: boolean
   createdAt: string
   lastSeen: string
+  keyState?: AgentKeyState
 }
 
 export interface AgentProfile extends AgentRecord {
@@ -122,6 +123,30 @@ export interface KeyRotationResult {
   publicKey: string
   rotatedAt?: string
   previousKey?: string
+  keyState?: AgentKeyState
+}
+
+export interface AgentKeyRecord {
+  id?: number
+  beamId: BeamIdString
+  publicKey: string
+  createdAt: number
+  revokedAt: number | null
+  status: 'active' | 'revoked'
+}
+
+export interface AgentKeyState {
+  active: AgentKeyRecord | null
+  revoked: AgentKeyRecord[]
+  keys: AgentKeyRecord[]
+  total: number
+}
+
+export interface KeyRevocationResult {
+  beamId: BeamIdString
+  revoked: boolean
+  revokedKey: AgentKeyRecord | null
+  keyState: AgentKeyState
 }
 
 export interface DirectoryConfig {

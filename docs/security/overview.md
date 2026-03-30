@@ -11,7 +11,8 @@ Every agent identity is backed by an Ed25519 keypair:
 - **Private key** stays with the agent, never transmitted
 - **Public key** registered in the directory
 - **Every intent is signed** — the directory verifies signatures before relaying
-- **Key rotation** supported via the `/agents/:beamId/keys` API
+- **Key rotation and revocation** supported via `/agents/:beamId/keys/rotate`, `/agents/:beamId/keys/revoke`, and `GET /agents/:beamId/keys`
+- **Historical verification** preserved in DID resolution: rotated-out keys remain visible as revoked verification methods
 
 ```
 Agent generates Ed25519 keypair
@@ -29,17 +30,22 @@ Every signed intent includes a nonce:
 - The directory rejects any intent with a reused nonce
 - Prevents replay attacks where a captured message is re-sent
 
-### 3. Rate Limiting
+### 3. Rate Limiting and Abuse Controls
 
-IP-based rate limiting on all endpoints:
+Public endpoints are protected by configurable Beam Shield policies. Limits can be enforced by IP, Beam identity, or both, and trusted IPs / trusted Beam IDs can bypass those controls in managed environments.
 
 | Endpoint | Limit |
 |----------|-------|
 | `POST /agents/register` | 10/minute |
 | `GET /agents/search` | 30/minute |
-| All other endpoints | 60/minute |
+| `GET /agents/browse` | 30/minute |
+| `GET /agents/:beamId` | 120/minute |
+| `GET /did/*` | 120/minute |
+| `POST /intents/send` | 30/minute per IP, 20/minute per sender |
+| `POST /admin/auth/*` | 6/minute |
 
 Exceeded limits return `429 Too Many Requests`.
+All throttled and blocked requests are written into audit and shield observability views.
 
 ### 4. Input Validation
 
@@ -91,7 +97,7 @@ No wildcard origins. No `*`.
 | **Replay attacks** | Nonce-based. Each nonce is single-use and time-limited. |
 | **Man-in-the-middle** | TLS in transit. Signatures on payloads. Receiver can verify sender independently. |
 | **Directory poisoning** | Registration rate-limited. Verification tiers add trust signals. Abuse reporting API. |
-| **Spam/flooding** | Rate limiting per IP. Trust score affects relay priority. |
+| **Spam/flooding** | Public endpoint limits by IP and sender identity, per-agent trust gates, audit trails, and trusted-environment overrides. |
 | **SQL injection** | Prepared statements everywhere. No string concatenation in queries. |
 | **XSS on dashboard** | `escapeHtml()` on all dynamic output. |
 

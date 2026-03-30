@@ -26,6 +26,7 @@ DID:      did:beam:coppen:jarvis
 ## DID Document
 
 Every registered agent gets a DID Document that follows the [W3C DID v1.1 specification](https://www.w3.org/TR/did-core/).
+Beam keeps historical signing keys in the DID document so older signatures remain auditable after key rotation.
 
 ### Resolve a DID
 
@@ -43,23 +44,48 @@ curl https://api.beam.directory/agents/did/did:beam:coppen:jarvis
   ],
   "id": "did:beam:coppen:jarvis",
   "alsoKnownAs": ["jarvis@coppen.beam.directory"],
-  "verificationMethod": [{
-    "id": "did:beam:coppen:jarvis#key-1",
-    "type": "Ed25519VerificationKey2020",
-    "controller": "did:beam:coppen:jarvis",
-    "publicKeyMultibase": "z6MkrvPsTYcb..."
-  }],
-  "authentication": ["did:beam:coppen:jarvis#key-1"],
-  "assertionMethod": ["did:beam:coppen:jarvis#key-1"],
-  "capabilityInvocation": ["did:beam:coppen:jarvis#key-1"],
-  "capabilityDelegation": ["did:beam:coppen:jarvis#key-1"],
-  "service": [{
-    "id": "did:beam:coppen:jarvis#directory",
-    "type": "BeamDirectoryService",
-    "serviceEndpoint": "https://beam.directory/agents/jarvis@coppen.beam.directory"
-  }]
+  "verificationMethod": [
+    {
+      "id": "did:beam:coppen:jarvis#z6MkrvPsTYcb...",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:beam:coppen:jarvis",
+      "publicKeyMultibase": "z6MkrvPsTYcb...",
+      "beamStatus": "active"
+    },
+    {
+      "id": "did:beam:coppen:jarvis#z6Mklegacy...",
+      "type": "Ed25519VerificationKey2020",
+      "controller": "did:beam:coppen:jarvis",
+      "publicKeyMultibase": "z6Mklegacy...",
+      "beamStatus": "revoked",
+      "beamRevokedAt": "2026-03-30T10:22:11.000Z"
+    }
+  ],
+  "authentication": ["did:beam:coppen:jarvis#z6MkrvPsTYcb..."],
+  "assertionMethod": ["did:beam:coppen:jarvis#z6MkrvPsTYcb..."],
+  "capabilityInvocation": ["did:beam:coppen:jarvis#z6MkrvPsTYcb..."],
+  "capabilityDelegation": ["did:beam:coppen:jarvis#z6MkrvPsTYcb..."],
+  "service": [
+    {
+      "id": "did:beam:coppen:jarvis#directory",
+      "type": "BeamDirectoryService",
+      "serviceEndpoint": "https://beam.directory/agents/jarvis@coppen.beam.directory"
+    },
+    {
+      "id": "did:beam:coppen:jarvis#keys",
+      "type": "BeamKeyStateService",
+      "serviceEndpoint": "https://beam.directory/agents/jarvis@coppen.beam.directory/keys"
+    }
+  ]
 }
 ```
+
+### Key lifecycle semantics
+
+- Only the current active key appears in `authentication`, `assertionMethod`, `capabilityInvocation`, and `capabilityDelegation`.
+- Rotated-out keys stay in `verificationMethod` with `beamStatus: "revoked"` so historical signatures can still be verified.
+- Revoked keys are not accepted for new intents.
+- The directory key inventory is also available at `GET /agents/:beamId/keys`.
 
 ## Architecture
 

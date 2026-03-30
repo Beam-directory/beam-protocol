@@ -16,6 +16,7 @@ from .frames import create_intent_frame, create_result_frame, validate_intent_fr
 from .identity import BeamIdentity
 from .types import (
     AgentProfile,
+    AgentKeyState,
     AgentRecord,
     BeamClientConfig,
     BeamIdString,
@@ -26,6 +27,7 @@ from .types import (
     DirectoryStats,
     DomainVerification,
     IntentFrame,
+    KeyRevocationResult,
     KeyRotationResult,
     Report,
     ResultFrame,
@@ -33,6 +35,18 @@ from .types import (
 )
 
 IntentHandler = Callable[[IntentFrame], Coroutine[Any, Any, ResultFrame]]
+
+
+def _sort_json(value: Any) -> Any:
+    if isinstance(value, list):
+        return [_sort_json(entry) for entry in value]
+    if isinstance(value, dict):
+        return {key: _sort_json(value[key]) for key in sorted(value.keys())}
+    return value
+
+
+def _canonicalize_json(value: dict[str, Any]) -> str:
+    return json.dumps(_sort_json(value), separators=(",", ":"))
 
 
 class BeamClient:
@@ -102,10 +116,24 @@ class BeamClient:
             if isinstance(new_key_pair, BeamIdentity)
             else BeamIdentity.from_data(new_key_pair)
         )
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        signature_payload = _canonicalize_json(
+            {
+                "action": "keys.rotate",
+                "beamId": self._identity.beam_id,
+                "newPublicKey": identity.public_key_base64,
+                "timestamp": timestamp,
+            }
+        )
         data = await self._request(
             "POST",
             f"/agents/{self._identity.beam_id}/keys/rotate",
-            json={"publicKey": identity.public_key_base64},
+            json={
+                "new_public_key": identity.public_key_base64,
+                "rotation_proof": self._identity.sign(json.dumps(identity.public_key_base64)),
+                "signature": self._identity.sign(signature_payload),
+                "timestamp": timestamp,
+            },
         )
         self._identity = identity
         return KeyRotationResult.from_dict(
@@ -113,6 +141,34 @@ class BeamClient:
             beam_id=self._identity.beam_id,
             public_key=self._identity.public_key_base64,
         )
+
+    async def list_keys(self) -> AgentKeyState:
+        data = await self._request(
+            "GET",
+            f"/agents/{self._identity.beam_id}/keys",
+        )
+        return AgentKeyState.from_dict(data.get("keyState"))
+
+    async def revoke_key(self, public_key: str) -> KeyRevocationResult:
+        timestamp = time.strftime("%Y-%m-%dT%H:%M:%S.000Z", time.gmtime())
+        signature_payload = _canonicalize_json(
+            {
+                "action": "keys.revoke",
+                "beamId": self._identity.beam_id,
+                "publicKey": public_key,
+                "timestamp": timestamp,
+            }
+        )
+        data = await self._request(
+            "POST",
+            f"/agents/{self._identity.beam_id}/keys/revoke",
+            json={
+                "public_key": public_key,
+                "signature": self._identity.sign(signature_payload),
+                "timestamp": timestamp,
+            },
+        )
+        return KeyRevocationResult.from_dict(data, beam_id=self._identity.beam_id)
 
     async def browse(
         self,

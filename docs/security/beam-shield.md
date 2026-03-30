@@ -2,6 +2,11 @@
 
 Beam Shield is a 5-wall defense system that protects every agent in the Beam network from prompt injection, PII leaks, and unauthorized access.
 
+It now covers both:
+
+- **per-agent intent controls** via `/shield/config/:beamId`
+- **public HTTP abuse controls** via `/shield/policies/public-endpoints`
+
 ## Architecture
 
 Every incoming intent passes through five sequential security layers:
@@ -109,6 +114,37 @@ The Output Filter scans agent responses before sending to detect:
 
 Detected PII is auto-redacted: `[REDACTED-iban]`, `[REDACTED-email]`
 
+## Public Endpoint Policy
+
+Operators can tune unauthenticated and semi-authenticated HTTP limits without redeploying the directory.
+
+```bash
+# Read the active policy
+curl -H "Authorization: Bearer <admin-session-token>" \
+  https://api.beam.directory/shield/policies/public-endpoints
+
+# Tighten registration and trust a private ingress IP
+curl -X PATCH https://api.beam.directory/shield/policies/public-endpoints \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer <admin-session-token>" \
+  -d '{
+    "registrationPerMinute": 5,
+    "intentSendPerIpPerMinute": 20,
+    "intentSendPerSenderPerMinute": 10,
+    "trustedIps": ["203.0.113.44"],
+    "trustedBeamIds": ["*@internal.beam.directory"]
+  }'
+```
+
+The public policy currently covers:
+
+- registration bursts
+- search and browse scraping
+- direct lookup and DID resolution
+- `POST /intents/send` throttling by both IP and sender identity
+- admin magic-link challenge abuse
+- key mutation endpoints
+
 ## Admin API
 
 ```bash
@@ -124,6 +160,12 @@ GET /shield/audit/:beamId?hours=24
 
 # Get aggregate shield statistics (admin only)
 GET /shield/stats?hours=24
+
+# Get public endpoint abuse policy (admin/operator/viewer)
+GET /shield/policies/public-endpoints
+
+# Update public endpoint abuse policy (admin/operator)
+PATCH /shield/policies/public-endpoints
 ```
 
 ## Security Model
@@ -134,3 +176,5 @@ This means:
 - **Protocol level** (always on): Ed25519 signatures, nonce replay protection, rate limiting
 - **Agent level** (configurable): Trust Gate mode, Content Sandbox, Output Filter
 - **Receiver level** (agent's responsibility): Application-specific filtering, business logic validation
+
+Blocked and throttled traffic is surfaced to operators in both the audit log and the shield event stream.

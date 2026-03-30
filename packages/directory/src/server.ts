@@ -35,7 +35,7 @@ import {
 } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
-import { assignDirectoryRole, deleteDirectoryRole, listDirectoryRoles, listAuditLog, listRecentIntentLogs, listTrustScores, logAuditEvent, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
+import { assignDirectoryRole, deleteDirectoryRole, getAgent, getDIDDocument, listAgentKeys, listAuditLog, listDirectoryRoles, listRecentIntentLogs, listTrustScores, logAuditEvent, upsertDIDDocument } from './db.js'
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import type { AgentRow, IntentFrame } from './types.js'
@@ -576,7 +576,7 @@ export function createApp(db: Database): Hono {
     credentials: true,
   }))
 
-  app.use('*', createRateLimitMiddleware())
+  app.use('*', createRateLimitMiddleware(db))
 
   // Beam Shield — Wall 1: Body size limit (64KB)
   app.use('*', async (c, next) => {
@@ -794,12 +794,12 @@ export function createApp(db: Database): Hono {
     if (stored) return c.json(stored)
 
     // On-demand generation: convert DID → beam_id → lookup agent → generate
-    const { toBeamDID, generateDIDDocument, didToBeamId } = await import('./did.js')
+    const { generateDIDDocumentWithKeys, didToBeamId } = await import('./did.js')
     const beamId = didToBeamId(didString)
     if (beamId) {
       const agent = getAgent(db, beamId)
       if (agent) {
-        const newDoc = generateDIDDocument(agent)
+        const newDoc = generateDIDDocumentWithKeys(agent, listAgentKeys(db, beamId))
         upsertDIDDocument(db, newDoc)
         return c.json(newDoc)
       }

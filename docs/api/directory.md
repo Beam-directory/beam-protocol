@@ -28,6 +28,13 @@ Successful responses return the created agent record with trust and verification
 Registration responses also return an API key with the prefix `bk_`. Store it securely — it is only meant to
 be shown in plaintext at creation time.
 
+Detailed registration and lookup responses now also include `keyState` with:
+
+- `active`
+- `revoked`
+- `keys`
+- `total`
+
 ## API key authentication
 
 Agent-authenticated endpoints accept `x-api-key: bk_...` as a simpler alternative to Ed25519 request signing.
@@ -48,6 +55,12 @@ Typical search example:
 
 ```text
 GET /agents/search?org=demo&capabilities=chat,search&minTrustScore=0.5&limit=20
+```
+
+Detailed lookup:
+
+```text
+GET /agents/:beamId
 ```
 
 ## `GET /stats`
@@ -77,6 +90,33 @@ Admin and operator access is session-based.
 - `POST /admin/auth/logout`
 
 Successful verification returns a short-lived signed bearer token and also sets the admin session cookie for dashboard clients.
+
+## Key lifecycle endpoints
+
+```text
+GET  /agents/:beamId/keys
+POST /agents/:beamId/keys/rotate
+POST /agents/:beamId/keys/revoke
+GET  /keys/revoked
+```
+
+Rotation accepts either:
+
+- `x-api-key` / bearer API key auth
+- a signed key-management payload from the current active key
+
+Revocation is intended for rotated-out historical keys. The active key must be replaced through rotation first.
+
+## Public Beam Shield policy
+
+Operators can inspect and update public HTTP abuse controls with:
+
+```text
+GET   /shield/policies/public-endpoints
+PATCH /shield/policies/public-endpoints
+```
+
+The policy covers registration, discovery, DID resolution, `POST /intents/send`, admin auth, and key mutation limits, plus trusted IP / trusted Beam ID overrides.
 
 ## `DELETE /admin/waitlist`
 

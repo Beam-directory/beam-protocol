@@ -44,6 +44,16 @@ beam verify domain acme.example
 beam verify check
 ```
 
+## Key lifecycle
+
+```bash
+beam keys list
+beam keys rotate
+beam keys revoke MCowBQYDK2VwAyEA...
+```
+
+`beam keys rotate` generates a fresh local keypair for the same Beam ID, submits the signed rotation request, and updates `.beam/identity.json` on success.
+
 ## Directory stats
 
 ```bash

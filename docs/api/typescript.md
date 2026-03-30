@@ -66,6 +66,25 @@ const nextIdentity = BeamIdentity.generate({ agentName: 'planner', orgName: 'acm
 await client.rotateKeys(nextIdentity)
 ```
 
+The SDK signs the rotation request with the current active key, updates the local `BeamClient`
+identity on success, and the returned `KeyRotationResult` includes `keyState`.
+
+### `listKeys()`
+
+```ts
+const keyState = await client.listKeys()
+console.log(keyState.active?.publicKey)
+console.log(keyState.revoked.map((key) => key.publicKey))
+```
+
+### `revokeKey(publicKey)`
+
+```ts
+await client.revokeKey('MCowBQYDK2VwAyEA...')
+```
+
+Use `rotateKeys(...)` for the current active key. `revokeKey(...)` is for rotated-out historical keys.
+
 ### `browse(page?, filters?)`
 
 ```ts
@@ -146,6 +165,19 @@ interface BrowseFilters {
 ### `AgentProfile`
 
 `AgentProfile` extends the base agent record with `description`, `logoUrl`, `website`, `verificationTier`, `verificationStatus`, `domain`, and `intentsHandled`.
+
+### `AgentKeyState`
+
+Returned by `listKeys()`, and also exposed as `keyState` on detailed agent lookups and key lifecycle responses.
+
+```ts
+interface AgentKeyState {
+  active: AgentKeyRecord | null
+  revoked: AgentKeyRecord[]
+  keys: AgentKeyRecord[]
+  total: number
+}
+```
 
 ### `DirectoryStats`
 

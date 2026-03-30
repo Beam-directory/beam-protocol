@@ -15,6 +15,9 @@ import { cmdStats } from './commands/stats.js'
 import { cmdDelegate } from './commands/delegate.js'
 import { cmdReport } from './commands/report.js'
 import { cmdTalk } from './commands/talk.js'
+import { cmdKeysList } from './commands/keys-list.js'
+import { cmdKeysRotate } from './commands/keys-rotate.js'
+import { cmdKeysRevoke } from './commands/keys-revoke.js'
 
 const require = createRequire(import.meta.url)
 const { version } = require('../package.json') as { version: string }
@@ -177,6 +180,34 @@ program
   .option('--json', 'Output raw JSON')
   .action(async (to: string, message: string, opts: { directory?: string; timeout?: string; language?: string; context?: string; json?: boolean }) => {
     await cmdTalk(to, message, opts)
+  })
+
+const keys = program.command('keys').description('Signing key lifecycle commands')
+keys
+  .command('list [beamId]')
+  .description('List active and revoked signing keys for an agent')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (beamId: string | undefined, opts: { directory?: string; json?: boolean }) => {
+    await cmdKeysList(beamId, opts)
+  })
+
+keys
+  .command('rotate')
+  .description('Rotate the local agent signing key and update .beam/identity.json')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (opts: { directory?: string; json?: boolean }) => {
+    await cmdKeysRotate(opts)
+  })
+
+keys
+  .command('revoke <publicKey>')
+  .description('Revoke a previously rotated-out signing key')
+  .option('-d, --directory <url>', 'Override directory URL')
+  .option('--json', 'Output raw JSON')
+  .action(async (publicKey: string, opts: { directory?: string; json?: boolean }) => {
+    await cmdKeysRevoke(publicKey, opts)
   })
 
 program.configureOutput({
