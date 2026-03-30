@@ -5,6 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Beam Playground | Send a Test Message in Your Browser</title>
   <meta name="description" content="Send a test message to Beam's public demo responder. This page creates a temporary Beam identity in your browser, shows the reply, and keeps the technical log available if you want it." />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%23f15a24%22/><path d=%22M17 46V18h8.8c4.4 0 7.2 2.4 7.2 6.4 0 2.7-1.4 4.8-3.8 5.7 3 .7 4.8 3 4.8 6.2 0 4.4-3.1 7.7-8.8 7.7H17Zm5.4-16.6h2.5c1.8 0 2.9-1 2.9-2.7 0-1.7-1.1-2.7-2.9-2.7h-2.5v5.4Zm0 11.9h3.2c2.3 0 3.6-1.2 3.6-3.2 0-2.1-1.3-3.3-3.6-3.3h-3.2v6.5Z%22 fill=%22white%22/></svg>" />
   <style>
     :root {
       --bg: #0b0f14;
@@ -792,32 +793,41 @@
 
       await new Promise((resolve, reject) => {
         const timeout = window.setTimeout(() => {
+          cleanup();
           reject(new Error('Timed out while opening the Beam WebSocket connection'));
         }, 12000);
 
-        const handleOpen = () => {
+        const cleanup = () => {
+          clearTimeout(timeout);
           socket.removeEventListener('message', handleMessage);
+          socket.removeEventListener('error', handleError);
+          socket.removeEventListener('close', handleClose);
+        };
+
+        const handleClose = (event) => {
+          cleanup();
+          reject(new Error(event.reason || 'WebSocket closed before Beam confirmed the session'));
+        };
+
+        const handleError = () => {
+          cleanup();
+          reject(new Error('WebSocket connection failed'));
         };
 
         const handleMessage = (event) => {
           try {
             const payload = JSON.parse(event.data);
             if (payload.type === 'connected') {
-              clearTimeout(timeout);
-              socket.removeEventListener('open', handleOpen);
-              socket.removeEventListener('message', handleMessage);
+              cleanup();
               resolve();
             }
           } catch {
           }
         };
 
-        socket.addEventListener('open', handleOpen, { once: true });
         socket.addEventListener('message', handleMessage);
-        socket.addEventListener('error', () => {
-          clearTimeout(timeout);
-          reject(new Error('WebSocket connection failed'));
-        }, { once: true });
+        socket.addEventListener('error', handleError, { once: true });
+        socket.addEventListener('close', handleClose, { once: true });
       });
     }
 
