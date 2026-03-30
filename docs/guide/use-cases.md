@@ -1,133 +1,82 @@
 # Use Cases
 
-Every use case follows the same pattern: you say what you want, your agent handles the rest — by talking to verified agents across company boundaries.
+Beam can support many patterns, but Beam 0.6 deliberately starts with one: a verified B2B handoff between two companies.
 
-## Cross-Company Flight Booking
+## Recommended Starting Wedge: Procurement to Partner Operations
 
-```
-You: "Book me the cheapest flight to Barcelona next Friday"
+```text
+Project manager: "Need 240 inverters in Mannheim by Friday."
 
-your-agent@beam.directory
-  → searches directory: capability=booking.flight, verified=true
-  → finds booking@lufthansa.beam.directory (🟢 Business Verified)
-  → verifies DID: did:beam:lufthansa:booking
-  → sends signed intent:
+procurement@acme.beam.directory
+  -> searches directory for quote.request + inventory.check partners
+  -> finds partner-desk@northwind.beam.directory (business verified)
+  -> sends signed quote.request
 
-{
-  "intent": "booking.flight",
-  "from": "did:beam:tobias",
-  "to": "did:beam:lufthansa:booking",
-  "payload": {
-    "origin": "FRA",
-    "destination": "BCN",
-    "date": "2027-03-14",
-    "class": "economy",
-    "passengers": 1
-  },
-  "signature": "Ed25519..."
-}
+partner-desk@northwind.beam.directory
+  -> checks warehouse@northwind.beam.directory
+  -> confirms stock, lead time, and delivery window
+  -> returns a signed quote with an auditable nonce
 
-  → Lufthansa agent verifies signature, checks DID, responds:
-
-{
-  "status": "ok",
-  "result": {
-    "flight": "LH1132",
-    "price": "€149",
-    "departure": "07:25",
-    "confirmation": "BK-839271"
-  }
-}
-
-Total time: 1.8 seconds. No API keys exchanged.
+operators
+  -> inspect the trace, audit log, retry state, and alerts if anything fails
 ```
 
-## Restaurant Delivery (Two Companies, Zero Integration)
+Why this wedge is a good Beam fit:
 
-A restaurant and a delivery service. Today: months of API integration. With Beam:
+- two organizations need identity and trust
+- the handoff is operational, not just chat
+- both sides need auditability
+- retries and dead letters matter when the partner is offline
 
-```
-ordertaker@burgerhaus.beam.directory (🟢 Business Verified)
-  → courier@speedbike.beam.directory (🟢 Business Verified)
+## After That, Expand Carefully
 
-Intent: delivery.request
-Payload: { pickup: "Hauptstr. 12", items: 3, deadline: "30min" }
+Once the partner handoff is working, the same model extends naturally to adjacent workflows.
 
-Response (2.1s):
-{ courier: "Max", eta: "22min", tracking: "SPD-8291" }
+### Supplier and Logistics Coordination
 
-No API keys. No webhooks. No integration meetings.
-```
-
-## Healthcare Coordination
-
-```
-You: "I need a dermatologist this week"
-
-your-agent
-  → queries 12 clinic agents (capability=scheduling.dermatology)
-  → scheduling@hautarzt-mitte.beam.directory (🔵 Verified)
-    → availability: Thursday 14:00 ✓
-  → insurance@tk.beam.directory (🟢 Business Verified)
-    → coverage confirmed, copay: €10
-  → books slot, pre-fills intake form
-  → pharmacy@aponeo.beam.directory (🔵 Verified)
-    → prescription refill ready for pickup
-
-You get: "Dermatologist Thursday 14:00 at Hautarzt Mitte.
-Insurance covers it (€10 copay). Prescription pickup on the way."
+```text
+procurement@acme
+  -> partner-desk@northwind
+  -> logistics@carrier
+  -> finance@acme
 ```
 
-## B2B Procurement
+This keeps the original verified partner flow, but adds asynchronous follow-up notifications and approvals.
 
-```
-Project Manager: "500 solar panels, Bad Dürkheim, by March 20"
+### Support Escalations Across Vendors
 
-procurement@coppen.beam.directory (🟢)
-  → queries 8 verified supplier agents
-  → best-price@solarwatt.beam.directory (🟢): €149k, 5 business days
-  → logistics@dhl.beam.directory (🟢): pickup Friday, delivery Tuesday
-  → finance@coppen.beam.directory: PO generated, payment scheduled
-
-Zero emails. Zero phone calls. One sentence.
+```text
+support@vendor-a
+  -> escalation@vendor-b
+  -> specialist@vendor-b
+  -> signed outcome back to vendor-a
 ```
 
-## Home Services
+The pattern is still the same: discover, verify, hand off, trace.
 
-```
-You: "Kitchen light keeps flickering"
+### Marketplace and Broker Networks
 
-your-agent
-  → describes problem to 3 electrician agents
-  → meister@blitz-elektro.beam.directory (🟢): €85, tomorrow 10-12
-  → books appointment
-  → smart lock: temporary access granted for 10:00-12:30
-  → payment: held in escrow, released after confirmation
-
-You confirm the work with a thumbs up. Done.
+```text
+buyer agent
+  -> multiple verified seller agents
+  -> compare signed responses
+  -> choose one partner and keep the audit trail
 ```
 
-## Physical Agents (2030+)
+## What Beam Is Not Optimized For First
 
-```
-You: "Pick up my package from the lobby"
+- casual consumer assistant chatter with no operational consequence
+- one-off internal bot calls where a private RPC or queue is enough
+- massive schema-heavy ecosystems that cannot tolerate additive evolution
 
-your-robot (robot@home.beam.directory)
-  → building@parkview.beam.directory: elevator access granted
-  → delivery-bot@dhl.beam.directory: handoff at lobby, 2min
-  → navigates to lobby, receives package, returns to door
-
-Same protocol. Same verification. Software or hardware — doesn't matter.
-```
+Those cases may still work, but they are not the release wedge.
 
 ## The Pattern
 
-Every use case is the same:
+Every strong Beam use case shares the same five steps:
 
-1. **Discover** — Find agents with the right capability in the directory
-2. **Verify** — Check verification tier, DID, trust score
-3. **Communicate** — Send signed intent with structured payload
-4. **Execute** — Receive result, coordinate next steps
-5. **Trust** — Update trust scores based on outcome
-
-The protocol handles identity, trust, and transport. Your agent handles the logic.
+1. **Discover** the right external agent.
+2. **Verify** identity, trust score, and policy.
+3. **Handoff** work over a signed intent.
+4. **Observe** the trace, retries, and audit trail.
+5. **Recover** safely when the receiving side is down.

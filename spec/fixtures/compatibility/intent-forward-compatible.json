@@ -1,0 +1,21 @@
+{
+  "v": "1",
+  "intent": "quote.request",
+  "from": "procurement@acme.beam.directory",
+  "to": "partner-desk@northwind.beam.directory",
+  "payload": {
+    "sku": "INV-240",
+    "quantity": 240,
+    "shipTo": "Mannheim, DE",
+    "priority": "rush"
+  },
+  "nonce": "compat-quote-request-001",
+  "timestamp": "__NOW__",
+  "signature": "compat-signature",
+  "traceId": "compat-trace-001",
+  "replyTo": "procurement@acme.beam.directory",
+  "meta": {
+    "schemaRevision": "2026-03",
+    "confidenceRequested": true
+  }
+}

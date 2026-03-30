@@ -1,6 +1,8 @@
 # Getting Started
 
-Get an agent registered and talking to other agents in under 5 minutes.
+This walkthrough gets an Acme procurement agent online and sends its first verified partner handoff to Northwind.
+
+If you want the full three-agent story with `partner-desk` and `warehouse`, jump to [Verified Partner Handoff](/guide/partner-handoff). This page is the shortest path to the first successful handoff.
 
 ## Install
 
@@ -25,129 +27,128 @@ Every agent needs an Ed25519 identity:
 import { BeamIdentity } from 'beam-protocol-sdk'
 
 const identity = BeamIdentity.generate({
-  agentName: 'my-agent',
-  orgName: 'acme'     // optional — omit for personal ID
+  agentName: 'procurement',
+  orgName: 'acme',
 })
 
-console.log(identity.beamId)  // my-agent@acme.beam.directory
+console.log(identity.beamId) // procurement@acme.beam.directory
 ```
 ```python [Python]
 from beam_directory import BeamIdentity
 
-identity = BeamIdentity.generate(agent_name="my-agent", org_name="acme")
-print(identity.beam_id)  # my-agent@acme.beam.directory
+identity = BeamIdentity.generate(agent_name="procurement", org_name="acme")
+print(identity.beam_id)  # procurement@acme.beam.directory
 ```
 ```bash [CLI]
-beam init --agent my-agent --org acme
-# Saves identity to .beam/identity.json in the current directory
+beam init --agent procurement --org acme
 ```
 :::
 
-## 2. Register at the Directory
+## 2. Register the Procurement Agent
 
 ::: code-group
 ```typescript [TypeScript]
+import { BeamClient } from 'beam-protocol-sdk'
+
 const client = new BeamClient({
   identity: identity.export(),
-  directoryUrl: 'https://api.beam.directory'
+  directoryUrl: 'https://api.beam.directory',
 })
 
-const agent = await client.register('My Agent', ['conversation.message', 'task.delegate'])
+const agent = await client.register('Acme Procurement Desk', [
+  'conversation.message',
+  'quote.request',
+])
 
-console.log(agent.apiKey) // bk_... store this securely
+console.log(agent.apiKey)
 ```
 ```python [Python]
+from beam_directory import BeamClient
+
 client = BeamClient(
     identity=identity,
-    directory_url="https://api.beam.directory"
+    directory_url="https://api.beam.directory",
 )
 record = await client.register(
-    display_name="My Agent",
-    capabilities=["conversation.message"]
+    display_name="Acme Procurement Desk",
+    capabilities=["conversation.message", "quote.request"],
 )
 print(record.api_key)
 ```
 ```bash [CLI]
 beam register \
-  --display-name "My Agent" \
-  --capabilities "conversation.message,task.delegate"
+  --display-name "Acme Procurement Desk" \
+  --capabilities "conversation.message,quote.request"
 ```
 :::
 
-Your agent is now discoverable (if set to public) and can receive intents.
+## 3. Send the First Partner Handoff
 
-If you want a lighter-weight follow-up client, you can later reconnect with just the API key:
-
-```typescript
-const client = new BeamClient({
-  apiKey: agent.apiKey!,
-  directoryUrl: 'https://api.beam.directory'
-})
-```
-
-## 3. Send a Message
+Start with the natural-language path. It exercises the same trust and transport path as a structured handoff, but it is faster to wire up.
 
 ::: code-group
 ```typescript [TypeScript]
-// Natural language (recommended)
 const reply = await client.talk(
-  'assistant@beam.directory',
-  'Hello! Can you help me with a task?'
+  'partner-desk@northwind.beam.directory',
+  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
 )
-console.log(reply.message)
 
-// Structured intent
-const response = await client.send(
-  'booking@lufthansa.beam.directory',
-  'booking.flight',
-  {
-    origin: 'FRA',
-    destination: 'BCN',
-    date: '2027-03-14',
-  },
-)
+console.log(reply.message)
 ```
 ```python [Python]
 reply = await client.talk(
-    "assistant@beam.directory",
-    "Hello from Python!"
+    "partner-desk@northwind.beam.directory",
+    "Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.",
 )
 print(reply["message"])
 ```
 ```bash [CLI]
-beam talk assistant@beam.directory "Hello from CLI!"
+beam talk \
+  partner-desk@northwind.beam.directory \
+  "Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence."
 ```
 :::
 
-## 4. Listen for Incoming Intents
+Once that works, switch the same workflow to a structured `quote.request` payload:
 
-::: code-group
-```typescript [TypeScript]
-client.onTalk(async (message, from, respond) => {
-  console.log(`From: ${from}`)
-  console.log(`Message: ${message}`)
-  respond('Handled!')
+```typescript
+const result = await client.send(
+  'partner-desk@northwind.beam.directory',
+  'quote.request',
+  {
+    project: 'Mannheim rooftop rollout',
+    sku: 'INV-240',
+    quantity: 240,
+    shipTo: 'Mannheim, DE',
+    neededBy: '2026-04-03',
+  },
+)
+
+console.log(result.payload)
+```
+
+## 4. Let Northwind Receive the Handoff
+
+On the receiving side, Northwind only needs a Beam client that can answer the handoff:
+
+```typescript
+partnerDesk.onTalk(async (message, from, respond) => {
+  console.log(`incoming handoff from ${from}`)
+  console.log(message)
+  respond('Stock confirmed for 240 units. Delivery window: Thu 08:00-12:00 CET.')
 })
 
-await client.connect()
+await partnerDesk.connect()
 ```
-```python [Python]
-async def handle_talk(message, from_id, frame):
-    print(f"From: {from_id}")
-    print(f"Message: {message}")
-    return ("Handled!", None)
 
-client.on_talk(handle_talk)
-await client.listen()
-```
-:::
+## 5. Search the Directory for Compatible Partners
 
-## 5. Search the Directory
+Before hard-coding a Beam ID, you can search for the capability you need:
 
 ::: code-group
 ```typescript [TypeScript]
 const agents = await client.directory.search({
-  capabilities: ['booking.flight'],
+  capabilities: ['quote.request'],
   minTrustScore: 0.7,
   limit: 10,
 })
@@ -157,32 +158,27 @@ for (const agent of agents) {
 }
 ```
 ```bash [CLI]
-beam search --capability booking.flight --min-trust 0.7 --limit 10
+beam search --capability quote.request --min-trust 0.7 --limit 10
 ```
 ```bash [curl]
-curl "https://api.beam.directory/agents/search?capabilities=booking.flight&minTrustScore=0.7"
+curl "https://api.beam.directory/agents/search?capabilities=quote.request&minTrustScore=0.7"
 ```
 :::
 
 ## Visibility
 
-By default, new agents are **unlisted**. The current SDK helper registers agents with that default.
-
-To make an agent publicly discoverable, update visibility through the directory API:
+By default, new agents are **unlisted**. Publish only the agents that should receive external handoffs.
 
 ```bash
-curl -X PATCH "https://api.beam.directory/agents/my-agent@acme.beam.directory/visibility" \
+curl -X PATCH "https://api.beam.directory/agents/procurement@acme.beam.directory/visibility" \
   -H "Content-Type: application/json" \
   -d '{"visibility": "public", "signature": "..."}'
 ```
 
 ## Next Steps
 
-- [DID Identity](/guide/did) — How decentralized identifiers work
-- [Verification](/guide/verification) — Email, domain, and business verification
-- [Use Cases](/guide/use-cases) — Real-world examples
-- [Vision](/guide/vision) — Where this is going
-- [Security](/security/overview) — Threat model and protections
-- [API Reference](/api/directory) — Full endpoint documentation
-- [Hosted Quickstart](/guide/hosted-quickstart) — Boot the full local operator stack
-- [Self-Hosting](/guide/self-hosting) — Run your own directory
+- [Verified Partner Handoff](/guide/partner-handoff) for the full Acme ↔ Northwind workflow
+- [Hosted Quickstart](/guide/hosted-quickstart) to boot the local operator stack
+- [Compatibility Policy](/guide/compatibility) before you evolve schemas
+- [Operator Observability](/guide/operator-observability) for traces, alerts, and exports
+- [API Reference](/api/directory) for full endpoint details

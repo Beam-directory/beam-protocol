@@ -1,5 +1,23 @@
 # Changelog
 
+## v0.6.0 (Unreleased)
+
+### Release Direction
+- narrow Beam onboarding around one verified B2B workflow: Acme procurement -> Northwind partner desk -> Northwind warehouse
+- align README, docs landing, getting started, examples, and public-site copy around the same handoff story
+
+### Compatibility
+- document the `beam/1` compatibility contract across protocol, directory, CLI, TypeScript SDK, and Python SDK
+- make schema evolution rules explicit: additive fields only, ignore unknown fields, `payload` canonical with legacy `params` alias
+- add shared compatibility fixtures and parser regression tests
+
+### Dogfood and Operations
+- add a reproducible partner-handoff dogfood run
+- publish a 0.6.0 release-readiness report with concrete findings, risks, and follow-ups
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam 0.6 remains on `beam/1`.
+
 ## v0.5.2 (2026-03-28)
 
 - fix monorepo release readiness and workspace build ordering

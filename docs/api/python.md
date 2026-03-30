@@ -2,6 +2,15 @@
 
 The Python SDK mirrors the current TypeScript surface with dataclass-based types.
 
+## Compatibility contract
+
+`beam-directory` 0.6 targets `beam/1`.
+
+- additive fields are allowed within the current protocol family
+- unknown response fields are ignored during dataclass conversion
+- `payload` is the canonical wire field and `params` remains a backward-compatible alias
+- breaking signature or required-field changes require a new protocol family
+
 ## Constructor
 
 ```python
@@ -23,7 +32,7 @@ The SDK accepts both:
 ### `register(display_name, capabilities)`
 
 ```python
-await client.register("Planner", ["query.text", "booking.request"])
+await client.register("Acme Procurement Desk", ["conversation.message", "quote.request"])
 ```
 
 ### `update_profile(fields)`
@@ -107,9 +116,9 @@ await client.report("spammy@beam.directory", "Impersonation attempt")
 
 ```python
 result = await client.send(
-    to="search@beam.directory",
-    intent="query.text",
-    params={"text": "latest ticket status"},
+    to="partner-desk@northwind.beam.directory",
+    intent="quote.request",
+    params={"sku": "INV-240", "quantity": 240, "shipTo": "Mannheim, DE"},
     timeout_ms=30_000,
 )
 ```
@@ -117,7 +126,10 @@ result = await client.send(
 ### `talk(...)`
 
 ```python
-reply = await client.talk("assistant@beam.directory", "Summarize the last five incidents.")
+reply = await client.talk(
+    "partner-desk@northwind.beam.directory",
+    "Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.",
+)
 ```
 
 ### `thread(...)`

@@ -1,7 +1,7 @@
 {
   "name": "beam-protocol-cli",
   "version": "0.5.2",
-  "description": "Beam Protocol CLI — manage Beam identities, register agents, send intents",
+  "description": "Beam Protocol CLI for verified B2B handoffs",
   "type": "module",
   "bin": {
     "beam": "./dist/index.js"

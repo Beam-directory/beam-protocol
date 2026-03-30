@@ -151,7 +151,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     const msgId = insertMessage(db, { nonce, sender, recipient, intent, payload, priority, traceId })
     const message = getMessage(db, msgId)
     const messageNonce = message?.nonce ?? nonce ?? msgId
-    const now = Date.now() / 1000
+    const createdAt = message?.created_at ?? Date.now() / 1000
 
     // Attempt immediate delivery
     markDispatched(db, msgId)
@@ -160,7 +160,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     if (result.success) {
       markDelivered(db, msgId)
       console.log(`[beam-bus] ✅ ${sender} → ${recipient} (${intent}) delivered`)
-      return c.json({ message_id: msgId, nonce: messageNonce, status: 'delivered', created_at: now }, 201)
+      return c.json({ message_id: msgId, nonce: messageNonce, status: 'delivered', created_at: createdAt }, 201)
     }
 
     if (!result.retryable) {
@@ -170,21 +170,21 @@ export function createBusRouter(options: RouterOptions): Hono {
         message_id: msgId,
         nonce: messageNonce,
         status: 'dead_letter',
-        created_at: now,
+        created_at: createdAt,
         error: result.error,
         error_code: result.errorCode,
       }, 201)
     }
 
     const retryCount = 1
-    const nextRetry = computeRetryAt(retryCount, messageNonce, now)
+    const nextRetry = computeRetryAt(retryCount, messageNonce, createdAt)
     scheduleRetry(db, msgId, retryCount, nextRetry, result.error)
     console.log(`[beam-bus] ⏳ ${sender} → ${recipient} (${intent}) queued: ${result.error}`)
     return c.json({
       message_id: msgId,
       nonce: messageNonce,
       status: 'queued',
-      created_at: now,
+      created_at: createdAt,
       retry_count: retryCount,
       next_retry_at: nextRetry,
       error: result.error,

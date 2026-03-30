@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam Protocol — SMTP for AI Agents</title>
-  <meta name="description" content="The open communication protocol for AI agents. Give every agent a global address, signed messages, and a discoverable directory." />
-  <meta property="og:title" content="Beam Protocol — SMTP for AI Agents" />
-  <meta property="og:description" content="Every AI agent deserves an address. Beam is the open protocol for agent-to-agent communication." />
+  <title>Beam Protocol — Verified B2B Handoffs for AI Agents</title>
+  <meta name="description" content="Verified B2B handoffs for AI agents. Beam gives partner agents signed messages, traceable nonces, and an operator-visible directory." />
+  <meta property="og:title" content="Beam Protocol — Verified B2B Handoffs for AI Agents" />
+  <meta property="og:description" content="Beam helps one company hand work to another company's agent with verified addresses, signed intents, and traceable outcomes." />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Beam Protocol — SMTP for AI Agents" />
-  <meta name="twitter:description" content="The open communication protocol for AI agents. Global identity, signed messages, discoverable directory." />
+  <meta name="twitter:title" content="Beam Protocol — Verified B2B Handoffs for AI Agents" />
+  <meta name="twitter:description" content="Beam helps one company hand work to another company's agent with verified addresses, signed intents, and traceable outcomes." />
   <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Beam Protocol" />
@@ -29,7 +29,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Beam Protocol",
-    "description": "The open communication protocol for AI agents. SMTP for AI — global identity, signed messages, discoverable directory.",
+    "description": "Verified B2B handoffs for AI agents with signed messages, traceable nonces, and operator visibility.",
     "url": "https://beam.directory",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Cross-platform",
@@ -62,7 +62,7 @@
         "name": "What is Beam Protocol?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Beam Protocol is an open communication protocol for AI agents — like SMTP for email, but for agent-to-agent communication. It provides globally unique Beam IDs, Ed25519-signed messages, and a discoverable directory."
+          "text": "Beam Protocol is an open protocol for verified B2B agent handoffs. It gives partner agents Beam IDs, Ed25519-signed messages, replay protection, and an operator-visible directory."
         }
       },
       {
@@ -86,7 +86,7 @@
         "name": "Is Beam Protocol production-ready?",
         "acceptedAnswer": {
           "@type": "Answer",
-          "text": "Yes. Beam Protocol has been live in production since March 2026 at Acme Corp, with 4 AI agents communicating across 2 physical machines. The fastest end-to-end intent took 6.7 seconds."
+          "text": "Beam is release-focused around controlled B2B workflows. The repository ships a local quickstart, observability dashboard, and a reproducible dogfood run for the Acme to Northwind partner handoff."
         }
       }
     ]
@@ -927,17 +927,17 @@
 
     <div class="hero-badge">
       <div class="pulse"></div>
-      Live in Production · 4 Agents · March 2026
+      Beam 0.6 Focus · Verified B2B Handoffs
     </div>
 
     <h1>
-      <span class="accent">SMTP</span> for AI Agents
+      Verified <span class="accent">B2B</span> handoffs for AI agents
     </h1>
 
     <p class="tagline">
-      Every AI agent deserves a global address and a standard way to communicate.
-      Beam gives agents a <strong>Beam ID</strong>, cryptographically signed messages,
-      and a discoverable directory — all open source.
+      Beam gives <strong>procurement@acme</strong> a reliable way to hand work to
+      <strong>partner-desk@northwind</strong>, get a signed result back, and inspect the
+      exact trace when the partner side is slow or offline.
     </p>
 
     <div class="hero-actions">
@@ -945,8 +945,8 @@
         <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
         View on GitHub
       </a>
-      <a href="/playground.html" class="btn-secondary">
-        Try the web playground →
+      <a href="https://docs.beam.directory/guide/partner-handoff" class="btn-secondary">
+        Read the handoff guide →
       </a>
     </div>
 
@@ -954,7 +954,7 @@
       <div class="beam-id-box">
         <span class="icon">🤖</span>
         <div>
-          <span class="agent">jarvis</span><span class="at">@</span><span class="org">acme</span><span class="domain">.beam.directory</span>
+          <span class="agent">procurement</span><span class="at">@</span><span class="org">acme</span><span class="domain">.beam.directory</span>
         </div>
         <span class="label">Beam ID</span>
       </div>
@@ -962,20 +962,20 @@
 
     <div class="stats-row fade-up">
       <div class="stat">
-        <div class="stat-value" id="hero-agents">4</div>
-        <div class="stat-label">Live Agents</div>
+        <div class="stat-value">beam/1</div>
+        <div class="stat-label">Compatibility</div>
       </div>
       <div class="stat">
-        <div class="stat-value" id="hero-uptime">6.7s</div>
-        <div class="stat-label">Uptime</div>
+        <div class="stat-value">Nonce</div>
+        <div class="stat-label">Traceable Handoffs</div>
       </div>
       <div class="stat">
         <div class="stat-value">Ed25519</div>
         <div class="stat-label">Signed Frames</div>
       </div>
       <div class="stat">
-        <div class="stat-value">0</div>
-        <div class="stat-label">Cloud Deps</div>
+        <div class="stat-value">Retry</div>
+        <div class="stat-label">Recovery Ready</div>
       </div>
     </div>
     <div class="stats-live fade-up" id="hero-stats-live" aria-live="polite">
@@ -990,41 +990,41 @@
   <div class="container">
     <div class="section-header fade-up">
       <span class="section-label">How it works</span>
-      <h2>Three building blocks for agent communication</h2>
-      <p>Beam is minimal by design. Just enough structure to make agents discoverable and interoperable.</p>
+      <h2>One workflow, three building blocks</h2>
+      <p>Beam 0.6 is intentionally narrow: get one partner handoff working end to end, then expand from there.</p>
     </div>
 
     <div class="pillars-grid">
       <div class="pillar-card fade-up">
         <div class="pillar-icon orange">📛</div>
-        <h3>Beam ID</h3>
-        <p>Every agent gets a globally unique, human-readable address. Like email but for AI — no DNS setup, no OAuth dance.</p>
+        <h3>Verified Addresses</h3>
+        <p>Both companies know which agent sent the request and which agent answered it. No shared vendor secret or custom API account required.</p>
         <div class="pillar-detail">
-          <span>agent</span>@org.beam.directory<br/>
-          › Verified via Ed25519 keypair<br/>
-          › Portable across deployments
+          procurement@acme.beam.directory<br/>
+          › Ed25519 identity + DID<br/>
+          › portable across deployments
         </div>
       </div>
 
       <div class="pillar-card fade-up">
         <div class="pillar-icon blue">⚡</div>
-        <h3>Intent & Result Frames</h3>
-        <p>Agents communicate via tiny, signed JSON frames. Under 1 KB, routed in milliseconds, with built-in replay protection.</p>
+        <h3>Signed Handoffs</h3>
+        <p>The procurement request, warehouse lookup, and final quote all move as signed intents and results with replay-safe nonces.</p>
         <div class="pillar-detail">
-          intent: "<span>payment.status_check</span>"<br/>
-          payload: { invoiceId: "INV-2847" }<br/>
+          intent: "<span>quote.request</span>"<br/>
+          payload: { sku: "INV-240", quantity: 240 }<br/>
           signature: Ed25519
         </div>
       </div>
 
       <div class="pillar-card fade-up">
         <div class="pillar-icon green">🗂️</div>
-        <h3>Directory</h3>
-        <p>A registry where agents publish their capabilities. Search by org, capability, or connection status. Self-hostable.</p>
+        <h3>Operator Visibility</h3>
+        <p>The same handoff shows up in traces, audit history, alerts, and retry state so operations teams can debug real partner failures.</p>
         <div class="pillar-detail">
-          GET /directory/agents<br/>
-          › 4 agents connected<br/>
-          › Real-time status via WebSocket
+          /observability/intents/:nonce<br/>
+          › alerts, audit, dead letters<br/>
+          › real-time status and recovery
         </div>
       </div>
     </div>
@@ -1035,31 +1035,31 @@
 <section id="vision" style="padding: 100px 0; background: linear-gradient(135deg, #0a0a0f 0%, #1a0800 50%, #0a0a0f 100%); color: #e4e4ef;">
   <div class="container">
     <div class="section-header fade-up">
-      <span class="section-label">The Vision</span>
-      <h2 style="color: #f4f4f5;">Every interaction will be agent-mediated.</h2>
-      <p style="max-width: 640px; margin: 0 auto; color: #a1a1aa;">You won't book flights. You won't order food. You won't fill out forms. You won't wait on hold. Your agent will — by talking to other agents.</p>
+      <span class="section-label">Why This Workflow</span>
+      <h2 style="color: #f4f4f5;">Start where trust, traceability, and retries actually matter.</h2>
+      <p style="max-width: 640px; margin: 0 auto; color: #a1a1aa;">A partner quote handoff is concrete, operational, and unforgiving. If Beam works there, it is solving a real problem rather than demo theater.</p>
     </div>
 
     <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 48px;" class="vision-grid fade-up">
       <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
         <div style="font-size: 1.6rem; margin-bottom: 10px;">📅</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Today</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">47 tabs, 3 forms, 2 phone calls, 45 minutes — just to book a flight and hotel.</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Cross-company by default</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">Procurement can ask a supplier agent for stock and delivery without bespoke OAuth, vendor-specific secrets, or a custom one-off integration.</div>
       </div>
       <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 14px; padding: 28px;">
         <div style="font-size: 1.6rem; margin-bottom: 10px;">⚡</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">2027</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">"Book Barcelona next Friday." Your agent talks to Lufthansa, Allianz, and your calendar. Done in 4 seconds.</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Signed and inspectable</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">Every handoff has a nonce, a signature, a result, and a trace. That makes partner automation governable instead of magical.</div>
       </div>
       <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
         <div style="font-size: 1.6rem; margin-bottom: 10px;">🤖</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">2030+</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">You mention you're hungry. Food arrives. Your robot picks up the delivery. You never opened an app.</div>
+        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Recoverable when it fails</div>
+        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">If the supplier side is down, the queue, retries, restart recovery, and dead-letter surfaces make the failure operationally manageable.</div>
       </div>
     </div>
 
     <div style="text-align: center; margin-bottom: 12px;" class="fade-up">
-      <a href="https://github.com/Beam-directory/beam-protocol/blob/main/VISION.md" target="_blank" style="color: var(--accent); font-size: 0.9rem; text-decoration: none; border-bottom: 1px solid rgba(247,92,3,0.3);">Read the full Vision Document →</a>
+      <a href="https://docs.beam.directory/guide/partner-handoff" target="_blank" style="color: var(--accent); font-size: 0.9rem; text-decoration: none; border-bottom: 1px solid rgba(247,92,3,0.3);">See the canonical partner handoff →</a>
     </div>
   </div>
 </section>
@@ -1068,89 +1068,57 @@
 <section id="use-cases" style="padding: 100px 0;">
   <div class="container">
     <div class="section-header fade-up">
-      <span class="section-label">Use Cases</span>
-      <h2>One sentence. Any service. Seconds.</h2>
-      <p style="max-width: 580px; margin: 0 auto;">Every use case follows the same pattern: you say what you want, your agent handles the rest — by talking to verified agents across company boundaries.</p>
+      <span class="section-label">First Workflow</span>
+      <h2>The Acme to Northwind partner handoff</h2>
+      <p style="max-width: 640px; margin: 0 auto;">Beam 0.6 does not ask you to imagine every possible agent future. It asks you to make this workflow work reliably first.</p>
     </div>
 
     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="use-cases-grid fade-up">
-
-      <!-- Travel -->
       <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
         <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">🛫</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Travel & Booking</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Fly me to Tokyo, business class, and book the Park Hyatt."</p>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">1</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Acme starts the request</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence."</p>
         <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          your-agent → booking@lufthansa 🟢<br/>
-          → hotels@hyatt 🔵<br/>
-          → insurance@allianz 🟢<br/>
-          → calendar updated ✅
+          procurement@acme.beam.directory<br/>
+          → partner-desk@northwind.beam.directory<br/>
+          intent: quote.request
         </div>
       </div>
 
-      <!-- Food -->
       <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
         <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">🍕</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Food & Delivery</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Order what I usually get from that Thai place."</p>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">2</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Northwind checks fulfillment</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">The partner desk queries the warehouse before promising stock or a delivery window.</p>
         <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          your-agent → kitchen@somtum 🔵<br/>
-          → courier@speedbike 🟢<br/>
-          → payment handled, ETA 22min ✅
+          partner-desk@northwind<br/>
+          → warehouse@northwind<br/>
+          intent: inventory.check
         </div>
       </div>
 
-      <!-- Healthcare -->
       <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
         <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">🏥</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Healthcare</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"I need a dermatologist appointment this week."</p>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">3</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Acme gets a signed answer back</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">The final result includes the supplier, price, inventory confidence, and a traceable nonce.</p>
         <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          your-agent → scheduling@hautarzt-mitte 🔵<br/>
-          → insurance@tk 🟢 (coverage confirmed)<br/>
-          → pharmacy@aponeo 🔵 (refill ready) ✅
+          totalPriceEur: 44160<br/>
+          shipWindow: "Thu 08:00-12:00 CET"<br/>
+          supplier: partner-desk@northwind
         </div>
       </div>
 
-      <!-- Home Services -->
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">🏠</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Home & Services</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"The kitchen light keeps flickering."</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          your-agent → 3 electricians (compare quotes)<br/>
-          → meister@blitz-elektro 🟢 (best match)<br/>
-          → smart-lock: temp access granted ✅
-        </div>
-      </div>
-
-      <!-- B2B -->
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">💼</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">B2B Procurement</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"We need 500 solar panels in Bad Dürkheim by March 20."</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          procurement@acme 🟢 → 8 supplier agents<br/>
-          → best-price@solarwatt 🟢 (€149k, 5 days)<br/>
-          → logistics@dhl 🟢 → finance@acme ✅
-        </div>
-      </div>
-
-      <!-- Robots -->
       <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
         <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">🤖</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Physical Agents (2030+)</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Go pick up my package from the lobby."</p>
+        <div style="font-size: 1.3rem; margin-bottom: 8px;">4</div>
+        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Operators can inspect and recover</h3>
+        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">If Northwind is offline, the same handoff can be retried, exported, or dead-lettered instead of disappearing into logs.</p>
         <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          your-robot → building@parkview 🟢 (elevator)<br/>
-          → delivery-bot@dhl 🟢 (handoff)<br/>
-          → package at your door ✅
+          /observability/intents/:nonce<br/>
+          /observability/alerts<br/>
+          /v1/beam/dead-letter
         </div>
       </div>
 
@@ -1207,12 +1175,12 @@
     </div>
 
     <div style="max-width: 680px; margin: 0 auto; background: rgba(255,255,255,0.03); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; font-family: 'SF Mono', monospace; font-size: 14px; line-height: 1.7;" class="fade-up">
-      <div style="color: #888; margin-bottom: 16px;">// Real test — March 7, 2026</div>
-      <div style="color: #F75C03; font-weight: 600;">Jarvis → Clara:</div>
-      <div style="color: #e0e0e0; padding-left: 16px; margin-bottom: 12px;">"Hey Clara, was weißt du über Christopher Schnorrenberg?<br/>Deals, Volumen, letzte Aktivität bitte."</div>
-      <div style="color: #4ade80; font-weight: 600;">Clara → Jarvis <span style="color: #666; font-weight: 400;">(7.2s)</span>:</div>
-      <div style="color: #e0e0e0; padding-left: 16px;">"400 Deals, €5.8M Gesamtvolumen. Letzte Aktivität: heute.<br/>Top Deal: Irfan Sahillioglu — €88.213."</div>
-      <div style="color: #666; margin-top: 16px; font-size: 12px;">Clara used her real HubSpot tools to answer. No schema required.</div>
+      <div style="color: #888; margin-bottom: 16px;">// Natural-language handoff</div>
+      <div style="color: #F75C03; font-weight: 600;">procurement@acme → partner-desk@northwind:</div>
+      <div style="color: #e0e0e0; padding-left: 16px; margin-bottom: 12px;">"Need 240 inverters for Mannheim by Friday.<br/>Include delivery window and stock confidence."</div>
+      <div style="color: #4ade80; font-weight: 600;">partner-desk@northwind → procurement@acme <span style="color: #666; font-weight: 400;">(4.8s)</span>:</div>
+      <div style="color: #e0e0e0; padding-left: 16px;">"Stock confirmed for 240 units.<br/>Delivery window: Thu 08:00-12:00 CET. Quote ready."</div>
+      <div style="color: #666; margin-top: 16px; font-size: 12px;">Use talk for the first handoff, then move the same flow to a structured quote.request payload.</div>
     </div>
 
     <div style="text-align: center; margin-top: 40px;" class="fade-up">
@@ -1225,8 +1193,8 @@
     <div style="max-width: 520px; margin: 32px auto 0; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 24px; font-family: 'SF Mono', monospace; font-size: 13px;" class="fade-up">
       <div style="color: #888;">// One line of code:</div>
       <div style="color: #e0e0e0;"><span style="color: #c084fc;">const</span> reply = <span style="color: #c084fc;">await</span> client.<span style="color: #F75C03;">talk</span>(</div>
-      <div style="color: #4ade80; padding-left: 24px;">'clara@acme.beam.directory',</div>
-      <div style="color: #4ade80; padding-left: 24px;">'Was weißt du über Chris?'</div>
+      <div style="color: #4ade80; padding-left: 24px;">'partner-desk@northwind.beam.directory',</div>
+      <div style="color: #4ade80; padding-left: 24px;">'Need 240 inverters for Mannheim by Friday.'</div>
       <div style="color: #e0e0e0;">)</div>
     </div>
   </div>
@@ -1315,10 +1283,10 @@
 
 <span class="cm">// 1. Generate a Beam identity</span>
 <span class="kw">const</span> identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>({
-  agentName: <span class="str">'jarvis'</span>,
+  agentName: <span class="str">'procurement'</span>,
   orgName: <span class="str">'acme'</span>,
 })
-<span class="cm">// → jarvis@acme.beam.directory</span>
+<span class="cm">// → procurement@acme.beam.directory</span>
 
 <span class="cm">// 2. Connect to the directory</span>
 <span class="kw">const</span> client = <span class="kw">new</span> <span class="fn">BeamClient</span>({
@@ -1327,14 +1295,14 @@
 })
 <span class="kw">await</span> client.<span class="fn">connect</span>()
 
-<span class="cm">// 3. Send an intent — that's it</span>
+<span class="cm">// 3. Send the first partner handoff</span>
 <span class="kw">const</span> result = <span class="kw">await</span> client.<span class="fn">send</span>(
-  <span class="str">'clara@acme.beam.directory'</span>,
-  <span class="str">'payment.status_check'</span>,
-  { invoiceId: <span class="str">'INV-2847'</span> }
+  <span class="str">'partner-desk@northwind.beam.directory'</span>,
+  <span class="str">'quote.request'</span>,
+  { sku: <span class="str">'INV-240'</span>, quantity: <span class="num">240</span>, shipTo: <span class="str">'Mannheim, DE'</span> }
 )
 console.<span class="fn">log</span>(result.payload)
-<span class="cm">// → { status: 'paid', amount: 2185.00, date: '2026-03-05' }</span></pre>
+<span class="cm">// → { totalPriceEur: 44160, shipWindow: 'Thu 08:00-12:00 CET' }</span></pre>
         </div>
 
         <div class="code-panel" id="tab-py">
@@ -1342,10 +1310,10 @@ console.<span class="fn">log</span>(result.payload)
 
 <span class="cm"># 1. Generate a Beam identity</span>
 identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>(
-    agent_name=<span class="str">"jarvis"</span>,
+    agent_name=<span class="str">"procurement"</span>,
     org_name=<span class="str">"acme"</span>
 )
-<span class="cm"># → jarvis@acme.beam.directory</span>
+<span class="cm"># → procurement@acme.beam.directory</span>
 
 <span class="cm"># 2. Connect to the directory</span>
 client = <span class="fn">BeamClient</span>(
@@ -1354,14 +1322,14 @@ client = <span class="fn">BeamClient</span>(
 )
 <span class="kw">await</span> client.<span class="fn">connect</span>()
 
-<span class="cm"># 3. Send an intent</span>
+<span class="cm"># 3. Send the first partner handoff</span>
 result = <span class="kw">await</span> client.<span class="fn">send</span>(
-    to=<span class="str">"clara@acme.beam.directory"</span>,
-    intent=<span class="str">"payment.status_check"</span>,
-    params={<span class="str">"invoiceId"</span>: <span class="str">"INV-2847"</span>}
+    to=<span class="str">"partner-desk@northwind.beam.directory"</span>,
+    intent=<span class="str">"quote.request"</span>,
+    params={<span class="str">"sku"</span>: <span class="str">"INV-240"</span>, <span class="str">"quantity"</span>: <span class="num">240</span>, <span class="str">"shipTo"</span>: <span class="str">"Mannheim, DE"</span>}
 )
 <span class="fn">print</span>(result.payload)
-<span class="cm"># → {"status": "paid", "amount": 2185.00}</span></pre>
+<span class="cm"># → {"totalPriceEur": 44160, "shipWindow": "Thu 08:00-12:00 CET"}</span></pre>
         </div>
 
         <div class="code-panel" id="tab-cli">
@@ -1369,18 +1337,18 @@ result = <span class="kw">await</span> client.<span class="fn">send</span>(
 $ <span class="fn">npm install -g</span> beam-protocol-cli
 
 <span class="cm"># Generate identity</span>
-$ <span class="fn">beam init</span> --agent jarvis --org acme
+$ <span class="fn">beam init</span> --agent procurement --org acme
 <span class="op">✔</span> Identity generated
-  Beam ID: jarvis@acme.beam.directory
+  Beam ID: procurement@acme.beam.directory
 
 <span class="cm"># Look up another agent</span>
-$ <span class="fn">beam lookup</span> clara@acme.beam.directory
-<span class="op">🤖</span> Clara · connected · trust: <span class="op">████████░░</span> 82%
+$ <span class="fn">beam lookup</span> partner-desk@northwind.beam.directory
+<span class="op">🤖</span> Northwind Partner Desk · connected · trust: <span class="op">█████████░</span> 90%
 
 <span class="cm"># Send an intent</span>
-$ <span class="fn">beam send</span> clara@acme.beam.directory payment.status_check \
-    <span class="str">'{"invoiceId":"INV-2847"}'</span>
-<span class="op">✅</span> Result in <span class="num">29.4s</span> — status: paid, amount: €2,185.00</pre>
+$ <span class="fn">beam send</span> partner-desk@northwind.beam.directory quote.request \
+    <span class="str">'{"sku":"INV-240","quantity":240,"shipTo":"Mannheim, DE"}'</span>
+<span class="op">✅</span> Result — shipWindow: Thu 08:00-12:00 CET, totalPriceEur: 44160</pre>
         </div>
       </div>
     </div>

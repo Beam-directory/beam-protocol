@@ -2,83 +2,76 @@
 layout: home
 hero:
   name: Beam Protocol
-  text: SMTP for AI Agents
-  tagline: The open identity, verification, and communication layer that lets any agent talk to any other agent — verified and secure, in seconds.
+  text: "Verified Partner Handoffs for AI Agents"
+  tagline: "Start with one workflow: procurement@acme hands a request to partner-desk@northwind, gets a signed result back, and operators can trace the whole exchange."
   actions:
     - theme: brand
-      text: Get Started
+      text: Start the Partner Handoff
+      link: /guide/partner-handoff
+    - theme: alt
+      text: 5-Minute Setup
       link: /guide/getting-started
     - theme: alt
-      text: View on GitHub
-      link: https://github.com/Beam-directory/beam-protocol
-    - theme: alt
-      text: API Reference
-      link: /api/directory
+      text: Compatibility Policy
+      link: /guide/compatibility
 features:
+  - icon: 🤝
+    title: One Clear Workflow
+    details: "Beam 0.6 leads with a concrete B2B story: Acme procurement asks Northwind partner operations for stock and delivery, then gets a signed quote back."
   - icon: 🆔
-    title: Agent Identity
-    details: Every agent gets a Beam-ID (agent@org.beam.directory), an Ed25519 keypair, and a W3C DID document. No passwords. No API keys.
-  - icon: ✅
-    title: Verification Tiers
-    details: "Email → Domain (DNS TXT) → Business Registry (Handelsregister, Companies House). Four tiers: Basic ⚪, Verified 🔵, Business 🟢, Enterprise 🟠."
-  - icon: ⚡
+    title: Verified Addresses
+    details: "Every agent gets a Beam ID, an Ed25519 keypair, and a DID document so both companies know exactly who sent and received the handoff."
+  - icon: 🔐
     title: Signed Intents
-    details: Structured messages signed with Ed25519, delivered via WebSocket relay in sub-second. Schema-validated payloads. Nonce-based replay protection.
-  - icon: 🔍
-    title: Discovery
-    details: Public directory with search, capability filters, trust scores. Agents opt-in to visibility — unlisted by default for privacy.
-  - icon: 🌐
-    title: Federation
-    details: Multiple directories can sync agents, relay intents, and propagate trust. No single point of control.
-  - icon: 🔑
-    title: DID Identity
-    details: "W3C DID v1.1 compatible. did:beam:tobias (personal), did:beam:lufthansa:booking (org). Ed25519 keys, DNS fallback, no blockchain."
-  - icon: 🛡️
-    title: Security by Default
-    details: Rate limiting, CORS whitelist, input validation (AJV), SQL injection prevention, XSS escaping, Stripe webhook signature verification.
-  - icon: 📦
-    title: Multi-Language SDKs
-    details: TypeScript SDK, Python SDK, CLI, LangChain integration, CrewAI integration. All on npm and PyPI.
+    details: "Intents and results are signed, nonce-protected, and transportable over WebSocket or HTTP without shared API secrets between companies."
+  - icon: 📊
+    title: Operator Visibility
+    details: "The directory and dashboard expose traces, audit entries, dead letters, alerts, and retention controls for the same handoff."
+  - icon: 🔁
+    title: Recovery Built In
+    details: "The message bus adds dedupe, retry, restart recovery, and dead-letter handling for handoffs that cannot be fire-and-forget."
+  - icon: 🧩
+    title: beam/1 Compatibility
+    details: "Beam 0.6 documents how servers, CLI, TypeScript, and Python stay compatible: additive fields only, ignore unknown fields, no silent signature breakage."
 ---
 
-## The Problem
+## Start Here
 
-AI agents can browse the web, write code, and analyze data. But they can't talk to each other — not across companies, not across frameworks, not even across machines.
-
-There's no address book. No identity. No trust.
-
-**Beam Protocol fixes this.** [Read the full vision →](/guide/vision)
-
-## Quick Example
+If you only read one thing, read [Verified Partner Handoff](/guide/partner-handoff). It is the canonical Beam 0.6 onboarding path and the same workflow used in the dogfood report.
 
 ```typescript
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 
-const identity = BeamIdentity.generate({ agentName: 'my-agent', orgName: 'acme' })
+const identity = BeamIdentity.generate({ agentName: 'procurement', orgName: 'acme' })
 const client = new BeamClient({
   identity: identity.export(),
   directoryUrl: 'https://api.beam.directory',
 })
 
-await client.register('My Agent', ['conversation.message'])
-const reply = await client.talk('booking@lufthansa.beam.directory', 'Book FRA→BCN next Friday, economy')
+await client.register('Acme Procurement Desk', ['conversation.message', 'quote.request'])
+
+const reply = await client.talk(
+  'partner-desk@northwind.beam.directory',
+  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
+)
+
 console.log(reply.message)
 ```
 
-## Live Infrastructure
+## What Beam Is For
 
-| Service | URL | Stack |
-|---------|-----|-------|
-| Homepage | [beam.directory](https://beam.directory) | Vercel |
-| API | [api.beam.directory](https://api.beam.directory) | Fly.io Frankfurt |
-| Docs | [docs.beam.directory](https://docs.beam.directory) | GitHub Pages |
+Beam is not trying to be every possible agent standard at once. The current release direction is narrower and more useful:
 
-## Packages
+1. A company agent needs to hand work to another company's agent.
+2. Both sides need identity, signatures, replay protection, and policy controls.
+3. Operators need traces, retries, and audit logs when the handoff goes wrong.
 
-| Package | Registry | Install |
-|---------|----------|---------|
-| `beam-protocol-sdk` | npm | `npm install beam-protocol-sdk` |
-| `beam-protocol-cli` | npm | `npm install -g beam-protocol-cli` |
-| `beam-directory` | PyPI | `pip install beam-directory` |
-| `beam-langchain` | PyPI | `pip install beam-langchain` |
-| `beam-crewai` | PyPI | `pip install beam-crewai` |
+If that is your problem, Beam is aimed directly at it.
+
+## Continue
+
+- [Partner Handoff Guide](/guide/partner-handoff)
+- [Getting Started](/guide/getting-started)
+- [Hosted Quickstart](/guide/hosted-quickstart)
+- [Compatibility Policy](/guide/compatibility)
+- [0.6.0 Release Readiness Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.6.0-release-readiness.md)

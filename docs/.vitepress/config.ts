@@ -2,7 +2,7 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Beam Protocol',
-  description: 'The open communication protocol for AI agents',
+  description: 'Verified B2B handoffs for AI agents',
   ignoreDeadLinks: true,
   cleanUrls: true,
   lastUpdated: true,
@@ -12,15 +12,17 @@ export default defineConfig({
   themeConfig: {
     siteTitle: 'Beam Protocol Docs',
     nav: [
-      { text: 'Guide', link: '/guide/getting-started' },
+      { text: 'Guide', link: '/guide/partner-handoff' },
       { text: 'API', link: '/api/typescript' },
       { text: 'Security', link: '/security/overview' },
       { text: 'RFC', link: 'https://github.com/Beam-directory/beam-protocol/blob/main/spec/RFC-0003.md' }
     ],
     sidebar: [
       { text: 'Guide', items: [
+        { text: 'Verified Partner Handoff', link: '/guide/partner-handoff' },
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Hosted Quickstart', link: '/guide/hosted-quickstart' },
+        { text: 'Compatibility', link: '/guide/compatibility' },
         { text: 'Vision', link: '/guide/vision' },
         { text: 'Use Cases', link: '/guide/use-cases' },
         { text: 'DID Identity', link: '/guide/did' },

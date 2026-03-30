@@ -89,7 +89,9 @@ export function validateIntentFrame(
   }
   if (typeof f['nonce'] !== 'string' || !f['nonce']) return { valid: false, error: 'Missing nonce' }
   if (typeof f['timestamp'] !== 'string') return { valid: false, error: 'Missing timestamp' }
-  if (!f['payload'] || typeof f['payload'] !== 'object' || Array.isArray(f['payload'])) {
+
+  const payload = normalizeIntentPayload(f)
+  if (!payload) {
     return { valid: false, error: 'Payload must be an object' }
   }
 
@@ -110,7 +112,7 @@ export function validateIntentFrame(
     from: f['from'],
     to: f['to'],
     intent: f['intent'],
-    payload: f['payload'],
+    payload,
     timestamp: f['timestamp'],
     nonce: f['nonce'],
   })
@@ -119,6 +121,21 @@ export function validateIntentFrame(
   }
 
   return { valid: true }
+}
+
+function normalizeIntentPayload(frame: Record<string, unknown>): Record<string, unknown> | null {
+  const payload = frame['payload']
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, unknown>
+  }
+
+  const params = frame['params']
+  if (params && typeof params === 'object' && !Array.isArray(params)) {
+    frame['payload'] = params
+    return params as Record<string, unknown>
+  }
+
+  return null
 }
 
 export function validateResultFrame(

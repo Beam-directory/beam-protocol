@@ -1,6 +1,6 @@
 # beam-protocol-cli
 
-Command-line client for generating Beam identities, registering agents, searching the directory, and sending structured or natural-language messages.
+Command-line client for generating Beam identities, registering agents, searching the directory, and sending verified partner handoffs.
 
 ## Install
 
@@ -11,11 +11,15 @@ npm install -g beam-protocol-cli
 ## Quick Start
 
 ```bash
-beam init --agent launch-bot --org acme
-beam register --display-name "Acme Launch Bot" --capabilities "conversation.message,task.execute"
-beam lookup launch-bot@acme.beam.directory
-beam talk echo@beam.directory "hello"
+beam init --agent procurement --org acme
+beam register --display-name "Acme Procurement Desk" --capabilities "conversation.message,quote.request"
+beam lookup partner-desk@northwind.beam.directory
+beam talk partner-desk@northwind.beam.directory "Need 240 inverters for Mannheim by Friday."
 ```
+
+## Compatibility
+
+This CLI targets `beam/1`. New optional response fields may appear in JSON output, but breaking protocol changes require a new protocol family.
 
 ## Commands
 
@@ -120,7 +124,7 @@ beam send <to> <intent> [params-json] [--timeout <seconds>] [--directory <url>] 
 Example:
 
 ```bash
-beam send echo@beam.directory conversation.message '{"message":"launch check"}'
+beam send partner-desk@northwind.beam.directory quote.request '{"sku":"INV-240","quantity":240,"shipTo":"Mannheim, DE"}'
 ```
 
 ### `beam talk`
@@ -134,7 +138,7 @@ beam talk <to> <message> [--timeout <seconds>] [--language <code>] [--context <j
 Example:
 
 ```bash
-beam talk echo@beam.directory "launch check"
+beam talk partner-desk@northwind.beam.directory "Need 240 inverters for Mannheim by Friday."
 ```
 
 ## Files

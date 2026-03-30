@@ -1,6 +1,6 @@
 # beam-protocol-sdk
 
-TypeScript SDK for Beam Protocol: identity generation, registration, discovery, DID tooling, and signed agent-to-agent messaging.
+TypeScript SDK for Beam Protocol: verified B2B handoffs, identity generation, discovery, DID tooling, and signed agent-to-agent messaging.
 
 ## Install
 
@@ -13,13 +13,24 @@ npm install beam-protocol-sdk
 ```ts
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 
-const identity = BeamIdentity.generate({ agentName: 'assistant', orgName: 'acme' })
+const identity = BeamIdentity.generate({ agentName: 'procurement', orgName: 'acme' })
 const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })
 
-await client.register('Acme Assistant', ['conversation.message'])
-const reply = await client.talk('echo@beam.directory', 'Hello from Beam')
+await client.register('Acme Procurement Desk', ['conversation.message', 'quote.request'])
+const reply = await client.talk(
+  'partner-desk@northwind.beam.directory',
+  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
+)
 console.log(reply.message)
 ```
+
+## Compatibility
+
+This SDK targets `beam/1`.
+
+- additive fields are allowed
+- unknown fields are tolerated in current frame validation
+- `payload` is canonical and legacy `params` fixtures remain supported for compatibility testing
 
 ## Common Usage
 
@@ -43,8 +54,8 @@ await client.connect()
 
 ```ts
 const directory = client.directory
-const record = await directory.lookup('echo@beam.directory')
-const matches = await directory.search({ capabilities: ['conversation.message'], limit: 10 })
+const record = await directory.lookup('partner-desk@northwind.beam.directory')
+const matches = await directory.search({ capabilities: ['quote.request'], limit: 10 })
 ```
 
 ### Work with DID documents and credentials

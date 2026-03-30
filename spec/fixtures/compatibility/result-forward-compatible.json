@@ -1,0 +1,19 @@
+{
+  "v": "1",
+  "success": true,
+  "nonce": "compat-quote-request-001",
+  "timestamp": "__NOW__",
+  "payload": {
+    "quotedUnitPriceEur": 184,
+    "totalPriceEur": 44160,
+    "shipWindow": "Thu 08:00-12:00 CET"
+  },
+  "latency": 1840,
+  "signature": "compat-result-signature",
+  "traceId": "compat-trace-001",
+  "status": "acked",
+  "meta": {
+    "source": "northwind",
+    "schemaRevision": "2026-03"
+  }
+}
