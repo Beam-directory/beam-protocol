@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.6.0 (Unreleased)
+## v0.6.0 (2026-03-30)
 
 ### Release Direction
 - narrow Beam onboarding around one verified B2B workflow: Acme procurement -> Northwind partner desk -> Northwind warehouse
