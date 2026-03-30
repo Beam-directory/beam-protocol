@@ -206,6 +206,8 @@ export interface AlertItem {
   sampleTraces: AlertTraceSample[]
   notificationId?: number | null
   notificationStatus?: OperatorNotificationStatus | null
+  notificationOwner?: string | null
+  notificationNextAction?: string | null
 }
 
 export interface AlertLink {
@@ -631,6 +633,8 @@ export interface OperatorNotification {
   title: string
   message: string
   href: string | null
+  owner: string | null
+  nextAction: string | null
   status: OperatorNotificationStatus
   createdAt: string
   updatedAt: string
@@ -655,6 +659,84 @@ export interface OperatorNotificationListResponse {
 export interface OperatorNotificationUpdateResponse {
   ok: boolean
   notification: OperatorNotification
+}
+
+export interface FunnelEntryPage {
+  pageKey: string
+  events: number
+  sessions: number
+}
+
+export interface FunnelCtaClick {
+  ctaKey: string
+  targetPage: string | null
+  events: number
+  sessions: number
+}
+
+export interface FunnelMilestone {
+  key: string
+  label: string
+  sessions: number
+  events: number
+  conversionFromPrevious: number | null
+  conversionFromLanding: number | null
+}
+
+export interface FunnelTimelinePoint {
+  day: string
+  landingSessions: number
+  guidedSessions: number
+  requestSessions: number
+  demoSessions: number
+}
+
+export interface FunnelRecentEvent {
+  id: number
+  sessionId: string
+  origin: string
+  pageKey: string
+  eventCategory: string
+  ctaKey: string | null
+  targetPage: string | null
+  workflowType: string | null
+  milestoneKey: string | null
+  createdAt: string
+}
+
+export interface FunnelAnalyticsResponse {
+  days: number
+  generatedAt: string
+  summary: {
+    anonymousSessions: number
+    pageViews: number
+    ctaClicks: number
+    requestEvents: number
+    demoEvents: number
+    landingSessions: number
+    guidedSessions: number
+    hostedBetaSessions: number
+    requestSessions: number
+    demoSessions: number
+    landingToGuidedRate: number | null
+    landingToRequestRate: number | null
+    requestToDemoRate: number | null
+  }
+  milestones: FunnelMilestone[]
+  entryPages: FunnelEntryPage[]
+  ctaClicks: FunnelCtaClick[]
+  demoMilestones: Array<{
+    milestoneKey: string
+    events: number
+    sessions: number
+  }>
+  workflows: Array<{
+    workflowType: string
+    events: number
+    sessions: number
+  }>
+  timeline: FunnelTimelinePoint[]
+  recentEvents: FunnelRecentEvent[]
 }
 
 export interface IntentFeedMessage {
@@ -1012,11 +1094,14 @@ export const directoryApi = {
     hours: params?.hours,
   })}`, undefined, { admin: true }),
   updateOperatorNotification: (id: number, input: {
-    status: OperatorNotificationStatus
+    status?: OperatorNotificationStatus
+    owner?: string | null
+    nextAction?: string | null
   }) => request<OperatorNotificationUpdateResponse>(`/admin/operator-notifications/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   }, { admin: true }),
+  getFunnelAnalytics: (days = 30) => request<FunnelAnalyticsResponse>(`/admin/funnel?days=${days}`, undefined, { admin: true }),
   createOrg: (input: OrgRegistrationInput) => request<OrgRegistrationResponse>('/orgs', {
     method: 'POST',
     body: JSON.stringify(input),

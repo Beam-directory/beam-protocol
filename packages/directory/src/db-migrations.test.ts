@@ -288,10 +288,24 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     assert.ok(notificationColumns.some((column) => column.name === 'source_type'))
     assert.ok(notificationColumns.some((column) => column.name === 'source_key'))
     assert.ok(notificationColumns.some((column) => column.name === 'status'))
+    assert.ok(notificationColumns.some((column) => column.name === 'owner'))
+    assert.ok(notificationColumns.some((column) => column.name === 'next_action'))
 
     const notificationIndexes = db.prepare("PRAGMA index_list('operator_notifications')").all() as Array<{ name: string }>
     assert.ok(notificationIndexes.some((index) => index.name === 'idx_operator_notifications_status'))
     assert.ok(notificationIndexes.some((index) => index.name === 'idx_operator_notifications_source'))
+    assert.ok(notificationIndexes.some((index) => index.name === 'idx_operator_notifications_owner'))
+
+    const funnelColumns = db.prepare('PRAGMA table_info(funnel_events)').all() as Array<{ name: string }>
+    assert.ok(funnelColumns.some((column) => column.name === 'session_id'))
+    assert.ok(funnelColumns.some((column) => column.name === 'page_key'))
+    assert.ok(funnelColumns.some((column) => column.name === 'event_category'))
+    assert.ok(funnelColumns.some((column) => column.name === 'milestone_key'))
+
+    const funnelIndexes = db.prepare("PRAGMA index_list('funnel_events')").all() as Array<{ name: string }>
+    assert.ok(funnelIndexes.some((index) => index.name === 'idx_funnel_events_created_at'))
+    assert.ok(funnelIndexes.some((index) => index.name === 'idx_funnel_events_category'))
+    assert.ok(funnelIndexes.some((index) => index.name === 'idx_funnel_events_session'))
   } finally {
     db.close()
     rmSync(root, { force: true, recursive: true })

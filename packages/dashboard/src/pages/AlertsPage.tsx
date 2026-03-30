@@ -147,7 +147,8 @@ export default function AlertsPage() {
       <div className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-300">
         <div className="font-medium text-slate-900 dark:text-slate-100">Operator flow</div>
         <div className="mt-1">
-          Alert cards now carry threshold reasoning plus investigation links into filtered intents, trace detail, and audit history.
+          Alert cards now carry threshold reasoning, the current owner and next action when a critical signal is already triaged,
+          plus direct links into the most relevant trace, inbox signal, and audit context.
           Exports are read-only snapshots. Prune is irreversible, so the dashboard requires an admin preview and typed confirmation phrase first.
         </div>
         <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">

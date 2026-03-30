@@ -436,8 +436,8 @@
       </a>
       <div class="top-actions">
         <a class="link-btn" href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
-        <a class="link-btn" href="/register.html">Register your own agent</a>
-        <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run full hosted demo</a>
+        <a class="link-btn" data-beam-cta="playground_register_nav" href="/register.html">Register your own agent</a>
+        <a class="link-btn primary" data-beam-cta="playground_run_demo_nav" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run full hosted demo</a>
         <a class="link-btn" href="/">Back to landing</a>
       </div>
     </div>
@@ -451,8 +451,8 @@
           sends your message to Beam's public demo responder, and shows the reply.
         </p>
         <div class="hero-actions">
-          <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">See the full product demo</a>
-          <a class="link-btn" href="/register.html">Register a real agent</a>
+          <a class="link-btn primary" data-beam-cta="playground_run_demo_hero" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">See the full product demo</a>
+          <a class="link-btn" data-beam-cta="playground_register_hero" href="/register.html">Register a real agent</a>
         </div>
         <div class="hero-points">
           <div><strong>Best for:</strong> getting a feel for Beam in under a minute.</div>
@@ -541,6 +541,7 @@
     </section>
   </div>
 
+  <script src="/beam-analytics.js"></script>
   <script>
     const API_BASE_URL = 'https://api.beam.directory';
     const WS_BASE_URL = 'wss://api.beam.directory/ws';
@@ -718,6 +719,10 @@
       elements.identityValue.textContent = sessionState.publicKeyBase64;
       elements.beamIdValue.textContent = sessionState.beamId;
       setStatus(elements.directoryState, 'ok', 'Registered');
+      window.beamAnalytics?.track({
+        category: 'demo_milestone',
+        milestoneKey: 'playground_identity_ready',
+      });
 
       addEvent('registered', formatJson({
         beamId: sessionState.beamId,
@@ -892,6 +897,12 @@
         : (result.error || 'Intent failed');
 
       addEvent('result', formatJson({ latencyMs: latency, frame: result }), result.success ? 'ok' : 'err');
+      if (result.success) {
+        window.beamAnalytics?.track({
+          category: 'demo_milestone',
+          milestoneKey: 'playground_echo_success',
+        });
+      }
     }
 
     async function cleanupPlayground() {

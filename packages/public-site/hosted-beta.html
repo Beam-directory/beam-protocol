@@ -707,7 +707,7 @@
         </a>
 
         <div class="top-links">
-          <a href="/guided-evaluation.html">Guided evaluation</a>
+          <a data-beam-cta="hosted_beta_guided_eval_nav" href="/guided-evaluation.html">Guided evaluation</a>
           <a href="https://docs.beam.directory/guide/design-partner-onboarding">Onboarding pack</a>
           <a class="primary" href="#faq">Common questions</a>
         </div>
@@ -796,7 +796,7 @@
 
             <div class="submit-row">
               <button class="btn primary" id="submit-button" type="submit">Request hosted beta</button>
-              <a class="btn ghost" href="/guided-evaluation.html">See the guided evaluation first</a>
+              <a class="btn ghost" data-beam-cta="hosted_beta_guided_eval_form" href="/guided-evaluation.html">See the guided evaluation first</a>
             </div>
           </form>
 
@@ -941,6 +941,7 @@
     </div>
   </main>
 
+  <script src="/beam-analytics.js"></script>
   <script>
     function resolveDirectoryApiBase() {
       if (window.location.hostname === 'localhost') {
@@ -999,6 +1000,8 @@
             agentCount: Number.isFinite(agentCount) ? agentCount : null,
             workflowType: workflow,
             workflowSummary: notes || null,
+            analyticsSessionId: window.beamAnalytics?.sessionId || null,
+            pageKey: window.beamAnalytics?.pageKey || 'hosted_beta',
           }),
         })
 

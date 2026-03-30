@@ -32,6 +32,7 @@ export default function AlertCard({
 }) {
   const visibleLinks = alert.links.slice(0, compact ? 2 : 3)
   const visibleSamples = alert.sampleTraces.slice(0, compact ? 1 : 3)
+  const primaryTrace = visibleSamples[0]
 
   return (
     <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
@@ -61,6 +62,18 @@ export default function AlertCard({
       <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">{alert.thresholdExplanation}</div>
       <div className="mt-1 text-xs font-medium text-slate-700 dark:text-slate-200">{alert.severityReason}</div>
 
+      {alert.notificationOwner || alert.notificationNextAction ? (
+        <div className="mt-4 rounded-xl border border-orange-200 bg-orange-50 px-3 py-3 text-sm text-slate-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-slate-200">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Operator handoff</div>
+          <div className="mt-2 text-sm">
+            <strong>Owner:</strong> {alert.notificationOwner ?? 'unassigned'}
+          </div>
+          <div className="mt-1 text-sm">
+            <strong>Next action:</strong> {alert.notificationNextAction ?? 'Open the inbox signal and record the next recovery step.'}
+          </div>
+        </div>
+      ) : null}
+
       {visibleSamples.length > 0 ? (
         <div className="mt-4">
           <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Recent traces</div>
@@ -85,14 +98,22 @@ export default function AlertCard({
         </div>
       ) : null}
 
-      {visibleLinks.length > 0 ? (
+      {visibleLinks.length > 0 || alert.notificationId || primaryTrace ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {alert.notificationId ? (
             <Link
               className="rounded-full border border-slate-200 px-3 py-1.5 text-sm text-slate-700 transition hover:border-slate-300 hover:bg-slate-50 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-900"
-              to="/inbox"
+              to={`/inbox?id=${alert.notificationId}`}
             >
-              Open inbox signal
+              Open owner and next action
+            </Link>
+          ) : null}
+          {primaryTrace ? (
+            <Link
+              className="rounded-full border border-orange-200 px-3 py-1.5 text-sm text-orange-700 transition hover:border-orange-300 hover:bg-orange-50 dark:border-orange-500/30 dark:text-orange-300 dark:hover:bg-orange-500/10"
+              to={`/intents/${encodeURIComponent(primaryTrace.nonce)}?alert=${encodeURIComponent(alert.id)}`}
+            >
+              Open primary trace
             </Link>
           ) : null}
           {visibleLinks.map((link) => (

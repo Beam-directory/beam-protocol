@@ -6,6 +6,9 @@ export default defineConfig({
   ignoreDeadLinks: true,
   cleanUrls: true,
   lastUpdated: true,
+  head: [
+    ['script', { src: 'https://beam.directory/beam-analytics.js', defer: '' }],
+  ],
   sitemap: {
     hostname: 'https://docs.beam.directory',
   },

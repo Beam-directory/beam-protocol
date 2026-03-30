@@ -148,6 +148,8 @@ export interface OperatorNotificationRow {
   title: string
   message: string
   href: string | null
+  owner: string | null
+  next_action: string | null
   status: OperatorNotificationStatus
   created_at: string
   updated_at: string
@@ -155,6 +157,21 @@ export interface OperatorNotificationRow {
   acted_at: string | null
   actor: string | null
   details_json: string | null
+}
+
+export type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
+
+export interface FunnelEventRow {
+  id: number
+  session_id: string
+  origin: string
+  page_key: string
+  event_category: FunnelEventCategory
+  cta_key: string | null
+  target_page: string | null
+  workflow_type: string | null
+  milestone_key: string | null
+  created_at: string
 }
 
 export interface ShieldAuditLogRow {

@@ -5,6 +5,8 @@ import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Ob
 import { formatDateTime, formatNumber } from '../lib/utils'
 import { formatIntentLifecycleLabel } from '../lib/intent-lifecycle'
 
+const RUNBOOK_URL = 'https://docs.beam.directory/guide/operator-runbook#dead-letters'
+
 function formatBusTimestamp(value?: number | null): string {
   if (value == null) {
     return '—'
@@ -20,6 +22,24 @@ function previewPayload(payload: Record<string, unknown>): string {
   }
 
   return `${serialized.slice(0, 117)}…`
+}
+
+function getRecoveryGuidance(message: DeadLetterMessage): string {
+  const error = (message.error ?? '').toLowerCase()
+
+  if (error.includes('offline')) {
+    return 'Confirm the recipient is reachable again, then requeue the same nonce.'
+  }
+
+  if (error.includes('rate')) {
+    return 'Wait for downstream pressure to clear, confirm the recipient can accept traffic, then requeue.'
+  }
+
+  if (error.includes('forbidden') || error.includes('acl')) {
+    return 'Inspect the trace and ACL or auth configuration before retrying this nonce.'
+  }
+
+  return 'Open the trace first, confirm why the downstream route failed, then requeue only after the condition is fixed.'
 }
 
 export default function DeadLetterPage() {
@@ -113,6 +133,18 @@ export default function DeadLetterPage() {
         <MetricCard label="Max retry count" value={loading ? '—' : formatNumber(summary.maxRetryCount)} />
       </section>
 
+      <section className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-300">
+        <div className="font-medium text-slate-900 dark:text-slate-100">Recovery sequence</div>
+        <div className="mt-1">
+          Dead letters are terminal queue outcomes, not immediate retry buttons. Open the trace, confirm the affected recipient,
+          check whether the failure is still real, then requeue only after someone owns the recovery path.
+        </div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Link className="btn-secondary" to="/alerts">Open alerts</Link>
+          <a className="btn-secondary" href={RUNBOOK_URL} rel="noreferrer" target="_blank">Open dead-letter runbook</a>
+        </div>
+      </section>
+
       <section className="panel space-y-4">
         <div className="panel-title">Filters</div>
         <div className="grid gap-3 md:grid-cols-4">
@@ -170,6 +202,7 @@ export default function DeadLetterPage() {
                   <th className="table-head">Retries</th>
                   <th className="table-head">Error</th>
                   <th className="table-head">Failed</th>
+                  <th className="table-head">Next action</th>
                   <th className="table-head">Payload</th>
                   <th className="table-head">Action</th>
                 </tr>
@@ -198,12 +231,21 @@ export default function DeadLetterPage() {
                       <div>{formatBusTimestamp(message.failed_at)}</div>
                       <div className="text-xs text-slate-500 dark:text-slate-400">Created {formatBusTimestamp(message.created_at)}</div>
                     </td>
+                    <td className="table-cell text-slate-600 dark:text-slate-300">
+                      {getRecoveryGuidance(message)}
+                    </td>
                     <td className="table-cell font-mono text-xs text-slate-500 dark:text-slate-400">{previewPayload(message.payload)}</td>
                     <td className="table-cell">
                       <div className="flex flex-wrap gap-2">
                         <Link className="btn-secondary" to={`/intents/${encodeURIComponent(message.nonce)}`}>
                           Trace
                         </Link>
+                        <Link className="btn-secondary" to={`/agents/${encodeURIComponent(message.recipient)}`}>
+                          Recipient
+                        </Link>
+                        <a className="btn-secondary" href={RUNBOOK_URL} rel="noreferrer" target="_blank">
+                          Runbook
+                        </a>
                         <button
                           className="btn-secondary"
                           disabled={requeueingId === message.id}

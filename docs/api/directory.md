@@ -282,11 +282,56 @@ Example patch:
 
 ```json
 {
-  "status": "acknowledged"
+  "status": "acknowledged",
+  "owner": "ops@beam.directory",
+  "nextAction": "Open the latest failing trace, confirm the downstream condition, then update the runbook ticket."
 }
 ```
 
-Critical alerts from observability reuse the same notification path. The `notificationStatus` and `notificationId` fields also appear on critical alert payloads from `GET /observability/overview` and `GET /observability/alerts`.
+Notification payloads now include:
+
+- `owner`
+- `nextAction`
+
+Critical alerts from observability reuse the same notification path. The `notificationStatus`, `notificationId`, `notificationOwner`, and `notificationNextAction` fields also appear on critical alert payloads from `GET /observability/overview` and `GET /observability/alerts`.
+
+## First-party funnel analytics
+
+The public Beam surfaces send privacy-conscious, first-party funnel events through:
+
+```text
+POST /analytics/events
+GET  /admin/funnel?days=30
+```
+
+Accepted public event categories are:
+
+- `page_view`
+- `cta_click`
+- `request`
+- `demo_milestone`
+
+Example ingest payload:
+
+```json
+{
+  "sessionId": "9f0f6f4f0f2f4c2da55f2f2d9f9b1e44",
+  "pageKey": "landing",
+  "eventCategory": "cta_click",
+  "ctaKey": "landing_guided_eval_hero",
+  "targetPage": "guided_evaluation"
+}
+```
+
+Request events use the same path, but require a compatible `workflowType`. Demo milestones require a compatible `milestoneKey`.
+
+`GET /admin/funnel` returns:
+
+- milestone progression across landing, guided evaluation, hosted beta, request, and demo proof
+- entry pages
+- CTA click summaries
+- request workflow breakdown
+- recent anonymous events for instrumentation validation
 
 All hosted beta admin endpoints require an authenticated admin session and accept either:
 

@@ -1644,8 +1644,8 @@
       </ul>
 
       <div class="nav-actions">
-        <a class="btn btn-ghost" href="/hosted-beta.html">Request hosted beta</a>
-        <a class="btn btn-primary" href="/guided-evaluation.html">See guided evaluation</a>
+        <a class="btn btn-ghost" data-beam-cta="landing_hosted_beta_nav" href="/hosted-beta.html">Request hosted beta</a>
+        <a class="btn btn-primary" data-beam-cta="landing_guided_eval_nav" href="/guided-evaluation.html">See guided evaluation</a>
       </div>
     </nav>
   </div>
@@ -1663,8 +1663,8 @@
             inspect the proof, then decide whether Beam deserves a bigger footprint.
           </p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="/guided-evaluation.html">See the guided evaluation</a>
-            <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
+            <a class="btn btn-primary" data-beam-cta="landing_guided_eval_hero" href="/guided-evaluation.html">See the guided evaluation</a>
+            <a class="btn btn-secondary" data-beam-cta="landing_hosted_beta_hero" href="/hosted-beta.html">Request hosted beta</a>
           </div>
           <div class="hero-proof">
             <div class="proof-item">
@@ -1939,7 +1939,7 @@
               <li>The same onboarding pack and operator docs power the follow-up workflow.</li>
             </ul>
             <div class="stack-actions">
-              <a class="btn btn-primary" href="/guided-evaluation.html">Open guided evaluation</a>
+              <a class="btn btn-primary" data-beam-cta="landing_guided_eval_paths" href="/guided-evaluation.html">Open guided evaluation</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/design-partner-onboarding">Open onboarding pack</a>
             </div>
             <div class="stack-note">Best first stop if you want proof before deciding whether Beam is worth a live workflow.</div>
@@ -1969,7 +1969,7 @@
               <li>Guided design-partner engagement with operator proof, rollout guidance, and follow-up.</li>
             </ul>
             <div class="stack-actions">
-              <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
+              <a class="btn btn-secondary" data-beam-cta="landing_hosted_beta_paths" href="/hosted-beta.html">Request hosted beta</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
             </div>
             <div class="stack-note">Best for teams that want a guided rollout around one live workflow.</div>
@@ -2122,9 +2122,9 @@
               or it does not. If it does, the next step is one real workflow and one clear owner.
             </p>
             <div class="closing-actions">
-              <a class="btn btn-primary" href="/guided-evaluation.html">See guided evaluation</a>
-              <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
-              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
+              <a class="btn btn-primary" data-beam-cta="landing_guided_eval_closing" href="/guided-evaluation.html">See guided evaluation</a>
+              <a class="btn btn-secondary" data-beam-cta="landing_hosted_beta_closing" href="/hosted-beta.html">Request hosted beta</a>
+              <a class="btn btn-secondary" data-beam-cta="landing_run_demo" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
             </div>
           </div>
         </div>
@@ -2145,6 +2145,7 @@
     </div>
   </footer>
 
+  <script src="/beam-analytics.js"></script>
   <script>
     const toggle = document.getElementById('menuToggle')
     const navLinks = document.getElementById('navLinks')
