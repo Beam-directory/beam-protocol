@@ -39,6 +39,32 @@ The dashboard still shows aggregate outcome metrics, but they are derived from l
 - `error`: `failed`, `dead_letter`
 - `in_flight`: `received`, `validated`, `queued`, `dispatched`, `delivered`
 
+## Delivery Acceptance Vs Terminal Acknowledgement
+
+Beam now uses one explicit acknowledgement vocabulary across the directory, message bus, dogfood flows, and dashboard:
+
+- `delivered` means delivery was accepted by the target agent or downstream directory
+- `acked` means the work reached a terminal acknowledged outcome for that transport path
+
+That distinction matters most for async message-bus initiated work. A sender may fan out a notification and stop waiting after the receiver accepts it. In that case:
+
+- the bus message stays `delivered`
+- the application payload should say `acknowledgement: "accepted"`
+- `terminal` should be `false`
+
+Example async acceptance payload:
+
+```json
+{
+  "accepted": true,
+  "acknowledgement": "accepted",
+  "terminal": false,
+  "reviewedBy": "finance@acme.beam.directory"
+}
+```
+
+When a polled bus consumer later records completion through `POST /v1/beam/ack`, the lifecycle advances to `acked`.
+
 ## Transport Mapping
 
 ### Directory HTTP / WebSocket / Federation
@@ -57,10 +83,16 @@ Transport-specific details such as `direct-http`, `ws`, `federation`, fallback b
 
 The message bus uses the same status vocabulary, but not every message visits every state:
 
-- synchronous success: `received -> dispatched -> delivered`
+- synchronous acceptance: `received -> dispatched -> delivered`
 - successful consumer acknowledgement: `... -> acked`
 - retryable delivery failure: `... -> queued`
 - terminal retry exhaustion: `... -> dead_letter`
+
+Interpretation:
+
+- `POST /v1/beam/send` returning `delivered` means the bus handed off the nonce successfully
+- `GET /v1/beam/poll` lets an async consumer inspect those accepted deliveries
+- `POST /v1/beam/ack` is what turns accepted delivery into a terminal `acked` or `failed` outcome
 
 ## Migration Notes
 

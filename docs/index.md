@@ -6,11 +6,11 @@ hero:
   tagline: "Start with one workflow: procurement@acme hands a request to partner-desk@northwind, gets a signed result back, and operators can trace the whole exchange."
   actions:
     - theme: brand
-      text: Start the Partner Handoff
-      link: /guide/partner-handoff
+      text: Launch Hosted Demo
+      link: /guide/hosted-quickstart
     - theme: alt
-      text: 5-Minute Setup
-      link: /guide/getting-started
+      text: Read the Workflow
+      link: /guide/partner-handoff
     - theme: alt
       text: Compatibility Policy
       link: /guide/compatibility
@@ -37,7 +37,7 @@ features:
 
 ## Start Here
 
-If you only read one thing, read [Verified Partner Handoff](/guide/partner-handoff). It is the canonical Beam 0.6 onboarding path and the same workflow used in the dogfood report.
+If you only run one thing, run the [Hosted Quickstart](/guide/hosted-quickstart). It seeds the exact Acme to Northwind workflow used in dogfood, observability, and the operator runbook.
 
 ```typescript
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
@@ -70,8 +70,10 @@ If that is your problem, Beam is aimed directly at it.
 
 ## Continue
 
-- [Partner Handoff Guide](/guide/partner-handoff)
-- [Getting Started](/guide/getting-started)
 - [Hosted Quickstart](/guide/hosted-quickstart)
+- [Partner Handoff Guide](/guide/partner-handoff)
+- [Operator Runbook](/guide/operator-runbook)
+- [Getting Started](/guide/getting-started)
 - [Compatibility Policy](/guide/compatibility)
-- [0.6.0 Release Readiness Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.6.0-release-readiness.md)
+- [0.7.0 Hosted Demo Readiness Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-hosted-demo-readiness.md)
+- [0.7.0 Clean-Start Onboarding Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-clean-start-onboarding.md)

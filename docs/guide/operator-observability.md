@@ -6,6 +6,7 @@ It covers:
 
 - admin setup and login
 - the alert -> trace -> audit workflow
+- the operator runbook for five common failure modes
 - exports and retention controls
 - expected operational guardrails
 
@@ -97,6 +98,8 @@ The trace page is the fastest way to answer:
 - which lifecycle stage it reached
 - whether Shield intervened
 - whether related audit events exist
+
+For the concrete next-step matrix after that first trace read, use the [Operator Runbook](/guide/operator-runbook).
 
 ### 3. Confirm With Audit History
 

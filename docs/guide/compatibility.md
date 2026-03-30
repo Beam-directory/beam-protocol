@@ -75,15 +75,22 @@ If any answer is "no", you are not making a minor change anymore.
 
 ## Fixtures and Tests
 
-Beam 0.6 ships compatibility fixtures under [`spec/fixtures/compatibility`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility).
+Beam 0.6 ships two compatibility fixture layers under [`spec/fixtures/compatibility`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility):
 
-They currently cover:
+- parser fixtures in the root folder for additive decode behavior such as unknown-field tolerance and legacy `params`
+- archived signed release fixtures in [`spec/fixtures/compatibility/releases`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility/releases) for `v0.6.0` and `v0.6.1`
 
-- forward-compatible intent frames with unknown fields
-- legacy `params` request bodies
-- forward-compatible result frames with extra metadata
+The archived fixtures pin real signed frames from released `beam/1` behavior:
 
-The TypeScript and Python SDK test suites read those fixtures so additive parser regressions fail locally before release.
+- `v0.6.0` quote request and signed quote result
+- `v0.6.1` async finance preflight intent and accepted acknowledgement result
+
+The TypeScript and Python SDK test suites consume both layers. That means CI now fails on:
+
+- additive parser regressions
+- signature verification drift
+- replay-window handling drift for archived intent frames
+- result-frame validation changes that would reject already released `beam/1` traffic
 
 ## Release Notes Requirement
 

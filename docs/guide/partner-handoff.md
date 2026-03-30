@@ -4,6 +4,8 @@ This is the canonical Beam 0.6 workflow.
 
 The goal is simple: Acme needs a quote from Northwind without custom API work. Beam gives both sides verified addresses, signed requests, and an operator-visible trace.
 
+If you want this exact flow running locally with seeded identities and operator tooling, start with the [Hosted Quickstart](/guide/hosted-quickstart) and `npm run demo:run` first.
+
 ## The Workflow
 
 ```text
@@ -99,7 +101,27 @@ partnerDesk.on('quote.request', async (frame, respond) => {
 })
 ```
 
-## 4. Observe the Same Handoff
+## 4. Fan Out The Async Finance Preflight
+
+After the quote response, Northwind can fan out a finance notification through the message bus without keeping the original sender blocked.
+
+Recommended response payload:
+
+```json
+{
+  "accepted": true,
+  "acknowledgement": "accepted",
+  "terminal": false
+}
+```
+
+Interpretation:
+
+- the finance side accepted delivery
+- the notification is not a terminal completion signal for the bus
+- operators should expect the bus status to remain `delivered` unless a consumer later records `acked`
+
+## 5. Observe The Same Handoff
 
 For this workflow, the important operator questions are:
 
@@ -114,7 +136,9 @@ Beam 0.6 answers those with:
 - `/observability/alerts` for failure-rate and stuck-intent heuristics
 - `/v1/beam/stats` and `/v1/beam/dead-letter` when the message bus is involved
 
-## 5. Expand Only After This Works
+The fastest investigation path is documented in the [Operator Runbook](/guide/operator-runbook).
+
+## 6. Expand Only After This Works
 
 Once this handoff is solid, add adjacent actors:
 

@@ -5,6 +5,69 @@ import { EmptyPanel, PageHeader, StatusPill } from '../components/Observability'
 import { alertSeverityColor, cn, formatDateTime, formatLatency, intentStatusColor, truncateBeamId } from '../lib/utils'
 import { formatIntentLifecycleLabel, intentLifecycleDotColor, intentLifecycleTone } from '../lib/intent-lifecycle'
 
+function getOperatorGuidance(status: string): {
+  title: string
+  body: string
+  actions: Array<{ to: string; label: string }>
+} {
+  switch (status) {
+    case 'delivered':
+      return {
+        title: 'Delivery accepted, terminal completion still pending',
+        body: 'Beam handed this nonce to the target successfully, but no terminal acknowledgement has been recorded yet. Treat it as in flight. If it remains here longer than expected, inspect alerts, queue health, or the dead-letter view.',
+        actions: [
+          { to: '/alerts', label: 'Open alerts' },
+          { to: '/dead-letter', label: 'Inspect dead letters' },
+        ],
+      }
+    case 'queued':
+      return {
+        title: 'Queued for retry',
+        body: 'A retryable delivery failure pushed this nonce back into the queue. Operators should check whether the target is offline, rate limited, or otherwise temporarily unavailable.',
+        actions: [
+          { to: '/alerts', label: 'Open alerts' },
+          { to: '/dead-letter', label: 'Inspect dead letters' },
+        ],
+      }
+    case 'dead_letter':
+      return {
+        title: 'Retry budget exhausted',
+        body: 'Beam stopped retrying this nonce. Use the dead-letter view to inspect the terminal failure and requeue only after the downstream condition has been corrected.',
+        actions: [
+          { to: '/dead-letter', label: 'Open dead letters' },
+          { to: '/audit', label: 'Open audit log' },
+        ],
+      }
+    case 'failed':
+      return {
+        title: 'Terminal failure recorded',
+        body: 'This nonce hit a terminal failure without exhausting the dead-letter recovery flow. Check audit history, sender or recipient configuration, and any matching Shield decisions.',
+        actions: [
+          { to: '/audit', label: 'Open audit log' },
+          { to: '/errors', label: 'Open errors' },
+        ],
+      }
+    case 'acked':
+      return {
+        title: 'Terminal acknowledgement recorded',
+        body: 'The recipient or downstream consumer recorded a final successful outcome for this nonce. Use the trace and audit history as evidence, not as an active queue item.',
+        actions: [
+          { to: '/audit', label: 'Open audit log' },
+          { to: '/intents', label: 'Back to intents' },
+        ],
+      }
+    default:
+      return {
+        title: 'Handoff still in flight',
+        body: 'Beam is still validating, routing, or waiting for transport progress on this nonce. Use the lifecycle stages below to see where it is spending time.',
+        actions: [
+          { to: '/alerts', label: 'Open alerts' },
+          { to: '/audit', label: 'Open audit log' },
+        ],
+      }
+  }
+}
+
 export default function TraceDetailPage() {
   const { nonce } = useParams<{ nonce: string }>()
   const [searchParams] = useSearchParams()
@@ -52,6 +115,8 @@ export default function TraceDetailPage() {
     )
   }
 
+  const guidance = getOperatorGuidance(trace.intent.status)
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -72,6 +137,18 @@ export default function TraceDetailPage() {
           This trace was opened from alert <span className="font-mono">{alertId}</span>. Use the audit button above for the matching control-plane history.
         </div>
       ) : null}
+
+      <section className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-300">
+        <div className="font-medium text-slate-900 dark:text-slate-100">{guidance.title}</div>
+        <div className="mt-1">{guidance.body}</div>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {guidance.actions.map((action) => (
+            <Link key={`${action.to}-${action.label}`} className="btn-secondary" to={action.to}>
+              {action.label}
+            </Link>
+          ))}
+        </div>
+      </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.1fr,0.9fr]">
         <div className="panel space-y-3">

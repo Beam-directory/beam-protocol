@@ -1,0 +1,28 @@
+{
+  "release": "0.6.1",
+  "kind": "intent",
+  "signedBy": {
+    "beamId": "partner-desk@northwind.beam.directory",
+    "publicKeyBase64": "MCowBQYDK2VwAyEAgnPeLCoJLVtALBPMEGTYjw/oWoLbBVN0zrGsAulTEqE="
+  },
+  "frame": {
+    "v": "1",
+    "intent": "purchase.preflight",
+    "from": "partner-desk@northwind.beam.directory",
+    "to": "finance@acme.beam.directory",
+    "payload": {
+      "requestNonce": "quote-request-v0-6-1",
+      "sku": "INV-240",
+      "quantity": 240,
+      "totalPriceEur": 44160,
+      "auditContext": {
+        "supplier": "northwind",
+        "project": "Mannheim rooftop rollout"
+      }
+    },
+    "nonce": "compat-release-v0-6-1-intent",
+    "timestamp": "2026-03-30T15:10:00.000Z",
+    "trace_id": "trace-release-v0-6-1",
+    "signature": "0vuSZGkg65R0nEXhCjY+i10p5tfMcoZErc0cxBSc8vd4GvE34j3VMWDhWEu8tLVeX/XTwqNI9o/TfCj76pesAQ=="
+  }
+}

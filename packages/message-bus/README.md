@@ -13,11 +13,25 @@ Persistent Beam relay for queued delivery, retries, audit history, and delivery 
 ## Delivery Model
 
 - The bus uses the canonical Beam lifecycle: `received`, `queued`, `dispatched`, `delivered`, `acked`, `failed`, `dead_letter`.
+- `delivered` means the downstream recipient or directory accepted delivery. It does **not** mean the business task is complete yet.
+- `acked` means a consumer or operator recorded terminal completion for the bus message.
 - Every bus message gets a persisted `nonce`. If the same `nonce` is submitted again with the same sender, recipient, intent, and payload, the bus returns the existing message instead of redelivering it.
 - Retryable errors from the directory (`OFFLINE`, `TIMEOUT`, `DELIVERY_FAILED`, `DIRECT_HTTP_FAILED`, `IN_PROGRESS`, `RATE_LIMITED`, transport timeouts, and connection errors) are retried.
 - Non-retryable errors (`INVALID_INTENT`, `FORBIDDEN`, `UNAUTHORIZED`, nonce conflicts, and other hard 4xx failures) are dead-lettered immediately.
 - Retry delays use the policy `30s, 60s, 120s, 240s, 480s` with deterministic ±15% jitter derived from the nonce. The `max_retries` limit bounds total attempts, after which the message moves to `dead_letter`.
 - Dead-lettered messages stay queryable through the API and can be manually requeued while keeping the original nonce.
+
+For async handoffs, the recommended receiver payload is:
+
+```json
+{
+  "accepted": true,
+  "acknowledgement": "accepted",
+  "terminal": false
+}
+```
+
+That makes it explicit that delivery was accepted while terminal completion is still pending elsewhere.
 
 ## Install
 
@@ -75,7 +89,7 @@ Environment variables:
 
 ### `GET /v1/beam/poll?agent=<beam-id>`
 
-Poll delivered messages for an agent.
+Poll delivered messages for an agent. `poll` is the normal bridge between `delivered` and terminal consumer action for async flows.
 
 ### `POST /v1/beam/ack`
 
@@ -86,6 +100,8 @@ Poll delivered messages for an agent.
   "response": { "ok": true }
 }
 ```
+
+Use `status: "acked"` only when the polled message reached a terminal outcome for the bus consumer. If the receiver merely accepted downstream work, keep the bus message in `delivered` and return an application-level payload such as `{"acknowledgement":"accepted","terminal":false}`.
 
 ### `GET /v1/beam/history`
 

@@ -31,6 +31,7 @@ export default defineConfig({
         { text: 'Intent Lifecycle', link: '/guide/intent-lifecycle' },
         { text: 'Restart Recovery', link: '/guide/restart-recovery' },
         { text: 'Operator Observability', link: '/guide/operator-observability' },
+        { text: 'Operator Runbook', link: '/guide/operator-runbook' },
         { text: 'Consumer IDs', link: '/guide/consumer-ids' },
         { text: 'Core Concepts', link: '/guide/concepts' },
         { text: 'Self-Hosting', link: '/guide/self-hosting' }
