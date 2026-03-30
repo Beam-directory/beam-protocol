@@ -28,10 +28,12 @@ export {
 export { createBusRouter, type RouterOptions } from './router.js'
 export { startRetryWorker, stopRetryWorker, type WorkerOptions } from './worker.js'
 export { loadIdentities, deliverToDirectory, type DeliveryResult } from './delivery.js'
+export { applyBusCors, resolveBusCorsOrigin } from './cors.js'
 
 import { serve } from '@hono/node-server'
 import { Hono } from 'hono'
 import { cleanTestMessages, initDatabase, recoverInterruptedMessages } from './db.js'
+import { applyBusCors } from './cors.js'
 import { createBusRouter } from './router.js'
 import { startRetryWorker } from './worker.js'
 import { loadIdentities } from './delivery.js'
@@ -93,6 +95,7 @@ export function createBus(options: BusOptions = {}): Bus {
       const busRouter = createBusRouter({ db, directoryUrl, rateLimit })
 
       const app = new Hono()
+      applyBusCors(app)
       app.route('/v1/beam', busRouter)
       app.get('/health', (c) => c.json({ status: 'ok', service: 'beam-message-bus' }))
 
