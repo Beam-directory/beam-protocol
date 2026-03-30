@@ -27,6 +27,7 @@ export default defineConfig({
         { text: 'Verification', link: '/guide/verification' },
         { text: 'Federation', link: '/guide/federation' },
         { text: 'Intent Lifecycle', link: '/guide/intent-lifecycle' },
+        { text: 'Restart Recovery', link: '/guide/restart-recovery' },
         { text: 'Consumer IDs', link: '/guide/consumer-ids' },
         { text: 'Core Concepts', link: '/guide/concepts' },
         { text: 'Self-Hosting', link: '/guide/self-hosting' }

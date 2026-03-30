@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { Hono } from 'hono'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -5,7 +8,19 @@ vi.mock('../src/delivery.js', () => ({
   deliverToDirectory: vi.fn(async () => ({ success: true, error: '', retryable: false })),
 }))
 
-import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDeadLetter, markDelivered, markDispatched, markFailed, scheduleRetry } from '../src/db.js'
+import {
+  cleanTestMessages,
+  getMessage,
+  initDatabase,
+  insertMessage,
+  markAcked,
+  markDeadLetter,
+  markDelivered,
+  markDispatched,
+  markFailed,
+  recoverInterruptedMessages,
+  scheduleRetry,
+} from '../src/db.js'
 import { deliverToDirectory } from '../src/delivery.js'
 import { createBusRouter } from '../src/router.js'
 import { startRetryWorker, stopRetryWorker } from '../src/worker.js'
@@ -25,6 +40,14 @@ describe('message bus', () => {
     vi.clearAllMocks()
     vi.useRealTimers()
   })
+
+  function createTempDbPath(): { root: string; dbPath: string } {
+    const root = mkdtempSync(join(tmpdir(), 'beam-bus-recovery-'))
+    return {
+      root,
+      dbPath: join(root, 'beam-bus.sqlite'),
+    }
+  }
 
   it('roundtrips insertMessage + getMessage', () => {
     const id = insertMessage(db, {
@@ -505,5 +528,94 @@ describe('message bus', () => {
       { text: 'hello' },
     )
     expect(getMessage(db, id)?.status).toBe('dead_letter')
+  })
+
+  it('requeues interrupted dispatched messages on startup and replays them with the original nonce', async () => {
+    vi.useFakeTimers()
+    const { root, dbPath } = createTempDbPath()
+
+    try {
+      let diskDb = initDatabase(dbPath)
+      const id = insertMessage(diskDb, {
+        nonce: 'restart-replay-nonce',
+        sender: 'alpha@beam.directory',
+        recipient: 'beta@beam.directory',
+        intent: 'chat',
+        payload: { text: 'restart' },
+      })
+      markDispatched(diskDb, id)
+      diskDb.close()
+
+      diskDb = initDatabase(dbPath)
+      const recovery = recoverInterruptedMessages(diskDb, (Date.now() / 1000) - 1)
+      expect(recovery).toEqual({ requeued: 1 })
+      expect(getMessage(diskDb, id)?.status).toBe('queued')
+      expect(getMessage(diskDb, id)?.nonce).toBe('restart-replay-nonce')
+
+      const timer = startRetryWorker({ db: diskDb, directoryUrl: 'http://directory.test', intervalMs: 50 })
+      await vi.advanceTimersByTimeAsync(50)
+      stopRetryWorker(timer)
+
+      expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledWith(
+        'http://directory.test',
+        id,
+        'restart-replay-nonce',
+        'alpha@beam.directory',
+        'beta@beam.directory',
+        'chat',
+        { text: 'restart' },
+      )
+      expect(getMessage(diskDb, id)?.status).toBe('delivered')
+      diskDb.close()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
+  })
+
+  it('keeps retry windows intact across a bus restart', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date('2026-03-30T09:00:00Z'))
+    const { root, dbPath } = createTempDbPath()
+
+    try {
+      let diskDb = initDatabase(dbPath)
+      const id = insertMessage(diskDb, {
+        nonce: 'restart-window-nonce',
+        sender: 'alpha@beam.directory',
+        recipient: 'beta@beam.directory',
+        intent: 'chat',
+        payload: { text: 'window' },
+      })
+      const nextRetryAt = (Date.now() / 1000) + 60
+      scheduleRetry(diskDb, id, 1, nextRetryAt, 'offline')
+      diskDb.close()
+
+      diskDb = initDatabase(dbPath)
+      expect(getMessage(diskDb, id)?.status).toBe('queued')
+      expect(getMessage(diskDb, id)?.next_retry_at).toBe(nextRetryAt)
+
+      const timer = startRetryWorker({ db: diskDb, directoryUrl: 'http://directory.test', intervalMs: 50 })
+      await vi.advanceTimersByTimeAsync(50)
+      expect(vi.mocked(deliverToDirectory)).not.toHaveBeenCalled()
+
+      vi.setSystemTime(new Date('2026-03-30T09:01:01Z'))
+      await vi.advanceTimersByTimeAsync(50)
+      stopRetryWorker(timer)
+
+      expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledTimes(1)
+      expect(vi.mocked(deliverToDirectory)).toHaveBeenCalledWith(
+        'http://directory.test',
+        id,
+        'restart-window-nonce',
+        'alpha@beam.directory',
+        'beta@beam.directory',
+        'chat',
+        { text: 'window' },
+      )
+      expect(getMessage(diskDb, id)?.status).toBe('delivered')
+      diskDb.close()
+    } finally {
+      rmSync(root, { recursive: true, force: true })
+    }
   })
 })

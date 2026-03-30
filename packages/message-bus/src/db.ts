@@ -247,6 +247,38 @@ export function requeueMessage(db: Database.Database, id: string): void {
   })
 }
 
+export interface BusStartupRecoverySummary {
+  requeued: number
+}
+
+export function recoverInterruptedMessages(
+  db: Database.Database,
+  nowSeconds = Date.now() / 1000,
+): BusStartupRecoverySummary {
+  const interrupted = db.prepare(`
+    SELECT id
+    FROM beam_messages
+    WHERE status IN ('received', 'dispatched')
+    ORDER BY created_at ASC
+  `).all() as Array<{ id: string }>
+
+  const recover = db.transaction(() => {
+    for (const message of interrupted) {
+      updateMessageLifecycle(db, message.id, 'queued', {
+        nextRetryAt: nowSeconds,
+        error: 'Recovered after message bus restart',
+        failedAt: null,
+      })
+    }
+  })
+
+  recover()
+
+  return {
+    requeued: interrupted.length,
+  }
+}
+
 export function getPendingRetries(db: Database.Database, limit = 10): BeamMessage[] {
   const now = Date.now() / 1000
   return db.prepare(`
