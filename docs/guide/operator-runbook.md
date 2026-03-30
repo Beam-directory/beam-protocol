@@ -29,7 +29,8 @@ The shortest daily loop is:
 1. Open `Inbox`.
 2. Filter to `new`.
 3. Acknowledge or act on each signal.
-4. Jump into `Beta Requests`, `Alerts`, or the linked trace from there.
+4. Record an owner and next action on critical alerts before you leave the inbox.
+5. Jump into `Beta Requests`, `Alerts`, or the linked trace from there.
 
 ## The Default Investigation Loop
 
@@ -90,9 +91,10 @@ Symptoms:
 What to do:
 
 1. Open the dead-letter row and then the trace link for the same nonce.
-2. Read the terminal error and confirm whether it is retryable.
-3. Correct the root cause first.
-4. Requeue only after the downstream condition changed.
+2. Open the recipient agent or the linked alert context if Beam already has a critical signal for the same failure pattern.
+3. Record or confirm the owner and next action in `Inbox` if the fix is not already obvious.
+4. Correct the root cause first.
+5. Requeue only after the downstream condition changed.
 
 ## Failure Mode 4: `FORBIDDEN` Or ACL Denial
 

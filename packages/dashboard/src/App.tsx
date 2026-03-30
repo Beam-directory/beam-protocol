@@ -10,6 +10,7 @@ import BetaRequestsPage from './pages/BetaRequestsPage'
 import DeadLetterPage from './pages/DeadLetterPage'
 import ErrorsPage from './pages/ErrorsPage'
 import FederationPage from './pages/FederationPage'
+import FunnelPage from './pages/FunnelPage'
 import IntentsPage from './pages/IntentsPage'
 import LoginPage from './pages/LoginPage'
 import OperatorInboxPage from './pages/OperatorInboxPage'
@@ -54,6 +55,7 @@ export default function App() {
             <Route path="agents" element={<AgentsPage />} />
             <Route path="agents/:beamId" element={<AgentProfilePage />} />
             <Route path="federation" element={<FederationPage />} />
+            <Route path="funnel" element={<FunnelPage />} />
             <Route path="errors" element={<ErrorsPage />} />
             <Route path="alerts" element={<AlertsPage />} />
             <Route path="inbox" element={<OperatorInboxPage />} />

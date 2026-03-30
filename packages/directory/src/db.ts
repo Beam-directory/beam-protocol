@@ -12,6 +12,7 @@ import type {
   DirectoryRoleRow,
   DnsCacheRow,
   FederatedAgentRow,
+  FunnelEventRow,
   FederatedTrustRow,
   IntentFrame,
   IntentLogRow,
@@ -182,6 +183,8 @@ function initSchema(db: DB): void {
       title TEXT NOT NULL,
       message TEXT NOT NULL,
       href TEXT,
+      owner TEXT,
+      next_action TEXT,
       status TEXT NOT NULL DEFAULT 'new' CHECK(status IN ('new', 'acknowledged', 'acted')),
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL,
@@ -199,6 +202,28 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_operator_notifications_beta_request
       ON operator_notifications(beta_request_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS funnel_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL,
+      origin TEXT NOT NULL,
+      page_key TEXT NOT NULL,
+      event_category TEXT NOT NULL CHECK(event_category IN ('page_view', 'cta_click', 'request', 'demo_milestone')),
+      cta_key TEXT,
+      target_page TEXT,
+      workflow_type TEXT,
+      milestone_key TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_funnel_events_created_at
+      ON funnel_events(created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_funnel_events_category
+      ON funnel_events(event_category, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_funnel_events_session
+      ON funnel_events(session_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS intent_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -524,6 +549,24 @@ function initSchema(db: DB): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_status ON operator_notifications(status, updated_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_source ON operator_notifications(source_type, created_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_beta_request ON operator_notifications(beta_request_id, created_at DESC)')
+  ensureColumn(db, 'operator_notifications', 'owner', 'TEXT')
+  ensureColumn(db, 'operator_notifications', 'next_action', 'TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_operator_notifications_owner ON operator_notifications(owner, updated_at DESC)')
+  db.exec(`CREATE TABLE IF NOT EXISTS funnel_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    session_id TEXT NOT NULL,
+    origin TEXT NOT NULL,
+    page_key TEXT NOT NULL,
+    event_category TEXT NOT NULL CHECK(event_category IN ('page_view', 'cta_click', 'request', 'demo_milestone')),
+    cta_key TEXT,
+    target_page TEXT,
+    workflow_type TEXT,
+    milestone_key TEXT,
+    created_at TEXT NOT NULL
+  )`)
+  db.exec('CREATE INDEX IF NOT EXISTS idx_funnel_events_created_at ON funnel_events(created_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_funnel_events_category ON funnel_events(event_category, created_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_funnel_events_session ON funnel_events(session_id, created_at DESC)')
   ensureIntentLogSchema(db)
   ensureColumn(db, 'intent_trace_events', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce ON intent_trace_events(nonce, timestamp ASC, id ASC)')
@@ -2245,10 +2288,12 @@ export function listOperatorNotifications(
       title LIKE ?
       OR message LIKE ?
       OR COALESCE(actor, '') LIKE ?
+      OR COALESCE(owner, '') LIKE ?
+      OR COALESCE(next_action, '') LIKE ?
       OR COALESCE(alert_id, '') LIKE ?
       OR COALESCE(source_key, '') LIKE ?
     )`)
-    params.push(needle, needle, needle, needle, needle)
+    params.push(needle, needle, needle, needle, needle, needle, needle)
   }
 
   const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
@@ -2304,6 +2349,9 @@ export function upsertOperatorNotification(
     title: string
     message: string
     href?: string | null
+    owner?: string | null
+    nextAction?: string | null
+    defaultNextAction?: string | null
     details?: unknown
     resetStatus?: boolean
   },
@@ -2327,6 +2375,8 @@ export function upsertOperatorNotification(
           title = ?,
           message = ?,
           href = ?,
+          owner = ?,
+          next_action = ?,
           status = ?,
           updated_at = ?,
           acknowledged_at = ?,
@@ -2342,6 +2392,8 @@ export function upsertOperatorNotification(
       input.title,
       input.message,
       input.href ?? existing.href,
+      input.owner ?? existing.owner,
+      input.nextAction ?? existing.next_action ?? input.defaultNextAction ?? null,
       nextStatus,
       now,
       acknowledgedAt,
@@ -2364,6 +2416,8 @@ export function upsertOperatorNotification(
       title,
       message,
       href,
+      owner,
+      next_action,
       status,
       created_at,
       updated_at,
@@ -2372,7 +2426,7 @@ export function upsertOperatorNotification(
       actor,
       details_json
     )
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, NULL, NULL, NULL, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'new', ?, ?, NULL, NULL, NULL, ?)
   `).run(
     input.sourceType,
     input.sourceKey,
@@ -2382,6 +2436,8 @@ export function upsertOperatorNotification(
     input.title,
     input.message,
     input.href ?? null,
+    input.owner ?? null,
+    input.nextAction ?? input.defaultNextAction ?? null,
     now,
     now,
     details,
@@ -2394,8 +2450,10 @@ export function updateOperatorNotificationStatus(
   db: DB,
   input: {
     id: number
-    status: OperatorNotificationRow['status']
+    status?: OperatorNotificationRow['status']
     actor: string
+    owner?: string | null
+    nextAction?: string | null
   },
 ): OperatorNotificationRow | null {
   const existing = getOperatorNotificationById(db, input.id)
@@ -2404,25 +2462,111 @@ export function updateOperatorNotificationStatus(
   }
 
   const now = nowIso()
-  const acknowledgedAt = input.status === 'new'
+  const nextStatus = input.status ?? existing.status
+  const acknowledgedAt = nextStatus === 'new'
     ? null
-    : input.status === 'acknowledged'
+    : nextStatus === 'acknowledged'
       ? (existing.acknowledged_at ?? now)
       : (existing.acknowledged_at ?? now)
-  const actedAt = input.status === 'acted' ? now : null
-  const actor = input.status === 'new' ? null : input.actor
+  const actedAt = nextStatus === 'acted' ? now : null
+  const actor = nextStatus === 'new' ? null : input.actor
+  const owner = input.owner === undefined ? existing.owner : input.owner
+  const nextAction = input.nextAction === undefined ? existing.next_action : input.nextAction
 
   db.prepare(`
     UPDATE operator_notifications
     SET status = ?,
+        owner = ?,
+        next_action = ?,
         updated_at = ?,
         acknowledged_at = ?,
         acted_at = ?,
         actor = ?
     WHERE id = ?
-  `).run(input.status, now, acknowledgedAt, actedAt, actor, input.id)
+  `).run(nextStatus, owner, nextAction, now, acknowledgedAt, actedAt, actor, input.id)
 
   return getOperatorNotificationById(db, input.id)
+}
+
+export function insertFunnelEvent(
+  db: DB,
+  input: {
+    sessionId: string
+    origin: string
+    pageKey: string
+    eventCategory: FunnelEventRow['event_category']
+    ctaKey?: string | null
+    targetPage?: string | null
+    workflowType?: string | null
+    milestoneKey?: string | null
+    createdAt?: string
+  },
+): FunnelEventRow {
+  const createdAt = input.createdAt ?? nowIso()
+  const result = db.prepare(`
+    INSERT INTO funnel_events (
+      session_id,
+      origin,
+      page_key,
+      event_category,
+      cta_key,
+      target_page,
+      workflow_type,
+      milestone_key,
+      created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.sessionId,
+    input.origin,
+    input.pageKey,
+    input.eventCategory,
+    input.ctaKey ?? null,
+    input.targetPage ?? null,
+    input.workflowType ?? null,
+    input.milestoneKey ?? null,
+    createdAt,
+  )
+
+  return db.prepare('SELECT * FROM funnel_events WHERE id = ?').get(Number(result.lastInsertRowid)) as FunnelEventRow
+}
+
+export function listFunnelEvents(
+  db: DB,
+  query: {
+    since?: string
+    limit?: number
+    eventCategory?: FunnelEventRow['event_category']
+    pageKey?: string
+  } = {},
+): FunnelEventRow[] {
+  const limit = Math.max(1, Math.min(10000, Math.trunc(query.limit ?? 5000)))
+  const conditions: string[] = []
+  const params: Array<string | number> = []
+
+  if (query.since) {
+    conditions.push('created_at >= ?')
+    params.push(query.since)
+  }
+
+  if (query.eventCategory) {
+    conditions.push('event_category = ?')
+    params.push(query.eventCategory)
+  }
+
+  if (query.pageKey) {
+    conditions.push('page_key = ?')
+    params.push(query.pageKey)
+  }
+
+  const where = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : ''
+  return db.prepare(`
+    SELECT *
+    FROM funnel_events
+    ${where}
+    ORDER BY created_at DESC, id DESC
+    LIMIT ${limit}
+  `).all(...params) as FunnelEventRow[]
 }
 
 export function listShieldAuditLog(

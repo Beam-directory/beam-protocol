@@ -71,6 +71,8 @@ export type AlertItem = {
   sampleTraces: AlertTraceSample[]
   notificationId?: number | null
   notificationStatus?: OperatorNotificationStatus | null
+  notificationOwner?: string | null
+  notificationNextAction?: string | null
 }
 
 type IntentQuery = {
@@ -1339,6 +1341,27 @@ function criticalAlertNotificationSourceKey(alertId: string): string {
   return `critical-alert:${alertId}`
 }
 
+function getAlertNextAction(alert: AlertItem): string {
+  switch (alert.id) {
+    case 'network-error-rate':
+      return 'Open the latest failing trace, confirm whether the recipient or route is broken, and assign an owner before retrying affected traffic.'
+    case 'network-latency-p95':
+      return 'Open the slowest recent trace, confirm whether the delay is downstream or queue-related, and record who owns the recovery path.'
+    case 'network-in-flight-backlog':
+      return 'Open the oldest in-flight trace, check whether the recipient is stalled, and only requeue after the downstream condition is understood.'
+    case 'federation-stale-peers':
+      return 'Inspect federation health, confirm which peer is stale, and assign an operator to restore sync or disable the peer deliberately.'
+    case 'shield-review-load':
+      return 'Open the latest flagged trace and Shield audit history, then decide whether this is abuse pressure or a false positive that needs policy changes.'
+    default:
+      if (alert.id.startsWith('error-hotspot-')) {
+        return 'Open the latest hotspot trace, inspect the affected recipient, and capture the next recovery action before retrying.'
+      }
+
+      return 'Open the linked context, assign an owner, and record the next recovery action before changing queue state.'
+  }
+}
+
 export function buildAlertsWithNotificationState(db: Database, windowHours: number): AlertItem[] {
   const alerts = buildAlerts(db, windowHours)
   const criticalAlerts = alerts.filter((alert) => alert.severity === 'critical')
@@ -1352,6 +1375,7 @@ export function buildAlertsWithNotificationState(db: Database, windowHours: numb
       title: alert.title,
       message: alert.message,
       href: alert.links[0]?.href ?? '/alerts',
+      defaultNextAction: getAlertNextAction(alert),
       details: {
         scope: alert.scope,
         metric: alert.metric,
@@ -1375,6 +1399,8 @@ export function buildAlertsWithNotificationState(db: Database, windowHours: numb
         ...alert,
         notificationId: notification.id,
         notificationStatus: notification.status,
+        notificationOwner: notification.owner,
+        notificationNextAction: notification.next_action,
       }
       : alert
   })

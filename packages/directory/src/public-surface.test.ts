@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
-import { assignDirectoryRole, createDatabase } from './db.js'
+import { assignDirectoryRole, createDatabase, upsertOperatorNotification } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
 
 function createAdminHeaders(
@@ -34,6 +34,11 @@ test('cors allows production public-site and loopback dashboard origins', async 
     }))
     assert.equal(beamOriginResponse.headers.get('access-control-allow-origin'), 'https://beam.directory')
 
+    const docsOriginResponse = await app.request(new Request('http://localhost/health', {
+      headers: { Origin: 'https://docs.beam.directory' },
+    }))
+    assert.equal(docsOriginResponse.headers.get('access-control-allow-origin'), 'https://docs.beam.directory')
+
     const localOriginResponse = await app.request(new Request('http://localhost/health', {
       headers: { Origin: 'http://localhost:43173' },
     }))
@@ -43,6 +48,136 @@ test('cors allows production public-site and loopback dashboard origins', async 
       headers: { Origin: 'https://evil.example' },
     }))
     assert.equal(unknownOriginResponse.headers.get('access-control-allow-origin'), null)
+  } finally {
+    db.close()
+  }
+})
+
+test('critical operator signals can capture owner and next action through the admin API', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+    const created = upsertOperatorNotification(db, {
+      sourceType: 'critical_alert',
+      sourceKey: 'critical-alert:network-error-rate',
+      alertId: 'network-error-rate',
+      severity: 'critical',
+      title: 'Error rate exceeded threshold',
+      message: '25% of completed intents failed.',
+      href: '/alerts?alert=network-error-rate',
+      nextAction: 'Open the latest failing trace.',
+    })
+
+    const response = await app.request(new Request(`http://localhost/admin/operator-notifications/${created.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'acknowledged',
+        owner: 'ops@example.com',
+        nextAction: 'Confirm the downstream route, then decide whether to requeue.',
+      }),
+    }))
+
+    assert.equal(response.status, 200)
+    const body = await response.json() as {
+      ok: boolean
+      notification: {
+        status: string
+        owner: string | null
+        nextAction: string | null
+      }
+    }
+    assert.equal(body.ok, true)
+    assert.equal(body.notification.status, 'acknowledged')
+    assert.equal(body.notification.owner, 'ops@example.com')
+    assert.match(body.notification.nextAction ?? '', /requeue/i)
+  } finally {
+    db.close()
+  }
+})
+
+test('first-party funnel analytics ingest and summary stay available through the admin API', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+
+    const events = [
+      {
+        sessionId: 'sessionlanding123',
+        pageKey: 'landing',
+        eventCategory: 'page_view',
+      },
+      {
+        sessionId: 'sessionlanding123',
+        pageKey: 'landing',
+        eventCategory: 'cta_click',
+        ctaKey: 'landing_guided_eval_hero',
+        targetPage: 'guided_evaluation',
+      },
+      {
+        sessionId: 'sessionlanding123',
+        pageKey: 'guided_evaluation',
+        eventCategory: 'page_view',
+      },
+      {
+        sessionId: 'sessionlanding123',
+        pageKey: 'guided_evaluation',
+        eventCategory: 'demo_milestone',
+        milestoneKey: 'guided_evaluation_view',
+      },
+      {
+        sessionId: 'sessionrequest456',
+        pageKey: 'hosted_beta',
+        eventCategory: 'request',
+        workflowType: 'hosted-beta-partner-handoff',
+        milestoneKey: 'hosted_beta_request_submitted',
+      },
+    ]
+
+    for (const payload of events) {
+      const response = await app.request(new Request('http://localhost/analytics/events', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Origin: 'https://beam.directory',
+        },
+        body: JSON.stringify(payload),
+      }))
+      assert.equal(response.status, 202)
+      assert.equal(response.headers.get('access-control-allow-origin'), 'https://beam.directory')
+    }
+
+    const summaryResponse = await app.request(new Request('http://localhost/admin/funnel?days=30', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+
+    assert.equal(summaryResponse.status, 200)
+    const summary = await summaryResponse.json() as {
+      summary: {
+        anonymousSessions: number
+        landingSessions: number
+        guidedSessions: number
+        requestSessions: number
+        demoSessions: number
+      }
+      ctaClicks: Array<{ ctaKey: string; sessions: number }>
+      workflows: Array<{ workflowType: string; sessions: number }>
+    }
+
+    assert.equal(summary.summary.anonymousSessions, 2)
+    assert.equal(summary.summary.landingSessions, 1)
+    assert.equal(summary.summary.guidedSessions, 1)
+    assert.equal(summary.summary.requestSessions, 1)
+    assert.equal(summary.summary.demoSessions, 1)
+    assert.equal(summary.ctaClicks[0]?.ctaKey, 'landing_guided_eval_hero')
+    assert.equal(summary.workflows[0]?.workflowType, 'hosted-beta-partner-handoff')
   } finally {
     db.close()
   }

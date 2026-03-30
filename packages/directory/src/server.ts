@@ -41,8 +41,10 @@ import {
   getAgent,
   getDIDDocument,
   getOperatorNotificationBySourceKey,
+  insertFunnelEvent,
   listAgentKeys,
   listAuditLog,
+  listFunnelEvents,
   listDirectoryRoles,
   listOperatorNotifications,
   listOperatorNotificationsBySourceKeys,
@@ -76,6 +78,21 @@ type BetaRequestAttention = 'unowned' | 'stale'
 type BetaRequestSort = 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
 type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 type OperatorNotificationSource = 'beta_request' | 'critical_alert'
+type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
+type FunnelPageKey =
+  | 'landing'
+  | 'guided_evaluation'
+  | 'hosted_beta'
+  | 'playground'
+  | 'register'
+  | 'status'
+  | 'privacy'
+  | 'terms'
+  | 'docs_home'
+  | 'docs_partner_handoff'
+  | 'docs_design_partner_onboarding'
+  | 'docs_hosted_quickstart'
+  | 'docs_other'
 
 type BetaRequestUpdateInput = {
   status?: BetaRequestStatus
@@ -104,6 +121,16 @@ type OperatorNotificationFilters = {
   hours?: number
 }
 
+type FunnelEventInput = {
+  sessionId: string
+  pageKey: FunnelPageKey
+  eventCategory: FunnelEventCategory
+  ctaKey?: string | null
+  targetPage?: FunnelPageKey | null
+  workflowType?: string | null
+  milestoneKey?: string | null
+}
+
 type WaitlistRow = {
   id: number
   email: string
@@ -130,6 +157,39 @@ const OPERATOR_NOTIFICATION_STATUSES: OperatorNotificationStatus[] = ['new', 'ac
 const OPERATOR_NOTIFICATION_STATUS_SET = new Set<string>(OPERATOR_NOTIFICATION_STATUSES)
 const OPERATOR_NOTIFICATION_SOURCES: OperatorNotificationSource[] = ['beta_request', 'critical_alert']
 const OPERATOR_NOTIFICATION_SOURCE_SET = new Set<string>(OPERATOR_NOTIFICATION_SOURCES)
+const FUNNEL_EVENT_CATEGORIES: FunnelEventCategory[] = ['page_view', 'cta_click', 'request', 'demo_milestone']
+const FUNNEL_EVENT_CATEGORY_SET = new Set<string>(FUNNEL_EVENT_CATEGORIES)
+const FUNNEL_PAGE_KEYS: FunnelPageKey[] = [
+  'landing',
+  'guided_evaluation',
+  'hosted_beta',
+  'playground',
+  'register',
+  'status',
+  'privacy',
+  'terms',
+  'docs_home',
+  'docs_partner_handoff',
+  'docs_design_partner_onboarding',
+  'docs_hosted_quickstart',
+  'docs_other',
+]
+const FUNNEL_PAGE_KEY_SET = new Set<string>(FUNNEL_PAGE_KEYS)
+const FUNNEL_WORKFLOW_TYPES = new Set<string>([
+  'hosted-beta-partner-handoff',
+  'hosted-beta-operator-eval',
+  'hosted-beta-managed-rollout',
+  'hosted-beta-compliance',
+])
+const FUNNEL_MILESTONE_KEYS = new Set<string>([
+  'guided_evaluation_view',
+  'hosted_beta_view',
+  'design_partner_onboarding_view',
+  'hosted_quickstart_view',
+  'playground_identity_ready',
+  'playground_echo_success',
+  'hosted_beta_request_submitted',
+])
 const BETA_REQUEST_STALE_HOURS: Record<BetaRequestStatus, number | null> = {
   new: 24,
   reviewing: 24,
@@ -230,6 +290,100 @@ function normalizeOperatorNotificationSource(value: unknown): OperatorNotificati
   return normalized as OperatorNotificationSource
 }
 
+function normalizeFunnelEventCategory(value: unknown): FunnelEventCategory | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase()
+  if (!FUNNEL_EVENT_CATEGORY_SET.has(normalized)) {
+    return null
+  }
+
+  return normalized as FunnelEventCategory
+}
+
+function normalizeFunnelPageKey(value: unknown): FunnelPageKey | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase().replaceAll('-', '_')
+  if (!FUNNEL_PAGE_KEY_SET.has(normalized)) {
+    return null
+  }
+
+  return normalized as FunnelPageKey
+}
+
+function normalizeSessionId(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim()
+  if (!/^[a-zA-Z0-9_-]{8,128}$/.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+function normalizeFunnelKey(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase().replaceAll(' ', '_')
+  if (!/^[a-z0-9:_-]{2,80}$/.test(normalized)) {
+    return null
+  }
+
+  return normalized
+}
+
+function normalizeWorkflowType(value: unknown): string | null {
+  const normalized = normalizeOptionalString(value)
+  if (!normalized) {
+    return null
+  }
+
+  return FUNNEL_WORKFLOW_TYPES.has(normalized) ? normalized : null
+}
+
+function normalizeMilestoneKey(value: unknown): string | null {
+  const normalized = normalizeFunnelKey(value)
+  if (!normalized) {
+    return null
+  }
+
+  return FUNNEL_MILESTONE_KEYS.has(normalized) ? normalized : null
+}
+
+function ratio(part: number, total: number): number | null {
+  if (!total) {
+    return null
+  }
+
+  return Number((part / total).toFixed(4))
+}
+
+function intersectionSize(left: Set<string>, right: Set<string>): number {
+  if (left.size === 0 || right.size === 0) {
+    return 0
+  }
+
+  let count = 0
+  const [small, large] = left.size <= right.size ? [left, right] : [right, left]
+  for (const value of small) {
+    if (large.has(value)) {
+      count += 1
+    }
+  }
+
+  return count
+}
+
 function betaRequestNotificationSourceKey(id: number): string {
   return `beta-request:${id}`
 }
@@ -293,6 +447,8 @@ function serializeOperatorNotification(row: OperatorNotificationRow) {
     title: row.title,
     message: row.message,
     href: row.href,
+    owner: row.owner,
+    nextAction: row.next_action,
     status: row.status,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -368,6 +524,7 @@ const PUBLIC_CORS_ORIGINS = new Set([
   'https://dashboard.beam.directory',
   'https://beam.directory',
   'https://www.beam.directory',
+  'https://docs.beam.directory',
 ])
 
 function resolveCorsOrigin(origin?: string | null): string | null {
@@ -746,6 +903,8 @@ function ensureBetaRequestNotification(
     title: `Hosted beta request from ${companyLabel}`,
     message: messageParts.join(' · '),
     href: `/beta-requests?id=${row.id}`,
+    owner: row.owner,
+    nextAction: row.next_action ?? getBetaRequestNextStep(row.status),
     resetStatus,
     details: {
       email: row.email,
@@ -791,6 +950,231 @@ function summarizeOperatorNotifications(rows: OperatorNotificationRow[]) {
       beta_request: rows.filter((row) => row.source_type === 'beta_request').length,
       critical_alert: rows.filter((row) => row.source_type === 'critical_alert').length,
     },
+  }
+}
+
+function serializeFunnelEvent(row: {
+  id: number
+  session_id: string
+  origin: string
+  page_key: string
+  event_category: string
+  cta_key: string | null
+  target_page: string | null
+  workflow_type: string | null
+  milestone_key: string | null
+  created_at: string
+}) {
+  return {
+    id: row.id,
+    sessionId: row.session_id,
+    origin: row.origin,
+    pageKey: row.page_key,
+    eventCategory: row.event_category,
+    ctaKey: row.cta_key,
+    targetPage: row.target_page,
+    workflowType: row.workflow_type,
+    milestoneKey: row.milestone_key,
+    createdAt: row.created_at,
+  }
+}
+
+function summarizeFunnel(rows: Array<{
+  id: number
+  session_id: string
+  origin: string
+  page_key: string
+  event_category: string
+  cta_key: string | null
+  target_page: string | null
+  workflow_type: string | null
+  milestone_key: string | null
+  created_at: string
+}>) {
+  const pageViews = rows.filter((row) => row.event_category === 'page_view')
+  const ctaClicks = rows.filter((row) => row.event_category === 'cta_click')
+  const requests = rows.filter((row) => row.event_category === 'request')
+  const demos = rows.filter((row) => row.event_category === 'demo_milestone')
+  const sessions = new Set(rows.map((row) => row.session_id))
+  const milestoneSets = [
+    {
+      key: 'landing_visit',
+      label: 'Landing visited',
+      sessionSet: new Set(rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'landing').map((row) => row.session_id)),
+      events: rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'landing').length,
+    },
+    {
+      key: 'guided_evaluation',
+      label: 'Guided evaluation viewed',
+      sessionSet: new Set(rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'guided_evaluation').map((row) => row.session_id)),
+      events: rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'guided_evaluation').length,
+    },
+    {
+      key: 'hosted_beta_view',
+      label: 'Hosted beta viewed',
+      sessionSet: new Set(rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'hosted_beta').map((row) => row.session_id)),
+      events: rows.filter((row) => row.event_category === 'page_view' && row.page_key === 'hosted_beta').length,
+    },
+    {
+      key: 'hosted_beta_request',
+      label: 'Hosted beta requested',
+      sessionSet: new Set(requests.map((row) => row.session_id)),
+      events: requests.length,
+    },
+    {
+      key: 'demo_milestone',
+      label: 'Demo milestone reached',
+      sessionSet: new Set(demos.map((row) => row.session_id)),
+      events: demos.length,
+    },
+  ]
+  const landingSet = milestoneSets[0]?.sessionSet ?? new Set<string>()
+  const milestoneRows = milestoneSets.map((entry, index, all) => {
+    const previousSet = index === 0 ? null : (all[index - 1]?.sessionSet ?? new Set<string>())
+    return {
+      key: entry.key,
+      label: entry.label,
+      sessions: entry.sessionSet.size,
+      events: entry.events,
+      conversionFromPrevious: previousSet ? ratio(intersectionSize(entry.sessionSet, previousSet), previousSet.size) : null,
+      conversionFromLanding: ratio(intersectionSize(entry.sessionSet, landingSet), landingSet.size),
+    }
+  })
+
+  const entryPages = Array.from(
+    pageViews.reduce((map, row) => {
+      const current = map.get(row.page_key) ?? { pageKey: row.page_key, events: 0, sessions: new Set<string>() }
+      current.events += 1
+      current.sessions.add(row.session_id)
+      map.set(row.page_key, current)
+      return map
+    }, new Map<string, { pageKey: string; events: number; sessions: Set<string> }>() ).values(),
+  )
+    .map((entry) => ({
+      pageKey: entry.pageKey,
+      events: entry.events,
+      sessions: entry.sessions.size,
+    }))
+    .sort((left, right) => right.sessions - left.sessions || right.events - left.events)
+
+  const ctaSummary = Array.from(
+    ctaClicks.reduce((map, row) => {
+      const key = row.cta_key ?? 'unknown'
+      const current = map.get(key) ?? { ctaKey: key, targetPage: row.target_page, events: 0, sessions: new Set<string>() }
+      current.events += 1
+      current.sessions.add(row.session_id)
+      if (!current.targetPage && row.target_page) {
+        current.targetPage = row.target_page
+      }
+      map.set(key, current)
+      return map
+    }, new Map<string, { ctaKey: string; targetPage: string | null; events: number; sessions: Set<string> }>() ).values(),
+  )
+    .map((entry) => ({
+      ctaKey: entry.ctaKey,
+      targetPage: entry.targetPage,
+      events: entry.events,
+      sessions: entry.sessions.size,
+    }))
+    .sort((left, right) => right.sessions - left.sessions || right.events - left.events)
+
+  const milestones = Array.from(
+    demos.reduce((map, row) => {
+      const key = row.milestone_key ?? 'unknown'
+      const current = map.get(key) ?? { milestoneKey: key, events: 0, sessions: new Set<string>() }
+      current.events += 1
+      current.sessions.add(row.session_id)
+      map.set(key, current)
+      return map
+    }, new Map<string, { milestoneKey: string; events: number; sessions: Set<string> }>() ).values(),
+  )
+    .map((entry) => ({
+      milestoneKey: entry.milestoneKey,
+      events: entry.events,
+      sessions: entry.sessions.size,
+    }))
+    .sort((left, right) => right.sessions - left.sessions || right.events - left.events)
+
+  const requestsByWorkflow = Array.from(
+    requests.reduce((map, row) => {
+      const key = row.workflow_type ?? 'unknown'
+      const current = map.get(key) ?? { workflowType: key, events: 0, sessions: new Set<string>() }
+      current.events += 1
+      current.sessions.add(row.session_id)
+      map.set(key, current)
+      return map
+    }, new Map<string, { workflowType: string; events: number; sessions: Set<string> }>() ).values(),
+  )
+    .map((entry) => ({
+      workflowType: entry.workflowType,
+      events: entry.events,
+      sessions: entry.sessions.size,
+    }))
+    .sort((left, right) => right.sessions - left.sessions || right.events - left.events)
+
+  const daily = new Map<string, { day: string; landing: Set<string>; guided: Set<string>; request: Set<string>; demo: Set<string> }>()
+  for (const row of rows) {
+    const day = row.created_at.slice(0, 10)
+    const bucket = daily.get(day) ?? {
+      day,
+      landing: new Set<string>(),
+      guided: new Set<string>(),
+      request: new Set<string>(),
+      demo: new Set<string>(),
+    }
+
+    if (row.event_category === 'page_view' && row.page_key === 'landing') {
+      bucket.landing.add(row.session_id)
+    }
+    if (row.event_category === 'page_view' && row.page_key === 'guided_evaluation') {
+      bucket.guided.add(row.session_id)
+    }
+    if (row.event_category === 'request') {
+      bucket.request.add(row.session_id)
+    }
+    if (row.event_category === 'demo_milestone') {
+      bucket.demo.add(row.session_id)
+    }
+
+    daily.set(day, bucket)
+  }
+
+  const timeline = Array.from(daily.values())
+    .sort((left, right) => left.day.localeCompare(right.day))
+    .map((entry) => ({
+      day: entry.day,
+      landingSessions: entry.landing.size,
+      guidedSessions: entry.guided.size,
+      requestSessions: entry.request.size,
+      demoSessions: entry.demo.size,
+    }))
+
+  return {
+    summary: {
+      anonymousSessions: sessions.size,
+      pageViews: pageViews.length,
+      ctaClicks: ctaClicks.length,
+      requestEvents: requests.length,
+      demoEvents: demos.length,
+      landingSessions: milestoneRows[0]?.sessions ?? 0,
+      guidedSessions: milestoneRows[1]?.sessions ?? 0,
+      hostedBetaSessions: milestoneRows[2]?.sessions ?? 0,
+      requestSessions: milestoneRows[3]?.sessions ?? 0,
+      demoSessions: milestoneRows[4]?.sessions ?? 0,
+      landingToGuidedRate: milestoneRows[1]?.conversionFromLanding ?? null,
+      landingToRequestRate: milestoneRows[3]?.conversionFromLanding ?? null,
+      requestToDemoRate: ratio(
+        intersectionSize(milestoneSets[4]?.sessionSet ?? new Set<string>(), milestoneSets[3]?.sessionSet ?? new Set<string>()),
+        milestoneSets[3]?.sessionSet.size ?? 0,
+      ),
+    },
+    milestones: milestoneRows,
+    entryPages,
+    ctaClicks: ctaSummary,
+    demoMilestones: milestones,
+    workflows: requestsByWorkflow,
+    timeline,
+    recentEvents: rows.slice(0, 40).map((row) => serializeFunnelEvent(row)),
   }
 }
 
@@ -1572,6 +1956,7 @@ export function createApp(db: Database): Hono {
         return c.json({ error: 'Beta request not found after update', errorCode: 'NOT_FOUND' }, 404)
       }
 
+      ensureBetaRequestNotification(db, updated)
       syncBetaRequestNotificationStatus(db, updated, auth.session.email)
       const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(updated.id))
 
@@ -1657,15 +2042,24 @@ export function createApp(db: Database): Hono {
       return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
     }
 
-    const status = normalizeOperatorNotificationStatus((body as Record<string, unknown>).status)
-    if (!status) {
+    const raw = body as Record<string, unknown>
+    const status = 'status' in raw ? (normalizeOperatorNotificationStatus(raw.status) ?? undefined) : undefined
+    if ('status' in raw && !status) {
       return c.json({ error: 'Invalid operator notification status', errorCode: 'INVALID_NOTIFICATION_STATUS' }, 400)
+    }
+    const owner = 'owner' in raw ? normalizeOptionalString(raw.owner) : undefined
+    const nextAction = 'nextAction' in raw ? normalizeOptionalString(raw.nextAction) : undefined
+
+    if (!('status' in raw) && !('owner' in raw) && !('nextAction' in raw)) {
+      return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
     }
 
     const updated = updateOperatorNotificationStatus(db, {
       id,
       status,
       actor: auth.session.email,
+      owner,
+      nextAction,
     })
     if (!updated) {
       return c.json({ error: 'Operator notification not found', errorCode: 'NOT_FOUND' }, 404)
@@ -1677,6 +2071,8 @@ export function createApp(db: Database): Hono {
       target: String(id),
       details: {
         status,
+        owner,
+        nextAction,
         role: auth.session.role,
         sourceType: updated.source_type,
         sourceKey: updated.source_key,
@@ -1688,6 +2084,33 @@ export function createApp(db: Database): Hono {
       ok: true,
       notification: serializeOperatorNotification(updated),
     })
+  })
+
+  app.get('/admin/funnel', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const days = Math.max(1, Math.min(180, Number.parseInt(c.req.query('days') ?? '30', 10) || 30))
+
+    try {
+      const rows = listFunnelEvents(db, {
+        since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+        limit: 10000,
+      })
+      const summary = summarizeFunnel(rows)
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        days,
+        generatedAt: new Date().toISOString(),
+        ...summary,
+      })
+    } catch (err) {
+      console.error('Funnel summary error:', err)
+      return c.json({ error: 'Failed to load funnel analytics', errorCode: 'DB_ERROR' }, 500)
+    }
   })
 
   app.get('/admin/waitlist', (c) => {
@@ -2011,6 +2434,8 @@ export function createApp(db: Database): Hono {
           : null
       )
     const workflowSummary = normalizeOptionalString(raw.workflowSummary) ?? normalizeOptionalString(raw.notes)
+    const analyticsSessionId = normalizeSessionId(raw.analyticsSessionId ?? raw.sessionId)
+    const analyticsPageKey = normalizeFunnelPageKey(raw.pageKey) ?? 'hosted_beta'
 
     const signup: WaitlistSignupInput = {
       email,
@@ -2058,6 +2483,16 @@ export function createApp(db: Database): Hono {
           ensureBetaRequestNotification(db, updated, true)
         }
         const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(updated.id))
+        if (analyticsSessionId && workflowType) {
+          insertFunnelEvent(db, {
+            sessionId: analyticsSessionId,
+            origin: resolveCorsOrigin(c.req.header('origin')) ?? 'https://beam.directory',
+            pageKey: analyticsPageKey,
+            eventCategory: 'request',
+            workflowType,
+            milestoneKey: 'hosted_beta_request_submitted',
+          })
+        }
 
         return c.json({
           ok: true,
@@ -2129,6 +2564,16 @@ export function createApp(db: Database): Hono {
         return c.json({ error: 'Failed to load saved beta request', errorCode: 'DB_ERROR' }, 500)
       }
       const notification = ensureBetaRequestNotification(db, created, true)
+      if (analyticsSessionId && workflowType) {
+        insertFunnelEvent(db, {
+          sessionId: analyticsSessionId,
+          origin: resolveCorsOrigin(c.req.header('origin')) ?? 'https://beam.directory',
+          pageKey: analyticsPageKey,
+          eventCategory: 'request',
+          workflowType,
+          milestoneKey: 'hosted_beta_request_submitted',
+        })
+      }
 
       return c.json({
         ok: true,
@@ -2176,6 +2621,80 @@ export function createApp(db: Database): Hono {
     } catch (err) {
       console.error('List waitlist error:', err)
       return c.json({ error: 'Failed to list waitlist signups', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.post('/analytics/events', async (c) => {
+    const requestOrigin = c.req.header('origin') ?? null
+    const origin = resolveCorsOrigin(requestOrigin)
+    if (!origin) {
+      return c.json({ error: 'Origin not allowed', errorCode: 'FORBIDDEN_ORIGIN' }, 403)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const sessionId = normalizeSessionId(raw.sessionId)
+    if (!sessionId) {
+      return c.json({ error: 'Invalid sessionId', errorCode: 'INVALID_SESSION_ID' }, 400)
+    }
+
+    const pageKey = normalizeFunnelPageKey(raw.pageKey)
+    if (!pageKey) {
+      return c.json({ error: 'Invalid pageKey', errorCode: 'INVALID_PAGE_KEY' }, 400)
+    }
+
+    const eventCategory = normalizeFunnelEventCategory(raw.eventCategory)
+    if (!eventCategory) {
+      return c.json({ error: 'Invalid eventCategory', errorCode: 'INVALID_EVENT_CATEGORY' }, 400)
+    }
+
+    const ctaKey = 'ctaKey' in raw ? normalizeFunnelKey(raw.ctaKey) : null
+    const targetPage = 'targetPage' in raw ? normalizeFunnelPageKey(raw.targetPage) : null
+    const workflowType = 'workflowType' in raw ? normalizeWorkflowType(raw.workflowType) : null
+    const milestoneKey = 'milestoneKey' in raw ? normalizeMilestoneKey(raw.milestoneKey) : null
+
+    if (eventCategory === 'cta_click' && !ctaKey) {
+      return c.json({ error: 'ctaKey is required for cta_click events', errorCode: 'INVALID_CTA_KEY' }, 400)
+    }
+
+    if (eventCategory === 'request' && !workflowType) {
+      return c.json({ error: 'workflowType is required for request events', errorCode: 'INVALID_WORKFLOW_TYPE' }, 400)
+    }
+
+    if (eventCategory === 'demo_milestone' && !milestoneKey) {
+      return c.json({ error: 'milestoneKey is required for demo_milestone events', errorCode: 'INVALID_MILESTONE_KEY' }, 400)
+    }
+
+    try {
+      const event = insertFunnelEvent(db, {
+        sessionId,
+        origin,
+        pageKey,
+        eventCategory,
+        ctaKey,
+        targetPage,
+        workflowType,
+        milestoneKey,
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        event: serializeFunnelEvent(event),
+      }, 202)
+    } catch (err) {
+      console.error('Analytics ingest error:', err)
+      return c.json({ error: 'Failed to record analytics event', errorCode: 'DB_ERROR' }, 500)
     }
   })
 
