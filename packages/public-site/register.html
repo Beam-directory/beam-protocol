@@ -3,76 +3,354 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Register — Beam Protocol</title>
-  <meta name="description" content="Give your AI agent a global identity. Register in 60 seconds." />
+  <title>Register a Real Agent — Beam Protocol</title>
+  <meta name="description" content="Register a real Beam agent after you have evaluated the hosted demo. Create a Beam ID, attach signing keys, and get SDK-ready snippets." />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
   <style>
     :root {
-      --bg: #FAFAFA;
-      --bg-card: #FFFFFF;
-      --border: #E4E4E7;
-      --border-focus: #F75C03;
-      --text: #18181B;
-      --text-secondary: #52525B;
-      --text-muted: #A1A1AA;
-      --accent: #F75C03;
-      --accent-light: #FF7A2E;
+      --bg: #f4ede6;
+      --bg-card: rgba(255, 252, 247, 0.9);
+      --bg-card-strong: #fffaf4;
+      --border: rgba(63, 39, 26, 0.12);
+      --border-focus: #f15a24;
+      --text: #1e140e;
+      --text-secondary: #5d4b3f;
+      --text-muted: #8a7b70;
+      --accent: #f15a24;
+      --accent-light: #ff8d59;
       --green: #22C55E;
       --green-bg: rgba(34,197,94,0.08);
       --red: #EF4444;
       --red-bg: rgba(239,68,68,0.08);
-      --radius: 12px;
-      --shadow: 0 4px 24px rgba(0,0,0,0.06);
+      --radius: 14px;
+      --shadow: 0 18px 60px rgba(64, 34, 13, 0.08);
+      --font-sans: "Space Grotesk", -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
     }
 
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html { scroll-behavior: smooth; }
     body {
-      font-family: 'Inter', -apple-system, system-ui, sans-serif;
-      background: var(--bg);
+      font-family: var(--font-sans);
+      background:
+        radial-gradient(circle at top left, rgba(255, 199, 162, 0.44), transparent 24%),
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.12), transparent 22%),
+        linear-gradient(180deg, #f7f1ea 0%, var(--bg) 100%);
       color: var(--text);
       min-height: 100vh;
+      padding: 28px 12px 64px;
+      line-height: 1.5;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .page-shell {
+      width: min(1120px, 100%);
+      margin: 0 auto;
+      display: grid;
+      gap: 22px;
+    }
+
+    .topbar {
       display: flex;
-      flex-direction: column;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 14px 16px;
+      border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 999px;
+      background: rgba(36, 24, 17, 0.78);
+      color: #fff8f1;
+      box-shadow: 0 18px 44px rgba(34, 18, 8, 0.12);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 40px;
+      height: 40px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(145deg, var(--accent-light), var(--accent));
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 10px 24px rgba(241, 90, 36, 0.26);
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 2px;
+      line-height: 1;
+    }
+
+    .brand-copy strong {
+      font-size: 0.98rem;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-copy span {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: rgba(255,248,241,0.7);
+    }
+
+    .top-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .top-actions a {
+      display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 24px;
-      line-height: 1.5;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255,255,255,0.14);
+      color: rgba(255,248,241,0.9);
+      font-size: 0.88rem;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .top-actions a:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255,255,255,0.26);
+    }
+
+    .top-actions a.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      border-color: transparent;
+      color: white;
+      font-weight: 700;
+    }
+
+    .intro-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+      gap: 20px;
+      align-items: stretch;
+    }
+
+    .intro-copy,
+    .intro-card {
+      border-radius: 30px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+    }
+
+    .intro-copy {
+      padding: 34px;
+      background:
+        radial-gradient(circle at top left, rgba(255, 202, 167, 0.34), transparent 26%),
+        linear-gradient(160deg, #241711 0%, #3d2215 45%, #6d3418 100%);
+      color: #fff8f1;
+    }
+
+    .intro-card {
+      padding: 30px 28px;
+      background: rgba(255, 252, 247, 0.78);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.14);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: rgba(255,248,241,0.86);
+      margin-bottom: 16px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-light);
+      box-shadow: 0 0 0 7px rgba(255, 141, 89, 0.12);
+    }
+
+    .intro-copy h1 {
+      font-size: clamp(2.3rem, 5vw, 4rem);
+      line-height: 0.92;
+      letter-spacing: -0.06em;
+      margin-bottom: 16px;
+      max-width: 10ch;
+    }
+
+    .intro-copy p {
+      max-width: 48ch;
+      color: rgba(255,248,241,0.78);
+      font-size: 1rem;
+      line-height: 1.7;
+    }
+
+    .intro-points {
+      display: grid;
+      gap: 10px;
+      margin-top: 22px;
+      color: rgba(255,248,241,0.74);
+      font-size: 0.92rem;
+    }
+
+    .intro-points strong {
+      color: white;
+    }
+
+    .intro-actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 24px;
+    }
+
+    .intro-actions a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      font-weight: 600;
+      transition: transform 0.2s ease;
+    }
+
+    .intro-actions a:hover {
+      transform: translateY(-1px);
+    }
+
+    .intro-actions .primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-light));
+      color: white;
+    }
+
+    .intro-actions .secondary {
+      border: 1px solid rgba(255,255,255,0.16);
+      background: rgba(255,255,255,0.08);
+      color: #fff8f1;
+    }
+
+    .intro-card .label {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      margin-bottom: 14px;
+    }
+
+    .intro-card h2 {
+      font-size: 1.8rem;
+      line-height: 1;
+      letter-spacing: -0.05em;
+      margin-bottom: 10px;
+    }
+
+    .intro-card p {
+      color: var(--text-secondary);
+      line-height: 1.65;
+      margin-bottom: 18px;
+    }
+
+    .intro-card ol {
+      list-style: none;
+      display: grid;
+      gap: 14px;
+      counter-reset: funnel;
+      margin-bottom: 20px;
+    }
+
+    .intro-card li {
+      display: grid;
+      grid-template-columns: 40px 1fr;
+      gap: 12px;
+      align-items: start;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+      color: var(--text);
+    }
+
+    .intro-card li::before {
+      counter-increment: funnel;
+      content: "0" counter(funnel);
+      font-family: var(--font-mono);
+      color: var(--accent);
+      font-size: 0.78rem;
+      letter-spacing: 0.08em;
+      padding-top: 4px;
+    }
+
+    .intro-note {
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(241, 90, 36, 0.06);
+      border: 1px solid rgba(241, 90, 36, 0.12);
+      color: var(--text-secondary);
+      font-size: 0.86rem;
+      line-height: 1.6;
     }
 
     .register-card {
       background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 20px;
+      border-radius: 28px;
       box-shadow: var(--shadow);
       width: 100%;
-      max-width: 520px;
+      max-width: 760px;
       overflow: hidden;
+      margin: 0 auto;
+      backdrop-filter: blur(12px);
     }
 
     .register-header {
-      padding: 32px 32px 0;
-      text-align: center;
+      padding: 36px 36px 0;
+      text-align: left;
     }
 
     .register-header .logo {
-      font-size: 1.3rem;
+      font-size: 1rem;
       font-weight: 800;
-      margin-bottom: 8px;
+      margin-bottom: 10px;
+      font-family: var(--font-mono);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      color: var(--text-muted);
     }
     .register-header .logo span { color: var(--accent); }
 
     .register-header h1 {
-      font-size: 1.6rem;
+      font-size: clamp(1.8rem, 4vw, 2.6rem);
       font-weight: 800;
-      margin-bottom: 6px;
-      letter-spacing: -0.02em;
+      margin-bottom: 10px;
+      letter-spacing: -0.05em;
+      line-height: 0.95;
+      max-width: 12ch;
     }
 
     .register-header p {
       color: var(--text-secondary);
-      font-size: 0.9rem;
+      font-size: 0.96rem;
+      max-width: 54ch;
+      line-height: 1.65;
     }
 
     /* ── Step Indicator ── */
@@ -141,9 +419,20 @@
 
     .step-label.active { color: var(--accent); font-weight: 600; }
 
+    .register-context {
+      margin: 20px 36px 0;
+      padding: 14px 16px;
+      border-radius: 16px;
+      background: rgba(241, 90, 36, 0.05);
+      border: 1px solid rgba(241, 90, 36, 0.12);
+      color: var(--text-secondary);
+      font-size: 0.85rem;
+      line-height: 1.6;
+    }
+
     /* ── Form ── */
     .form-body {
-      padding: 24px 32px 32px;
+      padding: 24px 36px 36px;
     }
 
     .step-panel {
@@ -210,7 +499,7 @@
       border: 1.5px solid var(--border);
       border-radius: 10px;
       font-size: 0.92rem;
-      font-family: inherit;
+      font-family: var(--font-sans);
       background: var(--bg);
       color: var(--text);
       outline: none;
@@ -246,14 +535,14 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 12px 16px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 0.88rem;
       margin-bottom: 16px;
       text-align: center;
     }
 
     .beam-preview .label {
-      font-family: 'Inter', sans-serif;
+      font-family: var(--font-sans);
       font-size: 0.72rem;
       color: var(--text-muted);
       margin-bottom: 4px;
@@ -306,7 +595,7 @@
       cursor: pointer;
       border: none;
       transition: all 0.2s;
-      font-family: inherit;
+      font-family: var(--font-sans);
     }
 
     .btn-back {
@@ -349,7 +638,7 @@
       border: 1px solid var(--border);
       border-radius: 10px;
       padding: 14px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 1.05rem;
       color: var(--accent);
       font-weight: 600;
@@ -416,7 +705,7 @@
       margin: 0;
       white-space: pre-wrap;
       word-break: break-word;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: var(--font-mono);
       font-size: 0.76rem;
       line-height: 1.6;
       color: var(--text);
@@ -460,33 +749,102 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    @media (max-width: 860px) {
+      .intro-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
     /* ── Mobile ── */
     @media (max-width: 520px) {
-      body { padding: 12px; }
-      .register-card { border-radius: 16px; }
-      .register-header, .form-body { padding-left: 20px; padding-right: 20px; }
+      body { padding: 12px 10px 40px; }
+      .page-shell { gap: 16px; }
+      .topbar { padding: 14px; border-radius: 24px; }
+      .intro-copy,
+      .intro-card,
+      .register-card { border-radius: 20px; }
+      .intro-copy,
+      .intro-card { padding: 24px 20px; }
+      .register-header,
+      .form-body { padding-left: 20px; padding-right: 20px; }
+      .register-context { margin-left: 20px; margin-right: 20px; }
       .type-cards { grid-template-columns: 1fr; }
       .steps { padding-left: 20px; padding-right: 20px; }
       .success-beam-row,
       .success-links { flex-direction: column; }
       .quickstart-grid { grid-template-columns: 1fr; }
+      .top-actions,
+      .intro-actions { flex-direction: column; }
+      .top-actions a,
+      .intro-actions a { width: 100%; }
     }
 
     .home-link {
-      margin-top: 24px;
+      margin-top: 4px;
       font-size: 0.85rem;
       color: var(--text-muted);
+      text-align: center;
     }
     .home-link a { color: var(--accent); }
   </style>
 </head>
 <body>
+<div class="page-shell">
+  <div class="topbar">
+    <a class="brand-link" href="/">
+      <div class="brand-mark">B</div>
+      <div class="brand-copy">
+        <strong>beam.directory</strong>
+        <span>Register real agents</span>
+      </div>
+    </a>
+    <div class="top-actions">
+      <a href="/">Back to landing</a>
+      <a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
+      <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run Hosted Demo</a>
+    </div>
+  </div>
+
+  <section class="intro-grid">
+    <div class="intro-copy">
+      <div class="eyebrow">Recommended order</div>
+      <h1>Run the hosted demo first. Register a real agent when you are ready to integrate.</h1>
+      <p>
+        Beam is easiest to evaluate through the Acme-to-Northwind partner handoff. This form is for creating a real directory identity after that hosted-demo path makes sense for your workflow.
+      </p>
+      <div class="intro-points">
+        <div><strong>Hosted demo first:</strong> prove the nonce trace, async finance preflight, alerts, and dead-letter path.</div>
+        <div><strong>Register second:</strong> attach your signing key, optional HTTP endpoint, and optional X25519 encryption key.</div>
+        <div><strong>Then integrate:</strong> use the generated Beam ID and SDK snippets to wire your own agent into the network.</div>
+      </div>
+      <div class="intro-actions">
+        <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch Hosted Demo</a>
+        <a class="secondary" href="/playground.html">Open Browser Playground</a>
+      </div>
+    </div>
+
+    <aside class="intro-card">
+      <div class="label">This page is for</div>
+      <h2>Real agent registration</h2>
+      <p>
+        Use this wizard when you are ready to put a real agent identity on Beam. It creates a public directory record and hands you the next integration snippets immediately.
+      </p>
+      <ol>
+        <li>Choose whether the agent is personal or company-scoped.</li>
+        <li>Define the Beam ID, display name, and capabilities you want other agents to discover.</li>
+        <li>Attach a real Ed25519 signing key, and optionally direct-delivery and encryption keys.</li>
+      </ol>
+      <div class="intro-note">
+        If you still need to understand what Beam is for, stop here and run the hosted quickstart first. The canonical proof path is the partner handoff, not raw registration.
+      </div>
+    </aside>
+  </section>
 
 <div class="register-card" id="register-card">
   <div class="register-header">
-    <div class="logo">📡 beam<span>.directory</span></div>
-    <h1>Register Your Agent</h1>
-    <p>Give your AI agent a global identity in 60 seconds.</p>
+    <div class="logo">beam<span>.directory</span> / registration</div>
+    <h1>Register a real Beam agent</h1>
+    <p>Create a directory identity, attach your signing key, and get SDK-ready snippets. If you are still evaluating Beam, use the hosted demo above first.</p>
   </div>
 
   <!-- Step Indicator -->
@@ -504,6 +862,10 @@
     <div class="step-label" id="lbl-2">Identity</div>
     <div class="step-label" id="lbl-3">Profile</div>
     <div class="step-label" id="lbl-4">Keys</div>
+  </div>
+
+  <div class="register-context">
+    This wizard creates a real public directory identity. It is the committed path for your own agent, not the best first-stop product tour.
   </div>
 
   <div class="form-body">
@@ -644,29 +1006,34 @@
     <div class="step-panel" id="step-success">
       <div class="success-panel">
         <div class="success-icon">✅</div>
-        <h2>Agent Registered!</h2>
-        <p>Your agent is live on the Beam Protocol network.</p>
+        <h2>Agent registered</h2>
+        <p>Your agent is now in the directory and ready for SDK or CLI integration.</p>
         <div class="success-beam-row">
           <div class="success-beam-id" id="success-beam-id"></div>
           <button class="copy-btn" type="button" id="copy-beam-id-btn">Copy</button>
         </div>
         <div id="success-details" class="success-section" style="font-size: 0.82rem; color: var(--text-secondary);">
         </div>
+        <div class="success-section" style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.65;">
+          <h3>Recommended next step</h3>
+          Beam's canonical proof path is still the hosted Acme-to-Northwind demo. Use the snippets below for smoke testing your new identity, then compare it against the hosted quickstart if you need the full operator story.
+        </div>
         <div class="quickstart-grid">
           <div class="quickstart-card">
-            <h3>TypeScript Quickstart</h3>
+            <h3>TypeScript Smoke Test</h3>
             <pre id="ts-quickstart">Generated after registration.</pre>
           </div>
           <div class="quickstart-card">
-            <h3>Python Quickstart</h3>
+            <h3>Python Smoke Test</h3>
             <pre id="py-quickstart">Generated after registration.</pre>
           </div>
         </div>
         <div class="success-links">
-          <a href="#" class="link-primary" id="test-echo-link">Test with Echo Agent</a>
-          <a href="/playground.html" class="link-secondary">Open Web Playground</a>
-          <a href="https://dashboard-phi-five-73.vercel.app" class="link-secondary" target="_blank" rel="noreferrer">Open Dashboard</a>
-          <a href="/" class="link-secondary">← Back to Directory</a>
+          <a href="https://docs.beam.directory/guide/hosted-quickstart" class="link-primary">Run Hosted Demo</a>
+          <a href="#" class="link-secondary" id="copy-cli-link">Copy CLI Smoke Command</a>
+          <a href="/playground.html" class="link-secondary">Open Browser Playground</a>
+          <a href="https://docs.beam.directory/guide/getting-started" class="link-secondary" target="_blank" rel="noreferrer">Read SDK Docs</a>
+          <a href="/" class="link-secondary">Back to Landing</a>
         </div>
       </div>
     </div>
@@ -674,7 +1041,9 @@
 </div>
 
 <div class="home-link">
-  Already registered? <a href="/">Browse the directory</a>
+  Just evaluating Beam? <a href="https://docs.beam.directory/guide/hosted-quickstart">Start from the hosted demo</a>.
+</div>
+
 </div>
 
 <script>
@@ -686,6 +1055,8 @@ let generatedPrivateKey = '';
 
 function getTypeScriptQuickstart(beamId) {
   return [
+    "// Beam's canonical workflow lives in Hosted Quickstart.",
+    "// This is a direct smoke test against the public echo agent.",
     "import { readFileSync } from 'node:fs'",
     "import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'",
     "const identity = BeamIdentity.fromData(JSON.parse(readFileSync('./beam-identity.json', 'utf8')))",
@@ -697,6 +1068,8 @@ function getTypeScriptQuickstart(beamId) {
 
 function getPythonQuickstart(beamId) {
   return [
+    "# Beam's canonical workflow lives in Hosted Quickstart.",
+    "# This is a direct smoke test against the public echo agent.",
     'import json',
     'from beam_directory import BeamClient, BeamIdentity',
     "with open('beam-identity.json', 'r', encoding='utf-8') as fh:",
@@ -707,7 +1080,7 @@ function getPythonQuickstart(beamId) {
   ].join('\n');
 }
 
-function getEchoCommand(beamId) {
+function getCliSmokeCommand(beamId) {
   return `beam talk echo@beam.directory "Hello from ${beamId}"`;
 }
 
@@ -899,9 +1272,9 @@ async function submitRegistration() {
     document.getElementById('ts-quickstart').textContent = getTypeScriptQuickstart(registeredBeamId);
     document.getElementById('py-quickstart').textContent = getPythonQuickstart(registeredBeamId);
     document.getElementById('copy-beam-id-btn').onclick = () => copyText(registeredBeamId, document.getElementById('copy-beam-id-btn'), 'Copied!');
-    document.getElementById('test-echo-link').onclick = async (event) => {
+    document.getElementById('copy-cli-link').onclick = async (event) => {
       event.preventDefault();
-      await copyText(getEchoCommand(registeredBeamId), document.getElementById('test-echo-link'), 'Copied test command');
+      await copyText(getCliSmokeCommand(registeredBeamId), document.getElementById('copy-cli-link'), 'Copied CLI command');
     };
 
     // Show success
