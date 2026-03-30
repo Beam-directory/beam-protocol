@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Request Hosted Beta — Beam Protocol</title>
+  <meta
+    name="description"
+    content="Request Beam hosted beta for one real partner-facing agent workflow. Start from the same operator-visible proof path used in the hosted demo."
+  />
+  <meta property="og:title" content="Request Hosted Beta — Beam Protocol" />
+  <meta
+    property="og:description"
+    content="Managed directory, dashboard, and operator onboarding around one real B2B handoff."
+  />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/hosted-beta.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Request Hosted Beta — Beam Protocol" />
+  <meta
+    name="twitter:description"
+    content="Start a hosted Beam evaluation around one real partner workflow, not a vague platform pitch."
+  />
+  <meta name="twitter:image" content="https://beam.directory/og-image.png" />
+  <link rel="canonical" href="https://beam.directory/hosted-beta.html" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+    rel="stylesheet"
+  />
+  <style>
+    :root {
+      --paper: #f5efe8;
+      --surface: rgba(255, 250, 244, 0.92);
+      --surface-strong: #fff9f3;
+      --ink: #1b130e;
+      --ink-soft: #54473c;
+      --ink-muted: #85786d;
+      --line: rgba(43, 28, 18, 0.12);
+      --line-strong: rgba(43, 28, 18, 0.18);
+      --accent: #f15a24;
+      --accent-soft: #ff8c58;
+      --accent-fog: rgba(241, 90, 36, 0.14);
+      --green: #1f8f5f;
+      --green-fog: rgba(31, 143, 95, 0.12);
+      --red: #c83a2f;
+      --red-fog: rgba(200, 58, 47, 0.12);
+      --shadow-soft: 0 26px 70px rgba(58, 31, 12, 0.1);
+      --shadow-strong: 0 48px 140px rgba(58, 31, 12, 0.16);
+      --radius-xl: 34px;
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+      --font-display: "Space Grotesk", sans-serif;
+      --font-body: "Space Grotesk", sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
+      --max: 1180px;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
+    body {
+      min-height: 100vh;
+      font-family: var(--font-body);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(255, 205, 167, 0.4), transparent 22%),
+        radial-gradient(circle at 88% 8%, rgba(241, 90, 36, 0.14), transparent 20%),
+        linear-gradient(180deg, #f7f1ea 0%, #f2ebe3 48%, #f5efe8 100%);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(27, 19, 14, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27, 19, 14, 0.03) 1px, transparent 1px);
+      background-size: 42px 42px;
+      mask-image: radial-gradient(circle at center, black 16%, transparent 86%);
+      pointer-events: none;
+      opacity: 0.55;
+      z-index: -1;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    img {
+      display: block;
+      max-width: 100%;
+    }
+
+    .container {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+    }
+
+    .topbar-shell {
+      padding: 22px 0 0;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 16px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      background: rgba(36, 24, 17, 0.8);
+      color: #fff8f1;
+      box-shadow: 0 20px 44px rgba(34, 18, 8, 0.12);
+      backdrop-filter: blur(16px);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 12px;
+      display: grid;
+      place-items: center;
+      background: linear-gradient(140deg, var(--accent-soft), var(--accent));
+      color: white;
+      font-weight: 700;
+      box-shadow: 0 14px 30px rgba(241, 90, 36, 0.25);
+    }
+
+    .brand-copy {
+      display: grid;
+      gap: 2px;
+      line-height: 1;
+    }
+
+    .brand-copy strong {
+      font-size: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-copy span {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+      color: rgba(255, 248, 241, 0.7);
+    }
+
+    .top-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .top-links a {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      color: rgba(255, 248, 241, 0.88);
+      font-size: 0.88rem;
+      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
+    }
+
+    .top-links a:hover {
+      transform: translateY(-1px);
+      border-color: rgba(255, 255, 255, 0.24);
+    }
+
+    .top-links a.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      border-color: transparent;
+      color: white;
+      font-weight: 700;
+    }
+
+    main {
+      padding: 28px 0 90px;
+    }
+
+    .hero-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(340px, 1.08fr);
+      gap: 24px;
+      align-items: stretch;
+    }
+
+    .panel,
+    .form-panel {
+      border-radius: var(--radius-xl);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+    }
+
+    .panel {
+      padding: 36px;
+      background:
+        radial-gradient(circle at top left, rgba(255, 205, 167, 0.36), transparent 26%),
+        linear-gradient(162deg, #241711 0%, #3d2215 44%, #6f3518 100%);
+      color: #fff8f1;
+    }
+
+    .form-panel {
+      padding: 30px;
+      background:
+        linear-gradient(180deg, rgba(255, 250, 244, 0.96), rgba(255, 252, 248, 0.9)),
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.1), transparent 24%);
+    }
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: rgba(255, 248, 241, 0.86);
+      margin-bottom: 16px;
+    }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 7px rgba(255, 141, 89, 0.12);
+    }
+
+    h1,
+    h2,
+    h3,
+    strong {
+      font-family: var(--font-display);
+    }
+
+    .panel h1 {
+      font-size: clamp(2.5rem, 5vw, 4.3rem);
+      line-height: 0.92;
+      letter-spacing: -0.06em;
+      max-width: 9ch;
+      margin-bottom: 16px;
+    }
+
+    .panel p {
+      max-width: 48ch;
+      color: rgba(255, 248, 241, 0.8);
+      font-size: 1rem;
+    }
+
+    .panel ul {
+      list-style: none;
+      display: grid;
+      gap: 12px;
+      margin-top: 24px;
+      color: rgba(255, 248, 241, 0.78);
+    }
+
+    .panel li {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .panel li::before {
+      content: "+";
+      color: var(--accent-soft);
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .hero-metrics {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 24px;
+    }
+
+    .metric {
+      padding: 14px 16px;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    .metric strong {
+      display: block;
+      font-size: 1.5rem;
+      letter-spacing: -0.04em;
+      margin-bottom: 4px;
+    }
+
+    .metric span {
+      display: block;
+      font-size: 0.86rem;
+      color: rgba(255, 248, 241, 0.72);
+    }
+
+    .section-kicker {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: var(--accent);
+      margin-bottom: 10px;
+    }
+
+    .form-panel h2 {
+      font-size: clamp(1.7rem, 4vw, 2.5rem);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+      margin-bottom: 10px;
+    }
+
+    .form-panel > p {
+      color: var(--ink-soft);
+      margin-bottom: 22px;
+      max-width: 48ch;
+    }
+
+    .form-grid {
+      display: grid;
+      gap: 14px;
+    }
+
+    .field {
+      display: grid;
+      gap: 8px;
+    }
+
+    .field label {
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--ink);
+    }
+
+    .field input,
+    .field select,
+    .field textarea {
+      width: 100%;
+      padding: 14px 15px;
+      border-radius: 14px;
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.72);
+      color: var(--ink);
+      font: inherit;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+    }
+
+    .field textarea {
+      min-height: 122px;
+      resize: vertical;
+    }
+
+    .field input:focus,
+    .field select:focus,
+    .field textarea:focus {
+      outline: none;
+      border-color: rgba(241, 90, 36, 0.4);
+      box-shadow: 0 0 0 4px rgba(241, 90, 36, 0.12);
+      transform: translateY(-1px);
+    }
+
+    .field small {
+      color: var(--ink-muted);
+      font-size: 0.8rem;
+      line-height: 1.5;
+    }
+
+    .field-row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 14px;
+    }
+
+    .submit-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      padding-top: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 50px;
+      padding: 0 18px;
+      border-radius: 999px;
+      border: none;
+      cursor: pointer;
+      font: inherit;
+      font-weight: 700;
+      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn:disabled {
+      cursor: wait;
+      opacity: 0.7;
+      transform: none;
+    }
+
+    .btn.primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      color: white;
+      box-shadow: 0 16px 34px rgba(241, 90, 36, 0.22);
+    }
+
+    .btn.ghost {
+      border: 1px solid var(--line-strong);
+      background: transparent;
+      color: var(--ink);
+    }
+
+    .status {
+      display: none;
+      padding: 16px 18px;
+      border-radius: 18px;
+      border: 1px solid var(--line);
+      background: rgba(255, 255, 255, 0.8);
+      margin-top: 18px;
+      line-height: 1.6;
+    }
+
+    .status.visible {
+      display: block;
+    }
+
+    .status.success {
+      border-color: rgba(31, 143, 95, 0.2);
+      background: var(--green-fog);
+      color: #11402c;
+    }
+
+    .status.error {
+      border-color: rgba(200, 58, 47, 0.2);
+      background: var(--red-fog);
+      color: #691f17;
+    }
+
+    .proof-section,
+    .expect-section {
+      padding-top: 88px;
+    }
+
+    .section-head {
+      display: grid;
+      gap: 12px;
+      margin-bottom: 32px;
+    }
+
+    .section-head h2 {
+      font-size: clamp(2rem, 4vw, 3.2rem);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+      max-width: 12ch;
+    }
+
+    .section-head p {
+      max-width: 46rem;
+      color: var(--ink-soft);
+    }
+
+    .proof-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
+      gap: 22px;
+      align-items: start;
+    }
+
+    .proof-card {
+      padding: 16px;
+      border-radius: 30px;
+      border: 1px solid var(--line);
+      background: rgba(20, 16, 13, 0.96);
+      color: #fff7f1;
+      box-shadow: var(--shadow-strong);
+      overflow: hidden;
+    }
+
+    .proof-card img {
+      width: 100%;
+      border-radius: 20px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #0d1322;
+      object-fit: cover;
+      object-position: top center;
+    }
+
+    .proof-card.overview img {
+      aspect-ratio: 1.44 / 1;
+    }
+
+    .proof-card.trace img {
+      aspect-ratio: 0.98 / 1;
+    }
+
+    .proof-copy {
+      display: grid;
+      gap: 8px;
+      padding-top: 14px;
+    }
+
+    .proof-copy strong {
+      font-size: 1.02rem;
+      letter-spacing: -0.03em;
+    }
+
+    .proof-copy p {
+      color: rgba(255, 247, 241, 0.74);
+      font-size: 0.9rem;
+    }
+
+    .proof-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .proof-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 10px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 247, 241, 0.82);
+    }
+
+    .expect-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 20px;
+    }
+
+    .expect-card {
+      display: grid;
+      gap: 14px;
+      padding: 24px 0 0;
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .expect-card h3 {
+      font-size: 1.18rem;
+      letter-spacing: -0.03em;
+    }
+
+    .expect-card p {
+      color: var(--ink-soft);
+    }
+
+    .expect-card ul {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+      color: var(--ink);
+    }
+
+    .expect-card li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .expect-card li::before {
+      content: ">";
+      color: var(--accent);
+      margin-top: 1px;
+    }
+
+    @media (max-width: 1120px) {
+      .hero-grid,
+      .proof-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .proof-card.trace img {
+        aspect-ratio: 1.18 / 1;
+      }
+    }
+
+    @media (max-width: 860px) {
+      .topbar,
+      .submit-row {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .top-links,
+      .hero-metrics,
+      .field-row,
+      .expect-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-metrics,
+      .field-row {
+        display: grid;
+      }
+
+      .top-links {
+        display: grid;
+      }
+
+      .top-links a,
+      .btn {
+        width: 100%;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .container {
+        width: min(var(--max), calc(100% - 28px));
+      }
+
+      .panel,
+      .form-panel {
+        padding: 26px;
+      }
+
+      .proof-section,
+      .expect-section {
+        padding-top: 72px;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="topbar-shell">
+    <div class="container">
+      <nav class="topbar">
+        <a class="brand" href="/">
+          <div class="brand-mark">B</div>
+          <div class="brand-copy">
+            <strong>beam.directory</strong>
+            <span>Hosted beta intake</span>
+          </div>
+        </a>
+
+        <div class="top-links">
+          <a href="https://docs.beam.directory/guide/hosted-quickstart">Hosted Demo</a>
+          <a href="/register.html">Register Agent</a>
+          <a class="primary" href="https://docs.beam.directory/guide/operator-runbook">Operator Runbook</a>
+        </div>
+      </nav>
+    </div>
+  </div>
+
+  <main>
+    <div class="container">
+      <section class="hero-grid">
+        <div class="panel">
+          <div class="eyebrow">Managed rollout intake</div>
+          <h1>Bring Beam into one real partner workflow.</h1>
+          <p>
+            Hosted beta is for teams that already understand the Acme-to-Northwind proof path and
+            now want a managed directory, dashboard, and operator onboarding around their own B2B
+            handoff.
+          </p>
+          <ul>
+            <li>Scope Beam to one workflow first: procurement, partner ops, finance, support, or another external handoff.</li>
+            <li>Keep the evaluation grounded in the same operator-visible proof path used in the hosted demo.</li>
+            <li>Start from signed identities, nonce traces, alerts, dead letters, and recovery, not just happy-path messaging.</li>
+          </ul>
+          <div class="hero-metrics">
+            <div class="metric">
+              <strong>15.81s</strong>
+              <span>Measured clean-start bring-up for the canonical hosted-demo stack.</span>
+            </div>
+            <div class="metric">
+              <strong>0 alerts</strong>
+              <span>Recorded on the latest healthy baseline pass.</span>
+            </div>
+            <div class="metric">
+              <strong>0 dead letters</strong>
+              <span>Current baseline for the seeded Acme-to-Northwind workflow.</span>
+            </div>
+            <div class="metric">
+              <strong>beam/1</strong>
+              <span>Compatibility preserved across CLI, TypeScript, Python, and the hosted demo.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-panel">
+          <div class="section-kicker">Hosted beta request</div>
+          <h2>Tell Beam what you want to operationalize.</h2>
+          <p>
+            This intake stores a lightweight waitlist record so Beam can prioritize conversations around one concrete workflow instead of a generic “tell me more” thread.
+          </p>
+
+          <form id="waitlist-form" class="form-grid">
+            <div class="field-row">
+              <div class="field">
+                <label for="email">Work email</label>
+                <input id="email" name="email" type="email" autocomplete="email" placeholder="ops@company.com" required />
+              </div>
+              <div class="field">
+                <label for="company">Company</label>
+                <input id="company" name="company" type="text" autocomplete="organization" placeholder="Northwind Systems" required />
+              </div>
+            </div>
+
+            <div class="field-row">
+              <div class="field">
+                <label for="agent-count">Approximate agents in scope</label>
+                <input id="agent-count" name="agentCount" type="number" min="1" step="1" placeholder="6" />
+                <small>Used for intake prioritization only.</small>
+              </div>
+              <div class="field">
+                <label for="workflow">What best matches your first workflow?</label>
+                <select id="workflow" name="workflow">
+                  <option value="hosted-beta-partner-handoff">Partner handoff</option>
+                  <option value="hosted-beta-operator-eval">Operator evaluation</option>
+                  <option value="hosted-beta-managed-rollout">Managed rollout</option>
+                  <option value="hosted-beta-compliance">Compliance-sensitive workflow</option>
+                </select>
+              </div>
+            </div>
+
+            <div class="field">
+              <label for="notes">What is the first handoff you want to make trustworthy?</label>
+              <textarea id="notes" name="notes" placeholder="Example: procurement asks partner operations for stock and delivery, then finance needs an async approval path before purchase preflight."></textarea>
+              <small>The current public waitlist endpoint stores email, company, source, and agent count. Keep this note for the follow-up call; it is not persisted server-side yet.</small>
+            </div>
+
+            <div class="submit-row">
+              <button class="btn primary" id="submit-button" type="submit">Request hosted beta</button>
+              <a class="btn ghost" href="https://docs.beam.directory/guide/hosted-quickstart">Run hosted demo first</a>
+            </div>
+          </form>
+
+          <div id="form-status" class="status" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <section class="proof-section">
+        <div class="section-head">
+          <div class="section-kicker">The proof Beam already shows</div>
+          <h2>Hosted beta should feel like a managed version of the real demo, not a sales abstraction.</h2>
+          <p>
+            These are real screenshots from the current quickstart stack. That is the bar: your hosted evaluation should preserve the same traceability and operator visibility, just scoped to your workflow.
+          </p>
+        </div>
+
+        <div class="proof-grid">
+          <figure class="proof-card overview">
+            <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing healthy baseline metrics, zero alerts, and zero dead letters." />
+            <figcaption class="proof-copy">
+              <strong>Overview baseline</strong>
+              <p>The current hosted-demo baseline shows 100% success, low latency, four live agents, and no alert pressure. Hosted beta should preserve that clarity.</p>
+              <div class="proof-pills">
+                <div class="proof-pill">0 alerts</div>
+                <div class="proof-pill">0 dead letters</div>
+                <div class="proof-pill">4 live agents</div>
+              </div>
+            </figcaption>
+          </figure>
+
+          <figure class="proof-card trace">
+            <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for a quote request nonce showing lifecycle stages from received to acked." />
+            <figcaption class="proof-copy">
+              <strong>Nonce-level trace</strong>
+              <p>The canonical quote request is inspectable from `received` to `acked`, including delivery path and linked entities. Hosted beta only matters if that operator surface survives first contact with your workflow.</p>
+            </figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="expect-section">
+        <div class="section-head">
+          <div class="section-kicker">What to expect</div>
+          <h2>Use hosted beta for one narrow rollout, then widen only after it works.</h2>
+        </div>
+
+        <div class="expect-grid">
+          <div class="expect-card">
+            <div class="section-kicker">01 · what Beam provides</div>
+            <h3>Managed surfaces</h3>
+            <p>Directory, dashboard, waitlist intake, and operator guidance stay aligned to the same proof path used on the public site.</p>
+            <ul>
+              <li>Managed directory and dashboard instead of only self-hosting.</li>
+              <li>Operator runbook, demo path, and rollout guidance around one workflow.</li>
+              <li>Support for traces, alerts, dead letters, rate limits, and recovery.</li>
+            </ul>
+          </div>
+
+          <div class="expect-card">
+            <div class="section-kicker">02 · what to bring</div>
+            <h3>One real handoff</h3>
+            <p>Beam is sharpest when the scope stays narrow: one sender, one recipient, one workflow, one operator owner.</p>
+            <ul>
+              <li>The sender and recipient agents you actually want to connect.</li>
+              <li>A concrete success condition beyond “messages can be exchanged.”</li>
+              <li>The operator who needs visibility when the flow fails or stalls.</li>
+            </ul>
+          </div>
+
+          <div class="expect-card">
+            <div class="section-kicker">03 · fastest next step</div>
+            <h3>Prove the baseline first</h3>
+            <p>The hosted-demo path is still the fastest way to understand Beam before a beta conversation.</p>
+            <ul>
+              <li>Run the seeded Acme-to-Northwind handoff.</li>
+              <li>Inspect the dashboard trace and async finance preflight.</li>
+              <li>Compare your workflow against that exact baseline before rollout.</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    function resolveDirectoryApiBase() {
+      if (window.location.hostname === 'localhost') {
+        return 'http://localhost:43100'
+      }
+
+      if (window.location.hostname === '127.0.0.1') {
+        return 'http://127.0.0.1:43100'
+      }
+
+      return 'https://api.beam.directory'
+    }
+
+    const API_BASE = resolveDirectoryApiBase()
+    const form = document.getElementById('waitlist-form')
+    const submitButton = document.getElementById('submit-button')
+    const formStatus = document.getElementById('form-status')
+
+    function setStatus(type, html) {
+      formStatus.className = `status visible ${type}`
+      formStatus.innerHTML = html
+    }
+
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+
+      const formData = new FormData(form)
+      const email = String(formData.get('email') || '').trim().toLowerCase()
+      const company = String(formData.get('company') || '').trim()
+      const workflow = String(formData.get('workflow') || 'hosted-beta-partner-handoff')
+      const agentCountRaw = String(formData.get('agentCount') || '').trim()
+      const agentCount = agentCountRaw ? Number.parseInt(agentCountRaw, 10) : null
+
+      submitButton.disabled = true
+      submitButton.textContent = 'Submitting...'
+      setStatus('success', 'Submitting hosted beta request...')
+
+      try {
+        const response = await fetch(`${API_BASE}/waitlist`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            email,
+            company: company || null,
+            source: workflow,
+            agentCount: Number.isFinite(agentCount) ? agentCount : null,
+          }),
+        })
+
+        const payload = await response.json()
+
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Hosted beta request failed')
+        }
+
+        const createdAt = payload.createdAt ? new Date(payload.createdAt).toLocaleString('en-US', {
+          dateStyle: 'medium',
+          timeStyle: 'short',
+        }) : null
+
+        if (payload.status === 'already_registered') {
+          setStatus(
+            'success',
+            `<strong>You are already on the hosted beta list.</strong><br />` +
+            `We kept the original signup and refreshed the latest company and workflow context for <code>${email}</code>.` +
+            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original signup: ${createdAt}</span>` : ''),
+          )
+        } else {
+          setStatus(
+            'success',
+            `<strong>Hosted beta request recorded.</strong><br />` +
+            `Beam now has the intake for <code>${email}</code> at <strong>${company}</strong>.` +
+            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Recorded: ${createdAt}</span>` : ''),
+          )
+          form.reset()
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Hosted beta request failed'
+        setStatus(
+          'error',
+          `<strong>Submission failed.</strong><br />${message}. If you are previewing locally, make sure the directory is reachable at <code>${API_BASE}</code>.`,
+        )
+      } finally {
+        submitButton.disabled = false
+        submitButton.textContent = 'Request hosted beta'
+      }
+    })
+  </script>
+</body>
+</html>

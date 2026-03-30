@@ -1126,7 +1126,7 @@
         </div>
         <div class="success-links">
           <a href="https://docs.beam.directory/guide/getting-started" class="link-secondary" target="_blank" rel="noreferrer">Read SDK Docs</a>
-          <a href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta" class="link-secondary">Talk Hosted Beta</a>
+          <a href="/hosted-beta.html" class="link-secondary">Request Hosted Beta</a>
           <a href="/" class="link-secondary">Back to Landing</a>
         </div>
       </div>
@@ -1141,7 +1141,19 @@
 </div>
 
 <script>
-const API = 'https://api.beam.directory';
+function resolveDirectoryApiBase() {
+  if (window.location.hostname === 'localhost') {
+    return 'http://localhost:43100';
+  }
+
+  if (window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:43100';
+  }
+
+  return 'https://api.beam.directory';
+}
+
+const API = resolveDirectoryApiBase();
 let currentStep = 1;
 let agentType = '';
 let selectedCaps = new Set();
