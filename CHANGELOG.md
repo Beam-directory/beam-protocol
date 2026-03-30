@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.7.0 (draft)
+## v0.7.0 (2026-03-30)
 
 ### Hosted Beta
 - align Beam around a hosted beta for verified B2B handoffs instead of an open-ended protocol pitch

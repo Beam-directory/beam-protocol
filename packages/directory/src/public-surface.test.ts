@@ -256,7 +256,7 @@ test('health, stats, and release endpoint expose consistent live release metadat
 
   try {
     process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
-    process.env['BEAM_RELEASE_VERSION'] = '0.6.1-test'
+    process.env['BEAM_RELEASE_VERSION'] = '0.7.0-test'
     process.env['BEAM_RELEASE_SHA'] = 'abcdef1234567890abcdef1234567890abcdef12'
     process.env['BEAM_DEPLOYED_AT'] = '2026-03-30T19:00:00.000Z'
 
@@ -288,9 +288,9 @@ test('health, stats, and release endpoint expose consistent live release metadat
       release: { version: string; gitSha: string; gitShaShort: string; deployedAt: string }
     }
 
-    assert.equal(health.version, '0.6.1-test')
-    assert.equal(stats.version, '0.6.1-test')
-    assert.equal(release.release.version, '0.6.1-test')
+    assert.equal(health.version, '0.7.0-test')
+    assert.equal(stats.version, '0.7.0-test')
+    assert.equal(release.release.version, '0.7.0-test')
     assert.equal(health.gitSha, 'abcdef1234567890abcdef1234567890abcdef12')
     assert.equal(stats.gitSha, 'abcdef1234567890abcdef1234567890abcdef12')
     assert.equal(release.release.gitShaShort, 'abcdef1')

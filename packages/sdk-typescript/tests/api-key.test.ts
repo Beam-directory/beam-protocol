@@ -55,11 +55,11 @@ describe('SDK API key auth', () => {
       verifiedAgents: 2,
       intentsProcessed: 9,
       waitlistSize: 1,
-      version: '0.6.1',
+      version: '0.7.0',
       gitSha: 'abcdef1234567890abcdef1234567890abcdef12',
       deployedAt: '2026-03-30T19:00:00.000Z',
       release: {
-        version: '0.6.1',
+        version: '0.7.0',
         gitSha: 'abcdef1234567890abcdef1234567890abcdef12',
         gitShaShort: 'abcdef1',
         deployedAt: '2026-03-30T19:00:00.000Z',
@@ -78,7 +78,7 @@ describe('SDK API key auth', () => {
     const stats = await directory.getStats()
 
     expect(stats.totalAgents).toBe(3)
-    expect(stats.version).toBe('0.6.1')
+    expect(stats.version).toBe('0.7.0')
     expect(stats.gitSha).toBe('abcdef1234567890abcdef1234567890abcdef12')
     expect(stats.deployedAt).toBe('2026-03-30T19:00:00.000Z')
     expect(stats.release?.gitShaShort).toBe('abcdef1')

@@ -99,11 +99,11 @@ Typical health response:
   "protocol": "beam/1",
   "connectedAgents": 12,
   "timestamp": "2026-03-08T12:00:00.000Z",
-  "version": "0.6.1",
+  "version": "0.7.0",
   "gitSha": "abcdef1234567890abcdef1234567890abcdef12",
   "deployedAt": "2026-03-30T19:00:00.000Z",
   "release": {
-    "version": "0.6.1",
+    "version": "0.7.0",
     "gitSha": "abcdef1234567890abcdef1234567890abcdef12",
     "gitShaShort": "abcdef1",
     "deployedAt": "2026-03-30T19:00:00.000Z"
