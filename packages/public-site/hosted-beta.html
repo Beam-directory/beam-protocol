@@ -3,24 +3,24 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Request Hosted Beta — Beam Protocol</title>
+  <title>Request a Guided Beam Pilot — Beam Protocol</title>
   <meta
     name="description"
-    content="Request Beam hosted beta for one real partner-facing agent workflow. Start from the same operator-visible proof path used in the hosted demo."
+    content="Request a guided Beam pilot for one real cross-company AI workflow."
   />
-  <meta property="og:title" content="Request Hosted Beta — Beam Protocol" />
+  <meta property="og:title" content="Request a Guided Beam Pilot — Beam Protocol" />
   <meta
     property="og:description"
-    content="Managed directory, dashboard, and operator onboarding around one real B2B handoff."
+    content="Bring Beam into one real cross-company AI workflow with a guided hosted evaluation and operator proof."
   />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory/hosted-beta.html" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Request Hosted Beta — Beam Protocol" />
+  <meta name="twitter:title" content="Request a Guided Beam Pilot — Beam Protocol" />
   <meta
     name="twitter:description"
-    content="Start a hosted Beam evaluation around one real partner workflow, not a vague platform pitch."
+    content="Start a guided Beam evaluation around one real partner workflow, not a vague platform pitch."
   />
   <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <link rel="canonical" href="https://beam.directory/hosted-beta.html" />
@@ -609,6 +609,32 @@
       margin-top: 1px;
     }
 
+    .faq-section {
+      padding-top: 88px;
+    }
+
+    .faq-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 22px 26px;
+    }
+
+    .faq-card {
+      display: grid;
+      gap: 12px;
+      padding: 22px 0 0;
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .faq-card h3 {
+      font-size: 1.1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .faq-card p {
+      color: var(--ink-soft);
+    }
+
     @media (max-width: 1120px) {
       .hero-grid,
       .proof-grid {
@@ -630,7 +656,8 @@
       .top-links,
       .hero-metrics,
       .field-row,
-      .expect-grid {
+      .expect-grid,
+      .faq-grid {
         grid-template-columns: 1fr;
       }
 
@@ -660,7 +687,8 @@
       }
 
       .proof-section,
-      .expect-section {
+      .expect-section,
+      .faq-section {
         padding-top: 72px;
       }
     }
@@ -674,14 +702,14 @@
           <div class="brand-mark">B</div>
           <div class="brand-copy">
             <strong>beam.directory</strong>
-            <span>Hosted beta intake</span>
+            <span>Guided pilot intake</span>
           </div>
         </a>
 
         <div class="top-links">
           <a href="https://docs.beam.directory/guide/hosted-quickstart">Hosted Demo</a>
-          <a href="/register.html">Register Agent</a>
-          <a class="primary" href="https://docs.beam.directory/guide/operator-runbook">Operator Runbook</a>
+          <a href="https://docs.beam.directory">Docs</a>
+          <a class="primary" href="#faq">Common questions</a>
         </div>
       </nav>
     </div>
@@ -691,49 +719,49 @@
     <div class="container">
       <section class="hero-grid">
         <div class="panel">
-          <div class="eyebrow">Managed rollout intake</div>
-          <h1>Bring Beam into one real partner workflow.</h1>
+          <div class="eyebrow">Guided evaluation</div>
+          <h1>Request a guided Beam pilot for one real workflow.</h1>
           <p>
-            Hosted beta is for teams that already understand the Acme-to-Northwind proof path and
-            now want a managed directory, dashboard, and operator onboarding around their own B2B
-            handoff.
+            If your AI needs another company's AI to do something real, Beam can scope a small
+            pilot around that handoff. We start narrow, prove it, and only expand if it works.
           </p>
           <ul>
-            <li>Scope Beam to one workflow first: procurement, partner ops, finance, support, or another external handoff.</li>
-            <li>Keep the evaluation grounded in the same operator-visible proof path used in the hosted demo.</li>
-            <li>Start from signed identities, nonce traces, alerts, dead letters, and recovery, not just happy-path messaging.</li>
+            <li>One workflow first, not a platform rollout.</li>
+            <li>Shared proof for both companies and one operator owner.</li>
+            <li>Managed directory, dashboard, and follow-up around the pilot.</li>
           </ul>
           <div class="hero-metrics">
             <div class="metric">
-              <strong>15.81s</strong>
-              <span>Measured clean-start bring-up for the canonical hosted-demo stack.</span>
+              <strong>1 workflow</strong>
+              <span>The cleanest pilots start with one handoff, one owner, and one clear success condition.</span>
             </div>
             <div class="metric">
-              <strong>0 alerts</strong>
-              <span>Recorded on the latest healthy baseline pass.</span>
+              <strong>2 sides</strong>
+              <span>Both companies can point at the same request, reply, and current status.</span>
             </div>
             <div class="metric">
-              <strong>0 dead letters</strong>
-              <span>Current baseline for the seeded Acme-to-Northwind workflow.</span>
+              <strong>Visible status</strong>
+              <span>Requests, replies, retries, and stuck work stay inspectable instead of hidden.</span>
             </div>
             <div class="metric">
-              <strong>beam/1</strong>
-              <span>Compatibility preserved across CLI, TypeScript, Python, and the hosted demo.</span>
+              <strong>Guided rollout</strong>
+              <span>Beam helps scope the first evaluation and the next concrete step after it.</span>
             </div>
           </div>
         </div>
 
         <div class="form-panel">
           <div class="section-kicker">Hosted beta request</div>
-          <h2>Tell Beam what you want to operationalize.</h2>
+          <h2>Tell us the first handoff you want to make reliable.</h2>
           <p>
-            This intake goes straight into the operator queue Beam uses to review hosted beta workflows. Keep it grounded in one real handoff, and Beam will respond with the next concrete step.
+            Keep it simple. We want the first workflow, who owns it, and what a good outcome looks
+            like. Beam will use that to decide the next concrete step.
           </p>
 
           <form id="waitlist-form" class="form-grid">
             <div class="field-row">
               <div class="field">
-                <label for="email">Work email</label>
+                <label for="email">Team email</label>
                 <input id="email" name="email" type="email" autocomplete="email" placeholder="ops@company.com" required />
               </div>
               <div class="field">
@@ -744,12 +772,12 @@
 
             <div class="field-row">
               <div class="field">
-                <label for="agent-count">Approximate agents in scope</label>
+                <label for="agent-count">How many AI systems or agents are in the first workflow?</label>
                 <input id="agent-count" name="agentCount" type="number" min="1" step="1" placeholder="6" />
-                <small>Used for intake prioritization only.</small>
+                <small>Used only to size the first evaluation.</small>
               </div>
               <div class="field">
-                <label for="workflow">What best matches your first workflow?</label>
+                <label for="workflow">What kind of workflow is it?</label>
                 <select id="workflow" name="workflow">
                   <option value="hosted-beta-partner-handoff">Partner handoff</option>
                   <option value="hosted-beta-operator-eval">Operator evaluation</option>
@@ -760,14 +788,14 @@
             </div>
 
             <div class="field">
-              <label for="notes">What is the first handoff you want to make trustworthy?</label>
-              <textarea id="notes" name="notes" placeholder="Example: procurement asks partner operations for stock and delivery, then finance needs an async approval path before purchase preflight."></textarea>
-              <small>This summary is stored for the operator review, so keep it short and specific.</small>
+              <label for="notes">What is the first handoff you want to make reliable?</label>
+              <textarea id="notes" name="notes" placeholder="Example: procurement asks a partner for stock and delivery, then finance needs an approval step before purchase."></textarea>
+              <small>This summary goes straight into operator review, so keep it short and specific.</small>
             </div>
 
             <div class="submit-row">
               <button class="btn primary" id="submit-button" type="submit">Request hosted beta</button>
-              <a class="btn ghost" href="https://docs.beam.directory/guide/hosted-quickstart">Run hosted demo first</a>
+              <a class="btn ghost" href="https://docs.beam.directory/guide/hosted-quickstart">See the demo first</a>
             </div>
           </form>
 
@@ -778,31 +806,33 @@
       <section class="proof-section">
         <div class="section-head">
           <div class="section-kicker">The proof Beam already shows</div>
-          <h2>Hosted beta should feel like a managed version of the real demo, not a sales abstraction.</h2>
+          <h2>You should expect Beam to show its work.</h2>
           <p>
-            These are real screenshots from the current quickstart stack. That is the bar: your hosted evaluation should preserve the same traceability and operator visibility, just scoped to your workflow.
+            These are real screenshots from the current hosted-demo baseline. That is the bar: the
+            pilot should preserve the same traceability and operator visibility, just scoped to your
+            workflow.
           </p>
         </div>
 
         <div class="proof-grid">
           <figure class="proof-card overview">
-            <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing healthy baseline metrics, zero alerts, and zero dead letters." />
+            <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing a healthy baseline, no active alerts, and no stuck work." />
             <figcaption class="proof-copy">
               <strong>Overview baseline</strong>
-              <p>The current hosted-demo baseline shows 100% success, low latency, four live agents, and no alert pressure. Hosted beta should preserve that clarity.</p>
+              <p>The current hosted-demo baseline shows a healthy system with clear operator state. A guided pilot should stay that understandable.</p>
               <div class="proof-pills">
                 <div class="proof-pill">0 alerts</div>
-                <div class="proof-pill">0 dead letters</div>
+                <div class="proof-pill">0 stuck handoffs</div>
                 <div class="proof-pill">4 live agents</div>
               </div>
             </figcaption>
           </figure>
 
           <figure class="proof-card trace">
-            <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for a quote request nonce showing lifecycle stages from received to acked." />
+            <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for one quote request showing each stage from arrival to completion." />
             <figcaption class="proof-copy">
-              <strong>Nonce-level trace</strong>
-              <p>The canonical quote request is inspectable from `received` to `acked`, including delivery path and linked entities. Hosted beta only matters if that operator surface survives first contact with your workflow.</p>
+              <strong>Request-level trace</strong>
+              <p>The canonical quote request is inspectable step by step. Hosted beta only matters if that same operator surface survives first contact with your workflow.</p>
             </figcaption>
           </figure>
         </div>
@@ -810,24 +840,24 @@
 
       <section class="expect-section">
         <div class="section-head">
-          <div class="section-kicker">What to expect</div>
+          <div class="section-kicker">What hosted beta is</div>
           <h2>Use hosted beta for one narrow rollout, then widen only after it works.</h2>
         </div>
 
         <div class="expect-grid">
           <div class="expect-card">
-            <div class="section-kicker">01 · what Beam provides</div>
-            <h3>Managed surfaces</h3>
-            <p>Directory, dashboard, waitlist intake, and operator guidance stay aligned to the same proof path used on the public site.</p>
+            <div class="section-kicker">01 · what you get</div>
+            <h3>Managed Beam surfaces</h3>
+            <p>Directory, dashboard, intake, and operator guidance stay aligned to the same proof path used on the public site.</p>
             <ul>
               <li>Managed directory and dashboard instead of only self-hosting.</li>
               <li>Operator runbook, demo path, and rollout guidance around one workflow.</li>
-              <li>Support for traces, alerts, dead letters, rate limits, and recovery.</li>
+              <li>Support for traces, alerts, stuck-work queues, rate limits, and recovery.</li>
             </ul>
           </div>
 
           <div class="expect-card">
-            <div class="section-kicker">02 · what to bring</div>
+            <div class="section-kicker">02 · what you bring</div>
             <h3>One real handoff</h3>
             <p>Beam is sharpest when the scope stays narrow: one sender, one recipient, one workflow, one operator owner.</p>
             <ul>
@@ -838,14 +868,56 @@
           </div>
 
           <div class="expect-card">
-            <div class="section-kicker">03 · fastest next step</div>
-            <h3>Prove the baseline first</h3>
-            <p>The hosted-demo path is still the fastest way to understand Beam before a beta conversation.</p>
+            <div class="section-kicker">03 · how we work together</div>
+            <h3>Start narrow and stay honest</h3>
+            <p>Hosted beta is a guided design-partner engagement. The first job is to decide whether one narrow workflow is worth a real pilot.</p>
             <ul>
-              <li>Run the seeded Acme-to-Northwind handoff.</li>
-              <li>Inspect the dashboard trace and async finance preflight.</li>
-              <li>Compare your workflow against that exact baseline before rollout.</li>
+              <li>Run the hosted demo first if the use case is still fuzzy.</li>
+              <li>Use the intake to scope one workflow, not a broad platform conversation.</li>
+              <li>Treat pricing and rollout as workflow-scoped, not as an open-ended beta promise.</li>
             </ul>
+          </div>
+        </div>
+      </section>
+
+      <section class="faq-section" id="faq">
+        <div class="section-head">
+          <div class="section-kicker">Common questions</div>
+          <h2>Short answers before you fill out the form.</h2>
+          <p>
+            The fastest way to a good Beam conversation is one workflow, one owner, and one clear
+            reason the handoff matters.
+          </p>
+        </div>
+
+        <div class="faq-grid">
+          <div class="faq-card">
+            <h3>Do we need to self-host Beam to start?</h3>
+            <p>
+              No. Hosted beta is the guided path. Self-hosting is still available later if you need
+              deeper control after the workflow is proven.
+            </p>
+          </div>
+          <div class="faq-card">
+            <h3>Do we need many agents for the first pilot?</h3>
+            <p>
+              No. One sender and one recipient is enough. Beam is easier to evaluate when the first
+              pilot stays narrow.
+            </p>
+          </div>
+          <div class="faq-card">
+            <h3>How long does the first evaluation usually take?</h3>
+            <p>
+              The first step is a short fit conversation. If there is a fit, Beam scopes one
+              workflow before anything broader.
+            </p>
+          </div>
+          <div class="faq-card">
+            <h3>How does pricing work right now?</h3>
+            <p>
+              Hosted beta is currently a guided design-partner engagement. Scope and pricing depend
+              on workflow complexity, so the intake form is the first qualification step.
+            </p>
           </div>
         </div>
       </section>

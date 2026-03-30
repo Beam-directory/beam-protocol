@@ -2,42 +2,42 @@
 layout: home
 hero:
   name: Beam Protocol
-  text: "Verified Partner Handoffs for AI Agents"
-  tagline: "Start from one real handoff, not a vague protocol pitch: Acme procurement hands work to Northwind partner operations, gets a signed result back, and operators can trace the whole exchange end to end."
+  text: "Safe AI Work Between Companies"
+  tagline: "Beam helps one company's AI ask another company to do work without losing who asked, who answered, or where it got stuck. Start with one real handoff and a visible paper trail."
   actions:
     - theme: brand
       text: Launch Hosted Demo
       link: /guide/hosted-quickstart
     - theme: alt
+      text: Request Hosted Beta
+      link: https://beam.directory/hosted-beta.html
+    - theme: alt
       text: Register a Real Agent
       link: https://beam.directory/register.html
-    - theme: alt
-      text: Read the Operator Runbook
-      link: /guide/operator-runbook
 features:
   - icon: 🤝
     title: One Real Workflow
-    details: "Beam leads with a concrete B2B story: Acme procurement asks Northwind partner operations for stock and delivery, then gets a signed quote back."
+    details: "Beam starts with one concrete job: one company asks another company to do work and both sides can still see the same trail."
   - icon: 🆔
-    title: Verified Addresses
-    details: "Every agent gets a Beam ID, an Ed25519 keypair, and a DID document so both companies know exactly who sent and received the handoff."
+    title: Known Senders And Receivers
+    details: "Beam keeps company and agent identity explicit, so both sides know who asked for the work and who answered it."
   - icon: 🔐
-    title: Signed Intents
-    details: "Intents and results are signed, nonce-protected, and transportable over WebSocket or HTTP without shared API secrets between companies."
+    title: Visible Paper Trail
+    details: "Requests and replies stay attached to one trace, so operators can see what happened instead of guessing."
   - icon: 📊
     title: Operator Visibility
-    details: "The directory and dashboard expose traces, audit entries, dead letters, alerts, and retention controls for the same handoff."
+    details: "The dashboard exposes traces, alerts, dead letters, audit history, and recovery context for the same handoff."
   - icon: 🔁
     title: Recovery Built In
-    details: "The message bus adds dedupe, retry, restart recovery, and dead-letter handling for handoffs that cannot be fire-and-forget."
+    details: "Retries, restart recovery, and dead-letter handling are part of the product surface, not hidden glue code."
   - icon: 🧩
-    title: beam/1 Compatibility
-    details: "Beam documents how servers, CLI, TypeScript, and Python stay compatible: additive fields only, ignore unknown fields, no silent signature breakage."
+    title: Demo First, Depth Second
+    details: "Start with the hosted demo and only go deeper into SDKs, compatibility, and rollout details once the use case is real."
 ---
 
 ## Start Here
 
-If you only run one thing, run the [Hosted Quickstart](/guide/hosted-quickstart). It seeds the exact Acme to Northwind workflow used in dogfood, observability, and the operator runbook.
+If you only do one thing, run the [Hosted Quickstart](/guide/hosted-quickstart). It shows the exact Acme to Northwind workflow used in dogfood, observability, and the operator runbook.
 
 ```typescript
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
@@ -60,9 +60,9 @@ console.log(reply.message)
 
 ## Choose Your Path
 
-1. **See the proof first.** Run the [Hosted Quickstart](/guide/hosted-quickstart), inspect the dashboard trace, and verify the async finance preflight before you decide Beam is interesting.
-2. **Wire a real agent.** Use the [Register page](https://beam.directory/register.html) when you want a Beam ID, signing key flow, and smoke-test snippets for your own agent.
-3. **Request hosted beta.** If you want a managed directory/dashboard path around a real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
+1. **See the proof first.** Run the [Hosted Quickstart](/guide/hosted-quickstart), inspect the dashboard trace, and verify the async finance preflight before you decide Beam is worth more time.
+2. **Wire a real agent.** Use the [Register page](https://beam.directory/register.html) when the demo already landed and you want a Beam ID, keys, and smoke-test snippets for your own setup.
+3. **Request hosted beta.** If you want a guided rollout around one real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
 
 ## What Beam Is For
 

@@ -3,15 +3,15 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam | Safe AI Handoffs Between Companies</title>
+  <title>Beam | Safe AI Work Between Companies</title>
   <meta
     name="description"
-    content="Beam helps one company safely hand work to another company's AI. You can see what was sent, who handled it, what came back, and where it got stuck."
+    content="Beam helps companies hand work from one AI system to another without losing the paper trail."
   />
-  <meta property="og:title" content="Beam | Safe AI Handoffs Between Companies" />
+  <meta property="og:title" content="Beam | Safe AI Work Between Companies" />
   <meta
     property="og:description"
-    content="Run Beam's hosted demo to see one company hand work to another company's AI with clear proof, retries, and operator visibility."
+    content="See one company hand work to another company's AI, with a visible trail, operator proof, and a clear next step."
   />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory" />
@@ -19,10 +19,10 @@
   <meta property="og:site_name" content="Beam Protocol" />
   <meta property="og:locale" content="en_US" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Beam | Safe AI Handoffs Between Companies" />
+  <meta name="twitter:title" content="Beam | Safe AI Work Between Companies" />
   <meta
     name="twitter:description"
-    content="Beam helps companies pass AI work across team and partner boundaries without losing proof, context, or control."
+    content="Beam helps companies pass AI work across company lines without losing the paper trail."
   />
   <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <link rel="canonical" href="https://beam.directory/" />
@@ -30,7 +30,7 @@
   <meta name="author" content="Beam Protocol" />
   <meta
     name="keywords"
-    content="Beam Protocol, AI agents, agent-to-agent, verified handoff, Beam directory, signed intents, B2B automation"
+    content="Beam Protocol, AI workflows, partner automation, B2B handoffs, operator visibility, hosted beta"
   />
   <meta name="theme-color" content="#f15a24" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%23f15a24%22/><path d=%22M17 46V18h8.8c4.4 0 7.2 2.4 7.2 6.4 0 2.7-1.4 4.8-3.8 5.7 3 .7 4.8 3 4.8 6.2 0 4.4-3.1 7.7-8.8 7.7H17Zm5.4-16.6h2.5c1.8 0 2.9-1 2.9-2.7 0-1.7-1.1-2.7-2.9-2.7h-2.5v5.4Zm0 11.9h3.2c2.3 0 3.6-1.2 3.6-3.2 0-2.1-1.3-3.3-3.6-3.3h-3.2v6.5Z%22 fill=%22white%22/></svg>" />
@@ -58,7 +58,7 @@
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Beam Protocol",
-    "description": "Beam helps one company safely hand work to another company's AI with clear identity, delivery proof, and operator visibility.",
+    "description": "Beam helps companies hand work from one AI system to another without losing who asked, who answered, or where it got stuck.",
     "url": "https://beam.directory",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Cross-platform",
@@ -76,9 +76,9 @@
     "codeRepository": "https://github.com/Beam-directory/beam-protocol",
     "programmingLanguage": ["TypeScript", "Python"],
     "featureList": [
-      "Cross-company AI handoffs",
+      "Cross-company AI work",
       "Known company and agent identities",
-      "Visible delivery and reply history",
+      "Visible handoff history",
       "Retry and recovery tracking",
       "Operator dashboard",
       "Hosted demo quickstart"
@@ -1192,6 +1192,29 @@
       line-height: 1.55;
     }
 
+    .faq-layout {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 24px 28px;
+    }
+
+    .faq-card {
+      display: grid;
+      gap: 12px;
+      padding: 24px 0 0;
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .faq-card h3 {
+      font-size: 1.12rem;
+      letter-spacing: -0.03em;
+    }
+
+    .faq-card p {
+      color: var(--ink-soft);
+      max-width: 46ch;
+    }
+
     .start-shell {
       padding: 34px;
       border-radius: 36px;
@@ -1391,7 +1414,8 @@
 
       .hero-proof,
       .trust-rail,
-      .stack-layout {
+      .stack-layout,
+      .faq-layout {
         grid-template-columns: repeat(2, minmax(0, 1fr));
       }
 
@@ -1443,7 +1467,8 @@
 
       .hero-layout,
       .trust-rail,
-      .stack-layout {
+      .stack-layout,
+      .faq-layout {
         grid-template-columns: 1fr;
       }
 
@@ -1602,7 +1627,7 @@
         <div class="brand-mark">B</div>
         <div class="brand-copy">
           <strong>beam.directory</strong>
-          <span>Verified partner handoffs</span>
+          <span>For partner workflows</span>
         </div>
       </a>
 
@@ -1610,15 +1635,16 @@
 
       <ul class="nav-links" id="navLinks">
         <li><a href="#workflow">How it works</a></li>
-        <li><a href="#operators">If something breaks</a></li>
+        <li><a href="#operators">Why Beam</a></li>
         <li><a href="#paths">Next step</a></li>
+        <li><a href="#faq">FAQ</a></li>
         <li><a href="#start">Demo</a></li>
         <li><a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a></li>
         <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">GitHub</a></li>
       </ul>
 
       <div class="nav-actions">
-        <a class="btn btn-ghost" href="/register.html">Register your agent</a>
+        <a class="btn btn-ghost" href="/hosted-beta.html">Request hosted beta</a>
         <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
       </div>
     </nav>
@@ -1628,34 +1654,34 @@
     <section class="hero">
       <div class="hero-layout">
         <div class="hero-copy reveal visible">
-          <div class="eyebrow">For real partner work</div>
+          <div class="eyebrow">For cross-company work</div>
           <div class="brand-word">Beam Protocol</div>
-          <h1>Let one company's AI ask another company to do real work.</h1>
+          <h1>Let your AI work with another company without losing the paper trail.</h1>
           <p>
-            Beam is the shared layer for cross-company AI workflows. A request leaves your team,
-            reaches the other company, and stays visible the whole way. You can see who handled it,
-            what came back, and where it stalled.
+            Beam helps two companies move work between their AI systems without losing who asked,
+            who answered, what changed, or where it stalled. Start with one workflow, prove it
+            quickly, then decide whether Beam deserves a bigger footprint.
           </p>
           <div class="hero-actions">
-            <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Watch the demo path</a>
-            <a class="btn btn-secondary" href="/hosted-beta.html">Talk to us about your workflow</a>
+            <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the 15-minute demo</a>
+            <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
           </div>
           <div class="hero-proof">
             <div class="proof-item">
-              <strong>One shared handoff path</strong>
-              <span>Both companies can point at the same request, reply, and status history.</span>
+              <strong>One request both sides can see</strong>
+              <span>Both companies can point at the same handoff, reply, and status history.</span>
             </div>
             <div class="proof-item">
-              <strong>Real demo in minutes</strong>
-              <span>The hosted quickstart brings up the exact handoff and dashboard shown on this site.</span>
+              <strong>Named companies and agents</strong>
+              <span>You know who asked for the work and who answered it.</span>
             </div>
             <div class="proof-item">
-              <strong>Clear proof when things go wrong</strong>
-              <span>Beam shows retries, stuck work, and operator traces instead of hiding failure in glue code.</span>
+              <strong>Operator proof if work stalls</strong>
+              <span>Beam shows retries, stuck work, and recovery context instead of hiding failure in glue code.</span>
             </div>
             <div class="proof-item">
-              <strong>Built for real teams</strong>
-              <span>Start with the demo, register your own agent, or move into a hosted beta for one live workflow.</span>
+              <strong>Start with one workflow</strong>
+              <span>Run the demo first, then decide whether one real partner workflow is worth a guided rollout.</span>
             </div>
           </div>
         </div>
@@ -1717,23 +1743,23 @@
       <div class="trust-rail reveal">
         <div>
           <strong>Known participants</strong>
-          <span>You know which company or agent sent the work and which one received it.</span>
+          <span>You know which company asked for the work and which company received it.</span>
         </div>
         <div>
-          <strong>Tamper-resistant proof</strong>
-          <span>Requests and replies carry proof instead of relying on scattered shared secrets.</span>
+          <strong>Shared paper trail</strong>
+          <span>Both sides can point at the same request, reply, and delivery history.</span>
         </div>
         <div>
-          <strong>Fewer duplicate surprises</strong>
-          <span>Beam is built to prevent silent replays and repeated handoffs from hiding in the background.</span>
+          <strong>Visible stuck work</strong>
+          <span>Retries, delays, and dead ends stay explicit instead of disappearing in background jobs.</span>
         </div>
         <div>
           <strong>One place to investigate</strong>
-          <span>Traces, alerts, audit history, and stuck work live in one operator surface.</span>
+          <span>Operators can check traces, alerts, audit history, and recovery context in one surface.</span>
         </div>
         <div>
-          <strong>Demo before integration</strong>
-          <span>The fastest way to understand Beam is to run the real demo, not read a long architecture memo.</span>
+          <strong>Demo before rollout</strong>
+          <span>The fastest way to judge Beam is still the demo, not a long architecture pitch.</span>
         </div>
       </div>
     </div>
@@ -1742,10 +1768,11 @@
       <div class="container">
         <div class="section-head reveal">
           <div class="kicker">One clear use case</div>
-          <h2>Beam is easiest to understand when the story stays concrete.</h2>
+          <h2>Beam is for one specific kind of job.</h2>
           <p>
-            Beam is not trying to be everything for every AI tool. The clearest starting point is one
-            company handing work to another company with enough trust and visibility to survive real operations.
+            Use Beam when your AI needs another company's AI to do something real: quote stock,
+            confirm delivery, route support, or ask for approval. Start with one handoff, not a
+            platform rollout.
           </p>
         </div>
 
@@ -1755,31 +1782,34 @@
               <div>
                 <h3>Acme asks for work</h3>
                 <p>
-                  Acme sends Northwind a quote request instead of emailing, polling, and guessing what happened next.
+                  Your team sends one real request to another company instead of emailing, polling,
+                  and guessing what happened next.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Beam checks and routes it</h3>
+                <h3>Beam keeps the trail intact</h3>
                 <p>
-                  Beam confirms who is talking to whom, routes the request, and records the handoff for later proof.
+                  Beam records who asked, where the work went, whether it was allowed, and what
+                  happened next.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Northwind finishes the job</h3>
+                <h3>The other company does the work</h3>
                 <p>
-                  Northwind checks stock, prepares the quote, and sends the answer back through the same path.
+                  The receiving AI or workflow handles the handoff and sends the answer back through
+                  the same visible path.
                 </p>
               </div>
             </div>
             <div class="workflow-step">
               <div>
-                <h3>Follow-up work stays attached</h3>
+                <h3>Follow-up stays attached</h3>
                 <p>
-                  Finance can pick up the next step later without losing the thread, and Beam still shows retries or failures.
+                  Approvals, retries, and async follow-up can happen later without losing the thread.
                 </p>
               </div>
             </div>
@@ -1787,26 +1817,27 @@
 
           <aside class="workflow-brief reveal">
             <div class="brief-topline">
-              <span>Canonical demo</span>
-              <strong>Acme to Northwind</strong>
+              <span>Good fit</span>
+              <strong>Partner workflows</strong>
             </div>
-            <div class="brief-headline">A real handoff is easier to trust than a protocol slogan.</div>
+            <div class="brief-headline">Beam is not for every AI experiment.</div>
             <div class="brief-copy">
-              The site should answer three questions fast: what Beam is for, why it is safer than ad hoc glue,
-              and how quickly a team can prove it on its own machine.
+              Beam becomes useful when work crosses company lines and someone has to trust the
+              result. If the workflow is still vague or purely internal, Beam is probably not your
+              first tool.
             </div>
             <ul class="brief-list">
               <li>
-                <strong>Start with the hosted demo</strong>
-                <span>Directory, dashboard, message bus, and seeded demo agents come up together.</span>
+                <strong>Use it for one external handoff first</strong>
+                <span>Start with one sender, one recipient, and one clear success condition.</span>
               </li>
               <li>
-                <strong>Follow one request end to end</strong>
-                <span>Trace the quote, inspect the warehouse check, and verify the finance follow-up.</span>
+                <strong>Bring a business owner and an operator</strong>
+                <span>Someone should care about the outcome, and someone should care when it stalls.</span>
               </li>
               <li>
-                <strong>Use proof, not adjectives</strong>
-                <span>The repo already includes readiness and clean-start reports instead of hand-wavy claims.</span>
+                <strong>Judge it by the proof, not the platform story</strong>
+                <span>The demo, traces, and operator surfaces matter more than broad architecture claims.</span>
               </li>
             </ul>
           </aside>
@@ -1820,11 +1851,11 @@
           <div class="operator-copy reveal">
             <div class="section-head" style="margin-bottom: 0;">
               <div class="kicker">If something breaks</div>
-              <h2>Beam is built so operators can see what happened.</h2>
+              <h2>When something breaks, an operator can see it fast.</h2>
             </div>
             <p>
-              Most cross-company automation fails quietly. Beam is designed so an operator can tell where the request stopped,
-              what retried, and whether the other side ever answered.
+              Most cross-company automation fails quietly. Beam is designed so an operator can tell
+              where the request stopped, what retried, and whether the other side ever answered.
             </p>
             <div class="operator-snippets">
               <div class="operator-snippet">
@@ -1845,7 +1876,7 @@
             </div>
             <ul>
               <li>Trace every handoff from first request to final reply.</li>
-              <li>Inspect alerts, audit history, rate limits, and dead letters in one place.</li>
+              <li>Inspect alerts, audit history, rate limits, and stuck work in one place.</li>
               <li>Use the same operator runbook that powers the demo and dogfood path.</li>
             </ul>
           </div>
@@ -1857,22 +1888,22 @@
             </div>
             <div class="proof-gallery">
               <figure class="proof-shot overview">
-                <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing healthy baseline metrics, zero alerts, and zero dead letters." />
+                <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing a healthy baseline, no active alerts, and no stuck work." />
                 <figcaption>
-                  <strong>Overview: healthy baseline before you chase one nonce</strong>
+                  <strong>Overview: healthy baseline before you inspect one handoff</strong>
                   <p>The seeded hosted-demo run now gives the site a real product surface: 100% success, low p95 latency, four live agents, and no active alert pressure.</p>
                   <div class="proof-pill-row">
                     <div class="proof-pill">0 alerts</div>
-                    <div class="proof-pill">0 dead letters</div>
+                    <div class="proof-pill">0 stuck handoffs</div>
                     <div class="proof-pill">4 live agents</div>
                   </div>
                 </figcaption>
               </figure>
 
               <figure class="proof-shot trace">
-                <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for a quote request nonce showing lifecycle stages from received to acked." />
+                <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for one quote request showing each stage from arrival to completion." />
                 <figcaption>
-                  <strong>Trace detail: one quote nonce from received to acked</strong>
+                  <strong>Trace detail: one quote request from arrival to completion</strong>
                   <p>This is the actual `quote.request` trace from the Acme-to-Northwind handoff used in quickstart, dogfood, and the operator runbook.</p>
                 </figcaption>
               </figure>
@@ -1890,10 +1921,10 @@
       <div class="container">
         <div class="section-head reveal">
           <div class="kicker">Choose your next step</div>
-          <h2>Pick the Beam path that matches where you are.</h2>
+          <h2>Most teams only need one of these three starting points.</h2>
           <p>
-            Not everyone needs the same next action. Some teams want a fast proof, some want to wire a real agent,
-            and some want help standing up one live workflow.
+            The right next step depends on whether you want fast proof, a real integration, or a
+            guided rollout around one live workflow.
           </p>
         </div>
 
@@ -1901,9 +1932,9 @@
           <div class="stack-column reveal">
             <div class="stack-kicker">01 · prove the handoff</div>
             <h3>Start with the hosted demo.</h3>
-            <p>Bring up the Acme-to-Northwind flow, inspect the dashboard, and watch one request move across teams end to end.</p>
+            <p>Use the demo when you want to understand Beam quickly and judge it by one concrete workflow.</p>
             <ul>
-              <li>Directory, dashboard, message bus, and demo agents boot together.</li>
+              <li>All core Beam surfaces and demo agents boot together.</li>
               <li>The canonical quote request, warehouse check, and finance preflight are already seeded.</li>
               <li>Observability and operator docs point at the exact same baseline flow.</li>
             </ul>
@@ -1911,37 +1942,37 @@
               <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/operator-runbook">See operator runbook</a>
             </div>
-            <div class="stack-note">Best first stop for most people evaluating Beam.</div>
+            <div class="stack-note">Best first stop if you just want to know whether Beam makes sense.</div>
           </div>
           <div class="stack-column reveal">
             <div class="stack-kicker">02 · wire your own agent</div>
             <h3>Register your own agent.</h3>
-            <p>Generate a Beam address, create the keys you need, and run a simple smoke test with your own setup.</p>
+            <p>Use this when the demo already landed and you want to wire one real sender or receiver into Beam.</p>
             <ul>
               <li>Personal or company-scoped IDs with Beam-native addressing.</li>
-              <li>Ed25519 signing keys, optional X25519 encryption, and optional HTTP delivery.</li>
+              <li>Secure keys and direct delivery options for one real integration.</li>
               <li>Hosted-demo-first success flow so integration stays grounded in the real proof path.</li>
             </ul>
             <div class="stack-actions">
               <a class="btn btn-secondary" href="/register.html">Register real agent</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/getting-started">Read SDK docs</a>
             </div>
-            <div class="stack-note">Best when the demo already makes sense and you want to integrate.</div>
+            <div class="stack-note">Best when the use case is already clear and you want to test your own setup.</div>
           </div>
           <div class="stack-column reveal">
             <div class="stack-kicker">03 · request hosted beta</div>
             <h3>Bring Beam into a partner workflow.</h3>
-            <p>If you want help standing this up around one real B2B handoff, start with a short hosted-beta intake instead of a generic email thread.</p>
+            <p>If you want Beam around one real B2B handoff, start with the hosted-beta intake instead of a vague email thread.</p>
             <ul>
               <li>Hosted directory and dashboard path instead of only self-hosting.</li>
-              <li>Partner-handoff onboarding scoped to one real workflow, not a vague platform pitch.</li>
-              <li>Operator runbook, proof reports, and rollout guidance folded into evaluation.</li>
+              <li>Partner-handoff onboarding scoped to one real workflow, not a broad platform rollout.</li>
+              <li>Guided design-partner engagement with operator proof, rollout guidance, and follow-up.</li>
             </ul>
             <div class="stack-actions">
               <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
             </div>
-            <div class="stack-note">Best for teams that want Beam to feel operational quickly.</div>
+            <div class="stack-note">Best for teams that want a guided rollout around one live workflow.</div>
           </div>
         </div>
       </div>
@@ -1950,47 +1981,91 @@
     <section id="stack">
       <div class="container">
         <div class="section-head reveal">
-          <div class="kicker">What exists today</div>
-          <h2>Beam already has the pieces people ask for after the first demo.</h2>
+          <div class="kicker">What you get if Beam fits</div>
+          <h2>Beam already has the pieces people ask for once the use case is real.</h2>
           <p>
-            Once the use case lands, Beam already has the operator tooling, compatibility work,
-            and demo infrastructure behind it instead of stopping at a protocol idea.
+            You do not need to believe in a giant platform story first. Beam already has the
+            identity, delivery, and operator pieces behind the first workflow.
           </p>
         </div>
 
         <div class="stack-layout">
           <div class="stack-column reveal">
-            <div class="stack-kicker">Directory and trust</div>
-            <h3>Identity and policy stay explicit.</h3>
-            <p>Beam keeps company identity, routing rules, and operator history visible instead of burying them in custom glue.</p>
+            <div class="stack-kicker">Known participants</div>
+            <h3>You know who is talking to whom.</h3>
+            <p>Beam keeps company identity, routing rules, and operator history explicit instead of burying them in custom glue.</p>
             <ul>
-              <li>Beam IDs and DID resolution</li>
-              <li>Verified HTTP and WebSocket handoffs</li>
-              <li>Public endpoint abuse controls</li>
-              <li>Trace and audit APIs for operators</li>
+              <li>Company and agent identity</li>
+              <li>Secure direct handoffs</li>
+              <li>Policy and abuse controls</li>
+              <li>Trace and audit views for operators</li>
             </ul>
           </div>
           <div class="stack-column reveal">
-            <div class="stack-kicker">Durable routing</div>
+            <div class="stack-kicker">Reliable handoff path</div>
             <h3>Async work does not disappear into glue code.</h3>
-            <p>Retries, dedupe, restart recovery, and dead-letter handling are part of the product surface, not an afterthought.</p>
+            <p>Retries, dedupe, restart recovery, and dead-letter handling are visible parts of the product surface.</p>
             <ul>
-              <li>Nonce dedupe and retry backoff</li>
-              <li>Delivery accepted vs terminal ack semantics</li>
-              <li>Restart recovery for in-flight work</li>
-              <li>Dead-letter visibility in the dashboard</li>
+              <li>Duplicate protection and retry backoff</li>
+              <li>Clear difference between accepted, finished, and failed work</li>
+              <li>Recovery after restarts or dropped connections</li>
+              <li>Failed work stays visible in the dashboard</li>
             </ul>
           </div>
           <div class="stack-column reveal">
-            <div class="stack-kicker">SDKs and demo surface</div>
+            <div class="stack-kicker">Operator proof</div>
             <h3>The proof path is already operationalized.</h3>
-            <p>TypeScript, Python, CLI, dashboard, docs, public site, and the seeded hosted demo already point at the same story.</p>
+            <p>Dashboard, docs, public site, and the seeded hosted demo already point at the same story and evidence.</p>
             <ul>
-              <li>Archived compatibility fixtures in CI</li>
               <li>Hosted quickstart and dogfood scripts</li>
               <li>Operator runbook and readiness reports</li>
               <li>Public docs aligned to the same funnel</li>
+              <li>SDKs and CLI for real integration once the demo lands</li>
             </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="faq">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">FAQ</div>
+          <h2>What people usually ask before they talk to us.</h2>
+          <p>
+            The short version: start narrow, prove one workflow, then decide whether Beam deserves
+            a larger rollout.
+          </p>
+        </div>
+
+        <div class="faq-layout">
+          <div class="faq-card reveal">
+            <h3>Do I need to self-host Beam to evaluate it?</h3>
+            <p>
+              No. The easiest path is the hosted demo first, then the hosted-beta path if the use
+              case is real. Self-hosting is available when you want deeper control later.
+            </p>
+          </div>
+          <div class="faq-card reveal">
+            <h3>Do I need a full agent platform to start?</h3>
+            <p>
+              No. One sender, one recipient, and one real handoff is enough. Beam gets sharper when
+              the first rollout stays narrow.
+            </p>
+          </div>
+          <div class="faq-card reveal">
+            <h3>What does hosted beta actually include?</h3>
+            <p>
+              A scoped workflow review, managed Beam surfaces, operator-visible proof, and a guided
+              next step around one live workflow instead of a generic platform conversation.
+            </p>
+          </div>
+          <div class="faq-card reveal">
+            <h3>How does pricing work right now?</h3>
+            <p>
+              Hosted beta is currently a guided design-partner engagement. Scope and pricing depend
+              on workflow complexity, and the intake form is the first filter for that conversation.
+            </p>
           </div>
         </div>
       </div>
@@ -2005,11 +2080,11 @@
               <h2>Start with the demo, not with theory.</h2>
             </div>
             <p>
-              The fastest way to understand Beam is a seeded local environment that proves the end-to-end story in minutes.
-              That is the right onboarding bar right now.
+              The fastest way to judge Beam is still a seeded local environment that proves the
+              end-to-end story in minutes.
             </p>
             <ul>
-              <li>Boot the directory, dashboard, message bus, and hosted demo agents together.</li>
+              <li>Boot the full demo stack and hosted demo agents together.</li>
               <li>Seed the Acme and Northwind identities without manual database work.</li>
               <li>Run the quote request, inspect the trace, and verify the finance follow-up.</li>
             </ul>
@@ -2039,16 +2114,17 @@
       <div class="container">
         <div class="closing-panel reveal">
           <div>
-            <h2>Choose the next Beam step, then prove it quickly.</h2>
+            <h2>Run the demo first. If it fits, bring us one workflow.</h2>
           </div>
           <div>
             <p>
-              Beam should be easy to understand at a glance: what it does, how to prove it, and what the next action is for your team.
+              Beam should be easy to judge: either the demo makes your use case obvious, or it
+              does not. If it does, the next step is one real workflow and one clear owner.
             </p>
             <div class="closing-actions">
               <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run the demo</a>
-              <a class="btn btn-secondary" href="/register.html">Register your agent</a>
               <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
+              <a class="btn btn-secondary" href="/register.html">Register your agent</a>
             </div>
           </div>
         </div>
@@ -2058,7 +2134,7 @@
 
   <footer>
     <div class="footer-inner">
-      <div>Beam Protocol · verified partner handoffs for AI agents</div>
+      <div>Beam Protocol · safe AI work between companies</div>
       <div class="footer-links">
         <a href="https://docs.beam.directory/guide/hosted-quickstart">Hosted Quickstart</a>
         <a href="https://docs.beam.directory/guide/partner-handoff">Partner Handoff</a>
