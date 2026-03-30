@@ -3,21 +3,21 @@ layout: home
 hero:
   name: Beam Protocol
   text: "Verified Partner Handoffs for AI Agents"
-  tagline: "Start with one workflow: procurement@acme hands a request to partner-desk@northwind, gets a signed result back, and operators can trace the whole exchange."
+  tagline: "Start from one real handoff, not a vague protocol pitch: Acme procurement hands work to Northwind partner operations, gets a signed result back, and operators can trace the whole exchange end to end."
   actions:
     - theme: brand
       text: Launch Hosted Demo
       link: /guide/hosted-quickstart
     - theme: alt
-      text: Read the Workflow
-      link: /guide/partner-handoff
+      text: Read the Operator Runbook
+      link: /guide/operator-runbook
     - theme: alt
       text: Compatibility Policy
       link: /guide/compatibility
 features:
   - icon: 🤝
-    title: One Clear Workflow
-    details: "Beam 0.6 leads with a concrete B2B story: Acme procurement asks Northwind partner operations for stock and delivery, then gets a signed quote back."
+    title: One Real Workflow
+    details: "Beam leads with a concrete B2B story: Acme procurement asks Northwind partner operations for stock and delivery, then gets a signed quote back."
   - icon: 🆔
     title: Verified Addresses
     details: "Every agent gets a Beam ID, an Ed25519 keypair, and a DID document so both companies know exactly who sent and received the handoff."
@@ -32,7 +32,7 @@ features:
     details: "The message bus adds dedupe, retry, restart recovery, and dead-letter handling for handoffs that cannot be fire-and-forget."
   - icon: 🧩
     title: beam/1 Compatibility
-    details: "Beam 0.6 documents how servers, CLI, TypeScript, and Python stay compatible: additive fields only, ignore unknown fields, no silent signature breakage."
+    details: "Beam documents how servers, CLI, TypeScript, and Python stay compatible: additive fields only, ignore unknown fields, no silent signature breakage."
 ---
 
 ## Start Here
@@ -66,7 +66,7 @@ Beam is not trying to be every possible agent standard at once. The current rele
 2. Both sides need identity, signatures, replay protection, and policy controls.
 3. Operators need traces, retries, and audit logs when the handoff goes wrong.
 
-If that is your problem, Beam is aimed directly at it.
+If that is your problem, Beam is aimed directly at it. If it is not, Beam should probably not be your first tool.
 
 ## Continue
 

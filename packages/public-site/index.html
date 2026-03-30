@@ -3,33 +3,62 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam Protocol — Verified B2B Handoffs for AI Agents</title>
-  <meta name="description" content="Verified B2B handoffs for AI agents. Beam gives partner agents signed messages, traceable nonces, and an operator-visible directory." />
-  <meta property="og:title" content="Beam Protocol — Verified B2B Handoffs for AI Agents" />
-  <meta property="og:description" content="Beam helps one company hand work to another company's agent with verified addresses, signed intents, and traceable outcomes." />
+  <title>Beam Protocol | Verified Partner Handoffs for AI Agents</title>
+  <meta
+    name="description"
+    content="Beam gives one company's agent a verifiable way to hand work to another company's agent with signed messages, traceable nonces, and operator-visible recovery."
+  />
+  <meta property="og:title" content="Beam Protocol | Verified Partner Handoffs for AI Agents" />
+  <meta
+    property="og:description"
+    content="Run the Acme to Northwind hosted demo, inspect the trace, and see how Beam handles verified agent-to-agent partner handoffs."
+  />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory" />
-  <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Beam Protocol — Verified B2B Handoffs for AI Agents" />
-  <meta name="twitter:description" content="Beam helps one company hand work to another company's agent with verified addresses, signed intents, and traceable outcomes." />
-  <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <meta property="og:type" content="website" />
   <meta property="og:site_name" content="Beam Protocol" />
   <meta property="og:locale" content="en_US" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <meta name="twitter:title" content="Beam Protocol | Verified Partner Handoffs for AI Agents" />
+  <meta
+    name="twitter:description"
+    content="Verified partner handoffs for AI agents with signed messages, replay protection, and operator-visible traces."
+  />
+  <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <link rel="canonical" href="https://beam.directory/" />
   <meta name="robots" content="index, follow" />
   <meta name="author" content="Beam Protocol" />
-  <meta name="keywords" content="AI agents, agent-to-agent, A2A, protocol, communication, open source, Ed25519, WebSocket, MCP, beam directory" />
-  <meta name="theme-color" content="#F75C03" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>" />
-
-  <!-- JSON-LD Structured Data -->
+  <meta
+    name="keywords"
+    content="Beam Protocol, AI agents, agent-to-agent, verified handoff, Beam directory, signed intents, B2B automation"
+  />
+  <meta name="theme-color" content="#f15a24" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2212%22 fill=%22%23f15a24%22/><path d=%22M17 46V18h8.8c4.4 0 7.2 2.4 7.2 6.4 0 2.7-1.4 4.8-3.8 5.7 3 .7 4.8 3 4.8 6.2 0 4.4-3.1 7.7-8.8 7.7H17Zm5.4-16.6h2.5c1.8 0 2.9-1 2.9-2.7 0-1.7-1.1-2.7-2.9-2.7h-2.5v5.4Zm0 11.9h3.2c2.3 0 3.6-1.2 3.6-3.2 0-2.1-1.3-3.3-3.6-3.3h-3.2v6.5Z%22 fill=%22white%22/></svg>" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link
+    rel="preload"
+    as="style"
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+  />
+  <link
+    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+    rel="stylesheet"
+    media="print"
+    onload="this.media='all'"
+  />
+  <noscript>
+    <link
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
+      rel="stylesheet"
+    />
+  </noscript>
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
     "@type": "SoftwareApplication",
     "name": "Beam Protocol",
-    "description": "Verified B2B handoffs for AI agents with signed messages, traceable nonces, and operator visibility.",
+    "description": "Verified partner handoffs for AI agents with signed messages, traceable nonces, and operator-visible recovery paths.",
     "url": "https://beam.directory",
     "applicationCategory": "DeveloperApplication",
     "operatingSystem": "Cross-platform",
@@ -46,1737 +75,1752 @@
     },
     "codeRepository": "https://github.com/Beam-directory/beam-protocol",
     "programmingLanguage": ["TypeScript", "Python"],
-    "datePublished": "2026-03-04",
-    "dateModified": "2026-03-06"
-  }
-  </script>
-
-  <!-- FAQ Schema for rich results -->
-  <script type="application/ld+json">
-  {
-    "@context": "https://schema.org",
-    "@type": "FAQPage",
-    "mainEntity": [
-      {
-        "@type": "Question",
-        "name": "What is Beam Protocol?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Beam Protocol is an open protocol for verified B2B agent handoffs. It gives partner agents Beam IDs, Ed25519-signed messages, replay protection, and an operator-visible directory."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How is Beam different from MCP?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "MCP (Model Context Protocol) connects AI agents to tools and functions. Beam connects AI agents to each other. They are complementary: MCP handles agent-to-tool, Beam handles agent-to-agent communication across organizational boundaries."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "How is Beam different from Google A2A?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Beam Protocol is fully open source (Apache 2.0) and vendor-neutral, while Google A2A is a Google-controlled specification. Beam offers self-hostable directories, Ed25519 cryptographic signatures, and built-in replay protection."
-        }
-      },
-      {
-        "@type": "Question",
-        "name": "Is Beam Protocol production-ready?",
-        "acceptedAnswer": {
-          "@type": "Answer",
-          "text": "Beam is release-focused around controlled B2B workflows. The repository ships a local quickstart, observability dashboard, and a reproducible dogfood run for the Acme to Northwind partner handoff."
-        }
-      }
+    "featureList": [
+      "Beam IDs",
+      "Ed25519 signed intents and results",
+      "Replay protection",
+      "Operator-visible traces",
+      "Dead-letter inspection",
+      "Hosted demo quickstart"
     ]
   }
   </script>
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link rel="preload" as="style" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" media="print" onload="this.media='all'" />
-  <noscript><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" /></noscript>
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
     :root {
-      --accent: #F75C03;
-      --accent-light: #FF7A2E;
-      --accent-bg: rgba(247, 92, 3, 0.06);
-      --accent-border: rgba(247, 92, 3, 0.15);
-      --bg: #FAFAFA;
-      --bg-white: #FFFFFF;
-      --bg-subtle: #F4F4F5;
-      --border: #E4E4E7;
-      --border-light: #F0F0F2;
-      --text: #18181B;
-      --text-secondary: #52525B;
-      --text-muted: #71717A;
-      --green: #22C55E;
-      --green-bg: rgba(34, 197, 94, 0.08);
-      --blue: #3B82F6;
-      --purple: #8B5CF6;
-      --font-mono: 'JetBrains Mono', 'Fira Code', monospace;
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --radius: 12px;
-      --radius-lg: 16px;
-      --shadow-sm: 0 1px 2px rgba(0,0,0,0.04);
-      --shadow-md: 0 4px 12px rgba(0,0,0,0.06);
-      --shadow-lg: 0 8px 30px rgba(0,0,0,0.08);
-      --shadow-glow: 0 0 40px rgba(247, 92, 3, 0.1);
+      --paper: #f5efe8;
+      --paper-strong: #efe2d2;
+      --surface: rgba(255, 250, 244, 0.78);
+      --surface-strong: rgba(255, 250, 244, 0.92);
+      --surface-dark: #1f1712;
+      --surface-dark-2: #2a211a;
+      --ink: #1b130e;
+      --ink-soft: #4f4237;
+      --ink-muted: #7c6f64;
+      --line: rgba(43, 28, 18, 0.12);
+      --line-strong: rgba(43, 28, 18, 0.2);
+      --accent: #f15a24;
+      --accent-soft: #ff8a54;
+      --accent-fog: rgba(241, 90, 36, 0.14);
+      --green: #1f8f5f;
+      --green-fog: rgba(31, 143, 95, 0.14);
+      --font-display: "Space Grotesk", sans-serif;
+      --font-body: "Space Grotesk", sans-serif;
+      --font-mono: "IBM Plex Mono", monospace;
+      --shadow-soft: 0 24px 60px rgba(42, 25, 13, 0.08);
+      --shadow-hero: 0 60px 140px rgba(69, 31, 8, 0.18);
+      --radius-xl: 32px;
+      --radius-lg: 24px;
+      --radius-md: 16px;
+      --radius-sm: 12px;
+      --max: 1180px;
     }
 
-    html { scroll-behavior: smooth; }
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      background: var(--paper);
+    }
+
     body {
-      font-family: var(--font-sans);
-      background: var(--bg);
-      color: var(--text);
-      line-height: 1.6;
+      font-family: var(--font-body);
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 10% 10%, rgba(255, 203, 161, 0.42), transparent 28%),
+        radial-gradient(circle at 84% 14%, rgba(241, 90, 36, 0.13), transparent 24%),
+        linear-gradient(180deg, #f7f1ea 0%, #f2ebe3 42%, #f5efe8 100%);
+      line-height: 1.55;
       overflow-x: hidden;
       -webkit-font-smoothing: antialiased;
     }
 
-    h1, h2, h3, h4 { line-height: 1.15; font-weight: 800; letter-spacing: -0.03em; }
-    a { color: var(--accent); text-decoration: none; }
-    a:hover { text-decoration: underline; }
+    body::before {
+      content: "";
+      position: fixed;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(27, 19, 14, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(27, 19, 14, 0.03) 1px, transparent 1px);
+      background-size: 44px 44px;
+      mask-image: radial-gradient(circle at center, black 20%, transparent 85%);
+      pointer-events: none;
+      opacity: 0.55;
+      z-index: -1;
+    }
 
-    .container { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
-    section { padding: 100px 0; }
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
 
-    /* ── Nav ──────────────────────────────────────────── */
-    nav {
-      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
-      padding: 14px 24px;
-      display: flex; align-items: center; justify-content: space-between;
-      background: rgba(250, 250, 250, 0.85);
-      backdrop-filter: blur(16px) saturate(180%);
-      -webkit-backdrop-filter: blur(16px) saturate(180%);
-      border-bottom: 1px solid var(--border);
+    img,
+    svg {
+      display: block;
+      max-width: 100%;
     }
-    .nav-logo {
-      display: flex; align-items: center; gap: 10px;
-      font-weight: 800; font-size: 1.05rem; color: var(--text);
-      text-decoration: none; letter-spacing: -0.02em;
+
+    .container {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
     }
-    .nav-logo .beam-icon {
-      width: 30px; height: 30px;
-      background: var(--accent);
-      border-radius: 8px;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 16px;
-      box-shadow: 0 2px 8px rgba(247, 92, 3, 0.3);
+
+    .eyebrow {
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.26);
+      background: rgba(255, 255, 255, 0.18);
+      backdrop-filter: blur(14px);
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 244, 235, 0.92);
     }
+
+    .eyebrow::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: var(--accent-soft);
+      box-shadow: 0 0 0 8px rgba(255, 138, 84, 0.12);
+    }
+
+    .section-head {
+      display: grid;
+      gap: 14px;
+      margin-bottom: 44px;
+    }
+
+    .section-head .kicker {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .section-head h2 {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 4vw, 3.4rem);
+      letter-spacing: -0.05em;
+      line-height: 0.95;
+      max-width: 12ch;
+    }
+
+    .section-head p {
+      max-width: 44rem;
+      color: var(--ink-soft);
+      font-size: 1.02rem;
+    }
+
+    .reveal {
+      opacity: 0;
+      transform: translateY(28px);
+      animation: reveal-in 0.78s ease forwards;
+      animation-delay: var(--delay, 0s);
+    }
+
+    .reveal.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+
+    @keyframes reveal-in {
+      from {
+        opacity: 0;
+        transform: translateY(28px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .nav-shell {
+      position: sticky;
+      top: 0;
+      z-index: 30;
+      padding: 18px 0;
+    }
+
+    .nav {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 18px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.24);
+      background: rgba(31, 23, 18, 0.52);
+      color: #fff8f2;
+      backdrop-filter: blur(18px);
+      box-shadow: 0 18px 50px rgba(28, 15, 8, 0.14);
+    }
+
+    .brand {
+      display: inline-flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+
+    .brand-mark {
+      width: 42px;
+      height: 42px;
+      border-radius: 14px;
+      background: linear-gradient(160deg, var(--accent-soft), var(--accent));
+      color: #fff;
+      display: grid;
+      place-items: center;
+      font-family: var(--font-display);
+      font-size: 1.3rem;
+      font-weight: 700;
+      box-shadow: 0 12px 30px rgba(241, 90, 36, 0.3);
+    }
+
+    .brand-copy {
+      display: grid;
+      line-height: 1;
+      gap: 4px;
+    }
+
+    .brand-copy strong {
+      font-size: 0.98rem;
+      letter-spacing: -0.03em;
+    }
+
+    .brand-copy span {
+      color: rgba(255, 248, 242, 0.72);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: var(--font-mono);
+    }
+
     .nav-links {
-      display: flex; align-items: center; gap: 28px;
+      display: flex;
+      align-items: center;
+      gap: 22px;
       list-style: none;
     }
+
     .nav-links a {
-      color: var(--text-secondary); font-size: 0.88rem; font-weight: 500;
-      transition: color 0.2s;
+      color: rgba(255, 248, 242, 0.82);
+      font-size: 0.92rem;
+      transition: color 0.2s ease;
     }
-    .nav-links a:hover { color: var(--text); text-decoration: none; }
-    .nav-cta {
-      background: var(--text);
-      color: #fff !important;
-      padding: 8px 18px;
-      border-radius: 8px;
-      font-size: 0.88rem !important;
-      font-weight: 600 !important;
-      transition: all 0.2s !important;
-    }
-    .nav-cta:hover { background: #333 !important; transform: translateY(-1px); text-decoration: none !important; }
 
-    /* ── Hero ──────────────────────────────────────────── */
-    #hero {
-      padding: 160px 0 80px;
-      text-align: center;
+    .nav-links a:hover {
+      color: #ffffff;
+    }
+
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .menu-toggle {
+      display: none;
+      width: 42px;
+      height: 42px;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      background: transparent;
+      color: #fff;
+      cursor: pointer;
+      font-size: 1rem;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 48px;
+      padding: 0 18px;
+      border-radius: 999px;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+      transition: transform 0.2s ease, background 0.2s ease, border-color 0.2s ease, color 0.2s ease;
+    }
+
+    .btn:hover {
+      transform: translateY(-1px);
+    }
+
+    .btn-primary {
+      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
+      color: #fff;
+      box-shadow: 0 18px 40px rgba(241, 90, 36, 0.22);
+    }
+
+    .btn-secondary {
+      border: 1px solid var(--line-strong);
+      background: rgba(255, 255, 255, 0.5);
+      color: var(--ink);
+    }
+
+    .btn-ghost {
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      color: rgba(255, 248, 242, 0.92);
+      background: rgba(255, 255, 255, 0.08);
+    }
+
+    main {
+      display: grid;
+      gap: 0;
+    }
+
+    .hero {
       position: relative;
-      background: var(--bg-white);
-      border-bottom: 1px solid var(--border);
-    }
-    .hero-glow {
-      position: absolute; top: -100px; left: 50%; transform: translateX(-50%);
-      width: 900px; height: 500px;
-      background: radial-gradient(ellipse at 50% 60%, rgba(247, 92, 3, 0.06) 0%, transparent 70%);
-      pointer-events: none;
-    }
-    .hero-badge {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: var(--green-bg);
-      border: 1px solid rgba(34, 197, 94, 0.2);
-      color: #16A34A;
-      padding: 6px 16px;
-      border-radius: 100px;
-      font-size: 0.78rem; font-weight: 600;
-      letter-spacing: 0.04em; text-transform: uppercase;
-      margin-bottom: 28px;
-    }
-    .hero-badge .pulse {
-      width: 7px; height: 7px; border-radius: 50%;
-      background: var(--green);
-      animation: pulse 2s infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 1; box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.4); }
-      50% { opacity: 0.8; box-shadow: 0 0 0 6px rgba(34, 197, 94, 0); }
+      isolation: isolate;
+      overflow: hidden;
+      padding: 28px 0 70px;
     }
 
-    #hero h1 {
-      font-size: clamp(2.8rem, 6.5vw, 4.5rem);
-      margin-bottom: 20px;
-      color: var(--text);
+    .hero::before {
+      content: "";
+      position: absolute;
+      inset: 0 0 18% 0;
+      background:
+        radial-gradient(circle at 22% 24%, rgba(255, 196, 146, 0.55), transparent 28%),
+        radial-gradient(circle at 80% 16%, rgba(241, 90, 36, 0.18), transparent 22%),
+        linear-gradient(150deg, #241711 0%, #2c1c14 34%, #613016 100%);
+      z-index: -2;
     }
-    #hero h1 .accent { color: var(--accent); }
 
-    #hero p.tagline {
-      font-size: 1.15rem; color: var(--text-secondary);
-      max-width: 580px; margin: 0 auto 36px;
+    .hero::after {
+      content: "";
+      position: absolute;
+      inset: auto 0 0 0;
+      height: 30%;
+      background: linear-gradient(180deg, rgba(245, 239, 232, 0) 0%, rgba(245, 239, 232, 0.95) 78%, var(--paper) 100%);
+      z-index: -1;
+    }
+
+    .hero-layout {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      min-height: calc(100svh - 132px);
+      display: grid;
+      grid-template-columns: minmax(0, 1.05fr) minmax(0, 0.95fr);
+      align-items: center;
+      gap: 44px;
+    }
+
+    .hero-copy {
+      display: grid;
+      gap: 24px;
+      padding: 32px 0 36px;
+      color: #fff8f2;
+    }
+
+    .brand-word {
+      font-family: var(--font-display);
+      font-size: clamp(1.35rem, 2vw, 1.7rem);
+      letter-spacing: -0.05em;
+      color: rgba(255, 248, 242, 0.88);
+    }
+
+    .hero h1 {
+      font-family: var(--font-display);
+      font-size: clamp(3.2rem, 9vw, 7.2rem);
+      line-height: 0.88;
+      letter-spacing: -0.08em;
+      max-width: 9ch;
+    }
+
+    .hero h1 span {
+      color: var(--accent-soft);
+    }
+
+    .hero-copy p {
+      max-width: 36rem;
+      color: rgba(255, 248, 242, 0.8);
+      font-size: 1.08rem;
       line-height: 1.7;
-      font-weight: 400;
     }
 
     .hero-actions {
-      display: flex; gap: 12px; justify-content: center; flex-wrap: wrap;
-      margin-bottom: 56px;
-    }
-    .btn-primary {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: var(--accent);
-      color: #fff !important; padding: 12px 28px; border-radius: 10px;
-      font-weight: 600; font-size: 0.95rem;
-      box-shadow: 0 2px 12px rgba(247, 92, 3, 0.25);
-      transition: all 0.2s;
-    }
-    .btn-primary:hover { background: var(--accent-light); transform: translateY(-1px); box-shadow: 0 4px 20px rgba(247, 92, 3, 0.3); text-decoration: none; }
-    .btn-secondary {
-      display: inline-flex; align-items: center; gap: 8px;
-      background: var(--bg-white);
-      border: 1px solid var(--border);
-      color: var(--text) !important; padding: 12px 28px; border-radius: 10px;
-      font-weight: 600; font-size: 0.95rem;
-      transition: all 0.2s;
-    }
-    .btn-secondary:hover { border-color: #ccc; background: var(--bg-subtle); transform: translateY(-1px); text-decoration: none; }
-
-    /* ── Beam ID Demo ────────────────────────────────── */
-    .beam-id-demo {
-      display: flex; justify-content: center; margin-bottom: 48px;
-    }
-    .beam-id-box {
-      display: inline-flex; align-items: center; gap: 14px;
-      background: var(--bg-white);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 14px 24px;
-      box-shadow: var(--shadow-md);
-      font-family: var(--font-mono);
-      font-size: 0.92rem;
-    }
-    .beam-id-box .icon { font-size: 1.3rem; }
-    .beam-id-box .agent { color: var(--accent); font-weight: 600; }
-    .beam-id-box .at { color: var(--text-secondary); }
-    .beam-id-box .org { color: var(--text); font-weight: 500; }
-    .beam-id-box .domain { color: var(--text-secondary); }
-    .beam-id-box .label {
-      font-family: var(--font-sans);
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      background: var(--bg-subtle);
-      padding: 3px 8px; border-radius: 4px;
-      font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;
-    }
-
-    /* ── Stats Row ────────────────────────────────────── */
-    .stats-row {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 1px;
-      background: var(--border);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      max-width: 700px;
-      margin: 0 auto;
-    }
-    .stats-live {
-      display: none;
+      display: flex;
       align-items: center;
-      justify-content: center;
-      gap: 8px;
-      margin: 16px auto 0;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .hero-proof {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-top: 8px;
+    }
+
+    .proof-item {
+      padding: 16px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.18);
+    }
+
+    .proof-item strong {
+      display: block;
+      font-family: var(--font-display);
+      font-size: 1.45rem;
+      letter-spacing: -0.06em;
+    }
+
+    .proof-item span {
+      color: rgba(255, 248, 242, 0.68);
       font-size: 0.82rem;
-      font-weight: 600;
-      color: #16A34A;
-    }
-    .stats-live.visible {
-      display: inline-flex;
-    }
-    .stats-live-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: #22c55e;
-      animation: pulse 2s infinite;
-    }
-    .stat {
-      background: var(--bg-white);
-      padding: 24px 16px;
-      text-align: center;
-    }
-    .stat-value {
-      font-size: 1.5rem; font-weight: 800; color: var(--text);
-      letter-spacing: -0.02em;
-      margin-bottom: 4px;
-    }
-    .stat-label {
-      font-size: 0.75rem; color: var(--text-muted);
-      font-weight: 500; text-transform: uppercase; letter-spacing: 0.05em;
+      line-height: 1.45;
     }
 
-    /* ── Section Headers ─────────────────────────────── */
-    .section-header { text-align: center; margin-bottom: 56px; }
-    .section-label {
-      display: inline-block;
-      font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--accent);
-      margin-bottom: 12px;
-    }
-    .section-header h2 {
-      font-size: clamp(1.8rem, 4vw, 2.6rem);
-      margin-bottom: 14px;
-    }
-    .section-header p {
-      font-size: 1.05rem; color: var(--text-secondary);
-      max-width: 600px; margin: 0 auto;
-      line-height: 1.7;
-    }
-
-    /* ── Pillar Cards ─────────────────────────────────── */
-    .pillars-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-    }
-    .pillar-card {
-      background: var(--bg-white);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 32px 28px;
-      transition: all 0.25s;
-    }
-    .pillar-card:hover {
-      border-color: var(--accent-border);
-      box-shadow: var(--shadow-lg), var(--shadow-glow);
-      transform: translateY(-2px);
-    }
-    .pillar-icon {
-      width: 44px; height: 44px;
-      display: flex; align-items: center; justify-content: center;
-      border-radius: 10px;
-      font-size: 1.3rem;
-      margin-bottom: 18px;
-    }
-    .pillar-icon.orange { background: var(--accent-bg); }
-    .pillar-icon.blue { background: rgba(59, 130, 246, 0.08); }
-    .pillar-icon.green { background: var(--green-bg); }
-    .pillar-card h3 {
-      font-size: 1.1rem; margin-bottom: 10px; font-weight: 700;
-      letter-spacing: -0.01em;
-    }
-    .pillar-card p {
-      font-size: 0.9rem; color: var(--text-secondary); line-height: 1.65;
-    }
-    .pillar-detail {
-      margin-top: 16px; padding: 12px 16px;
-      background: var(--bg-subtle);
-      border-radius: 8px;
-      font-family: var(--font-mono);
-      font-size: 0.78rem; color: var(--text-secondary);
-      line-height: 1.8;
-    }
-    .pillar-detail span { color: var(--accent); font-weight: 500; }
-
-    /* ── Live Results ─────────────────────────────────── */
-    #live {
-      background: var(--bg-white);
-      border-top: 1px solid var(--border);
-      border-bottom: 1px solid var(--border);
-    }
-    .result-grid {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 20px;
-      margin-top: 48px;
-    }
-    .result-card {
-      background: var(--bg);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 28px 24px;
+    .hero-visual {
       position: relative;
+      min-height: 680px;
+      border-radius: 42px;
+      background:
+        linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.03)),
+        radial-gradient(circle at 14% 18%, rgba(255, 226, 188, 0.42), transparent 24%),
+        linear-gradient(160deg, rgba(255, 255, 255, 0.06), rgba(0, 0, 0, 0.08));
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      box-shadow: var(--shadow-hero);
       overflow: hidden;
+      backdrop-filter: blur(18px);
     }
-    .result-card.success { border-left: 3px solid var(--green); }
-    .result-card.timeout { border-left: 3px solid var(--blue); }
-    .result-status {
-      font-size: 1.3rem; margin-bottom: 12px;
-    }
-    .result-card h3 {
-      font-size: 0.95rem; font-weight: 700; margin-bottom: 8px;
-      letter-spacing: -0.01em;
-      font-family: var(--font-mono);
-    }
-    .result-card p {
-      font-size: 0.85rem; color: var(--text-secondary); line-height: 1.6;
-    }
-    .result-latency {
-      display: inline-block; margin-top: 12px;
-      font-family: var(--font-mono);
-      font-size: 1.6rem; font-weight: 800;
-      letter-spacing: -0.02em;
-    }
-    .result-latency.green { color: var(--green); }
-    .result-latency.blue { color: var(--blue); }
-    .built-with {
-      text-align: center; margin-top: 48px;
-      padding: 24px;
-      background: var(--bg-subtle);
-      border-radius: var(--radius);
-      border: 1px solid var(--border-light);
-    }
-    .built-with p {
-      font-size: 0.88rem; color: var(--text-secondary); line-height: 1.7;
-    }
-    .built-with strong { color: var(--text); }
 
-    /* ── Code Example ─────────────────────────────────── */
-    .code-example {
-      background: #1a1a2e;
-      border-radius: var(--radius-lg);
-      overflow: hidden;
-      box-shadow: var(--shadow-lg);
-      border: 1px solid #2a2a3e;
-    }
-    .code-tabs {
-      display: flex; gap: 0;
-      background: #12121f;
-      border-bottom: 1px solid #2a2a3e;
-      padding: 0 4px;
-    }
-    .code-tab {
-      padding: 12px 20px;
-      background: none; border: none; cursor: pointer;
-      color: #666; font-family: var(--font-sans);
-      font-size: 0.82rem; font-weight: 600;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
-    }
-    .code-tab:hover { color: #999; }
-    .code-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-    .code-body { position: relative; }
-    .code-panel { display: none; }
-    .code-panel.active { display: block; }
-    .code-panel pre {
-      padding: 28px; margin: 0;
-      font-family: var(--font-mono);
-      font-size: 0.82rem; line-height: 1.75;
-      color: #c9d1d9; overflow-x: auto;
-      background: transparent;
-    }
-    .code-panel .kw { color: #ff7b72; }
-    .code-panel .fn { color: #d2a8ff; }
-    .code-panel .str { color: #a5d6ff; }
-    .code-panel .cm { color: #8b949e; }
-    .code-panel .op { color: #79c0ff; }
-    .code-panel .num { color: #f2cc60; }
-
-    /* ── Compare Table ────────────────────────────────── */
-    #compare { background: var(--bg-white); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
-    .compare-wrap {
-      overflow-x: auto;
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      box-shadow: var(--shadow-sm);
-    }
-    .compare-table {
-      width: 100%; border-collapse: collapse;
-      font-size: 0.88rem;
-    }
-    .compare-table th {
-      padding: 16px 20px;
-      text-align: left;
-      font-weight: 700; font-size: 0.82rem;
-      text-transform: uppercase; letter-spacing: 0.06em;
-      color: var(--text-muted);
-      background: var(--bg-subtle);
-      border-bottom: 1px solid var(--border);
-    }
-    .compare-table th:last-child {
-      color: var(--accent);
-    }
-    .compare-table td {
-      padding: 14px 20px;
-      border-bottom: 1px solid var(--border-light);
-      color: var(--text-secondary);
-    }
-    .compare-table tr:last-child td { border-bottom: none; }
-    .compare-table td:first-child { font-weight: 600; color: var(--text); }
-    .compare-table .yes { color: var(--green); font-weight: 700; }
-    .compare-table .no { color: #EF4444; }
-    .compare-table .partial { color: #F59E0B; }
-    .compare-table .beam-col { background: rgba(247, 92, 3, 0.03); font-weight: 600; }
-
-    /* ── Pricing ─────────────────────────────────────── */
-    #pricing {
-      background: linear-gradient(135deg, #1a0a00 0%, #0a0a0f 100%);
-      border-top: 1px solid rgba(255, 255, 255, 0.06);
-      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    }
-    #pricing .section-header h2,
-    #pricing .section-header p {
-      color: #F4F4F5;
-    }
-    #pricing .section-header p {
-      color: #A1A1AA;
-    }
-    .pricing-grid {
-      display: grid;
-      grid-template-columns: repeat(4, 1fr);
-      gap: 20px;
-    }
-    .pricing-card {
-      position: relative;
-      background: rgba(16, 16, 24, 0.92);
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      border-radius: var(--radius-lg);
-      padding: 32px 28px;
-      color: #F4F4F5;
-      box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
-    }
-    .pricing-card.highlight {
-      border-color: rgba(247, 92, 3, 0.5);
-      box-shadow: 0 18px 48px rgba(0, 0, 0, 0.34), 0 0 0 1px rgba(247, 92, 3, 0.18), 0 0 42px rgba(247, 92, 3, 0.18);
-      transform: translateY(-4px);
-    }
-    .pricing-badge {
+    .hero-visual::before {
+      content: "";
       position: absolute;
-      top: 18px;
-      right: 18px;
-      padding: 5px 10px;
-      border-radius: 999px;
-      background: rgba(247, 92, 3, 0.14);
-      border: 1px solid rgba(247, 92, 3, 0.22);
-      color: #FF9A64;
-      font-size: 0.72rem;
-      font-weight: 700;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      background-size: 46px 46px;
+      opacity: 0.6;
+      pointer-events: none;
     }
-    .pricing-tier {
-      font-size: 1.35rem;
-      font-weight: 800;
-      letter-spacing: -0.02em;
+
+    .signal-stage {
+      position: absolute;
+      inset: 0;
+      padding: 42px 30px;
+    }
+
+    .signal-label {
+      position: absolute;
+      top: 26px;
+      left: 30px;
+      z-index: 2;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: rgba(255, 248, 242, 0.62);
+    }
+
+    .signal-node {
+      position: absolute;
+      width: 170px;
+      padding: 16px 18px 18px;
+      border-radius: 22px;
+      background: rgba(255, 249, 244, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      box-shadow: 0 14px 34px rgba(13, 8, 5, 0.16);
+      backdrop-filter: blur(18px);
+      color: #fff8f2;
+      z-index: 2;
+    }
+
+    .signal-node strong {
+      display: block;
+      font-size: 1rem;
+      line-height: 1.1;
+      letter-spacing: -0.04em;
       margin-bottom: 8px;
     }
-    .pricing-price {
+
+    .signal-node span {
+      display: block;
+      color: rgba(255, 248, 242, 0.66);
+      font-size: 0.8rem;
+      line-height: 1.45;
+    }
+
+    .signal-node em {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 14px;
+      font-style: normal;
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(255, 248, 242, 0.78);
+    }
+
+    .signal-node em::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: currentColor;
+      opacity: 0.7;
+    }
+
+    .signal-node.procurement {
+      top: 92px;
+      left: 28px;
+    }
+
+    .signal-node.directory {
+      top: 250px;
+      left: 210px;
+      width: 190px;
+    }
+
+    .signal-node.partner {
+      top: 132px;
+      right: 30px;
+    }
+
+    .signal-node.warehouse {
+      bottom: 166px;
+      right: 62px;
+    }
+
+    .signal-node.finance {
+      bottom: 74px;
+      left: 244px;
+      width: 188px;
+    }
+
+    .signal-node.directory em {
+      color: rgba(255, 196, 146, 0.92);
+    }
+
+    .signal-node.finance em {
+      color: rgba(138, 238, 186, 0.92);
+    }
+
+    .signal-legend {
+      position: absolute;
+      left: 30px;
+      right: 30px;
+      bottom: 28px;
       display: flex;
-      align-items: flex-end;
+      flex-wrap: wrap;
+      gap: 10px;
+      z-index: 2;
+    }
+
+    .signal-pill {
+      padding: 9px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      color: rgba(255, 248, 242, 0.74);
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+    }
+
+    .signal-svg {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .signal-svg path {
+      fill: none;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+    }
+
+    .route-main {
+      stroke: rgba(255, 188, 147, 0.88);
+      stroke-width: 4;
+      stroke-dasharray: 10 16;
+      animation: dash 14s linear infinite;
+      filter: drop-shadow(0 0 14px rgba(255, 166, 115, 0.3));
+    }
+
+    .route-branch {
+      stroke: rgba(155, 245, 202, 0.78);
+      stroke-width: 3;
+      stroke-dasharray: 8 14;
+      animation: dash 16s linear infinite;
+      filter: drop-shadow(0 0 12px rgba(155, 245, 202, 0.22));
+    }
+
+    .signal-scan {
+      stroke: rgba(255, 255, 255, 0.12);
+      stroke-width: 1.2;
+    }
+
+    @keyframes dash {
+      from {
+        stroke-dashoffset: 0;
+      }
+      to {
+        stroke-dashoffset: -220;
+      }
+    }
+
+    .trust-strip {
+      position: relative;
+      padding: 34px 0 20px;
+    }
+
+    .trust-rail {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      padding: 18px 22px;
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.52);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 16px;
+    }
+
+    .trust-rail div {
+      display: grid;
+      gap: 5px;
+    }
+
+    .trust-rail strong {
+      font-size: 0.9rem;
+      letter-spacing: -0.03em;
+    }
+
+    .trust-rail span {
+      color: var(--ink-muted);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    section {
+      padding: 110px 0;
+    }
+
+    .workflow-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 0.95fr) minmax(0, 1.05fr);
+      gap: 38px;
+      align-items: start;
+    }
+
+    .workflow-steps {
+      display: grid;
+      gap: 22px;
+      counter-reset: workflow;
+    }
+
+    .workflow-step {
+      display: grid;
+      grid-template-columns: 64px 1fr;
+      gap: 18px;
+      padding: 18px 0;
+      border-top: 1px solid var(--line);
+    }
+
+    .workflow-step:last-child {
+      border-bottom: 1px solid var(--line);
+    }
+
+    .workflow-step::before {
+      counter-increment: workflow;
+      content: "0" counter(workflow);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+      color: var(--accent);
+      letter-spacing: 0.08em;
+      padding-top: 4px;
+    }
+
+    .workflow-step h3 {
+      font-size: 1.18rem;
+      letter-spacing: -0.03em;
+      margin-bottom: 8px;
+    }
+
+    .workflow-step p {
+      color: var(--ink-soft);
+      max-width: 44ch;
+    }
+
+    .workflow-step code,
+    .terminal code {
+      font-family: var(--font-mono);
+      font-size: 0.9em;
+      background: rgba(241, 90, 36, 0.08);
+      color: #a33f15;
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+
+    .workflow-brief {
+      padding: 28px;
+      border-radius: var(--radius-xl);
+      background:
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.08), transparent 30%),
+        rgba(255, 255, 255, 0.65);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+      display: grid;
+      gap: 18px;
+    }
+
+    .brief-topline {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      color: var(--ink-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+    }
+
+    .brief-topline strong {
+      color: var(--accent);
+      font-weight: 600;
+    }
+
+    .brief-headline {
+      font-size: clamp(1.7rem, 3vw, 2.6rem);
+      line-height: 0.96;
+      letter-spacing: -0.05em;
+      max-width: 10ch;
+    }
+
+    .brief-copy {
+      color: var(--ink-soft);
+      max-width: 44ch;
+    }
+
+    .brief-list {
+      display: grid;
+      gap: 14px;
+      list-style: none;
+    }
+
+    .brief-list li {
+      display: grid;
       gap: 6px;
-      margin-bottom: 10px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
     }
-    .pricing-price .amount {
-      font-size: 2.2rem;
-      font-weight: 800;
-      line-height: 1;
-      letter-spacing: -0.04em;
+
+    .brief-list strong {
+      font-size: 0.95rem;
+      letter-spacing: -0.03em;
     }
-    .pricing-price .period,
-    .pricing-copy {
-      color: #A1A1AA;
+
+    .brief-list span {
+      color: var(--ink-muted);
+      font-size: 0.88rem;
     }
-    .pricing-copy {
-      font-size: 0.92rem;
-      line-height: 1.7;
+
+    .operator-layout {
+      display: grid;
+      grid-template-columns: minmax(0, 0.82fr) minmax(0, 1.18fr);
+      gap: 38px;
+      align-items: start;
+    }
+
+    .operator-copy {
+      display: grid;
+      gap: 20px;
+    }
+
+    .operator-copy p {
+      max-width: 42ch;
+      color: var(--ink-soft);
+    }
+
+    .operator-copy ul {
+      list-style: none;
+      display: grid;
+      gap: 12px;
+      color: var(--ink);
+    }
+
+    .operator-copy li {
+      display: flex;
+      gap: 12px;
+      align-items: flex-start;
+    }
+
+    .operator-copy li::before {
+      content: "+";
+      color: var(--accent);
+      font-weight: 700;
+      margin-top: 1px;
+    }
+
+    .trace-board {
+      position: relative;
+      overflow: hidden;
+      padding: 28px;
+      border-radius: var(--radius-xl);
+      background: linear-gradient(180deg, #171210 0%, #221913 100%);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      color: #f5eee7;
+      box-shadow: 0 34px 90px rgba(27, 15, 9, 0.22);
+    }
+
+    .trace-board::before {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(circle at 12% 12%, rgba(255, 169, 117, 0.12), transparent 20%),
+        linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+      background-size: auto, 26px 26px, 26px 26px;
+      pointer-events: none;
+    }
+
+    .trace-topline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      position: relative;
+      z-index: 1;
       margin-bottom: 22px;
     }
-    .pricing-features {
+
+    .trace-topline strong {
+      font-size: 1.1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .trace-topline span {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: rgba(245, 238, 231, 0.64);
+    }
+
+    .trace-feed {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 14px;
+    }
+
+    .trace-row {
+      display: grid;
+      grid-template-columns: 132px minmax(0, 1fr) auto;
+      gap: 16px;
+      align-items: center;
+      padding: 14px 0;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      font-family: var(--font-mono);
+      font-size: 0.82rem;
+    }
+
+    .trace-row:first-child {
+      border-top: none;
+    }
+
+    .trace-row .step {
+      color: rgba(245, 238, 231, 0.92);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .trace-row .detail {
+      color: rgba(245, 238, 231, 0.66);
+      line-height: 1.55;
+    }
+
+    .trace-row .state {
+      justify-self: end;
+      padding: 8px 12px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.72rem;
+    }
+
+    .trace-row .state.good {
+      color: #bff0cf;
+      background: rgba(31, 143, 95, 0.14);
+      border-color: rgba(31, 143, 95, 0.22);
+    }
+
+    .trace-row .state.warn {
+      color: #ffd2b6;
+      background: rgba(241, 90, 36, 0.12);
+      border-color: rgba(241, 90, 36, 0.18);
+    }
+
+    .stack-layout {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 22px;
+    }
+
+    .stack-column {
+      display: grid;
+      gap: 18px;
+      padding: 24px 0 0;
+      border-top: 1px solid var(--line-strong);
+    }
+
+    .stack-column h3 {
+      font-size: 1.2rem;
+      letter-spacing: -0.03em;
+    }
+
+    .stack-column p {
+      color: var(--ink-soft);
+    }
+
+    .stack-column ul {
+      list-style: none;
+      display: grid;
+      gap: 10px;
+      color: var(--ink);
+    }
+
+    .stack-column li {
+      display: flex;
+      gap: 10px;
+      align-items: flex-start;
+    }
+
+    .stack-column li::before {
+      content: ">";
+      color: var(--accent);
+      margin-top: 1px;
+    }
+
+    .start-shell {
+      padding: 34px;
+      border-radius: 36px;
+      background:
+        linear-gradient(180deg, rgba(255, 250, 244, 0.92), rgba(255, 255, 255, 0.82)),
+        radial-gradient(circle at top right, rgba(241, 90, 36, 0.1), transparent 24%);
+      border: 1px solid var(--line);
+      box-shadow: var(--shadow-soft);
+      display: grid;
+      grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+      gap: 28px;
+      align-items: start;
+    }
+
+    .start-copy {
+      display: grid;
+      gap: 16px;
+    }
+
+    .start-copy p {
+      color: var(--ink-soft);
+      max-width: 40ch;
+    }
+
+    .start-copy ul {
       list-style: none;
       display: grid;
       gap: 12px;
     }
-    .pricing-features li {
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      color: #E4E4E7;
-      font-size: 0.92rem;
-      line-height: 1.55;
-    }
-    .pricing-features li::before {
-      content: "✦";
-      color: var(--accent);
-      font-size: 0.9rem;
-      line-height: 1.4;
-      margin-top: 1px;
-    }
-    .pricing-cta {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      margin-top: 22px;
-      padding: 12px 18px;
-      width: 100%;
-      border-radius: 12px;
-      border: 1px solid rgba(247, 92, 3, 0.18);
-      background: rgba(247, 92, 3, 0.08);
-      color: var(--text);
-      font-weight: 700;
-      text-decoration: none;
-      transition: all 0.2s ease;
-    }
-    .pricing-cta:hover {
-      transform: translateY(-1px);
-      border-color: rgba(247, 92, 3, 0.35);
-      background: rgba(247, 92, 3, 0.14);
-    }
-    .pricing-cta.primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent-light));
-      color: #fff;
-      border-color: transparent;
-    }
 
-    /* ── Waitlist ──────────────────────────────────────── */
-    #waitlist { background: var(--bg); }
-    .waitlist-card {
-      max-width: 520px; margin: 0 auto;
-      background: var(--bg-white);
-      border: 1px solid var(--border);
-      border-radius: var(--radius-lg);
-      padding: 48px 40px;
-      text-align: center;
-      box-shadow: var(--shadow-md);
-    }
-    .waitlist-card h2 {
-      font-size: 1.5rem; margin-bottom: 10px;
-    }
-    .waitlist-card > p {
-      color: var(--text-secondary); font-size: 0.95rem;
-      margin-bottom: 28px; line-height: 1.6;
-    }
-    .waitlist-form {
-      display: flex; gap: 10px;
-    }
-    .waitlist-form input {
-      flex: 1; padding: 12px 16px;
-      border: 1px solid var(--border);
-      border-radius: 10px; font-size: 0.92rem;
-      font-family: var(--font-sans);
-      background: var(--bg);
-      color: var(--text);
-      transition: border-color 0.2s;
-      outline: none;
-    }
-    .waitlist-form input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(247, 92, 3, 0.1); }
-    .waitlist-form input::placeholder { color: var(--text-muted); }
-    .waitlist-form button {
-      padding: 12px 24px; background: var(--accent);
-      color: #fff; border: none; border-radius: 10px;
-      font-weight: 600; font-size: 0.92rem;
-      font-family: var(--font-sans);
-      cursor: pointer; white-space: nowrap;
-      transition: all 0.2s;
-    }
-    .waitlist-form button:hover { background: var(--accent-light); }
-    .success-msg {
-      display: none; color: var(--green);
-      font-weight: 600; font-size: 1rem; padding: 16px 0;
-    }
-    .waitlist-social {
-      margin-top: 20px;
-      font-size: 0.82rem; color: var(--text-muted); font-weight: 500;
-    }
-    .waitlist-social strong { color: var(--text-secondary); }
-
-    /* ── Footer ───────────────────────────────────────── */
-    footer {
-      padding: 40px 24px;
-      text-align: center;
-      border-top: 1px solid var(--border);
-    }
-    .footer-links {
-      display: flex; justify-content: center; flex-wrap: wrap;
-      gap: 24px; list-style: none; margin-bottom: 16px;
-    }
-    .footer-links a { color: var(--text-muted); font-size: 0.82rem; font-weight: 500; }
-    .footer-links a:hover { color: var(--text); }
-    .footer-copy { font-size: 0.78rem; color: var(--text-muted); }
-
-    /* ── Animations ───────────────────────────────────── */
-    .fade-up {
-      opacity: 1; transform: none;
-      transition: opacity 0.6s ease, transform 0.6s ease;
-    }
-    html.motion-safe .fade-up {
-      opacity: 0; transform: translateY(20px);
-    }
-    html.motion-safe .fade-up.visible { opacity: 1; transform: translateY(0); }
-
-    .directory-fallback {
-      grid-column: 1 / -1;
-      padding: 28px;
-      border-radius: 18px;
-      background: rgba(255,255,255,0.03);
-      border: 1px solid rgba(255,255,255,0.08);
-      text-align: left;
-    }
-    .directory-fallback h3 {
-      margin-bottom: 8px;
-      font-size: 1.05rem;
-    }
-    .directory-fallback p {
-      color: var(--text-secondary);
-      line-height: 1.6;
-      margin-bottom: 14px;
-    }
-    .directory-fallback-actions {
+    .start-copy li {
       display: flex;
       gap: 12px;
-      flex-wrap: wrap;
+      align-items: flex-start;
     }
-    .directory-fallback-actions a {
-      display: inline-flex;
+
+    .start-copy li::before {
+      content: "";
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: var(--green);
+      margin-top: 8px;
+      box-shadow: 0 0 0 8px var(--green-fog);
+      flex: 0 0 auto;
+    }
+
+    .terminal {
+      position: relative;
+      overflow: hidden;
+      border-radius: 24px;
+      background: linear-gradient(180deg, #16110e 0%, #221812 100%);
+      color: #efe4d8;
+      box-shadow: 0 28px 70px rgba(23, 14, 8, 0.25);
+    }
+
+    .terminal-bar {
+      display: flex;
       align-items: center;
-      justify-content: center;
-      padding: 10px 14px;
-      border-radius: 10px;
-      border: 1px solid rgba(255,255,255,0.08);
-      color: var(--text);
-      text-decoration: none;
-    }
-    .directory-fallback-actions a.primary {
-      border-color: transparent;
-      background: var(--accent);
-      color: #fff;
+      justify-content: space-between;
+      gap: 14px;
+      padding: 14px 18px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: rgba(239, 228, 216, 0.66);
+      background: rgba(255, 255, 255, 0.02);
     }
 
-    /* ── Mobile Menu ──────────────────────────────────── */
-    .menu-toggle {
-      display: none;
-      background: none; border: none; cursor: pointer;
-      width: 40px; height: 40px;
-      flex-direction: column; justify-content: center; align-items: center; gap: 5px;
+    .terminal-dots {
+      display: flex;
+      gap: 7px;
     }
-    .menu-toggle span {
-      display: block; width: 22px; height: 2px;
-      background: var(--text); border-radius: 2px;
-      transition: all .3s;
+
+    .terminal-dots i {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: block;
+      background: rgba(255, 255, 255, 0.16);
     }
-    .menu-toggle.active span:nth-child(1) { transform: rotate(45deg) translate(5px, 5px); }
-    .menu-toggle.active span:nth-child(2) { opacity: 0; }
-    .menu-toggle.active span:nth-child(3) { transform: rotate(-45deg) translate(5px, -5px); }
 
-    /* ── Responsive ───────────────────────────────────── */
-    html, body { overflow-x: hidden; max-width: 100vw; }
+    .terminal-dots i:first-child {
+      background: #ff7b5d;
+    }
 
-    @media (max-width: 768px) {
-      section { padding: 64px 0; }
+    .terminal-dots i:nth-child(2) {
+      background: #ffcc70;
+    }
 
-      /* Hamburger Menu */
-      .menu-toggle { display: flex; }
+    .terminal-dots i:last-child {
+      background: #6fdca0;
+    }
+
+    .terminal pre {
+      padding: 24px 24px 28px;
+      overflow-x: auto;
+      font-family: var(--font-mono);
+      font-size: 0.84rem;
+      line-height: 1.8;
+      white-space: pre;
+    }
+
+    .terminal .accent {
+      color: #ffb387;
+    }
+
+    .terminal .good {
+      color: #91f2be;
+    }
+
+    .terminal .muted {
+      color: rgba(239, 228, 216, 0.54);
+    }
+
+    .closing {
+      padding: 0 0 110px;
+    }
+
+    .closing-panel {
+      padding: 44px;
+      border-radius: 40px;
+      background: linear-gradient(140deg, #251710 0%, #4f210f 55%, #8a3813 100%);
+      color: #fff7f1;
+      box-shadow: var(--shadow-hero);
+      display: grid;
+      grid-template-columns: minmax(0, 0.85fr) minmax(0, 1.15fr);
+      gap: 24px;
+      align-items: end;
+    }
+
+    .closing-panel h2 {
+      font-family: var(--font-display);
+      font-size: clamp(2.2rem, 4vw, 3.8rem);
+      line-height: 0.94;
+      letter-spacing: -0.06em;
+      max-width: 8ch;
+    }
+
+    .closing-panel p {
+      color: rgba(255, 247, 241, 0.74);
+      max-width: 42ch;
+      margin-bottom: 18px;
+    }
+
+    .closing-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .closing-actions .btn-secondary {
+      color: #fff7f1;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    footer {
+      padding: 32px 0 56px;
+      color: var(--ink-muted);
+    }
+
+    .footer-inner {
+      width: min(var(--max), calc(100% - 40px));
+      margin: 0 auto;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 20px;
+      padding-top: 18px;
+      border-top: 1px solid var(--line);
+      font-size: 0.88rem;
+    }
+
+    .footer-links {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 18px;
+    }
+
+    .footer-links a:hover {
+      color: var(--ink);
+    }
+
+    @media (max-width: 1120px) {
+      .hero-layout,
+      .workflow-grid,
+      .operator-layout,
+      .start-shell,
+      .closing-panel {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-layout {
+        min-height: auto;
+      }
+
+      .hero-proof,
+      .trust-rail,
+      .stack-layout {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .hero-visual {
+        min-height: 620px;
+      }
+    }
+
+    @media (max-width: 900px) {
+      .nav {
+        border-radius: 28px;
+        align-items: flex-start;
+      }
+
       .nav-links {
         display: none;
-        position: fixed; top: 53px; left: 0; right: 0; bottom: 0;
-        background: var(--bg-white);
+        width: 100%;
         flex-direction: column;
-        padding: 24px;
-        gap: 0;
-        list-style: none;
-        z-index: 99;
-        overflow-y: auto;
-        border-top: 1px solid var(--border);
-      }
-      .nav-links.open { display: flex; }
-      .nav-links li { border-bottom: 1px solid var(--border); }
-      .nav-links a {
-        display: block; padding: 16px 0;
-        font-size: 1.05rem !important; font-weight: 500;
-      }
-      .nav-links .nav-cta {
-        display: block; text-align: center;
-        margin-top: 16px; padding: 14px 24px;
-        border-radius: 10px;
+        align-items: flex-start;
+        gap: 14px;
+        padding-top: 10px;
       }
 
-      /* Grids → single column */
-      .pillars-grid { grid-template-columns: 1fr !important; }
-      .result-grid { grid-template-columns: 1fr !important; }
-      .pricing-grid { grid-template-columns: 1fr !important; }
-      .stats-row { grid-template-columns: repeat(2, 1fr); }
-
-      /* Hero */
-      #hero { padding: 120px 0 60px; }
-      #hero h1 { font-size: 2rem; }
-      .hero-actions { flex-direction: column; align-items: center; }
-      .beam-id-box { font-size: 0.78rem; padding: 10px 14px; gap: 8px; }
-      .beam-id-box .label { font-size: 0.6rem; padding: 2px 6px; }
-      .hero-glow { width: 400px; height: 300px; }
-
-      /* Vision + Use Cases grids */
-      .vision-grid { grid-template-columns: 1fr !important; }
-      .use-cases-grid { grid-template-columns: 1fr !important; }
-
-      /* Agent directory grid */
-      #agent-grid, [id="agent-grid"] {
-        grid-template-columns: 1fr !important;
+      .nav-links.open {
+        display: flex;
       }
 
-      /* Code blocks no horizontal scroll */
-      pre, code, .code-panel { overflow-x: auto; max-width: 100%; -webkit-overflow-scrolling: touch; }
-
-      /* Compare table */
-      .compare-table { font-size: 0.75rem; }
-      .compare-table th, .compare-table td { padding: 8px 6px; }
-
-      /* Waitlist / CTA */
-      .waitlist-form { flex-direction: column; }
-      .waitlist-card { padding: 32px 20px; }
-
-      /* Security / Shield grids */
-      .security-grid { grid-template-columns: 1fr !important; }
-      .shield-walls-grid { grid-template-columns: 1fr !important; }
-      .shield-detail-grid { grid-template-columns: 1fr !important; }
-
-      /* Prevent ALL children from overflowing on mobile */
-      .shield-detail-grid > div,
-      .shield-detail-grid pre,
-      .shield-detail-grid code {
-        max-width: calc(100vw - 48px) !important;
-        overflow-x: auto !important;
-        word-break: break-word;
+      .nav-actions {
+        margin-left: auto;
       }
 
-      /* Code examples in How section */
-      .code-example, .code-panel, .code-tabs {
-        max-width: calc(100vw - 48px) !important;
-        overflow-x: auto !important;
+      .nav-actions .btn-ghost {
+        display: none;
       }
 
-      /* Font size minimum for mobile readability */
-      .shield-walls-grid p,
-      .shield-detail-grid p,
-      .cap-tag { font-size: 13px !important; }
-
-      /* Compare table scroll */
-      .compare-table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
-
-      /* Blog cards */
-      [style*="grid-template-columns: repeat(3"] {
-        grid-template-columns: 1fr !important;
+      .menu-toggle {
+        display: inline-grid;
+        place-items: center;
       }
 
-      /* Inline pricing grid override */
-      [style*="grid-template-columns: repeat(4"],
-      [style*="grid-template-columns: repeat(5"] {
-        grid-template-columns: 1fr !important;
+      .hero {
+        padding-top: 18px;
       }
 
-      /* How section steps */
-      .how-steps { grid-template-columns: 1fr !important; }
+      .hero-layout,
+      .trust-rail,
+      .stack-layout {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-proof {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .hero-visual {
+        min-height: 540px;
+      }
+
+      .signal-node {
+        width: 156px;
+      }
+
+      .signal-node.directory {
+        left: 158px;
+      }
+
+      .signal-node.finance {
+        left: 148px;
+      }
+
+      .trace-row {
+        grid-template-columns: 1fr;
+      }
+
+      .trace-row .state {
+        justify-self: start;
+      }
+
+      .closing-panel {
+        padding: 36px 28px;
+      }
+
+      .footer-inner {
+        flex-direction: column;
+        align-items: flex-start;
+      }
     }
 
-    @media (max-width: 480px) {
-      .container { padding: 0 16px; }
-      #hero h1 { font-size: 1.75rem; }
-      .stats-row { grid-template-columns: 1fr 1fr; }
-      .stat { padding: 16px 12px; }
-      .stat-value { font-size: 1.2rem; }
+    @media (max-width: 640px) {
+      .container,
+      .hero-layout,
+      .trust-rail,
+      .footer-inner,
+      .nav {
+        width: min(var(--max), calc(100% - 28px));
+      }
+
+      section {
+        padding: 84px 0;
+      }
+
+      .hero h1 {
+        font-size: clamp(2.8rem, 16vw, 4.1rem);
+      }
+
+      .hero-copy p,
+      .section-head p,
+      .brief-copy,
+      .start-copy p {
+        font-size: 0.97rem;
+      }
+
+      .hero-proof {
+        grid-template-columns: 1fr;
+      }
+
+      .hero-visual {
+        min-height: 660px;
+      }
+
+      .signal-stage {
+        padding: 38px 20px 100px;
+      }
+
+      .signal-label,
+      .signal-legend {
+        left: 20px;
+        right: 20px;
+      }
+
+      .signal-node {
+        position: relative;
+        top: auto;
+        left: auto;
+        right: auto;
+        bottom: auto;
+        width: 100%;
+        margin-top: 14px;
+      }
+
+      .signal-node.directory,
+      .signal-node.finance,
+      .signal-node.partner,
+      .signal-node.warehouse,
+      .signal-node.procurement {
+        top: auto;
+        left: auto;
+        right: auto;
+        bottom: auto;
+      }
+
+      .signal-svg {
+        display: none;
+      }
+
+      .workflow-step {
+        grid-template-columns: 1fr;
+        gap: 10px;
+      }
+
+      .start-shell,
+      .workflow-brief,
+      .trace-board {
+        padding: 24px;
+      }
+
+      .closing-actions,
+      .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn,
+      .hero-actions .btn,
+      .closing-actions .btn {
+        width: 100%;
+      }
+
+      .nav-actions {
+        gap: 8px;
+      }
+
+      .nav-actions .btn-primary {
+        display: none;
+      }
     }
   </style>
 </head>
 <body>
-
-<!-- ── Nav ──────────────────────────────────────────────── -->
-<nav>
-  <a href="/" class="nav-logo">
-    <div class="beam-icon">📡</div>
-    beam<span style="color: var(--text-muted); font-weight: 400;">.directory</span>
-  </a>
-  <ul class="nav-links" id="navLinks">
-    <li><a href="#pillars" onclick="closeMenu()">How it works</a></li>
-    <li><a href="#use-cases" onclick="closeMenu()">Use Cases</a></li>
-    <li><a href="#directory" onclick="closeMenu()">Directory</a></li>
-    <li><a href="#pricing" onclick="closeMenu()">Pricing</a></li>
-    <li><a href="#blog" onclick="closeMenu()">Blog</a></li>
-    <li><a href="/playground.html">Playground</a></li>
-    <li><a href="https://docs.beam.directory" target="_blank">Docs</a></li>
-    <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
-    <li><a href="/register.html" class="nav-cta">Register Agent</a></li>
-  </ul>
-  <button class="menu-toggle" id="menuToggle" aria-label="Menu">
-    <span></span><span></span><span></span>
-  </button>
-</nav>
-
-<!-- ── Hero ──────────────────────────────────────────────── -->
-<main>
-<section id="hero">
-  <div class="hero-glow"></div>
-  <div class="container">
-
-    <div class="hero-badge">
-      <div class="pulse"></div>
-      Beam 0.6 Focus · Verified B2B Handoffs
-    </div>
-
-    <h1>
-      Verified <span class="accent">B2B</span> handoffs for AI agents
-    </h1>
-
-    <p class="tagline">
-      Beam gives <strong>procurement@acme</strong> a reliable way to hand work to
-      <strong>partner-desk@northwind</strong>, get a signed result back, and inspect the
-      exact trace when the partner side is slow or offline.
-    </p>
-
-    <div class="hero-actions">
-      <a href="https://github.com/Beam-directory/beam-protocol" class="btn-primary" target="_blank">
-        <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-        View on GitHub
+  <div class="nav-shell">
+    <nav class="nav">
+      <a class="brand" href="/">
+        <div class="brand-mark">B</div>
+        <div class="brand-copy">
+          <strong>beam.directory</strong>
+          <span>Verified partner handoffs</span>
+        </div>
       </a>
-      <a href="https://docs.beam.directory/guide/hosted-quickstart" class="btn-secondary">
-        Run the hosted demo →
-      </a>
-    </div>
 
-    <div class="beam-id-demo fade-up">
-      <div class="beam-id-box">
-        <span class="icon">🤖</span>
+      <button class="menu-toggle" id="menuToggle" aria-label="Toggle menu">Menu</button>
+
+      <ul class="nav-links" id="navLinks">
+        <li><a href="#workflow">Workflow</a></li>
+        <li><a href="#operators">Operators</a></li>
+        <li><a href="#stack">Stack</a></li>
+        <li><a href="#start">Start</a></li>
+        <li><a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a></li>
+        <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">GitHub</a></li>
+      </ul>
+
+      <div class="nav-actions">
+        <a class="btn btn-ghost" href="/register.html">Register Agent</a>
+        <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run Hosted Demo</a>
+      </div>
+    </nav>
+  </div>
+
+  <main>
+    <section class="hero">
+      <div class="hero-layout">
+        <div class="hero-copy reveal visible">
+          <div class="eyebrow">Hosted beta · Beam 0.7 direction</div>
+          <div class="brand-word">Beam Protocol</div>
+          <h1>One <span>company agent</span> hands work to another.</h1>
+          <p>
+            Beam is the trust layer for partner-facing AI workflows. Give agents Beam IDs,
+            signed intents, replay protection, and operator-visible traces so
+            <code>procurement@acme</code> can hand work to <code>partner-desk@northwind</code>
+            without shared API keys or blind trust.
+          </p>
+          <div class="hero-actions">
+            <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
+            <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
+          </div>
+          <div class="hero-proof">
+            <div class="proof-item">
+              <strong>15.81s</strong>
+              <span>Measured clean-start bring-up on the local hosted demo path.</span>
+            </div>
+            <div class="proof-item">
+              <strong>0 alerts</strong>
+              <span>Recorded on the latest hosted-demo dogfood pass.</span>
+            </div>
+            <div class="proof-item">
+              <strong>0 dead letters</strong>
+              <span>Healthy baseline for the canonical Acme to Northwind flow.</span>
+            </div>
+            <div class="proof-item">
+              <strong>beam/1</strong>
+              <span>Compatibility fixtures now verified across TypeScript and Python.</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual reveal visible">
+          <div class="signal-stage">
+            <div class="signal-label">Canonical handoff</div>
+            <svg class="signal-svg" viewBox="0 0 1000 1000" preserveAspectRatio="none" aria-hidden="true">
+              <path class="signal-scan" d="M40 170C220 170 270 170 360 170" />
+              <path class="signal-scan" d="M364 170C510 170 540 232 630 232" />
+              <path class="signal-scan" d="M364 620C470 620 525 742 625 742" />
+              <path class="route-main" d="M140 190C285 190 270 300 386 300C520 300 560 240 800 240" />
+              <path class="route-main" d="M386 300C420 300 462 404 732 404" />
+              <path class="route-branch" d="M384 322C414 322 445 706 338 760" />
+            </svg>
+
+            <div class="signal-node procurement">
+              <strong>Acme procurement</strong>
+              <span>Starts a quote request with a signed Beam frame and a traceable nonce.</span>
+              <em>quote.request</em>
+            </div>
+
+            <div class="signal-node directory">
+              <strong>Beam directory</strong>
+              <span>Identity, ACL, replay window, lifecycle stages, audit, observability.</span>
+              <em>validate + route</em>
+            </div>
+
+            <div class="signal-node partner">
+              <strong>Northwind partner desk</strong>
+              <span>Receives the request, asks warehouse, and returns the signed quote.</span>
+              <em>signed result</em>
+            </div>
+
+            <div class="signal-node warehouse">
+              <strong>Warehouse check</strong>
+              <span>Confirms stock and ship window before the quote is finalized.</span>
+              <em>inventory.check</em>
+            </div>
+
+            <div class="signal-node finance">
+              <strong>Finance preflight</strong>
+              <span>Async acceptance routed through the message bus for durable partner workflows.</span>
+              <em>accepted</em>
+            </div>
+
+            <div class="signal-legend">
+              <div class="signal-pill">Beam IDs</div>
+              <div class="signal-pill">Ed25519 signatures</div>
+              <div class="signal-pill">Nonce traces</div>
+              <div class="signal-pill">Retry and dead-letter</div>
+              <div class="signal-pill">Operator runbook</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <div class="trust-strip">
+      <div class="trust-rail reveal">
         <div>
-          <span class="agent">procurement</span><span class="at">@</span><span class="org">acme</span><span class="domain">.beam.directory</span>
+          <strong>Verified addresses</strong>
+          <span>Every agent gets a Beam ID and a DID-facing identity surface.</span>
         </div>
-        <span class="label">Beam ID</span>
-      </div>
-    </div>
-
-    <div class="stats-row fade-up">
-      <div class="stat">
-        <div class="stat-value">beam/1</div>
-        <div class="stat-label">Compatibility</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">Nonce</div>
-        <div class="stat-label">Traceable Handoffs</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">Ed25519</div>
-        <div class="stat-label">Signed Frames</div>
-      </div>
-      <div class="stat">
-        <div class="stat-value">Retry</div>
-        <div class="stat-label">Recovery Ready</div>
-      </div>
-    </div>
-    <div class="stats-live fade-up" id="hero-stats-live" aria-live="polite">
-      <span class="stats-live-dot" aria-hidden="true"></span>
-      <span>Live</span>
-    </div>
-  </div>
-</section>
-
-<!-- ── How it works ──────────────────────────────────────── -->
-<section id="pillars">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">How it works</span>
-      <h2>One workflow, three building blocks</h2>
-      <p>Beam 0.6 is intentionally narrow: get one partner handoff working end to end, then expand from there.</p>
-    </div>
-
-    <div class="pillars-grid">
-      <div class="pillar-card fade-up">
-        <div class="pillar-icon orange">📛</div>
-        <h3>Verified Addresses</h3>
-        <p>Both companies know which agent sent the request and which agent answered it. No shared vendor secret or custom API account required.</p>
-        <div class="pillar-detail">
-          procurement@acme.beam.directory<br/>
-          › Ed25519 identity + DID<br/>
-          › portable across deployments
+        <div>
+          <strong>Signed handoffs</strong>
+          <span>Intents and results are signed end to end instead of relying on shared secrets.</span>
         </div>
-      </div>
-
-      <div class="pillar-card fade-up">
-        <div class="pillar-icon blue">⚡</div>
-        <h3>Signed Handoffs</h3>
-        <p>The procurement request, warehouse lookup, and final quote all move as signed intents and results with replay-safe nonces.</p>
-        <div class="pillar-detail">
-          intent: "<span>quote.request</span>"<br/>
-          payload: { sku: "INV-240", quantity: 240 }<br/>
-          signature: Ed25519
+        <div>
+          <strong>Replay protection</strong>
+          <span>Timestamps and nonces prevent silent replays or duplicate delivery surprises.</span>
         </div>
-      </div>
-
-      <div class="pillar-card fade-up">
-        <div class="pillar-icon green">🗂️</div>
-        <h3>Operator Visibility</h3>
-        <p>The same handoff shows up in traces, audit history, alerts, and retry state so operations teams can debug real partner failures.</p>
-        <div class="pillar-detail">
-          /observability/intents/:nonce<br/>
-          › alerts, audit, dead letters<br/>
-          › real-time status and recovery
+        <div>
+          <strong>Operator visibility</strong>
+          <span>Traces, audit entries, alerts, dead letters, and retention controls live in one surface.</span>
+        </div>
+        <div>
+          <strong>Hosted demo first</strong>
+          <span>The fastest path is a seeded local environment, not a long architecture talk.</span>
         </div>
       </div>
     </div>
-  </div>
-</section>
 
-<!-- ── Vision ─────────────────────────────────────────────── -->
-<section id="vision" style="padding: 100px 0; background: linear-gradient(135deg, #0a0a0f 0%, #1a0800 50%, #0a0a0f 100%); color: #e4e4ef;">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Why This Workflow</span>
-      <h2 style="color: #f4f4f5;">Start where trust, traceability, and retries actually matter.</h2>
-      <p style="max-width: 640px; margin: 0 auto; color: #a1a1aa;">A partner quote handoff is concrete, operational, and unforgiving. If Beam works there, it is solving a real problem rather than demo theater.</p>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; margin-bottom: 48px;" class="vision-grid fade-up">
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
-        <div style="font-size: 1.6rem; margin-bottom: 10px;">📅</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Cross-company by default</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">Procurement can ask a supplier agent for stock and delivery without bespoke OAuth, vendor-specific secrets, or a custom one-off integration.</div>
-      </div>
-      <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 14px; padding: 28px;">
-        <div style="font-size: 1.6rem; margin-bottom: 10px;">⚡</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Signed and inspectable</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">Every handoff has a nonce, a signature, a result, and a trace. That makes partner automation governable instead of magical.</div>
-      </div>
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 14px; padding: 28px;">
-        <div style="font-size: 1.6rem; margin-bottom: 10px;">🤖</div>
-        <div style="font-weight: 600; margin-bottom: 6px; color: #f0f0f0;">Recoverable when it fails</div>
-        <div style="font-size: 0.88rem; color: #8b949e; line-height: 1.5;">If the supplier side is down, the queue, retries, restart recovery, and dead-letter surfaces make the failure operationally manageable.</div>
-      </div>
-    </div>
-
-    <div style="text-align: center; margin-bottom: 12px;" class="fade-up">
-      <a href="https://docs.beam.directory/guide/partner-handoff" target="_blank" style="color: var(--accent); font-size: 0.9rem; text-decoration: none; border-bottom: 1px solid rgba(247,92,3,0.3);">See the canonical partner handoff →</a>
-    </div>
-  </div>
-</section>
-
-<!-- ── Use Cases ──────────────────────────────────────────── -->
-<section id="use-cases" style="padding: 100px 0;">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">First Workflow</span>
-      <h2>The Acme to Northwind partner handoff</h2>
-      <p style="max-width: 640px; margin: 0 auto;">Beam 0.6 does not ask you to imagine every possible agent future. It asks you to make this workflow work reliably first.</p>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="use-cases-grid fade-up">
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">1</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Acme starts the request</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">"Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence."</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          procurement@acme.beam.directory<br/>
-          → partner-desk@northwind.beam.directory<br/>
-          intent: quote.request
-        </div>
-      </div>
-
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">2</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Northwind checks fulfillment</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">The partner desk queries the warehouse before promising stock or a delivery window.</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          partner-desk@northwind<br/>
-          → warehouse@northwind<br/>
-          intent: inventory.check
-        </div>
-      </div>
-
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: linear-gradient(90deg, #F75C03, transparent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">3</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Acme gets a signed answer back</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">The final result includes the supplier, price, inventory confidence, and a traceable nonce.</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          totalPriceEur: 44160<br/>
-          shipWindow: "Thu 08:00-12:00 CET"<br/>
-          supplier: partner-desk@northwind
-        </div>
-      </div>
-
-      <div style="background: rgba(247,92,3,0.06); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; position: relative; overflow: hidden;">
-        <div style="position: absolute; top: 0; left: 0; right: 0; height: 3px; background: var(--accent);"></div>
-        <div style="font-size: 1.3rem; margin-bottom: 8px;">4</div>
-        <h3 style="font-size: 1.05rem; font-weight: 600; margin-bottom: 8px; color: #f0f0f0;">Operators can inspect and recover</h3>
-        <p style="font-size: 0.85rem; color: #8b949e; line-height: 1.6; margin-bottom: 16px;">If Northwind is offline, the same handoff can be retried, exported, or dead-lettered instead of disappearing into logs.</p>
-        <div style="font-family: 'SF Mono', monospace; font-size: 0.75rem; color: #58a6ff; background: rgba(0,0,0,0.3); border-radius: 8px; padding: 12px; line-height: 1.6;">
-          /observability/intents/:nonce<br/>
-          /observability/alerts<br/>
-          /v1/beam/dead-letter
-        </div>
-      </div>
-
-    </div>
-  </div>
-</section>
-
-<!-- ── Live Results ───────────────────────────────────────── -->
-<section id="live">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">First Live Deployment</span>
-      <h2>4 agents. 2 machines. Zero cloud.</h2>
-      <p>March 6, 2026 — four independent AI agents communicated across two physical machines for the first time. No cloud. No central API. Just signed frames over WebSocket.</p>
-    </div>
-
-    <div class="result-grid">
-      <div class="result-card success fade-up">
-        <div class="result-status">✅</div>
-        <h3>escalation.request → Jarvis</h3>
-        <p>Agent Fischer escalated a customer case. Jarvis processed it end-to-end with real tool usage.</p>
-        <div class="result-latency green">6.7s</div>
-      </div>
-      <div class="result-card success fade-up">
-        <div class="result-status">✅</div>
-        <h3>payment.status_check → Fischer</h3>
-        <p>Fischer queried the actual payment system and returned real invoice data — not a canned response.</p>
-        <div class="result-latency green">29.4s</div>
-      </div>
-      <div class="result-card timeout fade-up">
-        <div class="result-status">⏱️</div>
-        <h3>pipeline.summary → Clara</h3>
-        <p>HubSpot CRM query exceeded 60s timeout. Proof that agents do real work, not just echo back.</p>
-        <div class="result-latency blue">&gt;60s</div>
-      </div>
-    </div>
-
-    <div class="built-with fade-up">
-      <p>
-        v0.2 built by <strong>OpenAI Codex</strong> in 5 minutes — auto-reconnect, health endpoints, intent catalog, HTTP fallback API.<br/>
-        Running across two local machines on a private network.
-      </p>
-    </div>
-  </div>
-</section>
-
-<!-- ── Natural Language ────────────────────────────────────── -->
-<section id="natural-language" style="padding: 80px 0; background: linear-gradient(135deg, #1a0a00 0%, #0a0a0f 100%); color: #e4e4ef;">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label" style="color: #a1a1aa;">NEW — Natural Language</span>
-      <h2 style="background: linear-gradient(135deg, #F75C03, #ff9a56); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">Agents don't need schemas. They just talk.</h2>
-      <p style="color: #a1a1aa;">Beam v0.2 introduces <code style="background: rgba(247,92,3,0.15); padding: 2px 8px; border-radius: 4px; color: #F75C03;">conversation.message</code> — agents communicate in natural language. No pre-agreed schemas. No integration work.</p>
-    </div>
-
-    <div style="max-width: 680px; margin: 0 auto; background: rgba(255,255,255,0.03); border: 1px solid rgba(247,92,3,0.2); border-radius: 16px; padding: 32px; font-family: 'SF Mono', monospace; font-size: 14px; line-height: 1.7;" class="fade-up">
-      <div style="color: #888; margin-bottom: 16px;">// Natural-language handoff</div>
-      <div style="color: #F75C03; font-weight: 600;">procurement@acme → partner-desk@northwind:</div>
-      <div style="color: #e0e0e0; padding-left: 16px; margin-bottom: 12px;">"Need 240 inverters for Mannheim by Friday.<br/>Include delivery window and stock confidence."</div>
-      <div style="color: #4ade80; font-weight: 600;">partner-desk@northwind → procurement@acme <span style="color: #666; font-weight: 400;">(4.8s)</span>:</div>
-      <div style="color: #e0e0e0; padding-left: 16px;">"Stock confirmed for 240 units.<br/>Delivery window: Thu 08:00-12:00 CET. Quote ready."</div>
-      <div style="color: #666; margin-top: 16px; font-size: 12px;">Use talk for the first handoff, then move the same flow to a structured quote.request payload.</div>
-    </div>
-
-    <div style="text-align: center; margin-top: 40px;" class="fade-up">
-      <div style="display: inline-flex; gap: 16px; flex-wrap: wrap; justify-content: center;">
-        <code style="background: rgba(247,92,3,0.1); border: 1px solid rgba(247,92,3,0.3); padding: 12px 20px; border-radius: 8px; color: #F75C03; font-size: 14px;">npm install beam-protocol-sdk</code>
-        <code style="background: rgba(247,92,3,0.1); border: 1px solid rgba(247,92,3,0.3); padding: 12px 20px; border-radius: 8px; color: #F75C03; font-size: 14px;">pip install beam-directory</code>
-      </div>
-    </div>
-
-    <div style="max-width: 520px; margin: 32px auto 0; background: rgba(255,255,255,0.03); border: 1px solid rgba(255,255,255,0.06); border-radius: 12px; padding: 24px; font-family: 'SF Mono', monospace; font-size: 13px;" class="fade-up">
-      <div style="color: #888;">// One line of code:</div>
-      <div style="color: #e0e0e0;"><span style="color: #c084fc;">const</span> reply = <span style="color: #c084fc;">await</span> client.<span style="color: #F75C03;">talk</span>(</div>
-      <div style="color: #4ade80; padding-left: 24px;">'partner-desk@northwind.beam.directory',</div>
-      <div style="color: #4ade80; padding-left: 24px;">'Need 240 inverters for Mannheim by Friday.'</div>
-      <div style="color: #e0e0e0;">)</div>
-    </div>
-  </div>
-</section>
-
-<!-- ── Beam Shield ─────────────────────────────────────────── -->
-<section id="security" style="padding: 100px 0; background: linear-gradient(135deg, #0a0a0f 0%, #0d1117 50%, #0a0a0f 100%); color: #e4e4ef;">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label" style="color: #a1a1aa;">🛡️ Beam Shield</span>
-      <h2 style="background: linear-gradient(135deg, #00d4ff, #7c3aed); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">5-wall defense for every agent</h2>
-      <p style="color: #a1a1aa;">No unsigned message ever reaches your agent. Every intent passes through five security layers before delivery.</p>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-bottom: 48px;" class="fade-up shield-walls-grid">
-      <div style="background: rgba(0,212,255,0.08); border: 1px solid rgba(0,212,255,0.2); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 32px; margin-bottom: 8px;">🔐</div>
-        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #00d4ff;">Wall 1</h3>
-        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Protocol Hardening — 64KB body limit, timestamp validation, nonce expiry, key pinning</p>
-      </div>
-      <div style="background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 32px; margin-bottom: 8px;">🚧</div>
-        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #7c3aed;">Wall 2</h3>
-        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Trust Gate — Per-agent allowlist/blocklist, trust scoring, sender rate limiting, whitelist mode</p>
-      </div>
-      <div style="background: rgba(247,92,3,0.08); border: 1px solid rgba(247,92,3,0.2); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 32px; margin-bottom: 8px;">🧪</div>
-        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #F75C03;">Wall 3</h3>
-        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Content Sandbox — 23 injection patterns, HTML stripping, message isolation frame</p>
-      </div>
-      <div style="background: rgba(0,255,136,0.08); border: 1px solid rgba(0,255,136,0.2); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 32px; margin-bottom: 8px;">🔍</div>
-        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #00ff88;">Wall 4</h3>
-        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Output Filter — PII detection (IBAN, phone, email), credential scanning, auto-redaction</p>
-      </div>
-      <div style="background: rgba(255,215,0,0.08); border: 1px solid rgba(255,215,0,0.2); border-radius: 12px; padding: 24px; text-align: center;">
-        <div style="font-size: 32px; margin-bottom: 8px;">📊</div>
-        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 6px; color: #ffd700;">Wall 5</h3>
-        <p style="font-size: 13px; color: #8b949e; line-height: 1.5;">Audit & Anomaly — Event logging, behavior fingerprinting, spike detection</p>
-      </div>
-    </div>
-
-    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 24px;" class="fade-up shield-detail-grid">
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 32px;">
-        <h3 style="font-size: 18px; margin-bottom: 16px;">🔒 Whitelist Mode</h3>
-        <p style="font-size: 14px; color: #8b949e; line-height: 1.7; margin-bottom: 16px;">Lock your agents to a closed circle. Only agents in your organization's allowlist can communicate. Everyone else gets a 403.</p>
-        <code style="display: block; background: #161b22; padding: 16px; border-radius: 8px; font-size: 13px; color: #e6edf3; white-space: pre; overflow-x: auto;">PATCH /shield/config/your-agent@org.beam.directory
-{
-  "mode": "whitelist",
-  "allowlist": ["*@org.beam.directory"]
-}</code>
-      </div>
-      <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 32px;">
-        <h3 style="font-size: 18px; margin-bottom: 16px;">🌐 Open Mode</h3>
-        <p style="font-size: 14px; color: #8b949e; line-height: 1.7; margin-bottom: 16px;">Accept intents from anyone — but with guardrails. Trust score minimum, rate limiting, injection detection, and PII filtering protect your agent automatically.</p>
-        <code style="display: block; background: #161b22; padding: 16px; border-radius: 8px; font-size: 13px; color: #e6edf3; white-space: pre; overflow-x: auto;">PATCH /shield/config/your-agent@org.beam.directory
-{
-  "mode": "open",
-  "minTrust": 0.3,
-  "rateLimit": 20
-}</code>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── Code Example ──────────────────────────────────────── -->
-<section id="how">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Developer Experience</span>
-      <h2>Ship in minutes, not days</h2>
-      <p>TypeScript and Python SDKs. Three steps to your first intent.</p>
-    </div>
-
-    <div class="code-example fade-up">
-      <div class="code-tabs">
-        <button class="code-tab active" data-tab="ts">TypeScript</button>
-        <button class="code-tab" data-tab="py">Python</button>
-        <button class="code-tab" data-tab="cli">CLI</button>
-      </div>
-
-      <div class="code-body">
-        <div class="code-panel active" id="tab-ts">
-<pre><span class="kw">import</span> { <span class="fn">BeamIdentity</span>, <span class="fn">BeamClient</span> } <span class="kw">from</span> <span class="str">'beam-protocol-sdk'</span>
-
-<span class="cm">// 1. Generate a Beam identity</span>
-<span class="kw">const</span> identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>({
-  agentName: <span class="str">'procurement'</span>,
-  orgName: <span class="str">'acme'</span>,
-})
-<span class="cm">// → procurement@acme.beam.directory</span>
-
-<span class="cm">// 2. Connect to the directory</span>
-<span class="kw">const</span> client = <span class="kw">new</span> <span class="fn">BeamClient</span>({
-  identity: identity.<span class="fn">export</span>(),
-  directoryUrl: <span class="str">'https://api.beam.directory'</span>,
-})
-<span class="kw">await</span> client.<span class="fn">connect</span>()
-
-<span class="cm">// 3. Send the first partner handoff</span>
-<span class="kw">const</span> result = <span class="kw">await</span> client.<span class="fn">send</span>(
-  <span class="str">'partner-desk@northwind.beam.directory'</span>,
-  <span class="str">'quote.request'</span>,
-  { sku: <span class="str">'INV-240'</span>, quantity: <span class="num">240</span>, shipTo: <span class="str">'Mannheim, DE'</span> }
-)
-console.<span class="fn">log</span>(result.payload)
-<span class="cm">// → { totalPriceEur: 44160, shipWindow: 'Thu 08:00-12:00 CET' }</span></pre>
+    <section id="workflow">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">One workflow on purpose</div>
+          <h2>Beam gets sharper when the story stays narrow.</h2>
+          <p>
+            The current wedge is not "all agents everywhere." It is one company handing work to
+            another company's agent, with enough trust and observability to survive real operations.
+          </p>
         </div>
 
-        <div class="code-panel" id="tab-py">
-<pre><span class="kw">from</span> beam_directory <span class="kw">import</span> <span class="fn">BeamIdentity</span>, <span class="fn">BeamClient</span>
-
-<span class="cm"># 1. Generate a Beam identity</span>
-identity = <span class="fn">BeamIdentity</span>.<span class="fn">generate</span>(
-    agent_name=<span class="str">"procurement"</span>,
-    org_name=<span class="str">"acme"</span>
-)
-<span class="cm"># → procurement@acme.beam.directory</span>
-
-<span class="cm"># 2. Connect to the directory</span>
-client = <span class="fn">BeamClient</span>(
-    identity=identity,
-    directory_url=<span class="str">"https://api.beam.directory"</span>
-)
-<span class="kw">await</span> client.<span class="fn">connect</span>()
-
-<span class="cm"># 3. Send the first partner handoff</span>
-result = <span class="kw">await</span> client.<span class="fn">send</span>(
-    to=<span class="str">"partner-desk@northwind.beam.directory"</span>,
-    intent=<span class="str">"quote.request"</span>,
-    params={<span class="str">"sku"</span>: <span class="str">"INV-240"</span>, <span class="str">"quantity"</span>: <span class="num">240</span>, <span class="str">"shipTo"</span>: <span class="str">"Mannheim, DE"</span>}
-)
-<span class="fn">print</span>(result.payload)
-<span class="cm"># → {"totalPriceEur": 44160, "shipWindow": "Thu 08:00-12:00 CET"}</span></pre>
-        </div>
-
-        <div class="code-panel" id="tab-cli">
-<pre><span class="cm"># Install</span>
-$ <span class="fn">npm install -g</span> beam-protocol-cli
-
-<span class="cm"># Generate identity</span>
-$ <span class="fn">beam init</span> --agent procurement --org acme
-<span class="op">✔</span> Identity generated
-  Beam ID: procurement@acme.beam.directory
-
-<span class="cm"># Look up another agent</span>
-$ <span class="fn">beam lookup</span> partner-desk@northwind.beam.directory
-<span class="op">🤖</span> Northwind Partner Desk · connected · trust: <span class="op">█████████░</span> 90%
-
-<span class="cm"># Send an intent</span>
-$ <span class="fn">beam send</span> partner-desk@northwind.beam.directory quote.request \
-    <span class="str">'{"sku":"INV-240","quantity":240,"shipTo":"Mannheim, DE"}'</span>
-<span class="op">✅</span> Result — shipWindow: Thu 08:00-12:00 CET, totalPriceEur: 44160</pre>
-        </div>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── Compare ────────────────────────────────────────────── -->
-<section id="compare">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Compare</span>
-      <h2>MCP connects tools. Beam connects agents.</h2>
-      <p>Different layers, complementary protocols.</p>
-    </div>
-
-    <div class="compare-wrap fade-up">
-      <table class="compare-table">
-        <thead>
-          <tr>
-            <th>Feature</th>
-            <th>MCP</th>
-            <th>Google A2A</th>
-            <th class="beam-col">Beam ⚡</th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr>
-            <td>Global agent identity</td>
-            <td class="no">✗</td>
-            <td class="partial">~</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Cross-org discovery</td>
-            <td class="no">✗</td>
-            <td class="partial">~</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Ed25519 signed messages</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Tool / function calling</td>
-            <td class="yes">✓</td>
-            <td class="yes">✓</td>
-            <td class="partial">~</td>
-          </tr>
-          <tr>
-            <td>Self-hostable registry</td>
-            <td class="no">✗</td>
-            <td class="no">✗</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Not vendor-locked</td>
-            <td class="yes">✓</td>
-            <td class="no">✗ Google</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Replay protection</td>
-            <td class="no">✗</td>
-            <td class="partial">~</td>
-            <td class="beam-col yes">✓</td>
-          </tr>
-          <tr>
-            <td>Live in production</td>
-            <td class="yes">✓</td>
-            <td class="partial">~ Preview</td>
-            <td class="beam-col yes">✓ Since Mar '26</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
-  </div>
-</section>
-
-<!-- ── Pricing ────────────────────────────────────────────── -->
-<section id="pricing">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Pricing</span>
-      <h2>Simple plans for every agent fleet</h2>
-      <p>Start free, scale to production, or bring Beam into your enterprise stack with dedicated support.</p>
-    </div>
-
-    <div class="pricing-grid" >
-      <div class="pricing-card fade-up">
-        <div class="pricing-tier">Free ⚪</div>
-        <div class="pricing-price">
-          <span class="amount">Free</span>
-        </div>
-        <p class="pricing-copy">Get started — register agents, send intents, explore the directory.</p>
-        <ul class="pricing-features">
-          <li>Beam-ID registration</li>
-          <li>Email verification</li>
-          <li>Ed25519 identity</li>
-          <li>100 intents/day</li>
-          <li>5 agents</li>
-        </ul>
-        <a href="/register.html" class="pricing-cta">Get Started</a>
-      </div>
-
-      <div class="pricing-card fade-up">
-        <div class="pricing-tier">Pro 🔵</div>
-        <div class="pricing-price">
-          <span class="amount">€29</span>
-          <span class="period">/month</span>
-        </div>
-        <p class="pricing-copy">Verified agents, full Shield protection, 10K intents/day.</p>
-        <ul class="pricing-features">
-          <li>Everything in Basic</li>
-          <li>Domain verification (DNS TXT)</li>
-          <li>Verified badge</li>
-          <li>1,000 intents/day</li>
-          <li>25 agents</li>
-        </ul>
-        <a href="/register.html?plan=pro" class="pricing-cta">Start Pro</a>
-      </div>
-
-      <div class="pricing-card highlight fade-up">
-        <div class="pricing-badge">Most Popular</div>
-        <div class="pricing-tier">Business 🟢</div>
-        <div class="pricing-price">
-          <span class="amount">€99</span>
-          <span class="period">/month</span>
-        </div>
-        <p class="pricing-copy">For companies shipping production agents with verified business identity.</p>
-        <ul class="pricing-features">
-          <li>Everything in Pro</li>
-          <li>Business registry check</li>
-          <li>Business badge + legal name</li>
-          <li>100,000 intents/day</li>
-          <li>50 agents</li>
-          <li>Custom Shield config</li>
-          <li>Priority support (24h SLA)</li>
-        </ul>
-        <a href="/register.html?plan=business" class="pricing-cta primary">Start Business</a>
-      </div>
-
-      <div class="pricing-card fade-up">
-        <div class="pricing-tier">Enterprise 🟠</div>
-        <div class="pricing-price">
-          <span class="amount">Custom</span>
-        </div>
-        <p class="pricing-copy">Unlimited scale, dedicated infrastructure, and custom SLA.</p>
-        <ul class="pricing-features">
-          <li>Everything in Business</li>
-          <li>Custom domain</li>
-          <li>Unlimited intents & agents</li>
-          <li>99.9% SLA</li>
-          <li>SSO / SAML</li>
-          <li>Private directory option</li>
-        </ul>
-        <a href="mailto:team@beam.directory" class="pricing-cta">Contact Us</a>
-      </div>
-    </div>
-  </div>
-</section>
-
-<!-- ── Agent Directory ─────────────────────────────────────── -->
-<section id="directory" style="background: var(--bg-subtle); border-top: 1px solid var(--border); border-bottom: 1px solid var(--border);">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Directory</span>
-      <h2>Browse registered agents</h2>
-      <p>Discover verified AI agents. Search by name, capability, or verification tier.</p>
-    </div>
-
-    <div style="display: flex; gap: 12px; margin-bottom: 24px; flex-wrap: wrap;" class="fade-up">
-      <input type="text" id="agent-search" placeholder="Search agents..." style="flex:1; min-width:200px; padding:12px 16px; border:1px solid var(--border); border-radius:8px; font-size:.9rem; background:var(--bg-white); color:var(--text);">
-      <select id="tier-filter" style="padding:12px 16px; border:1px solid var(--border); border-radius:8px; font-size:.9rem; background:var(--bg-white); color:var(--text); cursor:pointer;">
-        <option value="">All Tiers</option>
-        <option value="basic">⚪ Basic</option>
-        <option value="verified">🔵 Verified</option>
-        <option value="business">🟢 Business</option>
-        <option value="enterprise">🟠 Enterprise</option>
-      </select>
-    </div>
-
-    <div id="agent-grid" class="fade-up" style="display:grid; grid-template-columns:repeat(auto-fill, minmax(320px, 1fr)); gap:16px; margin-bottom:32px;">
-      <p style="text-align:center; color:var(--text-muted); grid-column:1/-1; padding:40px 0;">Loading agents from directory...</p>
-    </div>
-
-    <div style="text-align:center;" class="fade-up">
-      <a href="/register.html" class="btn-primary">Register Your Agent →</a>
-      <a href="/playground.html" class="btn-secondary">Try Beam in browser</a>
-    </div>
-  </div>
-</section>
-
-<!-- ── Blog ────────────────────────────────────────────────── -->
-<section id="blog" style="padding: 100px 0;">
-  <div class="container">
-    <div class="section-header fade-up">
-      <span class="section-label">Blog</span>
-      <h2>Latest from Beam Protocol</h2>
-      <p>Engineering updates, protocol design decisions, and agent security insights.</p>
-    </div>
-
-    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 24px;" class="fade-up blog-grid">
-      <a href="/blog/beam-shield.html" style="text-decoration:none; color:inherit;">
-        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#7c3aed'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <span style="background:rgba(124,58,237,0.15); color:#7c3aed; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Security</span>
-            <span style="color:#8b949e; font-size:12px; line-height:2;">March 8, 2026</span>
+        <div class="workflow-grid">
+          <div class="workflow-steps reveal">
+            <div class="workflow-step">
+              <div>
+                <h3>Acme starts the handoff</h3>
+                <p>
+                  <code>procurement@acme.beam.directory</code> sends
+                  <code>quote.request</code> with a signed payload, timestamp, and nonce.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <div>
+                <h3>Beam validates and routes</h3>
+                <p>
+                  The directory resolves identities, checks ACLs, enforces replay protection,
+                  and records lifecycle stages for operators.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <div>
+                <h3>Northwind completes the work</h3>
+                <p>
+                  The partner desk fans into <code>inventory.check</code>, assembles the quote,
+                  and sends a signed result back to Acme.
+                </p>
+              </div>
+            </div>
+            <div class="workflow-step">
+              <div>
+                <h3>Finance gets an async preflight</h3>
+                <p>
+                  The message bus accepts <code>purchase.preflight</code> for durable follow-up,
+                  with retries and dead-letter visibility when the path degrades.
+                </p>
+              </div>
+            </div>
           </div>
-          <h3 style="font-size:18px; margin-bottom:8px;">Introducing Beam Shield: 5-Wall Agent Defense</h3>
-          <p style="font-size:14px; color:#8b949e; line-height:1.6;">How we built a 5-layer security system that protects agents from prompt injection, PII leaks, and unauthorized access — without blocking legitimate communication.</p>
-        </article>
-      </a>
 
-      <a href="/blog/natural-language-first.html" style="text-decoration:none; color:inherit;">
-        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#F75C03'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <span style="background:rgba(247,92,3,0.15); color:#F75C03; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Protocol</span>
-            <span style="color:#8b949e; font-size:12px; line-height:2;">March 7, 2026</span>
+          <aside class="workflow-brief reveal">
+            <div class="brief-topline">
+              <span>Canonical demo</span>
+              <strong>Acme to Northwind</strong>
+            </div>
+            <div class="brief-headline">A real handoff beats a vague protocol claim.</div>
+            <div class="brief-copy">
+              The public surface should let a buyer or engineer answer three questions fast:
+              what Beam is for, why it is safer than ad hoc API glue, and how quickly they can prove it locally.
+            </div>
+            <ul class="brief-list">
+              <li>
+                <strong>Start with the hosted quickstart</strong>
+                <span>Directory, dashboard, message bus, and seeded demo agents come up together.</span>
+              </li>
+              <li>
+                <strong>Follow one nonce end to end</strong>
+                <span>Trace the quote, inspect the warehouse check, and verify the finance preflight.</span>
+              </li>
+              <li>
+                <strong>Use reports as proof, not slogans</strong>
+                <span>Readiness and clean-start onboarding reports now live in the repo.</span>
+              </li>
+            </ul>
+          </aside>
+        </div>
+      </div>
+    </section>
+
+    <section id="operators">
+      <div class="container">
+        <div class="operator-layout">
+          <div class="operator-copy reveal">
+            <div class="section-head" style="margin-bottom: 0;">
+              <div class="kicker">Operator reality</div>
+              <h2>When the handoff gets weird, Beam stays inspectable.</h2>
+            </div>
+            <p>
+              A2A infrastructure only matters when the partner path is late, repeated, blocked, or half-complete.
+              Beam already leans into that operator surface instead of pretending the happy path is enough.
+            </p>
+            <ul>
+              <li>Trace every handoff by nonce, including lifecycle stages and delivery path.</li>
+              <li>Inspect audit entries, shield blocks, rate limits, alerts, and dead letters in one flow.</li>
+              <li>Run the operator runbook against the same canonical demo used in quickstart and dogfood.</li>
+            </ul>
           </div>
-          <h3 style="font-size:18px; margin-bottom:8px;">Natural Language First: Why Agents Should Just Talk</h3>
-          <p style="font-size:14px; color:#8b949e; line-height:1.6;">Why we made natural language the default communication mode for agent-to-agent interactions — and why rigid schemas are the wrong abstraction.</p>
-        </article>
-      </a>
 
-      <a href="/blog/did-without-blockchain.html" style="text-decoration:none; color:inherit;">
-        <article style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 28px; transition: border-color 0.2s, transform 0.2s;" onmouseover="this.style.borderColor='#00d4ff'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='translateY(0)'">
-          <div style="display:flex; gap:8px; margin-bottom:12px;">
-            <span style="background:rgba(0,212,255,0.15); color:#00d4ff; padding:2px 10px; border-radius:20px; font-size:12px; font-weight:600;">Identity</span>
-            <span style="color:#8b949e; font-size:12px; line-height:2;">March 8, 2026</span>
+          <div class="trace-board reveal">
+            <div class="trace-topline">
+              <strong>Trace detail: quote.request</strong>
+              <span>nonce 5692ef35-f712-491e-aac0-5fa2de3df9a5</span>
+            </div>
+            <div class="trace-feed">
+              <div class="trace-row">
+                <div class="step">received</div>
+                <div class="detail">Signed frame accepted from procurement@acme with replay window intact.</div>
+                <div class="state good">ok</div>
+              </div>
+              <div class="trace-row">
+                <div class="step">validated</div>
+                <div class="detail">ACL, trust checks, and payload validation passed before routing.</div>
+                <div class="state good">verified</div>
+              </div>
+              <div class="trace-row">
+                <div class="step">dispatched</div>
+                <div class="detail">Northwind partner desk delivered the signed quote after warehouse confirmation.</div>
+                <div class="state good">sent</div>
+              </div>
+              <div class="trace-row">
+                <div class="step">delivered</div>
+                <div class="detail">Message bus accepted finance preflight as async follow-up with durable handling.</div>
+                <div class="state warn">accepted</div>
+              </div>
+              <div class="trace-row">
+                <div class="step">acked</div>
+                <div class="detail">The downstream flow completed cleanly with zero alerts and zero dead letters on the baseline pass.</div>
+                <div class="state good">done</div>
+              </div>
+            </div>
           </div>
-          <h3 style="font-size:18px; margin-bottom:8px;">DID:beam — Decentralized Identity Without the Blockchain</h3>
-          <p style="font-size:14px; color:#8b949e; line-height:1.6;">How we implemented W3C DID v1.1 with Ed25519, DNS fallback, and Verifiable Credentials — and why we skipped the blockchain entirely.</p>
-        </article>
-      </a>
-    </div>
-  </div>
-</section>
+        </div>
+      </div>
+    </section>
 
-<!-- ── CTA ─────────────────────────────────────────────────── -->
-<section id="cta">
-  <div class="container">
-    <div class="waitlist-card fade-up" style="text-align:center;">
-      <h2>Ready to give your agent an identity?</h2>
-      <p style="margin-bottom:28px;">Register in 30 seconds. Open source. Free tier forever.</p>
-      <div style="display:flex; gap:12px; justify-content:center; flex-wrap:wrap;">
-        <a href="/register.html" class="btn-primary">Register Your Agent →</a>
-        <a href="/playground.html" class="btn-secondary">Try Beam in browser</a>
+    <section id="stack">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">What ships today</div>
+          <h2>Beam is already more than a protocol document.</h2>
+          <p>
+            The core repo now has enough substance that the next job is product surface:
+            make the hosted demo, proof reports, and operator workflow impossible to miss.
+          </p>
+        </div>
+
+        <div class="stack-layout">
+          <div class="stack-column reveal">
+            <h3>Directory and trust</h3>
+            <p>Identity, ACLs, nonce lifecycle, admin sessions, audit, shield policy, and observability APIs.</p>
+            <ul>
+              <li>Beam IDs and DID resolution</li>
+              <li>Signed HTTP and WebSocket handoffs</li>
+              <li>Public endpoint abuse controls</li>
+              <li>Trace and audit APIs for operators</li>
+            </ul>
+          </div>
+          <div class="stack-column reveal">
+            <h3>Durable routing</h3>
+            <p>Message bus semantics for retries, dedupe, restart recovery, and dead-letter handling.</p>
+            <ul>
+              <li>Nonce dedupe and retry backoff</li>
+              <li>Delivery accepted vs terminal ack semantics</li>
+              <li>Restart recovery for in-flight work</li>
+              <li>Dead-letter visibility in the dashboard</li>
+            </ul>
+          </div>
+          <div class="stack-column reveal">
+            <h3>SDKs and demo surface</h3>
+            <p>TypeScript, Python, CLI, dashboard, docs, public site, and a seeded hosted demo path.</p>
+            <ul>
+              <li>Archived compatibility fixtures in CI</li>
+              <li>Hosted quickstart and dogfood scripts</li>
+              <li>Operator runbook and readiness reports</li>
+              <li>Public docs aligned to the same funnel</li>
+            </ul>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="start">
+      <div class="container">
+        <div class="start-shell reveal">
+          <div class="start-copy">
+            <div class="section-head" style="margin-bottom: 0;">
+              <div class="kicker">Fastest path</div>
+              <h2>Start Beam from the demo, not from theory.</h2>
+            </div>
+            <p>
+              The cleanest evaluation path is a seeded local environment that proves the end-to-end story in minutes.
+              That is the right onboarding bar for Beam now.
+            </p>
+            <ul>
+              <li>Boot directory, dashboard, message bus, and hosted demo agents together.</li>
+              <li>Seed the Acme and Northwind identities without manual database work.</li>
+              <li>Run the quote request, inspect the trace, and verify the async finance preflight.</li>
+            </ul>
+          </div>
+
+          <div class="terminal">
+            <div class="terminal-bar">
+              <div class="terminal-dots"><i></i><i></i><i></i></div>
+              <span>hosted quickstart</span>
+            </div>
+            <pre><span class="accent">$</span> cp ops/quickstart/.env.example ops/quickstart/.env
+<span class="accent">$</span> docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env up -d --build
+<span class="accent">$</span> npm run demo:seed
+<span class="accent">$</span> npm run demo:run
+
+<span class="muted">quote total</span>            <span class="good">44160</span>
+<span class="muted">async bus status</span>       <span class="good">delivered</span>
+<span class="muted">async acknowledgement</span>  <span class="good">accepted</span>
+<span class="muted">readiness report</span>      reports/0.7.0-hosted-demo-readiness.md
+<span class="muted">clean-start timing</span>    reports/0.7.0-clean-start-onboarding.md</pre>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="closing">
+      <div class="container">
+        <div class="closing-panel reveal">
+          <div>
+            <h2>Beam should feel operational before it feels visionary.</h2>
+          </div>
+          <div>
+            <p>
+              The next win is not another abstract capability. It is a public surface where the use case,
+              trust model, operator story, and hosted demo are obvious in one pass.
+            </p>
+            <div class="closing-actions">
+              <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
+              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/operator-runbook">Read operator runbook</a>
+              <a class="btn btn-secondary" href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">Open GitHub</a>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div>Beam Protocol · verified partner handoffs for AI agents</div>
+      <div class="footer-links">
+        <a href="https://docs.beam.directory/guide/hosted-quickstart">Hosted Quickstart</a>
+        <a href="https://docs.beam.directory/guide/partner-handoff">Partner Handoff</a>
+        <a href="https://docs.beam.directory/guide/compatibility">Compatibility</a>
+        <a href="/register.html">Register</a>
       </div>
     </div>
-  </div>
-</section>
+  </footer>
 
-</main>
-<!-- ── Footer ──────────────────────────────────────────────── -->
-<footer>
-  <ul class="footer-links">
-    <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank">GitHub</a></li>
-    <li><a href="https://docs.beam.directory" target="_blank">Docs</a></li>
-    <li><a href="https://www.npmjs.com/package/beam-protocol-sdk" target="_blank">npm SDK</a></li>
-    <li><a href="https://pypi.org/project/beam-directory/" target="_blank">PyPI</a></li>
-    <li><a href="#blog">Blog</a></li>
-    <li><a href="/playground.html">Playground</a></li>
-    <li><a href="/status.html">Status</a></li>
-    <li><a href="/privacy.html">Privacy</a></li>
-    <li><a href="/terms.html">Terms</a></li>
-    <li><a href="https://github.com/Beam-directory/beam-protocol/blob/main/LICENSE" target="_blank">Apache 2.0</a></li>
-  </ul>
-  <p class="footer-copy">
-    © 2026 Beam Protocol — Built with 🔥 for the open agent ecosystem
-  </p>
-</footer>
+  <script>
+    const toggle = document.getElementById('menuToggle')
+    const navLinks = document.getElementById('navLinks')
 
-<script>
-  // Mobile menu
-  const menuToggle = document.getElementById('menuToggle');
-  const navLinks = document.getElementById('navLinks');
-  if (menuToggle && navLinks) {
-    menuToggle.addEventListener('click', () => {
-      navLinks.classList.toggle('open');
-      menuToggle.classList.toggle('active');
-      document.body.style.overflow = navLinks.classList.contains('open') ? 'hidden' : '';
-    });
-  }
-  function closeMenu() {
-    navLinks?.classList.remove('open');
-    menuToggle?.classList.remove('active');
-    document.body.style.overflow = '';
-  }
+    if (toggle && navLinks) {
+      toggle.addEventListener('click', () => {
+        navLinks.classList.toggle('open')
+      })
 
-  // Code tabs
-  document.querySelectorAll('.code-tab').forEach(tab => {
-    tab.addEventListener('click', () => {
-      const target = tab.dataset.tab;
-      document.querySelectorAll('.code-tab').forEach(t => t.classList.remove('active'));
-      document.querySelectorAll('.code-panel').forEach(p => p.classList.remove('active'));
-      tab.classList.add('active');
-      document.getElementById('tab-' + target).classList.add('active');
-    });
-  });
-
-  // Scroll animations
-  const supportsMotionObserver = 'IntersectionObserver' in window && !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  if (supportsMotionObserver) {
-    document.documentElement.classList.add('motion-safe');
-    const observer = new IntersectionObserver(entries => {
-      entries.forEach(entry => {
-        if (entry.isIntersecting) entry.target.classList.add('visible');
-      });
-    }, { threshold: 0.1, rootMargin: '0px 0px -40px 0px' });
-    document.querySelectorAll('.fade-up').forEach(el => observer.observe(el));
-  } else {
-    document.querySelectorAll('.fade-up').forEach(el => el.classList.add('visible'));
-  }
-
-  const HERO_STATS_API_URL = 'https://api.beam.directory/stats';
-
-  function formatUptime(totalSeconds) {
-    const seconds = Math.max(0, Math.floor(Number(totalSeconds) || 0));
-    const days = Math.floor(seconds / 86400);
-    const hours = Math.floor((seconds % 86400) / 3600);
-    const minutes = Math.floor((seconds % 3600) / 60);
-
-    if (days > 0) return `${days}d ${hours}h`;
-    if (hours > 0) return `${hours}h ${minutes}m`;
-    if (minutes > 0) return `${minutes}m`;
-    return `${seconds}s`;
-  }
-
-  window.addEventListener('load', async () => {
-    try {
-      const res = await fetch(HERO_STATS_API_URL);
-      if (!res.ok) throw new Error('Stats fetch failed');
-
-      const stats = await res.json();
-      const agentsEl = document.getElementById('hero-agents');
-      const uptimeEl = document.getElementById('hero-uptime');
-      const liveEl = document.getElementById('hero-stats-live');
-
-      if (agentsEl && Number.isFinite(Number(stats.agents))) {
-        agentsEl.textContent = String(stats.agents);
-      }
-
-      if (uptimeEl) {
-        uptimeEl.textContent = formatUptime(stats.uptime);
-      }
-
-      if (liveEl) {
-        liveEl.classList.add('visible');
-      }
-    } catch (err) {
-      console.error('Hero stats fetch failed:', err);
-      const liveEl = document.getElementById('hero-stats-live');
-      if (liveEl) {
-        liveEl.textContent = 'Preview';
-        liveEl.classList.add('visible');
-      }
+      navLinks.querySelectorAll('a').forEach((link) => {
+        link.addEventListener('click', () => {
+          navLinks.classList.remove('open')
+        })
+      })
     }
-  });
 
-  // Agent Directory
-  const BADGE = { basic: '⚪', verified: '🔵', business: '🟢', enterprise: '🟠' };
-  let allAgents = [];
-
-  async function loadDirectory() {
-    const grid = document.getElementById('agent-grid');
-    try {
-      const r = await fetch('https://api.beam.directory/directory/agents');
-      allAgents = await r.json();
-      renderAgents(allAgents);
-    } catch {
-      allAgents = [];
-      grid.innerHTML = `
-        <div class="directory-fallback">
-          <h3>Agent directory preview unavailable</h3>
-          <p>The live directory could not be reached right now. Beam registration and the hosted quickstart still work — you can register your agent or run the seeded Acme to Northwind demo locally.</p>
-          <div class="directory-fallback-actions">
-            <a href="/register.html" class="primary">Register your agent</a>
-            <a href="https://api.beam.directory/health" target="_blank" rel="noreferrer">Check API status</a>
-          </div>
-        </div>`;
-    }
-  }
-
-  function esc(s) { const d = document.createElement('div'); d.textContent = s || ''; return d.innerHTML; }
-
-  function renderAgents(agents) {
-    const grid = document.getElementById('agent-grid');
-    if (!agents.length) {
-      grid.innerHTML = '<p style="text-align:center; color:var(--text-muted); grid-column:1/-1; padding:40px 0;">No agents found. <a href="/register.html">Be the first →</a></p>';
-      return;
-    }
-    grid.innerHTML = agents.map(a => `
-      <div style="background:var(--bg-white); border:1px solid var(--border); border-radius:var(--radius); padding:20px; transition:all .2s;" onmouseover="this.style.borderColor='var(--accent)'; this.style.transform='translateY(-2px)'" onmouseout="this.style.borderColor='var(--border)'; this.style.transform='none'">
-        <div style="display:flex; justify-content:space-between; align-items:start; margin-bottom:8px;">
-          <span style="font-family:var(--font-mono); font-size:.85rem; color:var(--accent); word-break:break-all;">${esc(a.beam_id)}</span>
-          <span style="font-size:1.1rem; flex-shrink:0; margin-left:8px;">${BADGE[a.verification_tier] || '⚪'}</span>
-        </div>
-        ${a.display_name ? `<div style="font-weight:600; margin-bottom:6px;">${esc(a.display_name)}</div>` : ''}
-        ${a.description ? `<div style="font-size:.85rem; color:var(--text-secondary); margin-bottom:10px;">${esc(a.description)}</div>` : ''}
-        <div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
-          ${(a.capabilities || []).map(c => `<span style="font-size:.72rem; padding:3px 8px; background:var(--accent-bg); border:1px solid var(--accent-border); border-radius:20px; color:var(--accent);">${esc(c)}</span>`).join('')}
-        </div>
-        <div style="display:flex; align-items:center; gap:8px; font-size:.8rem; color:var(--text-muted);">
-          <span>Trust</span>
-          <div style="flex:1; height:4px; background:var(--border); border-radius:2px; overflow:hidden;">
-            <div style="height:100%; background:var(--green); border-radius:2px; width:${Math.round((a.trust_score || 0) * 100)}%;"></div>
-          </div>
-          <span>${Math.round((a.trust_score || 0) * 100)}%</span>
-        </div>
-      </div>
-    `).join('');
-  }
-
-  function filterDir() {
-    const q = (document.getElementById('agent-search')?.value || '').toLowerCase();
-    const tier = document.getElementById('tier-filter')?.value || '';
-    renderAgents(allAgents.filter(a => {
-      const mq = !q || (a.beam_id || '').toLowerCase().includes(q) || (a.display_name || '').toLowerCase().includes(q) || (a.capabilities || []).some(c => c.toLowerCase().includes(q));
-      const mt = !tier || a.verification_tier === tier;
-      return mq && mt;
-    }));
-  }
-
-  document.getElementById('agent-search')?.addEventListener('input', filterDir);
-  document.getElementById('tier-filter')?.addEventListener('change', filterDir);
-  loadDirectory();
-</script>
+  </script>
 </body>
 </html>
