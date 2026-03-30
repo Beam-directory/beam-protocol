@@ -195,9 +195,6 @@ function initSchema(db: DB): void {
       details TEXT
     );
 
-    CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce
-      ON intent_trace_events(nonce, timestamp ASC, id ASC);
-
     CREATE INDEX IF NOT EXISTS idx_intent_trace_timestamp
       ON intent_trace_events(timestamp DESC);
 
@@ -408,7 +405,6 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_shield_audit_sender ON shield_audit_log(sender_beam_id);
     CREATE INDEX IF NOT EXISTS idx_shield_audit_created ON shield_audit_log(created_at);
-    CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce);
 
     CREATE TABLE IF NOT EXISTS shield_policies (
       policy_key TEXT PRIMARY KEY,
@@ -464,6 +460,9 @@ function initSchema(db: DB): void {
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
+  ensureIntentLogSchema(db)
+  ensureColumn(db, 'intent_trace_events', 'nonce', 'TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce ON intent_trace_events(nonce, timestamp ASC, id ASC)')
   ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
@@ -483,22 +482,33 @@ function initSchema(db: DB): void {
     FROM agents
   `).run(backfillKeysCreatedAt)
 
-  ensureFederationSafeIntentLog(db)
   migrateIntentLifecycleModel(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
-  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
-  if (columns.some((column) => column.name === columnName)) {
+  const columns = getTableColumnNames(db, tableName)
+  if (columns.size === 0 || columns.has(columnName)) {
     return
   }
 
   db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definition}`)
 }
 
-function ensureFederationSafeIntentLog(db: DB): void {
+function getTableColumnNames(db: DB, tableName: string): Set<string> {
+  const columns = db.prepare(`PRAGMA table_info(${tableName})`).all() as Array<{ name: string }>
+  return new Set(columns.map((column) => column.name))
+}
+
+function ensureIntentLogSchema(db: DB): void {
+  const columns = getTableColumnNames(db, 'intent_log')
+  if (columns.size === 0) {
+    return
+  }
+
   const foreignKeys = db.prepare(`PRAGMA foreign_key_list(intent_log)`).all() as Array<{ table: string }>
-  if (foreignKeys.length === 0) {
+  const needsNonceMigration = !columns.has('nonce')
+  const needsForeignKeyMigration = foreignKeys.length > 0
+  if (!needsNonceMigration && !needsForeignKeyMigration) {
     return
   }
 
@@ -524,7 +534,8 @@ function ensureFederationSafeIntentLog(db: DB): void {
           result_json TEXT
         );
       `)
-      db.exec(`
+      const legacyRows = db.prepare('SELECT * FROM intent_log_legacy ORDER BY id ASC').all() as Array<Record<string, unknown>>
+      const insert = db.prepare(`
         INSERT INTO intent_log (
           id,
           nonce,
@@ -537,21 +548,39 @@ function ensureFederationSafeIntentLog(db: DB): void {
           status,
           error_code,
           result_json
-        )
-        SELECT
-          id,
-          nonce,
-          from_beam_id,
-          to_beam_id,
-          intent_type,
-          requested_at,
-          completed_at,
-          round_trip_latency_ms,
-          status,
-          error_code,
-          NULL
-        FROM intent_log_legacy;
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `)
+
+      for (const row of legacyRows) {
+        const legacyId = typeof row['id'] === 'number' ? row['id'] : null
+        const legacyNonce = typeof row['nonce'] === 'string' && row['nonce'].length > 0
+          ? row['nonce']
+          : `legacy-intent-${legacyId ?? randomBytes(8).toString('hex')}`
+        const fromBeamId = typeof row['from_beam_id'] === 'string' ? row['from_beam_id'] : 'unknown@legacy.beam.directory'
+        const toBeamId = typeof row['to_beam_id'] === 'string' ? row['to_beam_id'] : 'unknown@legacy.beam.directory'
+        const intentType = typeof row['intent_type'] === 'string' ? row['intent_type'] : 'legacy.intent'
+        const requestedAt = typeof row['requested_at'] === 'string' ? row['requested_at'] : nowIso()
+        const completedAt = typeof row['completed_at'] === 'string' ? row['completed_at'] : null
+        const roundTripLatencyMs = typeof row['round_trip_latency_ms'] === 'number' ? row['round_trip_latency_ms'] : null
+        const status = typeof row['status'] === 'string' && row['status'].length > 0 ? row['status'] : 'received'
+        const errorCode = typeof row['error_code'] === 'string' ? row['error_code'] : null
+        const resultJson = typeof row['result_json'] === 'string' ? row['result_json'] : null
+
+        insert.run(
+          legacyId,
+          legacyNonce,
+          fromBeamId,
+          toBeamId,
+          intentType,
+          requestedAt,
+          completedAt,
+          roundTripLatencyMs,
+          status,
+          errorCode,
+          resultJson,
+        )
+      }
+
       db.exec('DROP TABLE intent_log_legacy')
       db.exec(`
         CREATE INDEX IF NOT EXISTS idx_intent_log_requested_at
