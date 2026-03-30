@@ -873,6 +873,38 @@
       margin-top: 1px;
     }
 
+    .operator-snippets {
+      display: grid;
+      gap: 14px;
+      margin: 20px 0 0;
+    }
+
+    .operator-snippet {
+      display: grid;
+      gap: 6px;
+      padding-top: 14px;
+      border-top: 1px solid var(--line);
+    }
+
+    .operator-snippet span {
+      font-family: var(--font-mono);
+      font-size: 0.74rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
+    .operator-snippet strong {
+      font-size: 1rem;
+      letter-spacing: -0.03em;
+    }
+
+    .operator-snippet p {
+      color: var(--ink-soft);
+      font-size: 0.92rem;
+      line-height: 1.55;
+    }
+
     .trace-board {
       position: relative;
       overflow: hidden;
@@ -994,6 +1026,14 @@
       letter-spacing: -0.03em;
     }
 
+    .stack-kicker {
+      font-family: var(--font-mono);
+      font-size: 0.76rem;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      color: var(--accent);
+    }
+
     .stack-column p {
       color: var(--ink-soft);
     }
@@ -1015,6 +1055,18 @@
       content: ">";
       color: var(--accent);
       margin-top: 1px;
+    }
+
+    .stack-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .stack-note {
+      color: var(--ink-muted);
+      font-size: 0.84rem;
+      line-height: 1.55;
     }
 
     .start-shell {
@@ -1421,7 +1473,7 @@
       <ul class="nav-links" id="navLinks">
         <li><a href="#workflow">Workflow</a></li>
         <li><a href="#operators">Operators</a></li>
-        <li><a href="#stack">Stack</a></li>
+        <li><a href="#paths">Paths</a></li>
         <li><a href="#start">Start</a></li>
         <li><a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a></li>
         <li><a href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">GitHub</a></li>
@@ -1642,6 +1694,23 @@
               A2A infrastructure only matters when the partner path is late, repeated, blocked, or half-complete.
               Beam already leans into that operator surface instead of pretending the happy path is enough.
             </p>
+            <div class="operator-snippets">
+              <div class="operator-snippet">
+                <span>Overview</span>
+                <strong>Check the baseline before you chase one nonce.</strong>
+                <p>Healthy runs should show the same zero-alert, zero-dead-letter baseline used in the hosted demo reports.</p>
+              </div>
+              <div class="operator-snippet">
+                <span>Intents</span>
+                <strong>Follow the handoff by nonce and lifecycle state.</strong>
+                <p>Move from <code>received</code> to <code>acked</code> without guessing which transport or retry path actually fired.</p>
+              </div>
+              <div class="operator-snippet">
+                <span>Dead letter</span>
+                <strong>See where a partner workflow stopped being healthy.</strong>
+                <p>When finance or partner delivery degrades, the operator surface stays explicit about retries, terminal failures, and recovery.</p>
+              </div>
+            </div>
             <ul>
               <li>Trace every handoff by nonce, including lifecycle stages and delivery path.</li>
               <li>Inspect audit entries, shield blocks, rate limits, alerts, and dead letters in one flow.</li>
@@ -1686,20 +1755,82 @@
       </div>
     </section>
 
-    <section id="stack">
+    <section id="paths">
       <div class="container">
         <div class="section-head reveal">
-          <div class="kicker">What ships today</div>
-          <h2>Beam is already more than a protocol document.</h2>
+          <div class="kicker">Choose the next Beam path</div>
+          <h2>Pick the proof depth that matches where you are.</h2>
           <p>
-            The core repo now has enough substance that the next job is product surface:
-            make the hosted demo, proof reports, and operator workflow impossible to miss.
+            Beam should not force every visitor into the same next step. Some teams need proof,
+            some need a real identity, and some want a managed beta conversation around one workflow.
           </p>
         </div>
 
         <div class="stack-layout">
           <div class="stack-column reveal">
-            <h3>Directory and trust</h3>
+            <div class="stack-kicker">01 · prove the handoff</div>
+            <h3>Start with the hosted demo.</h3>
+            <p>Bring up the seeded Acme-to-Northwind flow, inspect the dashboard trace, and verify the async finance preflight end to end.</p>
+            <ul>
+              <li>Directory, dashboard, message bus, and demo agents boot together.</li>
+              <li>The canonical quote request, warehouse check, and finance preflight are already seeded.</li>
+              <li>Observability and operator docs point at the exact same baseline flow.</li>
+            </ul>
+            <div class="stack-actions">
+              <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
+              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/operator-runbook">See operator runbook</a>
+            </div>
+            <div class="stack-note">Best first stop for most engineers, founders, and buyers.</div>
+          </div>
+          <div class="stack-column reveal">
+            <div class="stack-kicker">02 · wire your own agent</div>
+            <h3>Register a real identity.</h3>
+            <p>Generate the Beam ID, signing key, optional direct-delivery endpoint, and smoke-test snippets for your own agent.</p>
+            <ul>
+              <li>Personal or company-scoped IDs with Beam-native addressing.</li>
+              <li>Ed25519 signing keys, optional X25519 encryption, and optional HTTP delivery.</li>
+              <li>Hosted-demo-first success flow so integration stays grounded in the real proof path.</li>
+            </ul>
+            <div class="stack-actions">
+              <a class="btn btn-secondary" href="/register.html">Register real agent</a>
+              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/getting-started">Read SDK docs</a>
+            </div>
+            <div class="stack-note">Best when the hosted demo already makes sense and you want to integrate.</div>
+          </div>
+          <div class="stack-column reveal">
+            <div class="stack-kicker">03 · talk hosted beta</div>
+            <h3>Bring Beam into a partner workflow.</h3>
+            <p>If you want a managed directory, dashboard surface, and onboarding around a real B2B handoff, talk to the Beam team directly.</p>
+            <ul>
+              <li>Hosted directory and dashboard path instead of only self-hosting.</li>
+              <li>Partner-handoff onboarding scoped to one real workflow, not a vague platform pitch.</li>
+              <li>Operator runbook, proof reports, and rollout guidance folded into evaluation.</li>
+            </ul>
+            <div class="stack-actions">
+              <a class="btn btn-secondary" href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta">Email for hosted beta</a>
+              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
+            </div>
+            <div class="stack-note">Best for teams that want Beam to feel operational immediately.</div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="stack">
+      <div class="container">
+        <div class="section-head reveal">
+          <div class="kicker">What ships today</div>
+          <h2>Beam already has the surfaces a buyer asks for next.</h2>
+          <p>
+            Once the use case lands, the repo now backs it with operator tooling, compatibility work,
+            and demo infrastructure instead of leaving the story at protocol ambition.
+          </p>
+        </div>
+
+        <div class="stack-layout">
+          <div class="stack-column reveal">
+            <div class="stack-kicker">Directory and trust</div>
+            <h3>Identity and policy stay explicit.</h3>
             <p>Identity, ACLs, nonce lifecycle, admin sessions, audit, shield policy, and observability APIs.</p>
             <ul>
               <li>Beam IDs and DID resolution</li>
@@ -1709,7 +1840,8 @@
             </ul>
           </div>
           <div class="stack-column reveal">
-            <h3>Durable routing</h3>
+            <div class="stack-kicker">Durable routing</div>
+            <h3>Async work does not disappear into glue code.</h3>
             <p>Message bus semantics for retries, dedupe, restart recovery, and dead-letter handling.</p>
             <ul>
               <li>Nonce dedupe and retry backoff</li>
@@ -1719,7 +1851,8 @@
             </ul>
           </div>
           <div class="stack-column reveal">
-            <h3>SDKs and demo surface</h3>
+            <div class="stack-kicker">SDKs and demo surface</div>
+            <h3>The proof path is already operationalized.</h3>
             <p>TypeScript, Python, CLI, dashboard, docs, public site, and a seeded hosted demo path.</p>
             <ul>
               <li>Archived compatibility fixtures in CI</li>
@@ -1775,17 +1908,17 @@
       <div class="container">
         <div class="closing-panel reveal">
           <div>
-            <h2>Beam should feel operational before it feels visionary.</h2>
+            <h2>Pick the next Beam step, then prove it fast.</h2>
           </div>
           <div>
             <p>
-              The next win is not another abstract capability. It is a public surface where the use case,
-              trust model, operator story, and hosted demo are obvious in one pass.
+              The public surface should now do three jobs without friction: show the canonical handoff,
+              expose the operator proof, and make the right next CTA obvious for evaluation, integration, or hosted beta.
             </p>
             <div class="closing-actions">
               <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
-              <a class="btn btn-secondary" href="https://docs.beam.directory/guide/operator-runbook">Read operator runbook</a>
-              <a class="btn btn-secondary" href="https://github.com/Beam-directory/beam-protocol" target="_blank" rel="noreferrer">Open GitHub</a>
+              <a class="btn btn-secondary" href="/register.html">Register real agent</a>
+              <a class="btn btn-secondary" href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta">Talk hosted beta</a>
             </div>
           </div>
         </div>
