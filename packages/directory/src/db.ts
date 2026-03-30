@@ -157,11 +157,23 @@ function initSchema(db: DB): void {
       source TEXT,
       company TEXT,
       agent_count INTEGER,
-      created_at TEXT NOT NULL
+      workflow_type TEXT,
+      workflow_summary TEXT,
+      status TEXT NOT NULL DEFAULT 'new',
+      owner TEXT,
+      operator_notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
     );
 
     CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
       ON waitlist(created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_waitlist_status
+      ON waitlist(status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_waitlist_owner
+      ON waitlist(owner, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS intent_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -460,6 +472,19 @@ function initSchema(db: DB): void {
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'waitlist', 'workflow_type', 'TEXT')
+  ensureColumn(db, 'waitlist', 'workflow_summary', 'TEXT')
+  ensureColumn(db, 'waitlist', 'status', "TEXT NOT NULL DEFAULT 'new'")
+  ensureColumn(db, 'waitlist', 'owner', 'TEXT')
+  ensureColumn(db, 'waitlist', 'operator_notes', 'TEXT')
+  ensureColumn(db, 'waitlist', 'updated_at', 'TEXT')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_status ON waitlist(status, created_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_owner ON waitlist(owner, created_at DESC)')
+  db.prepare(`
+    UPDATE waitlist
+    SET status = COALESCE(NULLIF(status, ''), 'new'),
+        updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+  `).run()
   ensureIntentLogSchema(db)
   ensureColumn(db, 'intent_trace_events', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_intent_trace_nonce ON intent_trace_events(nonce, timestamp ASC, id ASC)')

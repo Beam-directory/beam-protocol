@@ -727,7 +727,7 @@
           <div class="section-kicker">Hosted beta request</div>
           <h2>Tell Beam what you want to operationalize.</h2>
           <p>
-            This intake stores a lightweight waitlist record so Beam can prioritize conversations around one concrete workflow instead of a generic “tell me more” thread.
+            This intake goes straight into the operator queue Beam uses to review hosted beta workflows. Keep it grounded in one real handoff, and Beam will respond with the next concrete step.
           </p>
 
           <form id="waitlist-form" class="form-grid">
@@ -762,7 +762,7 @@
             <div class="field">
               <label for="notes">What is the first handoff you want to make trustworthy?</label>
               <textarea id="notes" name="notes" placeholder="Example: procurement asks partner operations for stock and delivery, then finance needs an async approval path before purchase preflight."></textarea>
-              <small>The current public waitlist endpoint stores email, company, source, and agent count. Keep this note for the follow-up call; it is not persisted server-side yet.</small>
+              <small>This summary is stored for the operator review, so keep it short and specific.</small>
             </div>
 
             <div class="submit-row">
@@ -869,6 +869,12 @@
     const form = document.getElementById('waitlist-form')
     const submitButton = document.getElementById('submit-button')
     const formStatus = document.getElementById('form-status')
+    const WORKFLOW_LABELS = {
+      'hosted-beta-partner-handoff': 'Partner handoff',
+      'hosted-beta-operator-eval': 'Operator evaluation',
+      'hosted-beta-managed-rollout': 'Managed rollout',
+      'hosted-beta-compliance': 'Compliance-sensitive workflow',
+    }
 
     function setStatus(type, html) {
       formStatus.className = `status visible ${type}`
@@ -882,8 +888,10 @@
       const email = String(formData.get('email') || '').trim().toLowerCase()
       const company = String(formData.get('company') || '').trim()
       const workflow = String(formData.get('workflow') || 'hosted-beta-partner-handoff')
+      const workflowLabel = WORKFLOW_LABELS[workflow] || 'Hosted beta workflow'
       const agentCountRaw = String(formData.get('agentCount') || '').trim()
       const agentCount = agentCountRaw ? Number.parseInt(agentCountRaw, 10) : null
+      const notes = String(formData.get('notes') || '').trim()
 
       submitButton.disabled = true
       submitButton.textContent = 'Submitting...'
@@ -898,8 +906,10 @@
           body: JSON.stringify({
             email,
             company: company || null,
-            source: workflow,
+            source: 'hosted-beta-page',
             agentCount: Number.isFinite(agentCount) ? agentCount : null,
+            workflowType: workflow,
+            workflowSummary: notes || null,
           }),
         })
 
@@ -909,23 +919,27 @@
           throw new Error(payload.error || 'Hosted beta request failed')
         }
 
-        const createdAt = payload.createdAt ? new Date(payload.createdAt).toLocaleString('en-US', {
+        const request = payload.request || null
+        const createdAt = request?.createdAt ? new Date(request.createdAt).toLocaleString('en-US', {
           dateStyle: 'medium',
           timeStyle: 'short',
         }) : null
+        const nextStep = payload.nextStep || 'Beam will review the workflow and follow up with the next concrete step.'
 
         if (payload.status === 'already_registered') {
           setStatus(
             'success',
             `<strong>You are already on the hosted beta list.</strong><br />` +
-            `We kept the original signup and refreshed the latest company and workflow context for <code>${email}</code>.` +
-            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original signup: ${createdAt}</span>` : ''),
+            `Beam refreshed the latest workflow context for <code>${email}</code> and kept the original intake.` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
+            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original intake: ${createdAt}</span>` : ''),
           )
         } else {
           setStatus(
             'success',
             `<strong>Hosted beta request recorded.</strong><br />` +
-            `Beam now has the intake for <code>${email}</code> at <strong>${company}</strong>.` +
+            `Beam queued <strong>${workflowLabel}</strong> for <strong>${company}</strong>.` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
             (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Recorded: ${createdAt}</span>` : ''),
           )
           form.reset()
