@@ -62,7 +62,7 @@ console.log(reply.message)
 
 1. **See the proof first.** Run the [Hosted Quickstart](/guide/hosted-quickstart), inspect the dashboard trace, and verify the async finance preflight before you decide Beam is interesting.
 2. **Wire a real agent.** Use the [Register page](https://beam.directory/register.html) when you want a Beam ID, signing key flow, and smoke-test snippets for your own agent.
-3. **Talk hosted beta.** If you want a managed directory/dashboard path around a real partner workflow, email [team@beam.directory](mailto:team@beam.directory?subject=Beam%20Hosted%20Beta).
+3. **Request hosted beta.** If you want a managed directory/dashboard path around a real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
 
 ## What Beam Is For
 
@@ -82,6 +82,6 @@ If that is your problem, Beam is aimed directly at it. If it is not, Beam should
 - [Operator Runbook](/guide/operator-runbook)
 - [Getting Started](/guide/getting-started)
 - [Compatibility Policy](/guide/compatibility)
-- [Hosted Beta Request](mailto:team@beam.directory?subject=Beam%20Hosted%20Beta)
+- [Hosted Beta Request](https://beam.directory/hosted-beta.html)
 - [0.7.0 Hosted Demo Readiness Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-hosted-demo-readiness.md)
 - [0.7.0 Clean-Start Onboarding Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-clean-start-onboarding.md)

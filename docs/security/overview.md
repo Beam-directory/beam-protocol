@@ -58,15 +58,18 @@ All throttled and blocked requests are written into audit and shield observabili
 
 ### 5. CORS
 
-Strict whitelist:
+Strict allowlist:
 
 ```
 https://beam-dashboard.vercel.app
 https://dashboard.beam.directory
-http://localhost:5173
+https://beam.directory
+https://www.beam.directory
+http://localhost:*
+http://127.0.0.1:*
 ```
 
-No wildcard origins. No `*`.
+Production stays on explicit origins. Loopback hosts are allowed across ports for local dashboard, quickstart, and public-site preview flows. No `*`.
 
 ### 6. Authentication
 

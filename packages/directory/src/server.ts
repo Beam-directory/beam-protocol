@@ -60,6 +60,36 @@ type WaitlistRow = {
   created_at: string
 }
 
+const PUBLIC_CORS_ORIGINS = new Set([
+  'https://beam-dashboard.vercel.app',
+  'https://dashboard.beam.directory',
+  'https://beam.directory',
+  'https://www.beam.directory',
+])
+
+function resolveCorsOrigin(origin?: string | null): string | null {
+  if (!origin) {
+    return null
+  }
+
+  if (PUBLIC_CORS_ORIGINS.has(origin)) {
+    return origin
+  }
+
+  try {
+    const parsed = new URL(origin)
+    const isLoopbackHost = parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
+    const isHttp = parsed.protocol === 'http:' || parsed.protocol === 'https:'
+    if (isLoopbackHost && isHttp) {
+      return origin
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
 function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
   const { email_token: _emailToken, ...agent } = row
   return {
@@ -562,11 +592,7 @@ export function createApp(db: Database): Hono {
   seedAclsFromCatalog(db)
 
   app.use('*', cors({
-    origin: [
-      'https://beam-dashboard.vercel.app',
-      'https://dashboard.beam.directory',
-      'http://localhost:5173',
-    ],
+    origin: (origin) => resolveCorsOrigin(origin) ?? '',
     allowMethods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowHeaders: [
       'Content-Type',
@@ -1001,6 +1027,37 @@ export function createApp(db: Database): Hono {
     const createdAt = new Date().toISOString()
 
     try {
+      const existing = db.prepare(`
+        SELECT id, email, source, company, agent_count, created_at
+        FROM waitlist
+        WHERE email = ?
+        ORDER BY created_at DESC, id DESC
+        LIMIT 1
+      `).get(signup.email) as WaitlistRow | undefined
+
+      if (existing) {
+        const nextSource = signup.source ?? existing.source
+        const nextCompany = signup.company ?? existing.company
+        const nextAgentCount = signup.agentCount ?? existing.agent_count
+
+        db.prepare(`
+          UPDATE waitlist
+          SET source = ?, company = ?, agent_count = ?
+          WHERE id = ?
+        `).run(nextSource, nextCompany, nextAgentCount, existing.id)
+
+        return c.json({
+          ok: true,
+          status: 'already_registered',
+          id: existing.id,
+          email: existing.email,
+          source: nextSource,
+          company: nextCompany,
+          agentCount: nextAgentCount,
+          createdAt: existing.created_at,
+        }, 200)
+      }
+
       const result = db.prepare(`
         INSERT INTO waitlist (email, source, company, agent_count, created_at)
         VALUES (?, ?, ?, ?, ?)
@@ -1011,6 +1068,8 @@ export function createApp(db: Database): Hono {
       )
 
       return c.json({
+        ok: true,
+        status: 'registered',
         id: Number(result.lastInsertRowid),
         email: signup.email,
         source: signup.source,
@@ -1038,6 +1097,14 @@ export function createApp(db: Database): Hono {
       `).all() as WaitlistRow[]
 
       return c.json({
+        waitlist: rows.map((row) => ({
+          id: row.id,
+          email: row.email,
+          source: row.source,
+          company: row.company,
+          agentCount: row.agent_count,
+          createdAt: row.created_at,
+        })),
         signups: rows.map((row) => ({
           id: row.id,
           email: row.email,

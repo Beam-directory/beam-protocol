@@ -1008,6 +1008,129 @@
       border-color: rgba(241, 90, 36, 0.18);
     }
 
+    .proof-topline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      position: relative;
+      z-index: 1;
+      margin-bottom: 18px;
+    }
+
+    .proof-topline strong {
+      font-size: 1.08rem;
+      letter-spacing: -0.03em;
+    }
+
+    .proof-topline span {
+      font-family: var(--font-mono);
+      font-size: 0.72rem;
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      color: rgba(245, 238, 231, 0.68);
+    }
+
+    .proof-gallery {
+      position: relative;
+      z-index: 1;
+      display: grid;
+      gap: 18px;
+    }
+
+    .proof-shot {
+      position: relative;
+      overflow: hidden;
+      padding: 14px;
+      border-radius: 28px;
+      background: rgba(6, 10, 18, 0.74);
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      box-shadow: 0 18px 40px rgba(4, 6, 12, 0.28);
+    }
+
+    .proof-shot img {
+      width: 100%;
+      border-radius: 18px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: #0d1322;
+      object-fit: cover;
+      object-position: top center;
+    }
+
+    .proof-shot.overview {
+      transform: rotate(-1.3deg);
+    }
+
+    .proof-shot.overview img {
+      aspect-ratio: 1.42 / 1;
+    }
+
+    .proof-shot.trace {
+      width: min(78%, 430px);
+      margin-left: auto;
+      margin-top: -86px;
+      transform: rotate(2.2deg);
+    }
+
+    .proof-shot.trace img {
+      aspect-ratio: 0.92 / 1;
+    }
+
+    .proof-shot figcaption {
+      display: grid;
+      gap: 6px;
+      padding-top: 12px;
+    }
+
+    .proof-shot figcaption strong {
+      font-size: 0.98rem;
+      letter-spacing: -0.03em;
+    }
+
+    .proof-shot figcaption p {
+      color: rgba(245, 238, 231, 0.7);
+      font-size: 0.86rem;
+      line-height: 1.55;
+    }
+
+    .proof-pill-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding-top: 4px;
+    }
+
+    .proof-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: 999px;
+      border: 1px solid rgba(255, 255, 255, 0.08);
+      background: rgba(255, 255, 255, 0.06);
+      font-family: var(--font-mono);
+      font-size: 0.7rem;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: rgba(245, 238, 231, 0.82);
+    }
+
+    .proof-footnote {
+      position: relative;
+      z-index: 1;
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: space-between;
+      gap: 10px 18px;
+      padding-top: 18px;
+      margin-top: 18px;
+      border-top: 1px solid rgba(255, 255, 255, 0.08);
+      color: rgba(245, 238, 231, 0.68);
+      font-size: 0.82rem;
+      line-height: 1.55;
+    }
+
     .stack-layout {
       display: grid;
       grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -1275,6 +1398,11 @@
       .hero-visual {
         min-height: 620px;
       }
+
+      .proof-shot.trace {
+        width: min(72%, 410px);
+        margin-top: -56px;
+      }
     }
 
     @media (max-width: 900px) {
@@ -1345,6 +1473,12 @@
 
       .trace-row .state {
         justify-self: start;
+      }
+
+      .proof-shot.trace {
+        width: 100%;
+        margin-top: 0;
+        transform: none;
       }
 
       .closing-panel {
@@ -1445,6 +1579,10 @@
       .hero-actions .btn,
       .closing-actions .btn {
         width: 100%;
+      }
+
+      .proof-footnote {
+        flex-direction: column;
       }
 
       .nav-actions {
@@ -1719,36 +1857,35 @@
           </div>
 
           <div class="trace-board reveal">
-            <div class="trace-topline">
-              <strong>Trace detail: quote.request</strong>
-              <span>nonce 5692ef35-f712-491e-aac0-5fa2de3df9a5</span>
+            <div class="proof-topline">
+              <strong>Actual operator proof from the seeded hosted demo</strong>
+              <span>Captured on Mar 30, 2026 from the running quickstart stack</span>
             </div>
-            <div class="trace-feed">
-              <div class="trace-row">
-                <div class="step">received</div>
-                <div class="detail">Signed frame accepted from procurement@acme with replay window intact.</div>
-                <div class="state good">ok</div>
-              </div>
-              <div class="trace-row">
-                <div class="step">validated</div>
-                <div class="detail">ACL, trust checks, and payload validation passed before routing.</div>
-                <div class="state good">verified</div>
-              </div>
-              <div class="trace-row">
-                <div class="step">dispatched</div>
-                <div class="detail">Northwind partner desk delivered the signed quote after warehouse confirmation.</div>
-                <div class="state good">sent</div>
-              </div>
-              <div class="trace-row">
-                <div class="step">delivered</div>
-                <div class="detail">Message bus accepted finance preflight as async follow-up with durable handling.</div>
-                <div class="state warn">accepted</div>
-              </div>
-              <div class="trace-row">
-                <div class="step">acked</div>
-                <div class="detail">The downstream flow completed cleanly with zero alerts and zero dead letters on the baseline pass.</div>
-                <div class="state good">done</div>
-              </div>
+            <div class="proof-gallery">
+              <figure class="proof-shot overview">
+                <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing healthy baseline metrics, zero alerts, and zero dead letters." />
+                <figcaption>
+                  <strong>Overview: healthy baseline before you chase one nonce</strong>
+                  <p>The seeded hosted-demo run now gives the site a real product surface: 100% success, low p95 latency, four live agents, and no active alert pressure.</p>
+                  <div class="proof-pill-row">
+                    <div class="proof-pill">0 alerts</div>
+                    <div class="proof-pill">0 dead letters</div>
+                    <div class="proof-pill">4 live agents</div>
+                  </div>
+                </figcaption>
+              </figure>
+
+              <figure class="proof-shot trace">
+                <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for a quote request nonce showing lifecycle stages from received to acked." />
+                <figcaption>
+                  <strong>Trace detail: one quote nonce from received to acked</strong>
+                  <p>This is the actual `quote.request` trace from the Acme-to-Northwind handoff used in quickstart, dogfood, and the operator runbook.</p>
+                </figcaption>
+              </figure>
+            </div>
+            <div class="proof-footnote">
+              <span>Captured from the local quickstart stack with a real admin session, not a design mock.</span>
+              <span>Best next step: run the hosted demo, then compare your own workflow against this exact surface.</span>
             </div>
           </div>
         </div>
@@ -1798,16 +1935,16 @@
             <div class="stack-note">Best when the hosted demo already makes sense and you want to integrate.</div>
           </div>
           <div class="stack-column reveal">
-            <div class="stack-kicker">03 · talk hosted beta</div>
+            <div class="stack-kicker">03 · request hosted beta</div>
             <h3>Bring Beam into a partner workflow.</h3>
-            <p>If you want a managed directory, dashboard surface, and onboarding around a real B2B handoff, talk to the Beam team directly.</p>
+            <p>If you want a managed directory, dashboard surface, and onboarding around a real B2B handoff, start with a short hosted-beta intake instead of a generic email thread.</p>
             <ul>
               <li>Hosted directory and dashboard path instead of only self-hosting.</li>
               <li>Partner-handoff onboarding scoped to one real workflow, not a vague platform pitch.</li>
               <li>Operator runbook, proof reports, and rollout guidance folded into evaluation.</li>
             </ul>
             <div class="stack-actions">
-              <a class="btn btn-secondary" href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta">Email for hosted beta</a>
+              <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
               <a class="btn btn-secondary" href="https://docs.beam.directory/guide/partner-handoff">Read the handoff</a>
             </div>
             <div class="stack-note">Best for teams that want Beam to feel operational immediately.</div>
@@ -1918,7 +2055,7 @@
             <div class="closing-actions">
               <a class="btn btn-primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch hosted demo</a>
               <a class="btn btn-secondary" href="/register.html">Register real agent</a>
-              <a class="btn btn-secondary" href="mailto:team@beam.directory?subject=Beam%20Hosted%20Beta">Talk hosted beta</a>
+              <a class="btn btn-secondary" href="/hosted-beta.html">Request hosted beta</a>
             </div>
           </div>
         </div>
