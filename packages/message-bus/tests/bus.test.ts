@@ -21,6 +21,7 @@ import {
   recoverInterruptedMessages,
   scheduleRetry,
 } from '../src/db.js'
+import { applyBusCors } from '../src/cors.js'
 import { deliverToDirectory } from '../src/delivery.js'
 import { createBusRouter } from '../src/router.js'
 import { startRetryWorker, stopRetryWorker } from '../src/worker.js'
@@ -32,10 +33,14 @@ describe('message bus', () => {
   beforeEach(() => {
     db = initDatabase(':memory:')
     app = new Hono()
+    applyBusCors(app)
     app.route('/v1/beam', createBusRouter({ db, directoryUrl: 'http://directory.test', rateLimit: 10 }))
+    app.get('/health', (c) => c.json({ status: 'ok', service: 'beam-message-bus' }))
   })
 
   afterEach(() => {
+    delete process.env['BEAM_BUS_API_KEY']
+    delete process.env['BEAM_BUS_ALLOWED_ORIGINS']
     db.close()
     vi.clearAllMocks()
     vi.useRealTimers()
@@ -436,6 +441,50 @@ describe('message bus', () => {
     expect(body['acked']).toBe(1)
     expect(body['failed']).toBe(1)
     expect(body['dead_letter']).toBe(0)
+  })
+
+  it('allows loopback dashboard origins to read bus health and dead-letter data', async () => {
+    const healthResponse = await app.request('http://localhost/health', {
+      headers: { Origin: 'http://localhost:43173' },
+    })
+    expect(healthResponse.status).toBe(200)
+    expect(healthResponse.headers.get('access-control-allow-origin')).toBe('http://localhost:43173')
+
+    const deadLetterResponse = await app.request('http://localhost/v1/beam/dead-letter', {
+      headers: {
+        Origin: 'http://localhost:43173',
+        Authorization: 'Bearer local-dev-token',
+      },
+    })
+    expect(deadLetterResponse.status).toBe(200)
+    expect(deadLetterResponse.headers.get('access-control-allow-origin')).toBe('http://localhost:43173')
+  })
+
+  it('responds to browser preflight for protected dead-letter routes', async () => {
+    const originalApiKey = process.env['BEAM_BUS_API_KEY']
+    process.env['BEAM_BUS_API_KEY'] = 'local-dev-token'
+    const protectedApp = new Hono()
+    applyBusCors(protectedApp)
+    protectedApp.route('/v1/beam', createBusRouter({ db, directoryUrl: 'http://directory.test', rateLimit: 10 }))
+
+    const response = await protectedApp.request('http://localhost/v1/beam/dead-letter', {
+      method: 'OPTIONS',
+      headers: {
+        Origin: 'http://localhost:43173',
+        'Access-Control-Request-Method': 'GET',
+        'Access-Control-Request-Headers': 'Authorization',
+      },
+    })
+
+    expect(response.status).toBe(204)
+    expect(response.headers.get('access-control-allow-origin')).toBe('http://localhost:43173')
+    expect(response.headers.get('access-control-allow-headers')).toContain('Authorization')
+
+    if (originalApiKey === undefined) {
+      delete process.env['BEAM_BUS_API_KEY']
+    } else {
+      process.env['BEAM_BUS_API_KEY'] = originalApiKey
+    }
   })
 
   it('rate limits the 11th message from the same sender', async () => {

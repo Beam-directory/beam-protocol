@@ -70,6 +70,7 @@ Environment variables:
 - `DIRECTORY_URL` - Beam directory base URL
 - `IDENTITY_PATH` - optional identity bundle for directory delivery helpers
 - `BEAM_BUS_API_KEY` - bearer token required for API access
+- `BEAM_BUS_ALLOWED_ORIGINS` - optional comma-separated browser origins allowed to call bus operator endpoints; defaults already permit `beam.directory`, `dashboard.beam.directory`, and loopback dashboards such as `http://localhost:43173`
 - `BEAM_BUS_STATS_PUBLIC=true` - allow unauthenticated `GET /v1/beam/stats`
 - `BEAM_BUS_CLEAN_TEST_DATA=true` - remove demo/test rows on startup
 
