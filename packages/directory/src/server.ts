@@ -23,7 +23,16 @@ import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
-import { createWebSocketServer, getConnectedCount, getConnectedBeamIds, relayIntentFromHttp, RelayError } from './websocket.js'
+import {
+  createWebSocketServer,
+  getConnectedCount,
+  getConnectedBeamIds,
+  recoverInterruptedIntentsOnStartup,
+  relayIntentFromHttp,
+  RelayError,
+  startRecoveredIntentTimeoutSweep,
+  stopRecoveredIntentTimeoutSweep,
+} from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
 import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
 import { assignDirectoryRole, deleteDirectoryRole, listDirectoryRoles, listAuditLog, listRecentIntentLogs, listTrustScores, logAuditEvent, getDIDDocument, getAgent, upsertDIDDocument } from './db.js'
@@ -1229,14 +1238,22 @@ export function createApp(db: Database): Hono {
 }
 
 export function startServer(db: Database, port = 3100): HttpServer {
+  const recovery = recoverInterruptedIntentsOnStartup(db)
   const app = createApp(db)
   const wss = createWebSocketServer(db)
+  const recoverySweep = startRecoveredIntentTimeoutSweep(db)
 
   const server = serve(
     { fetch: app.fetch, port },
     (info) => {
       console.log(`Beam Directory Server running on http://localhost:${info.port}`)
       console.log(`WebSocket endpoint: ws://localhost:${info.port}/ws`)
+      if (recovery.failedInterrupted > 0 || recovery.resumedAwaitingResult > 0 || recovery.timedOutAwaitingResult > 0) {
+        console.log(
+          `[beam-directory] Recovery summary: failed=${recovery.failedInterrupted}, ` +
+          `resumed=${recovery.resumedAwaitingResult}, timed_out=${recovery.timedOutAwaitingResult}`,
+        )
+      }
     }
   ) as unknown as HttpServer
 
@@ -1248,6 +1265,10 @@ export function startServer(db: Database, port = 3100): HttpServer {
     } else {
       socket.destroy()
     }
+  })
+
+  server.on('close', () => {
+    stopRecoveredIntentTimeoutSweep(recoverySweep)
   })
 
   return server

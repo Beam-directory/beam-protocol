@@ -1567,6 +1567,39 @@ export function finalizeIntentLog(
   const current = normalizeIntentLifecycleStatus(existing?.status) ?? 'received'
   assertIntentLifecycleTransition(current, input.status, `intent ${input.nonce}`)
 
+  writeIntentLogFinalState(db, input, completedAt)
+}
+
+export function reconcileIntentLog(
+  db: DB,
+  input: {
+    nonce: string
+    fromBeamId: string
+    toBeamId: string
+    status: IntentLifecycleStatus
+    latencyMs: number | null
+    errorCode?: string
+    resultJson?: string | null
+  },
+): void {
+  const completedAt = nowIso()
+  writeIntentLogFinalState(db, input, completedAt)
+}
+
+function writeIntentLogFinalState(
+  db: DB,
+  input: {
+    nonce: string
+    fromBeamId: string
+    toBeamId: string
+    status: IntentLifecycleStatus
+    latencyMs: number | null
+    errorCode?: string
+    resultJson?: string | null
+  },
+  completedAt: string,
+): void {
+
   db.prepare(`
     UPDATE intent_log
     SET completed_at = ?,
@@ -1598,6 +1631,15 @@ export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
     ORDER BY requested_at DESC
     LIMIT ?
   `).all(safeLimit) as IntentLogRow[]
+}
+
+export function listInFlightIntentLogs(db: DB): IntentLogRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM intent_log
+    WHERE status IN ('received', 'validated', 'queued', 'dispatched', 'delivered')
+    ORDER BY requested_at ASC, id ASC
+  `).all() as IntentLogRow[]
 }
 
 export function getIntentLogByNonce(db: DB, nonce: string): IntentLogRow | null {

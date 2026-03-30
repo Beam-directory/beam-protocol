@@ -1,16 +1,30 @@
-import test from 'node:test'
+import test, { afterEach } from 'node:test'
 import assert from 'node:assert/strict'
 import { once } from 'node:events'
+import { mkdtempSync, rmSync } from 'node:fs'
 import { createServer } from 'node:http'
 import type { AddressInfo } from 'node:net'
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { createAcl } from './acl.js'
-import { createDatabase, getIntentLogByNonce, registerAgent } from './db.js'
-import { createWebSocketServer, relayIntentFromHttp, RelayError } from './websocket.js'
+import { createDatabase, getIntentLogByNonce, listIntentTraceEvents, registerAgent } from './db.js'
+import {
+  createWebSocketServer,
+  expireRecoveredIntentTimeouts,
+  recoverInterruptedIntentsOnStartup,
+  relayIntentFromHttp,
+  RelayError,
+  resetRelayRuntimeState,
+} from './websocket.js'
 import type { IntentFrame } from './types.js'
 
 const TEST_INTENT = 'agent.ping'
+
+afterEach(() => {
+  resetRelayRuntimeState({ closeConnections: true })
+})
 
 type FixtureAgent = {
   beamId: string
@@ -99,6 +113,7 @@ async function withFetchStub<T>(
 async function createWsHarness(db: ReturnType<typeof createDatabase>) {
   const wss = createWebSocketServer(db)
   const server = createServer()
+  let closed = false
 
   server.on('upgrade', (req, socket, head) => {
     wss.handleUpgrade(req, socket, head, (ws) => {
@@ -110,6 +125,10 @@ async function createWsHarness(db: ReturnType<typeof createDatabase>) {
   const { port } = server.address() as AddressInfo
 
   async function close() {
+    if (closed) {
+      return
+    }
+    closed = true
     await new Promise<void>((resolve, reject) => server.close((err) => (err ? reject(err) : resolve())))
     for (const client of wss.clients) {
       client.terminate()
@@ -159,6 +178,14 @@ async function closeSocket(ws: WebSocket): Promise<void> {
 
   ws.terminate()
   await once(ws, 'close')
+}
+
+function createTempDbPath(): { root: string; dbPath: string } {
+  const root = mkdtempSync(join(tmpdir(), 'beam-directory-recovery-'))
+  return {
+    root,
+    dbPath: join(root, 'beam-directory.sqlite'),
+  }
 }
 
 test('relayIntentFromHttp caches direct HTTP results by nonce and suppresses duplicate deliveries', async () => {
@@ -311,5 +338,155 @@ test('relayIntentFromHttp records a retryable timeout for unanswered websocket d
   } finally {
     await harness.close()
     db.close()
+  }
+})
+
+test('directory restart resumes delivered intents and serves a cached late result without redelivery', async () => {
+  const { root, dbPath } = createTempDbPath()
+  let db = createDatabase(dbPath)
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const receiver = createFixtureAgent('receiver@local.beam.directory')
+  let harness = await createWsHarness(db)
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, receiver, { displayName: 'Receiver' })
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: TEST_INTENT,
+      allowedFrom: sender.beamId,
+    })
+
+    const receiverWs = await connectClient(harness.url, receiver.beamId)
+    const senderWs = await connectClient(harness.url, sender.beamId)
+    const nonce = randomUUID()
+
+    senderWs.send(JSON.stringify({
+      type: 'intent',
+      frame: createSignedFrame(sender, receiver.beamId, nonce),
+    }))
+
+    const firstDelivery = await waitForJson(receiverWs)
+    assert.equal(firstDelivery.type, 'intent')
+    assert.equal((firstDelivery.frame as { nonce: string }).nonce, nonce)
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'delivered')
+
+    await closeSocket(senderWs)
+    await closeSocket(receiverWs)
+    await harness.close()
+    db.close()
+    resetRelayRuntimeState({ closeConnections: true, rejectPending: true })
+
+    db = createDatabase(dbPath)
+    const recovery = recoverInterruptedIntentsOnStartup(db)
+    assert.deepEqual(recovery, {
+      failedInterrupted: 0,
+      resumedAwaitingResult: 1,
+      timedOutAwaitingResult: 0,
+    })
+
+    harness = await createWsHarness(db)
+    const restartedReceiverWs = await connectClient(harness.url, receiver.beamId)
+    restartedReceiverWs.send(JSON.stringify({
+      type: 'result',
+      frame: {
+        v: '1',
+        success: true,
+        nonce,
+        timestamp: new Date().toISOString(),
+        payload: { ok: true },
+      },
+    }))
+
+    await new Promise((resolve) => setTimeout(resolve, 30))
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'acked')
+
+    const restartedSenderWs = await connectClient(harness.url, sender.beamId)
+    const cachedResultPromise = waitForJson(restartedSenderWs)
+    restartedSenderWs.send(JSON.stringify({
+      type: 'intent',
+      frame: createSignedFrame(sender, receiver.beamId, nonce, new Date(Date.now() + 1_000).toISOString()),
+    }))
+
+    const cachedResult = await cachedResultPromise
+    assert.equal(cachedResult.type, 'result')
+    assert.equal((cachedResult.frame as { nonce: string }).nonce, nonce)
+    assert.deepEqual((cachedResult.frame as { payload: Record<string, unknown> }).payload, { ok: true })
+
+    const unexpectedSecondDelivery = await waitForMessageOrTimeout(restartedReceiverWs, 120)
+    assert.equal(unexpectedSecondDelivery, null)
+
+    const trace = listIntentTraceEvents(db, nonce)
+    assert.equal(trace.filter((entry) => entry.stage === 'delivered').length, 1)
+    assert.equal(trace.filter((entry) => entry.stage === 'acked').length, 1)
+
+    await closeSocket(restartedSenderWs)
+    await closeSocket(restartedReceiverWs)
+  } finally {
+    await harness.close()
+    db.close()
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('directory restart expires recovered delivered intents after the original timeout window', async () => {
+  const { root, dbPath } = createTempDbPath()
+  let db = createDatabase(dbPath)
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const receiver = createFixtureAgent('receiver@local.beam.directory')
+  let harness = await createWsHarness(db)
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, receiver, { displayName: 'Receiver' })
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: TEST_INTENT,
+      allowedFrom: sender.beamId,
+    })
+
+    const receiverWs = await connectClient(harness.url, receiver.beamId)
+    const nonce = randomUUID()
+    const frame = createSignedFrame(sender, receiver.beamId, nonce)
+    const deliveryPromise = waitForJson(receiverWs)
+
+    const relayPromise = relayIntentFromHttp(db, frame, 30_000).catch(() => null)
+    const deliveredIntent = await deliveryPromise
+    assert.equal(deliveredIntent.type, 'intent')
+    assert.equal((deliveredIntent.frame as { nonce: string }).nonce, nonce)
+
+    await closeSocket(receiverWs)
+    await harness.close()
+    db.close()
+    resetRelayRuntimeState({ closeConnections: true, rejectPending: true })
+    await relayPromise
+
+    db = createDatabase(dbPath)
+    const requestedAtMs = new Date(frame.timestamp).getTime()
+    const recovered = recoverInterruptedIntentsOnStartup(db, {
+      nowMs: requestedAtMs + 5_000,
+      defaultTimeoutMs: 30_000,
+    })
+    assert.deepEqual(recovered, {
+      failedInterrupted: 0,
+      resumedAwaitingResult: 1,
+      timedOutAwaitingResult: 0,
+    })
+
+    const expired = expireRecoveredIntentTimeouts(db, {
+      nowMs: requestedAtMs + 35_000,
+      defaultTimeoutMs: 30_000,
+    })
+    assert.equal(expired, 1)
+
+    const log = getIntentLogByNonce(db, nonce)
+    assert.ok(log)
+    assert.equal(log?.status, 'failed')
+    assert.equal(log?.error_code, 'TIMEOUT')
+    assert.match(log?.result_json ?? '', /"errorCode":"TIMEOUT"/)
+  } finally {
+    await harness.close()
+    db.close()
+    rmSync(root, { recursive: true, force: true })
   }
 })

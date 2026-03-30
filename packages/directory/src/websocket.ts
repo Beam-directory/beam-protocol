@@ -2,8 +2,19 @@ import { createPublicKey, verify } from 'node:crypto'
 import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
-import type { IntentFrame, ResultFrame } from './types.js'
-import { finalizeIntentLog, getAgent, getIntentLogByNonce, hasActiveDelegation, logIntentStart, setIntentLifecycleStatus, updateLastSeen } from './db.js'
+import type { IntentFrame, IntentLogRow, IntentTraceEventRow, ResultFrame } from './types.js'
+import {
+  finalizeIntentLog,
+  getAgent,
+  getIntentLogByNonce,
+  getLatestIntentTraceEvent,
+  hasActiveDelegation,
+  listInFlightIntentLogs,
+  logIntentStart,
+  reconcileIntentLog,
+  setIntentLifecycleStatus,
+  updateLastSeen,
+} from './db.js'
 import { isIntentAllowed } from './acl.js'
 import {
   getCachedFederatedPublicKey,
@@ -27,6 +38,8 @@ import {
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 const STALE_PENDING_RETRY_WINDOW_MS = 2 * 60 * 1000
+const DEFAULT_RECOVERY_TIMEOUT_MS = Number(process.env.RELAY_TIMEOUT_MS || 30_000)
+const RECOVERY_SWEEP_INTERVAL_MS = Number(process.env.RELAY_RECOVERY_SWEEP_INTERVAL_MS || 5_000)
 const RETRYABLE_INTENT_ERRORS = new Set(['OFFLINE', 'TIMEOUT', 'DELIVERY_FAILED', 'DIRECT_HTTP_FAILED'])
 
 type ConnectionSession = {
@@ -97,6 +110,53 @@ function buildResultFrame(
     ...(options.errorCode !== undefined ? { errorCode: options.errorCode } : {}),
     ...(typeof options.latency === 'number' ? { latency: options.latency } : {}),
   }
+}
+
+function parseTraceDetails(trace: IntentTraceEventRow | null): Record<string, unknown> | null {
+  if (!trace?.details) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(trace.details) as Record<string, unknown>
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function resolveRecoveryTimeoutMs(
+  trace: IntentTraceEventRow | null,
+  fallbackMs = DEFAULT_RECOVERY_TIMEOUT_MS,
+): number {
+  const traceDetails = parseTraceDetails(trace)
+  const timeoutCandidate = traceDetails?.['timeoutMs']
+  if (typeof timeoutCandidate === 'number' && Number.isFinite(timeoutCandidate) && timeoutCandidate > 0) {
+    return timeoutCandidate
+  }
+
+  return fallbackMs
+}
+
+function getRequestedAtMs(row: IntentLogRow, nowMs = Date.now()): number {
+  const parsed = new Date(row.requested_at).getTime()
+  return Number.isNaN(parsed) ? nowMs : parsed
+}
+
+function buildIntentFrameFromLog(row: IntentLogRow): IntentFrame {
+  return {
+    v: '1',
+    from: row.from_beam_id,
+    to: row.to_beam_id,
+    intent: row.intent_type,
+    payload: {},
+    nonce: row.nonce,
+    timestamp: row.requested_at,
+  }
+}
+
+function isRetryableIntentFailure(errorCode: string | null | undefined): boolean {
+  return Boolean(errorCode && RETRYABLE_INTENT_ERRORS.has(errorCode))
 }
 
 function claimIntentNonce(db: Database, frame: IntentFrame): NonceClaimResult {
@@ -275,6 +335,144 @@ function normalizeDirectHttpResult(
     payload: {},
     latency: latencyMs,
   })
+}
+
+export interface DirectoryRecoverySummary {
+  failedInterrupted: number
+  resumedAwaitingResult: number
+  timedOutAwaitingResult: number
+}
+
+export function recoverInterruptedIntentsOnStartup(
+  db: Database,
+  options: {
+    nowMs?: number
+    defaultTimeoutMs?: number
+  } = {},
+): DirectoryRecoverySummary {
+  const nowMs = options.nowMs ?? Date.now()
+  const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_RECOVERY_TIMEOUT_MS
+  const summary: DirectoryRecoverySummary = {
+    failedInterrupted: 0,
+    resumedAwaitingResult: 0,
+    timedOutAwaitingResult: 0,
+  }
+
+  for (const row of listInFlightIntentLogs(db)) {
+    const status = normalizeIntentLifecycleStatus(row.status) ?? 'received'
+    const frame = buildIntentFrameFromLog(row)
+    const requestedAtMs = getRequestedAtMs(row, nowMs)
+    const latencyMs = Math.max(0, nowMs - requestedAtMs)
+
+    if (status === 'delivered') {
+      const timeoutMs = resolveRecoveryTimeoutMs(getLatestIntentTraceEvent(db, row.nonce), defaultTimeoutMs)
+      if (latencyMs < timeoutMs) {
+        summary.resumedAwaitingResult += 1
+        continue
+      }
+
+      finalizeFailedIntent(db, frame, {
+        error: `Intent timed out waiting for result after restart (${timeoutMs}ms)`,
+        errorCode: 'TIMEOUT',
+        latencyMs,
+        transport: 'recovery',
+        details: {
+          previousStatus: status,
+          recoveryAction: 'timeout_after_restart',
+          recoveredOnBoot: true,
+          timeoutMs,
+        },
+      })
+      summary.timedOutAwaitingResult += 1
+      continue
+    }
+
+    finalizeFailedIntent(db, frame, {
+      error: `Intent recovery failed after restart while it was ${status}`,
+      errorCode: 'DELIVERY_FAILED',
+      latencyMs,
+      transport: 'recovery',
+      details: {
+        previousStatus: status,
+        recoveryAction: 'fail_interrupted_intent',
+        recoveredOnBoot: true,
+      },
+    })
+    summary.failedInterrupted += 1
+  }
+
+  return summary
+}
+
+export function expireRecoveredIntentTimeouts(
+  db: Database,
+  options: {
+    nowMs?: number
+    defaultTimeoutMs?: number
+  } = {},
+): number {
+  const nowMs = options.nowMs ?? Date.now()
+  const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_RECOVERY_TIMEOUT_MS
+  let expiredCount = 0
+
+  for (const row of listInFlightIntentLogs(db)) {
+    const status = normalizeIntentLifecycleStatus(row.status) ?? 'received'
+    if (status !== 'delivered' || pendingResults.has(row.nonce)) {
+      continue
+    }
+
+    const timeoutMs = resolveRecoveryTimeoutMs(getLatestIntentTraceEvent(db, row.nonce), defaultTimeoutMs)
+    const requestedAtMs = getRequestedAtMs(row, nowMs)
+    const latencyMs = Math.max(0, nowMs - requestedAtMs)
+    if (latencyMs < timeoutMs) {
+      continue
+    }
+
+    finalizeFailedIntent(db, buildIntentFrameFromLog(row), {
+      error: `Intent timed out waiting for result after restart (${timeoutMs}ms)`,
+      errorCode: 'TIMEOUT',
+      latencyMs,
+      transport: 'recovery',
+      details: {
+        previousStatus: status,
+        recoveryAction: 'timeout_without_waiter',
+        recoveredOnBoot: true,
+        timeoutMs,
+      },
+    })
+    expiredCount += 1
+  }
+
+  return expiredCount
+}
+
+export function startRecoveredIntentTimeoutSweep(
+  db: Database,
+  options: {
+    intervalMs?: number
+    defaultTimeoutMs?: number
+  } = {},
+): NodeJS.Timeout {
+  const intervalMs = options.intervalMs ?? RECOVERY_SWEEP_INTERVAL_MS
+  const defaultTimeoutMs = options.defaultTimeoutMs ?? DEFAULT_RECOVERY_TIMEOUT_MS
+
+  const timer = setInterval(() => {
+    try {
+      const expired = expireRecoveredIntentTimeouts(db, { defaultTimeoutMs })
+      if (expired > 0) {
+        console.warn(`[beam-directory] Timed out ${expired} recovered intent(s) waiting for late results`)
+      }
+    } catch (err) {
+      console.error('[beam-directory] Intent recovery sweep failed:', err)
+    }
+  }, intervalMs)
+  timer.unref()
+
+  return timer
+}
+
+export function stopRecoveredIntentTimeoutSweep(timer: NodeJS.Timeout): void {
+  clearInterval(timer)
 }
 
 async function attemptDirectHttpDelivery(
@@ -1223,7 +1421,8 @@ function handleResult(db: Database, frame: ResultFrame): void {
     return
   }
 
-  if (isIntentLifecycleFailure(existingStatus) && existing.error_code && !RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
+  const recoveringFailedAttempt = isIntentLifecycleFailure(existingStatus) && isRetryableIntentFailure(existing.error_code)
+  if (isIntentLifecycleFailure(existingStatus) && !recoveringFailedAttempt) {
     return
   }
 
@@ -1232,15 +1431,20 @@ function handleResult(db: Database, frame: ResultFrame): void {
     ?? (Number.isNaN(requestedAtMs) ? null : Math.max(0, Date.now() - requestedAtMs))
   const resolvedLatencyMs = typeof frame.latency === 'number' ? frame.latency : fallbackLatencyMs
 
-  finalizeIntentLog(db, {
+  const finalState = {
     nonce: frame.nonce,
     fromBeamId: existing.from_beam_id,
     toBeamId: existing.to_beam_id,
-    status: frame.success ? 'acked' : 'failed',
+    status: frame.success ? 'acked' : 'failed' as IntentLifecycleStatus,
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(frame),
-  })
+  }
+  if (recoveringFailedAttempt) {
+    reconcileIntentLog(db, finalState)
+  } else {
+    finalizeIntentLog(db, finalState)
+  }
   recordIntentStage(db, {
     nonce: frame.nonce,
     from: existing.from_beam_id,
@@ -1251,6 +1455,8 @@ function handleResult(db: Database, frame: ResultFrame): void {
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? null : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
     lateResult: true,
+    recoveredAfterFailure: recoveringFailedAttempt || undefined,
+    previousStatus: existingStatus,
   })
   broadcastCompletedIntent({
     v: '1',
@@ -1306,6 +1512,43 @@ function clearPendingResult(nonce: string): void {
   if (!pending) return
   clearTimeout(pending.timeout)
   pendingResults.delete(nonce)
+}
+
+export function resetRelayRuntimeState(
+  options: {
+    closeConnections?: boolean
+    rejectPending?: boolean
+  } = {},
+): void {
+  const { closeConnections = false, rejectPending = false } = options
+
+  for (const pending of pendingResults.values()) {
+    clearTimeout(pending.timeout)
+    if (rejectPending) {
+      pending.reject(new RelayError('DELIVERY_FAILED', 'Relay runtime reset'))
+    }
+  }
+  pendingResults.clear()
+
+  if (closeConnections) {
+    for (const session of connections.values()) {
+      try {
+        session.ws.terminate()
+      } catch {
+        // Ignore best-effort connection cleanup during runtime resets.
+      }
+    }
+    for (const ws of intentFeedSubscribers.values()) {
+      try {
+        ws.terminate()
+      } catch {
+        // Ignore best-effort feed cleanup during runtime resets.
+      }
+    }
+  }
+
+  connections.clear()
+  intentFeedSubscribers.clear()
 }
 
 function sendJson(ws: WebSocket, payload: object): void {
