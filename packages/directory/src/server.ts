@@ -521,6 +521,7 @@ function escapeCsvValue(value: string | number | null | undefined): string {
 
 const PUBLIC_CORS_ORIGINS = new Set([
   'https://beam-dashboard.vercel.app',
+  'https://dashboard-phi-five-73.vercel.app',
   'https://dashboard.beam.directory',
   'https://beam.directory',
   'https://www.beam.directory',

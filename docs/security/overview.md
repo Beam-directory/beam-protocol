@@ -62,6 +62,7 @@ Strict allowlist:
 
 ```
 https://beam-dashboard.vercel.app
+https://dashboard-phi-five-73.vercel.app
 https://dashboard.beam.directory
 https://beam.directory
 https://www.beam.directory

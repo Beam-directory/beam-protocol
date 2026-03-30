@@ -6,6 +6,7 @@ const DEFAULT_PUBLIC_CORS_ORIGINS = new Set([
   'https://www.beam.directory',
   'https://dashboard.beam.directory',
   'https://beam-dashboard.vercel.app',
+  'https://dashboard-phi-five-73.vercel.app',
 ])
 
 function getConfiguredOrigins(): Set<string> {
