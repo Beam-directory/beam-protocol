@@ -13,6 +13,7 @@ import {
   getAgent,
   getAgentDirectoryStats,
   getAgentIntentStats,
+  listAgentKeys,
   registerAgent,
   countSearchAgents,
   searchAgents,
@@ -375,11 +376,15 @@ export function agentsRouter(db: Database): Hono {
 
       seedAclsFromCatalog(db)
       return c.json({
-        ...serializeAgent(agent),
+        ...serializeAgent(agent, { keys: listAgentKeys(db, request.beamId) }),
         apiKey,
         verification_email_sent: verificationEmailSent,
       }, 201)
     } catch (err) {
+      const knownError = err as { code?: string; message?: string } | undefined
+      if (knownError?.code === 'KEY_ALREADY_REVOKED') {
+        return c.json({ error: knownError.message ?? 'Key is already revoked', errorCode: 'KEY_ALREADY_REVOKED' }, 409)
+      }
       console.error('Registration error:', err)
       return c.json({ error: 'Failed to register agent', errorCode: 'DB_ERROR' }, 500)
     }
@@ -599,7 +604,7 @@ export function agentsRouter(db: Database): Hono {
       }
 
       return c.json({
-        ...serializeAgent(agent),
+        ...serializeAgent(agent, { keys: listAgentKeys(db, beamId) }),
         intentStats: getAgentIntentStats(db, beamId),
       })
     } catch (err) {

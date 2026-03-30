@@ -7,11 +7,14 @@ from typing import Any, Optional
 import httpx
 
 from .types import (
+    AgentKeyState,
     AgentRecord,
     AgentRegistration,
     AgentSearchQuery,
     BeamIdString,
     DirectoryConfig,
+    KeyRevocationResult,
+    KeyRotationResult,
 )
 
 
@@ -102,6 +105,68 @@ class BeamDirectory:
             )
         if res.status_code not in (200, 204, 404):
             self._raise_for_status(res, "Heartbeat failed")
+
+    async def list_keys(self, beam_id: BeamIdString) -> AgentKeyState:
+        async with httpx.AsyncClient() as client:
+            res = await client.get(
+                f"{self._base_url}/agents/{beam_id}/keys",
+                headers=self._headers,
+                timeout=10.0,
+            )
+        self._raise_for_status(res, "List keys failed")
+        body: Any = res.json()
+        return AgentKeyState.from_dict(body.get("keyState") if isinstance(body, dict) else None)
+
+    async def rotate_keys(
+        self,
+        beam_id: BeamIdString,
+        public_key: str,
+        *,
+        rotation_proof: Optional[str] = None,
+        signature: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> KeyRotationResult:
+        payload: dict[str, Any] = {"new_public_key": public_key}
+        if rotation_proof:
+            payload["rotation_proof"] = rotation_proof
+        if signature:
+            payload["signature"] = signature
+        if timestamp:
+            payload["timestamp"] = timestamp
+
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{self._base_url}/agents/{beam_id}/keys/rotate",
+                json=payload,
+                headers=self._headers,
+                timeout=30.0,
+            )
+        self._raise_for_status(res, "Key rotation failed")
+        return KeyRotationResult.from_dict(res.json(), beam_id=beam_id, public_key=public_key)
+
+    async def revoke_key(
+        self,
+        beam_id: BeamIdString,
+        public_key: str,
+        *,
+        signature: Optional[str] = None,
+        timestamp: Optional[str] = None,
+    ) -> KeyRevocationResult:
+        payload: dict[str, Any] = {"public_key": public_key}
+        if signature:
+            payload["signature"] = signature
+        if timestamp:
+            payload["timestamp"] = timestamp
+
+        async with httpx.AsyncClient() as client:
+            res = await client.post(
+                f"{self._base_url}/agents/{beam_id}/keys/revoke",
+                json=payload,
+                headers=self._headers,
+                timeout=30.0,
+            )
+        self._raise_for_status(res, "Key revocation failed")
+        return KeyRevocationResult.from_dict(res.json(), beam_id=beam_id)
 
     # ── Private helpers ────────────────────────────────────────────────────────
 

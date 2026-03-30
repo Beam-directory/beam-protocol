@@ -1,94 +1,72 @@
 /**
  * Beam Shield — Routes
- * Per-agent shield config, audit log, and anomaly detection endpoints.
+ * Per-agent shield config, public endpoint policy, audit log, and anomaly endpoints.
  */
 
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { getAdminSessionFromRequest, requireAdminRole, roleSatisfies } from '../admin-auth.js'
-import { logAuditEvent } from '../db.js'
+import {
+  getPublicEndpointShieldPolicy,
+  logAuditEvent,
+  recordNonce,
+  updatePublicEndpointShieldPolicy,
+} from '../db.js'
+import { verifyPayload } from '../crypto.js'
 import { getRecentEvents, getAuditStats } from '../shield/audit.js'
-
-export interface ShieldConfig {
-  mode: 'whitelist' | 'open' | 'closed'
-  allowlist: string[]
-  blocklist: string[]
-  minTrust: number
-  rateLimit: number
-}
-
-const DEFAULT_SHIELD_CONFIG: ShieldConfig = {
-  mode: 'open',
-  allowlist: [],
-  blocklist: [],
-  minTrust: 0.3,
-  rateLimit: 20,
-}
-
-export function parseShieldConfig(raw: string | null | undefined): ShieldConfig {
-  if (!raw) return { ...DEFAULT_SHIELD_CONFIG }
-  try {
-    const parsed = JSON.parse(raw) as Partial<ShieldConfig>
-    return {
-      mode: parsed.mode === 'whitelist' || parsed.mode === 'closed' ? parsed.mode : 'open',
-      allowlist: Array.isArray(parsed.allowlist) ? parsed.allowlist : [],
-      blocklist: Array.isArray(parsed.blocklist) ? parsed.blocklist : [],
-      minTrust: typeof parsed.minTrust === 'number' ? Math.max(0, Math.min(1, parsed.minTrust)) : 0.3,
-      rateLimit: typeof parsed.rateLimit === 'number' ? Math.max(1, Math.min(1000, parsed.rateLimit)) : 20,
-    }
-  } catch {
-    return { ...DEFAULT_SHIELD_CONFIG }
-  }
-}
+import {
+  parseShieldConfig,
+  type PublicEndpointShieldPolicy,
+  type ShieldConfig,
+} from '../shield/policies.js'
 
 export function shieldRouter(db: Database): Hono {
   const router = new Hono()
 
-  // GET /shield/config/:beamId — Get shield config for an agent
   router.get('/config/:beamId', (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     const row = db.prepare('SELECT shield_config FROM agents WHERE beam_id = ?').get(beamId) as { shield_config: string | null } | undefined
 
-    if (!row) return c.json({ error: 'Agent not found' }, 404)
+    if (!row) {
+      return c.json({ error: 'Agent not found' }, 404)
+    }
 
-    const config = parseShieldConfig(row.shield_config)
-    return c.json({ beamId, shield: config })
+    return c.json({ beamId, shield: parseShieldConfig(row.shield_config) })
   })
 
-  // PATCH /shield/config/:beamId — Update shield config (admin-key or Ed25519 required)
   router.patch('/config/:beamId', async (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
 
     const adminSession = getAdminSessionFromRequest(db, c.req.raw)
     const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
     if (!isAdmin) {
-      // Check Ed25519 signature auth
       const sigHeader = c.req.header('x-beam-signature')
       const nonceHeader = c.req.header('x-beam-nonce')
       if (!sigHeader || !nonceHeader) {
         return c.json({ error: 'Admin session or Ed25519 signature required', errorCode: 'UNAUTHORIZED' }, 401)
       }
 
-      // Verify signature over beamId + nonce
-      const { verifyPayload } = await import('../crypto.js')
       const agentRow = db.prepare('SELECT public_key FROM agents WHERE beam_id = ?').get(beamId) as { public_key: string } | undefined
-      if (!agentRow?.public_key) return c.json({ error: 'Agent not found or no key' }, 404)
+      if (!agentRow?.public_key) {
+        return c.json({ error: 'Agent not found or no key' }, 404)
+      }
 
       const payload = { action: 'shield', beamId, nonce: nonceHeader }
       const valid = verifyPayload(payload, sigHeader, agentRow.public_key)
-      if (!valid) return c.json({ error: 'Invalid signature', errorCode: 'INVALID_SIGNATURE' }, 403)
+      if (!valid) {
+        return c.json({ error: 'Invalid signature', errorCode: 'INVALID_SIGNATURE' }, 403)
+      }
 
-      // K1 FIX: Record nonce to prevent replay attacks
-      const existingNonce = db.prepare('SELECT nonce FROM nonces WHERE nonce = ?').get(nonceHeader)
-      if (existingNonce) return c.json({ error: 'Nonce already used', errorCode: 'NONCE_REPLAY' }, 409)
-      db.prepare('INSERT INTO nonces (nonce, beam_id, created_at) VALUES (?, ?, ?)').run(nonceHeader, beamId, new Date().toISOString())
+      if (!recordNonce(db, nonceHeader)) {
+        return c.json({ error: 'Nonce already used', errorCode: 'NONCE_REPLAY' }, 409)
+      }
     }
 
-    // Validate agent exists
     const agent = db.prepare('SELECT beam_id FROM agents WHERE beam_id = ?').get(beamId) as { beam_id: string } | undefined
-    if (!agent) return c.json({ error: 'Agent not found' }, 404)
+    if (!agent) {
+      return c.json({ error: 'Agent not found' }, 404)
+    }
 
-    // Parse and validate body
     let body: Record<string, unknown>
     try {
       body = await c.req.json() as Record<string, unknown>
@@ -96,14 +74,13 @@ export function shieldRouter(db: Database): Hono {
       return c.json({ error: 'Invalid JSON' }, 400)
     }
 
-    // Build config
     const currentRaw = (db.prepare('SELECT shield_config FROM agents WHERE beam_id = ?').get(beamId) as { shield_config: string | null } | undefined)?.shield_config
     const current = parseShieldConfig(currentRaw)
 
     const updated: ShieldConfig = {
       mode: body.mode === 'whitelist' || body.mode === 'open' || body.mode === 'closed' ? body.mode : current.mode,
-      allowlist: Array.isArray(body.allowlist) ? (body.allowlist as string[]).filter(s => typeof s === 'string') : current.allowlist,
-      blocklist: Array.isArray(body.blocklist) ? (body.blocklist as string[]).filter(s => typeof s === 'string') : current.blocklist,
+      allowlist: Array.isArray(body.allowlist) ? (body.allowlist as unknown[]).filter((value): value is string => typeof value === 'string') : current.allowlist,
+      blocklist: Array.isArray(body.blocklist) ? (body.blocklist as unknown[]).filter((value): value is string => typeof value === 'string') : current.blocklist,
       minTrust: typeof body.minTrust === 'number' ? Math.max(0, Math.min(1, body.minTrust)) : current.minTrust,
       rateLimit: typeof body.rateLimit === 'number' ? Math.max(1, Math.min(1000, body.rateLimit)) : current.rateLimit,
     }
@@ -127,7 +104,42 @@ export function shieldRouter(db: Database): Hono {
     return c.json({ beamId, shield: updated, updated: true })
   })
 
-  // GET /shield/audit/:beamId — Recent audit events for a sender
+  router.get('/policies/public-endpoints', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const { policy, updatedAt } = getPublicEndpointShieldPolicy(db)
+    return c.json({ policy, updatedAt })
+  })
+
+  router.patch('/policies/public-endpoints', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Partial<PublicEndpointShieldPolicy>
+    try {
+      body = await c.req.json() as Partial<PublicEndpointShieldPolicy>
+    } catch {
+      return c.json({ error: 'Invalid JSON', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    const { policy, updatedAt } = updatePublicEndpointShieldPolicy(db, body)
+    logAuditEvent(db, {
+      action: 'shield.public_policy.updated',
+      actor: auth.session.email,
+      target: 'public-endpoints',
+      details: {
+        role: auth.session.role,
+        policy,
+      },
+    })
+    return c.json({ policy, updatedAt, updated: true })
+  })
+
   router.get('/audit/:beamId', (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
@@ -135,7 +147,7 @@ export function shieldRouter(db: Database): Hono {
     }
 
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
-    const hours = parseInt(c.req.query('hours') ?? '24', 10)
+    const hours = Number.parseInt(c.req.query('hours') ?? '24', 10)
 
     try {
       const events = getRecentEvents(db, beamId, hours)
@@ -146,14 +158,13 @@ export function shieldRouter(db: Database): Hono {
     }
   })
 
-  // GET /shield/stats — Aggregate shield statistics
   router.get('/stats', (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
 
-    const hours = parseInt(c.req.query('hours') ?? '24', 10)
+    const hours = Number.parseInt(c.req.query('hours') ?? '24', 10)
 
     try {
       const stats = getAuditStats(db, hours)

@@ -57,6 +57,23 @@ next_identity = BeamIdentity.generate(agent_name="planner", org_name="acme")
 await client.rotate_keys(next_identity)
 ```
 
+The SDK signs the rotation request with the current active key and returns `KeyRotationResult`
+with the latest `key_state`.
+
+### `list_keys()`
+
+```python
+key_state = await client.list_keys()
+print(key_state.active.public_key if key_state.active else None)
+print([key.public_key for key in key_state.revoked])
+```
+
+### `revoke_key(public_key)`
+
+```python
+await client.revoke_key("MCowBQYDK2VwAyEA...")
+```
+
 ### `browse(page=1, filters=None)`
 
 ```python
@@ -120,3 +137,6 @@ await thread.say("Draft a response to this customer issue.")
 - `Report`
 - `DomainVerification`
 - `KeyRotationResult`
+- `KeyRevocationResult`
+- `AgentKeyState`
+- `AgentKeyRecord`

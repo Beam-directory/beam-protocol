@@ -11,6 +11,8 @@ from .directory import BeamDirectory, BeamDirectoryError
 from .client import BeamClient
 from .frames import create_intent_frame, create_result_frame, validate_intent_frame, validate_result_frame
 from .types import (
+    AgentKeyRecord,
+    AgentKeyState,
     AgentProfile,
     AgentRecord,
     AgentRegistration,
@@ -25,6 +27,7 @@ from .types import (
     DirectoryStats,
     DomainVerification,
     IntentFrame,
+    KeyRevocationResult,
     KeyRotationResult,
     Report,
     ResultFrame,
@@ -42,6 +45,8 @@ __all__ = [
     "validate_intent_frame",
     "validate_result_frame",
     "AgentProfile",
+    "AgentKeyRecord",
+    "AgentKeyState",
     "AgentRecord",
     "AgentRegistration",
     "AgentSearchQuery",
@@ -55,6 +60,7 @@ __all__ = [
     "DirectoryStats",
     "DomainVerification",
     "IntentFrame",
+    "KeyRevocationResult",
     "KeyRotationResult",
     "Report",
     "ResultFrame",

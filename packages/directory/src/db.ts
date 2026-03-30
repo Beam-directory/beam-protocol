@@ -24,7 +24,7 @@ import type {
   TrustScoreRow,
   VerificationTier,
 } from './types.js'
-import { generateDIDDocument, toBeamDID, type DIDDocument } from './did.js'
+import { generateDIDDocument, generateDIDDocumentWithKeys, toBeamDID, type DIDDocument } from './did.js'
 import {
   assertIntentLifecycleTransition,
   classifyIntentLifecycle,
@@ -34,8 +34,13 @@ import {
   normalizeLegacyTraceLifecycle,
   type IntentLifecycleStatus,
 } from './intent-lifecycle.js'
+import {
+  parsePublicEndpointShieldPolicy,
+  type PublicEndpointShieldPolicy,
+} from './shield/policies.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
+const PUBLIC_ENDPOINT_POLICY_KEY = 'public-endpoints'
 
 export function createDatabase(dbPath = process.env.DB_PATH || './beam-directory.db'): DB {
   const db = new Database(dbPath)
@@ -405,6 +410,12 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_shield_audit_created ON shield_audit_log(created_at);
     CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce);
 
+    CREATE TABLE IF NOT EXISTS shield_policies (
+      policy_key TEXT PRIMARY KEY,
+      config_json TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS pinned_keys (
       beam_id TEXT NOT NULL,
       pinned_beam_id TEXT NOT NULL,
@@ -760,11 +771,67 @@ function syncOrgAgentPublicKey(db: DB, beamId: string, publicKey: string): void 
   `).run(publicKey, nowIso(), beamId)
 }
 
+function createKeyLifecycleError(code: 'ACTIVE_KEY_REQUIRED' | 'KEY_ALREADY_REVOKED' | 'KEY_NOT_FOUND', message: string): Error & { code: string } {
+  const error = new Error(message) as Error & { code: string }
+  error.code = code
+  return error
+}
+
+function assertKeyCanBecomeActive(db: DB, beamId: string, publicKey: string): void {
+  const existing = db.prepare(`
+    SELECT revoked_at
+    FROM agent_keys
+    WHERE beam_id = ? AND public_key = ?
+    LIMIT 1
+  `).get(beamId, publicKey) as { revoked_at: number | null } | undefined
+
+  if (existing && existing.revoked_at !== null) {
+    throw createKeyLifecycleError(
+      'KEY_ALREADY_REVOKED',
+      `Key ${publicKey.slice(0, 16)}… has already been revoked for ${beamId}`,
+    )
+  }
+}
+
 function ensureAgentKeyRecorded(db: DB, beamId: string, publicKey: string, createdAt: number): void {
+  assertKeyCanBecomeActive(db, beamId, publicKey)
   db.prepare(`
     INSERT OR IGNORE INTO agent_keys (beam_id, public_key, created_at, revoked_at)
     VALUES (?, ?, ?, NULL)
   `).run(beamId, publicKey, createdAt)
+}
+
+export function listAgentKeys(db: DB, beamId: string): AgentKeyRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM agent_keys
+    WHERE beam_id = ?
+    ORDER BY CASE WHEN revoked_at IS NULL THEN 0 ELSE 1 END ASC,
+             COALESCE(revoked_at, created_at) DESC,
+             id DESC
+  `).all(beamId) as AgentKeyRow[]
+}
+
+export function getActiveAgentKey(db: DB, beamId: string): AgentKeyRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM agent_keys
+    WHERE beam_id = ? AND revoked_at IS NULL
+    ORDER BY created_at DESC, id DESC
+    LIMIT 1
+  `).get(beamId) as AgentKeyRow | undefined
+
+  return row ?? null
+}
+
+export function refreshAgentDIDDocument(db: DB, beamId: string): DIDDocument | null {
+  const agent = getAgent(db, beamId)
+  if (!agent) {
+    return null
+  }
+
+  const document = generateDIDDocumentWithKeys(agent, listAgentKeys(db, beamId))
+  return upsertDIDDocument(db, document)
 }
 
 export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
@@ -774,6 +841,9 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const personal = data.personal === true ? 1 : 0
 
   const existing = getAgent(db, data.beamId)
+  if (!existing || existing.public_key !== data.publicKey) {
+    assertKeyCanBecomeActive(db, data.beamId, data.publicKey)
+  }
   const normalizedEmail = data.email?.trim().toLowerCase() || null
   const emailChanged = normalizedEmail !== (existing?.email ?? null)
   const emailVerified = normalizedEmail
@@ -877,12 +947,19 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
 
   syncOrgAgent(db, data, existing?.created_at ?? now)
   ensureAgentKeyRecorded(db, data.beamId, data.publicKey, createdAtMs)
+  if (existing && existing.public_key !== data.publicKey) {
+    db.prepare(`
+      UPDATE agent_keys
+      SET revoked_at = ?
+      WHERE beam_id = ? AND public_key = ? AND revoked_at IS NULL
+    `).run(createdAtMs, data.beamId, existing.public_key)
+  }
 
   const score = calculateTrustScore(db, data.beamId)
   db.prepare('UPDATE agents SET trust_score = ? WHERE beam_id = ?').run(score, data.beamId)
 
   const agent = getAgent(db, data.beamId) as AgentRow
-  upsertDIDDocument(db, generateDIDDocument(agent))
+  refreshAgentDIDDocument(db, data.beamId)
   return agent
 }
 
@@ -1093,6 +1170,39 @@ export function getDIDDocument(db: DB, did: string): DIDDocument | null {
   }
 
   return JSON.parse(row.document) as DIDDocument
+}
+
+export function getPublicEndpointShieldPolicy(db: DB): { policy: PublicEndpointShieldPolicy; updatedAt: string | null } {
+  const row = db.prepare(`
+    SELECT config_json, updated_at
+    FROM shield_policies
+    WHERE policy_key = ?
+    LIMIT 1
+  `).get(PUBLIC_ENDPOINT_POLICY_KEY) as { config_json: string; updated_at: string } | undefined
+
+  return {
+    policy: parsePublicEndpointShieldPolicy(row?.config_json),
+    updatedAt: row?.updated_at ?? null,
+  }
+}
+
+export function updatePublicEndpointShieldPolicy(
+  db: DB,
+  patch: Partial<PublicEndpointShieldPolicy>,
+): { policy: PublicEndpointShieldPolicy; updatedAt: string } {
+  const current = getPublicEndpointShieldPolicy(db).policy
+  const merged = parsePublicEndpointShieldPolicy(JSON.stringify({ ...current, ...patch }))
+  const updatedAt = nowIso()
+
+  db.prepare(`
+    INSERT INTO shield_policies (policy_key, config_json, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(policy_key) DO UPDATE SET
+      config_json = excluded.config_json,
+      updated_at = excluded.updated_at
+  `).run(PUBLIC_ENDPOINT_POLICY_KEY, JSON.stringify(merged), updatedAt)
+
+  return { policy: merged, updatedAt }
 }
 
 export interface SearchQuery {
@@ -1359,6 +1469,8 @@ export function rotateAgentKey(db: DB, beamId: string, newPublicKey: string): Ag
     return null
   }
 
+  assertKeyCanBecomeActive(db, beamId, newPublicKey)
+
   const revokedAt = nowMs()
   const transaction = db.transaction(() => {
     db.prepare('UPDATE agents SET public_key = ? WHERE beam_id = ?').run(newPublicKey, beamId)
@@ -1372,6 +1484,49 @@ export function rotateAgentKey(db: DB, beamId: string, newPublicKey: string): Ag
       VALUES (?, ?, ?, NULL)
     `).run(beamId, newPublicKey, revokedAt)
     syncOrgAgentPublicKey(db, beamId, newPublicKey)
+    refreshAgentDIDDocument(db, beamId)
+  })
+
+  transaction()
+  return getAgent(db, beamId)
+}
+
+export function revokeAgentKey(db: DB, beamId: string, publicKey: string): AgentRow | null {
+  const existing = getAgent(db, beamId)
+  if (!existing) {
+    return null
+  }
+
+  if (existing.public_key === publicKey) {
+    throw createKeyLifecycleError(
+      'ACTIVE_KEY_REQUIRED',
+      'The active signing key must be rotated before it can be revoked',
+    )
+  }
+
+  const key = db.prepare(`
+    SELECT *
+    FROM agent_keys
+    WHERE beam_id = ? AND public_key = ?
+    LIMIT 1
+  `).get(beamId, publicKey) as AgentKeyRow | undefined
+
+  if (!key) {
+    throw createKeyLifecycleError('KEY_NOT_FOUND', `Key ${publicKey.slice(0, 16)}… was not found for ${beamId}`)
+  }
+
+  if (key.revoked_at !== null) {
+    throw createKeyLifecycleError('KEY_ALREADY_REVOKED', `Key ${publicKey.slice(0, 16)}… has already been revoked`)
+  }
+
+  const revokedAt = nowMs()
+  const transaction = db.transaction(() => {
+    db.prepare(`
+      UPDATE agent_keys
+      SET revoked_at = ?
+      WHERE beam_id = ? AND public_key = ? AND revoked_at IS NULL
+    `).run(revokedAt, beamId, publicKey)
+    refreshAgentDIDDocument(db, beamId)
   })
 
   transaction()

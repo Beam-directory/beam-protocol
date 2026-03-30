@@ -153,6 +153,7 @@ class AgentRecord(AgentRegistration):
     verified: bool = False
     created_at: str = ""
     last_seen: str = ""
+    key_state: Optional["AgentKeyState"] = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentRecord":
@@ -166,6 +167,7 @@ class AgentRecord(AgentRegistration):
             verified=data.get("verified", False),
             created_at=data.get("createdAt", data.get("created_at", "")),
             last_seen=data.get("lastSeen", data.get("last_seen", "")),
+            key_state=AgentKeyState.from_dict(data.get("keyState")) if isinstance(data.get("keyState"), dict) else None,
         )
 
 
@@ -319,6 +321,7 @@ class KeyRotationResult:
     public_key: str
     rotated_at: Optional[str] = None
     previous_key: Optional[str] = None
+    key_state: Optional["AgentKeyState"] = None
 
     @classmethod
     def from_dict(
@@ -332,6 +335,70 @@ class KeyRotationResult:
             public_key=data.get("publicKey", data.get("public_key", public_key)),
             rotated_at=data.get("rotatedAt", data.get("rotated_at")),
             previous_key=data.get("previousKey", data.get("previous_key")),
+            key_state=AgentKeyState.from_dict(data["keyState"]) if isinstance(data.get("keyState"), dict) else None,
+        )
+
+
+@dataclass
+class AgentKeyRecord:
+    beam_id: BeamIdString
+    public_key: str
+    created_at: int
+    revoked_at: Optional[int]
+    status: Literal["active", "revoked"]
+    id: Optional[int] = None
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> "AgentKeyRecord":
+        return cls(
+            id=data.get("id"),
+            beam_id=data.get("beamId", data.get("beam_id", "")),
+            public_key=data.get("publicKey", data.get("public_key", "")),
+            created_at=data.get("createdAt", data.get("created_at", 0)),
+            revoked_at=data.get("revokedAt", data.get("revoked_at")),
+            status="revoked" if data.get("status") == "revoked" else "active",
+        )
+
+
+@dataclass
+class AgentKeyState:
+    active: Optional[AgentKeyRecord]
+    revoked: list[AgentKeyRecord]
+    keys: list[AgentKeyRecord]
+    total: int
+
+    @classmethod
+    def from_dict(cls, data: Optional[dict[str, Any]]) -> "AgentKeyState":
+        if not isinstance(data, dict):
+            return cls(active=None, revoked=[], keys=[], total=0)
+
+        keys = [AgentKeyRecord.from_dict(entry) for entry in data.get("keys", []) if isinstance(entry, dict)]
+        revoked = [AgentKeyRecord.from_dict(entry) for entry in data.get("revoked", []) if isinstance(entry, dict)]
+        active_raw = data.get("active")
+        active = AgentKeyRecord.from_dict(active_raw) if isinstance(active_raw, dict) else None
+        return cls(
+            active=active,
+            revoked=revoked,
+            keys=keys,
+            total=data.get("total", len(keys)),
+        )
+
+
+@dataclass
+class KeyRevocationResult:
+    beam_id: BeamIdString
+    revoked: bool
+    revoked_key: Optional[AgentKeyRecord]
+    key_state: AgentKeyState
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any], beam_id: BeamIdString) -> "KeyRevocationResult":
+        revoked_key = data.get("revokedKey", data.get("revoked_key"))
+        return cls(
+            beam_id=data.get("beamId", data.get("beam_id", beam_id)),
+            revoked=bool(data.get("revoked", False)),
+            revoked_key=AgentKeyRecord.from_dict(revoked_key) if isinstance(revoked_key, dict) else None,
+            key_state=AgentKeyState.from_dict(data.get("keyState")),
         )
 
 

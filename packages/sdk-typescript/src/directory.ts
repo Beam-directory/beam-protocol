@@ -1,5 +1,7 @@
 import type {
   AgentProfile,
+  AgentKeyRecord,
+  AgentKeyState,
   AgentRecord,
   AgentRegistration,
   AgentSearchQuery,
@@ -10,6 +12,7 @@ import type {
   DirectoryStats,
   DomainVerification,
   KeyRotationResult,
+  KeyRevocationResult,
   Delegation,
   Report,
   VerificationTier,
@@ -68,6 +71,7 @@ function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
     verified: (raw.verified ?? false) as boolean,
     createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
     lastSeen: (raw.lastSeen ?? raw.last_seen ?? '') as string,
+    keyState: normalizeKeyState(raw['keyState']),
   }
 }
 
@@ -116,6 +120,59 @@ function normalizeRotation(raw: Record<string, unknown>, beamId: BeamIdString, p
     publicKey: getString(raw, 'publicKey', 'public_key') ?? publicKey,
     rotatedAt: getString(raw, 'rotatedAt', 'rotated_at'),
     previousKey: getString(raw, 'previousKey', 'previous_key'),
+    keyState: normalizeKeyState(raw['keyState']) ?? normalizeKeyState((raw['agent'] as Record<string, unknown> | undefined)?.['keyState']),
+  }
+}
+
+function normalizeKey(raw: unknown): AgentKeyRecord | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+
+  const value = raw as Record<string, unknown>
+  return {
+    id: getNumber(value, 'id'),
+    beamId: ((getString(value, 'beamId', 'beam_id') ?? '') || 'unknown@beam.directory') as BeamIdString,
+    publicKey: getString(value, 'publicKey', 'public_key') ?? '',
+    createdAt: getNumber(value, 'createdAt', 'created_at') ?? 0,
+    revokedAt: getNumber(value, 'revokedAt', 'revoked_at') ?? null,
+    status: (getString(value, 'status') === 'revoked' ? 'revoked' : 'active'),
+  }
+}
+
+function normalizeKeyState(raw: unknown): AgentKeyState | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return undefined
+  }
+
+  const value = raw as Record<string, unknown>
+  const keys = Array.isArray(value['keys'])
+    ? value['keys'].map(normalizeKey).filter((entry): entry is AgentKeyRecord => entry !== null)
+    : []
+  const revoked = Array.isArray(value['revoked'])
+    ? value['revoked'].map(normalizeKey).filter((entry): entry is AgentKeyRecord => entry !== null)
+    : []
+  const active = normalizeKey(value['active'])
+
+  return {
+    active,
+    revoked,
+    keys,
+    total: getNumber(value, 'total') ?? keys.length,
+  }
+}
+
+function normalizeRevocation(raw: Record<string, unknown>, beamId: BeamIdString): KeyRevocationResult {
+  return {
+    beamId: (getString(raw, 'beamId', 'beam_id') as BeamIdString | undefined) ?? beamId,
+    revoked: getBoolean(raw, 'revoked') ?? false,
+    revokedKey: normalizeKey(raw['revokedKey'] ?? raw['revoked_key']),
+    keyState: normalizeKeyState(raw['keyState']) ?? {
+      active: null,
+      revoked: [],
+      keys: [],
+      total: 0,
+    },
   }
 }
 
@@ -285,15 +342,47 @@ export class BeamDirectory {
     return normalizeVerification(body)
   }
 
-  async rotateKeys(beamId: BeamIdString, publicKey: string, rotationProof?: string): Promise<KeyRotationResult> {
+  async listKeys(beamId: BeamIdString): Promise<AgentKeyState> {
+    const body = await this.request<Record<string, unknown>>(`/agents/${encodeURIComponent(beamId)}/keys`)
+    return normalizeKeyState(body['keyState']) ?? {
+      active: null,
+      revoked: [],
+      keys: [],
+      total: 0,
+    }
+  }
+
+  async rotateKeys(
+    beamId: BeamIdString,
+    publicKey: string,
+    options: { rotationProof?: string; signature?: string; timestamp?: string } = {},
+  ): Promise<KeyRotationResult> {
     const body = await this.request<Record<string, unknown>>(`/agents/${encodeURIComponent(beamId)}/keys/rotate`, {
       method: 'POST',
       body: JSON.stringify({
         new_public_key: publicKey,
-        ...(rotationProof ? { rotation_proof: rotationProof } : {}),
+        ...(options.rotationProof ? { rotation_proof: options.rotationProof } : {}),
+        ...(options.signature ? { signature: options.signature } : {}),
+        ...(options.timestamp ? { timestamp: options.timestamp } : {}),
       }),
     })
     return normalizeRotation(body, beamId, publicKey)
+  }
+
+  async revokeKey(
+    beamId: BeamIdString,
+    publicKey: string,
+    options: { signature?: string; timestamp?: string } = {},
+  ): Promise<KeyRevocationResult> {
+    const body = await this.request<Record<string, unknown>>(`/agents/${encodeURIComponent(beamId)}/keys/revoke`, {
+      method: 'POST',
+      body: JSON.stringify({
+        public_key: publicKey,
+        ...(options.signature ? { signature: options.signature } : {}),
+        ...(options.timestamp ? { timestamp: options.timestamp } : {}),
+      }),
+    })
+    return normalizeRevocation(body, beamId)
   }
 
   async delegate(sourceBeamId: BeamIdString, targetBeamId: BeamIdString, scope: string, expiresIn?: number): Promise<Delegation> {

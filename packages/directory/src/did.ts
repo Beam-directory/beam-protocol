@@ -1,4 +1,4 @@
-import type { AgentRow } from './types.js'
+import type { AgentKeyRow, AgentRow } from './types.js'
 import { multibaseToRawEd25519, publicKeyBase64ToMultibase, rawEd25519ToPublicKeyBase64 } from './crypto.js'
 import { getDirectoryIssuerDid, getDirectoryIssuerPublicKeyBase64 } from './issuer.js'
 
@@ -9,6 +9,8 @@ export interface VerificationMethod {
   type: 'Ed25519VerificationKey2020'
   controller: string
   publicKeyMultibase: string
+  beamStatus?: 'active' | 'revoked'
+  beamRevokedAt?: string
 }
 
 export interface ServiceEndpoint {
@@ -37,6 +39,7 @@ type ResolverConfig = {
   getStoredDocument?: (did: string) => DIDDocument | null
   getAgentByBeamId?: (beamId: string) => AgentRow | null
   findAgentByHandle?: (handle: string) => AgentRow | null
+  listAgentKeysByBeamId?: (beamId: string) => AgentKeyRow[]
 }
 
 const resolverConfig: ResolverConfig = {}
@@ -45,6 +48,7 @@ export function configureDIDResolver(config: ResolverConfig): void {
   resolverConfig.getStoredDocument = config.getStoredDocument
   resolverConfig.getAgentByBeamId = config.getAgentByBeamId
   resolverConfig.findAgentByHandle = config.findAgentByHandle
+  resolverConfig.listAgentKeysByBeamId = config.listAgentKeysByBeamId
 }
 
 function getDirectoryBaseUrl(): string {
@@ -71,13 +75,38 @@ function extractOrgName(beamId: string): string | null {
 function createDocument(input: {
   did: string
   publicKeyBase64: string
+  keys?: AgentKeyRow[]
   createdAt?: string
   updatedAt?: string
   alsoKnownAs?: string[]
   service?: ServiceEndpoint[]
   deactivated?: boolean
 }): DIDDocument {
-  const verificationMethodId = `${input.did}#key-1`
+  const keyEntries = (input.keys?.length ? input.keys : [
+    {
+      id: 1,
+      beam_id: input.did,
+      public_key: input.publicKeyBase64,
+      created_at: Date.now(),
+      revoked_at: null,
+    },
+  ]).map((key) => {
+    const publicKeyMultibase = publicKeyBase64ToMultibase(key.public_key)
+    return {
+      id: `${input.did}#${publicKeyMultibase}`,
+      type: 'Ed25519VerificationKey2020' as const,
+      controller: input.did,
+      publicKeyMultibase,
+      ...(key.revoked_at === null
+        ? { beamStatus: 'active' as const }
+        : {
+            beamStatus: 'revoked' as const,
+            beamRevokedAt: new Date(key.revoked_at).toISOString(),
+          }),
+    }
+  })
+  const activeVerificationMethod = keyEntries.find((entry) => entry.beamStatus === 'active') ?? keyEntries[0]
+  const verificationMethodId = activeVerificationMethod?.id ?? `${input.did}#key-1`
 
   return {
     '@context': [
@@ -86,14 +115,7 @@ function createDocument(input: {
     ],
     id: input.did,
     ...(input.alsoKnownAs?.length ? { alsoKnownAs: input.alsoKnownAs } : {}),
-    verificationMethod: [
-      {
-        id: verificationMethodId,
-        type: 'Ed25519VerificationKey2020',
-        controller: input.did,
-        publicKeyMultibase: publicKeyBase64ToMultibase(input.publicKeyBase64),
-      },
-    ],
+    verificationMethod: keyEntries,
     authentication: [verificationMethodId],
     assertionMethod: [verificationMethodId],
     capabilityInvocation: [verificationMethodId],
@@ -146,12 +168,17 @@ export function toBeamDID(beamId: string): string {
 }
 
 export function generateDIDDocument(agent: AgentRow): DIDDocument {
+  return generateDIDDocumentWithKeys(agent)
+}
+
+export function generateDIDDocumentWithKeys(agent: AgentRow, keys: AgentKeyRow[] = []): DIDDocument {
   const did = toBeamDID(agent.beam_id)
   const baseUrl = getDirectoryBaseUrl()
 
   return createDocument({
     did,
     publicKeyBase64: agent.public_key,
+    keys: keys.length > 0 ? keys : undefined,
     createdAt: agent.created_at,
     updatedAt: agent.last_seen,
     alsoKnownAs: agent.beam_id.includes('@') ? [agent.beam_id] : undefined,
@@ -165,6 +192,11 @@ export function generateDIDDocument(agent: AgentRow): DIDDocument {
         id: `${did}#did-resolution`,
         type: 'DIDResolutionService',
         serviceEndpoint: `${baseUrl}/did/${encodeURIComponent(did)}`,
+      },
+      {
+        id: `${did}#keys`,
+        type: 'BeamKeyStateService',
+        serviceEndpoint: `${baseUrl}/agents/${encodeURIComponent(agent.beam_id)}/keys`,
       },
     ],
   })
@@ -223,7 +255,8 @@ function resolvePersonalDID(methodSpecificId: string): DIDDocument | null {
   }
 
   const agent = resolverConfig.findAgentByHandle?.(methodSpecificId) ?? null
-  return agent ? generateDIDDocument(agent) : null
+  const keys = agent ? resolverConfig.listAgentKeysByBeamId?.(agent.beam_id) ?? [] : []
+  return agent ? generateDIDDocumentWithKeys(agent, keys) : null
 }
 
 function resolveOrgBoundDID(org: string, agentName: string): DIDDocument | null {
@@ -235,7 +268,8 @@ function resolveOrgBoundDID(org: string, agentName: string): DIDDocument | null 
 
   const beamId = `${agentName}@${org}.beam.directory`
   const agent = resolverConfig.getAgentByBeamId?.(beamId) ?? null
-  return agent ? generateDIDDocument(agent) : null
+  const keys = agent ? resolverConfig.listAgentKeysByBeamId?.(agent.beam_id) ?? [] : []
+  return agent ? generateDIDDocumentWithKeys(agent, keys) : null
 }
 
 export function resolveDID(did: string): DIDDocument | null {

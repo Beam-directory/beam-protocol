@@ -3,7 +3,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { Hono } from 'hono'
 import { createAdminSession } from '../src/admin-auth.js'
 import { createDatabase, getAgent, registerAgent, assignDirectoryRole } from '../src/db.js'
+import { canonicalizeJson } from '../src/crypto.js'
 import { getLocalDirectoryUrl } from '../src/federation.js'
+import { agentsRouter } from '../src/routes/agents.js'
+import { didRouter } from '../src/routes/did.js'
 import { agentKeysRouter, revokedKeysRouter } from '../src/routes/keys.js'
 import { verificationRouter } from '../src/routes/verify.js'
 import { delegationsRouter } from '../src/routes/delegations.js'
@@ -22,12 +25,21 @@ function signPayload(privateKey: ReturnType<typeof generateIdentity>['privateKey
   return sign(null, Buffer.from(payload, 'utf8'), privateKey).toString('base64')
 }
 
+function signCanonicalPayload(
+  privateKey: ReturnType<typeof generateIdentity>['privateKey'],
+  payload: Record<string, unknown>,
+): string {
+  return sign(null, Buffer.from(canonicalizeJson(payload), 'utf8'), privateKey).toString('base64')
+}
+
 function createTestApp(db: ReturnType<typeof createDatabase>, resolver?: (hostname: string) => Promise<string[][]>) {
   const app = new Hono()
+  app.route('/agents', agentsRouter(db))
   app.route('/agents', verificationRouter(db, resolver as never))
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
   app.route('/agents', reportsRouter(db))
+  app.route('/agents', didRouter(db))
   app.route('/keys', revokedKeysRouter(db))
   return app
 }
@@ -81,7 +93,7 @@ describe('directory identity and verification routes', () => {
     expect(checked.body.agent.trust_score).toBe(1)
   })
 
-  it('rotates agent keys and exposes revoked keys', async () => {
+  it('rotates agent keys, exposes key state, and keeps revoked keys in DID resolution', async () => {
     const oldIdentity = generateIdentity()
     const newIdentity = generateIdentity()
     const beamId = 'rotator@acme.beam.directory'
@@ -107,6 +119,42 @@ describe('directory identity and verification routes', () => {
 
     expect(rotated.response.status).toBe(200)
     expect(rotated.body.agent.public_key).toBe(newIdentity.publicKey)
+    expect(rotated.body.keyState.active.publicKey).toBe(newIdentity.publicKey)
+    expect(rotated.body.keyState.revoked[0].publicKey).toBe(oldIdentity.publicKey)
+
+    const listed = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}/keys`)
+    expect(listed.response.status).toBe(200)
+    expect(listed.body.keyState.active.publicKey).toBe(newIdentity.publicKey)
+    expect(listed.body.keyState.revoked).toHaveLength(1)
+
+    const lookup = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}`)
+    expect(lookup.response.status).toBe(200)
+    expect(lookup.body.keyState.active.publicKey).toBe(newIdentity.publicKey)
+    expect(lookup.body.keyState.revoked[0].publicKey).toBe(oldIdentity.publicKey)
+
+    const revokePayload = {
+      action: 'keys.revoke',
+      beamId,
+      publicKey: oldIdentity.publicKey,
+      timestamp: new Date().toISOString(),
+    }
+    const revokedResponse = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}/keys/revoke`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        public_key: oldIdentity.publicKey,
+        timestamp: revokePayload.timestamp,
+        signature: signCanonicalPayload(newIdentity.privateKey, revokePayload),
+      }),
+    })
+    expect(revokedResponse.response.status).toBe(409)
+
+    const did = await app.request(`http://localhost/agents/did/${encodeURIComponent('did:beam:acme:rotator')}`)
+    const didBody = await did.json() as { verificationMethod: Array<{ publicKeyMultibase: string; beamStatus?: string }> }
+    expect(did.status).toBe(200)
+    expect(didBody.verificationMethod).toHaveLength(2)
+    expect(didBody.verificationMethod.some((entry) => entry.beamStatus === 'active')).toBe(true)
+    expect(didBody.verificationMethod.some((entry) => entry.beamStatus === 'revoked')).toBe(true)
 
     const revoked = await jsonRequest(app, '/keys/revoked')
     expect(revoked.response.status).toBe(200)

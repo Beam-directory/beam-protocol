@@ -15,6 +15,8 @@ export {
 } from './frames.js'
 export type {
   AgentProfile,
+  AgentKeyRecord,
+  AgentKeyState,
   AgentRegistration,
   AgentRecord,
   AgentSearchQuery,
@@ -30,6 +32,7 @@ export type {
   DomainVerification,
   IntentFrame,
   KeyRotationResult,
+  KeyRevocationResult,
   Report,
   ResultFrame,
   VerificationTier,
