@@ -25,6 +25,15 @@ import type {
   VerificationTier,
 } from './types.js'
 import { generateDIDDocument, toBeamDID, type DIDDocument } from './did.js'
+import {
+  assertIntentLifecycleTransition,
+  classifyIntentLifecycle,
+  isIntentLifecycleFailure,
+  isIntentLifecycleSuccess,
+  normalizeIntentLifecycleStatus,
+  normalizeLegacyTraceLifecycle,
+  type IntentLifecycleStatus,
+} from './intent-lifecycle.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 
@@ -158,7 +167,7 @@ function initSchema(db: DB): void {
       requested_at TEXT NOT NULL,
       completed_at TEXT,
       round_trip_latency_ms INTEGER,
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'received',
       error_code TEXT,
       result_json TEXT
     );
@@ -464,6 +473,7 @@ function initSchema(db: DB): void {
   `).run(backfillKeysCreatedAt)
 
   ensureFederationSafeIntentLog(db)
+  migrateIntentLifecycleModel(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
@@ -498,7 +508,7 @@ function ensureFederationSafeIntentLog(db: DB): void {
           requested_at TEXT NOT NULL,
           completed_at TEXT,
           round_trip_latency_ms INTEGER,
-          status TEXT NOT NULL DEFAULT 'pending',
+          status TEXT NOT NULL DEFAULT 'received',
           error_code TEXT,
           result_json TEXT
         );
@@ -546,6 +556,66 @@ function ensureFederationSafeIntentLog(db: DB): void {
   } finally {
     db.exec('PRAGMA foreign_keys = ON')
   }
+}
+
+function migrateIntentLifecycleModel(db: DB): void {
+  db.prepare(`
+    UPDATE intent_log
+    SET status = CASE
+      WHEN status = 'pending' THEN 'received'
+      WHEN status = 'success' THEN 'acked'
+      WHEN status = 'error' THEN 'failed'
+      ELSE status
+    END
+  `).run()
+
+  const rows = db.prepare(`
+    SELECT id, stage, status, details
+    FROM intent_trace_events
+    ORDER BY id ASC
+  `).all() as Array<{ id: number; stage: string; status: string; details: string | null }>
+
+  const update = db.prepare(`
+    UPDATE intent_trace_events
+    SET stage = ?, status = ?, details = ?
+    WHERE id = ?
+  `)
+  const remove = db.prepare('DELETE FROM intent_trace_events WHERE id = ?')
+
+  const migrate = db.transaction(() => {
+    for (const row of rows) {
+      const lifecycle = normalizeLegacyTraceLifecycle(row.stage, row.status)
+      if (!lifecycle) {
+        remove.run(row.id)
+        continue
+      }
+
+      let details = row.details
+      if (row.stage !== lifecycle || row.status !== lifecycle) {
+        let parsedDetails: Record<string, unknown> | null = null
+        if (row.details) {
+          try {
+            const parsed = JSON.parse(row.details) as unknown
+            if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+              parsedDetails = parsed as Record<string, unknown>
+            }
+          } catch {
+            parsedDetails = null
+          }
+        }
+
+        details = JSON.stringify({
+          ...(parsedDetails ?? {}),
+          legacyStage: row.stage,
+          legacyStatus: row.status,
+        })
+      }
+
+      update.run(lifecycle, lifecycle, details, row.id)
+    }
+  })
+
+  migrate()
 }
 
 function nowIso(): string {
@@ -1431,13 +1501,13 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
       intent_type,
       requested_at,
       status
-    ) VALUES (?, ?, ?, ?, ?, 'pending')
+    ) VALUES (?, ?, ?, ?, ?, 'received')
     ON CONFLICT(nonce) DO UPDATE SET
       from_beam_id = excluded.from_beam_id,
       to_beam_id = excluded.to_beam_id,
       intent_type = excluded.intent_type,
       requested_at = excluded.requested_at,
-      status = 'pending',
+      status = 'received',
       completed_at = NULL,
       round_trip_latency_ms = NULL,
       error_code = NULL,
@@ -1451,20 +1521,51 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
   )
 }
 
+export function setIntentLifecycleStatus(
+  db: DB,
+  input: {
+    nonce: string
+    status: IntentLifecycleStatus
+    errorCode?: string | null
+  },
+): void {
+  const existing = getIntentLogByNonce(db, input.nonce)
+  if (!existing) {
+    return
+  }
+
+  const current = normalizeIntentLifecycleStatus(existing.status) ?? 'received'
+  assertIntentLifecycleTransition(current, input.status, `intent ${input.nonce}`)
+
+  const nextBucket = classifyIntentLifecycle(input.status)
+  db.prepare(`
+    UPDATE intent_log
+    SET status = ?,
+        error_code = ?
+    WHERE nonce = ?
+  `).run(
+    input.status,
+    nextBucket === 'error' ? (input.errorCode ?? existing.error_code) : null,
+    input.nonce,
+  )
+}
+
 export function finalizeIntentLog(
   db: DB,
   input: {
     nonce: string
     fromBeamId: string
     toBeamId: string
-    success: boolean
+    status: IntentLifecycleStatus
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
   },
 ): void {
   const completedAt = nowIso()
-  const status = input.success ? 'success' : 'error'
+  const existing = getIntentLogByNonce(db, input.nonce)
+  const current = normalizeIntentLifecycleStatus(existing?.status) ?? 'received'
+  assertIntentLifecycleTransition(current, input.status, `intent ${input.nonce}`)
 
   db.prepare(`
     UPDATE intent_log
@@ -1477,13 +1578,16 @@ export function finalizeIntentLog(
   `).run(
     completedAt,
     input.latencyMs,
-    status,
+    input.status,
     input.errorCode ?? null,
     input.resultJson ?? null,
     input.nonce,
   )
 
-  updatePairTrustScore(db, input)
+  updatePairTrustScore(db, {
+    ...input,
+    success: isIntentLifecycleSuccess(input.status),
+  })
 }
 
 export function listRecentIntentLogs(db: DB, limit = 50): IntentLogRow[] {
@@ -1507,6 +1611,18 @@ export function getIntentLogByNonce(db: DB, nonce: string): IntentLogRow | null 
   return row ?? null
 }
 
+export function getLatestIntentTraceEvent(db: DB, nonce: string): IntentTraceEventRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM intent_trace_events
+    WHERE nonce = ?
+    ORDER BY timestamp DESC, id DESC
+    LIMIT 1
+  `).get(nonce) as IntentTraceEventRow | undefined
+
+  return row ?? null
+}
+
 export function appendIntentTraceEvent(
   db: DB,
   input: {
@@ -1514,14 +1630,15 @@ export function appendIntentTraceEvent(
     fromBeamId: string
     toBeamId: string
     intentType: string
-    stage: string
-    status: string
+    stage: IntentLifecycleStatus
+    status?: IntentLifecycleStatus
     timestamp?: string
     details?: unknown
   },
 ): IntentTraceEventRow {
   const timestamp = input.timestamp ?? nowIso()
   const details = input.details === undefined ? null : JSON.stringify(input.details)
+  const status = input.status ?? input.stage
 
   const result = db.prepare(`
     INSERT INTO intent_trace_events (
@@ -1540,7 +1657,7 @@ export function appendIntentTraceEvent(
     input.toBeamId,
     input.intentType,
     input.stage,
-    input.status,
+    status,
     timestamp,
     details,
   )
@@ -1561,8 +1678,8 @@ export function getAgentIntentStats(db: DB, beamId: string): AgentIntentStats {
   const row = db.prepare(`
     SELECT
       COUNT(*) AS received,
-      SUM(CASE WHEN status = 'success' THEN 1 ELSE 0 END) AS responded,
-      AVG(CASE WHEN status = 'success' THEN round_trip_latency_ms END) AS avg_response_time_ms
+      SUM(CASE WHEN status = 'acked' THEN 1 ELSE 0 END) AS responded,
+      AVG(CASE WHEN status = 'acked' THEN round_trip_latency_ms END) AS avg_response_time_ms
     FROM intent_log
     WHERE to_beam_id = ?
   `).get(beamId) as {
@@ -1595,7 +1712,7 @@ export function getAgentDirectoryStats(db: DB): {
       (
         SELECT AVG(round_trip_latency_ms)
         FROM intent_log
-        WHERE status = 'success' AND round_trip_latency_ms IS NOT NULL
+        WHERE status = 'acked' AND round_trip_latency_ms IS NOT NULL
       ) AS avg_response_time_ms
     FROM agents
   `).get() as {

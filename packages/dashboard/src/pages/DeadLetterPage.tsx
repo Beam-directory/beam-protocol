@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { ApiError, busApi, getBusBaseUrl, type DeadLetterMessage } from '../lib/api'
 import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
 import { formatDateTime, formatNumber } from '../lib/utils'
+import { formatIntentLifecycleLabel } from '../lib/intent-lifecycle'
 
 function formatBusTimestamp(value?: number | null): string {
   if (value == null) {
@@ -71,7 +72,7 @@ export default function DeadLetterPage() {
     try {
       setRequeueingId(messageId)
       const response = await busApi.requeueDeadLetter(messageId)
-      setStatus(`Requeued ${response.nonce} as ${response.status}.`)
+      setStatus(`Requeued ${response.nonce} as ${formatIntentLifecycleLabel(response.status)}.`)
       await load()
     } catch (err) {
       setStatus(err instanceof ApiError ? err.message : 'Failed to requeue dead-letter message')
@@ -181,11 +182,11 @@ export default function DeadLetterPage() {
                       <div className="text-slate-500 dark:text-slate-400">{message.recipient}</div>
                     </td>
                     <td className="table-cell">
-                      <div className="font-medium">{message.intent}</div>
-                      <div className="mt-2">
-                        <StatusPill label={message.status.replace('_', ' ')} tone="critical" />
-                      </div>
-                    </td>
+                        <div className="font-medium">{message.intent}</div>
+                        <div className="mt-2">
+                        <StatusPill label={formatIntentLifecycleLabel(message.status)} tone="critical" />
+                        </div>
+                      </td>
                     <td className="table-cell">{message.retry_count} / {message.max_retries}</td>
                     <td className="table-cell">{message.error ?? '—'}</td>
                     <td className="table-cell">

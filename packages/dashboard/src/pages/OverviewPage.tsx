@@ -72,11 +72,11 @@ export default function OverviewPage() {
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="panel-title">Intent Timeline</div>
-              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Throughput, failures, and pending pressure over time.</div>
+              <div className="mt-2 text-sm text-slate-500 dark:text-slate-400">Throughput, failures, and in-flight pressure over time.</div>
             </div>
             <StatusPill
-              label={overview && overview.summary.pendingOlderThan15m > 0 ? `${overview.summary.pendingOlderThan15m} stuck` : 'healthy'}
-              tone={overview && overview.summary.pendingOlderThan15m > 0 ? 'warning' : 'success'}
+              label={overview && overview.summary.inFlightOlderThan15m > 0 ? `${overview.summary.inFlightOlderThan15m} stuck` : 'healthy'}
+              tone={overview && overview.summary.inFlightOlderThan15m > 0 ? 'warning' : 'success'}
             />
           </div>
           <div className="mt-5">
@@ -88,7 +88,7 @@ export default function OverviewPage() {
                 series={[
                   { key: 'total', label: 'Total', color: '#f97316' },
                   { key: 'error', label: 'Errors', color: '#ef4444' },
-                  { key: 'pending', label: 'Pending', color: '#f59e0b' },
+                  { key: 'inFlight', label: 'In flight', color: '#f59e0b' },
                 ]}
               />
             )}

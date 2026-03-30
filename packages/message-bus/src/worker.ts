@@ -3,7 +3,7 @@
  */
 
 import type Database from 'better-sqlite3'
-import { getPendingRetries, markDeadLetter, markDelivered, scheduleRetry } from './db.js'
+import { getPendingRetries, markDeadLetter, markDelivered, markDispatched, scheduleRetry } from './db.js'
 import { deliverToDirectory } from './delivery.js'
 import { computeRetryAt } from './retry.js'
 
@@ -24,6 +24,7 @@ export function startRetryWorker(options: WorkerOptions): NodeJS.Timeout {
       if (pending.length === 0) return
 
       for (const msg of pending) {
+        markDispatched(db, msg.id)
         const payload = JSON.parse(msg.payload) as Record<string, unknown>
         const result = await deliverToDirectory(
           directoryUrl,

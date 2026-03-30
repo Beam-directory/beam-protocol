@@ -1,3 +1,5 @@
+import type { IntentLifecycleStatus } from './intent-lifecycle.js'
+
 // Beam ID string format: agent@org.beam.directory or agent@beam.directory
 export type BeamIdString = string
 
@@ -46,7 +48,7 @@ export interface IntentLogRow {
   requested_at: string
   completed_at: string | null
   round_trip_latency_ms: number | null
-  status: string
+  status: IntentLifecycleStatus
   error_code: string | null
   result_json: string | null
 }
@@ -57,8 +59,8 @@ export interface IntentTraceEventRow {
   from_beam_id: string
   to_beam_id: string
   intent_type: string
-  stage: string
-  status: string
+  stage: IntentLifecycleStatus
+  status: IntentLifecycleStatus
   timestamp: string
   details: string | null
 }

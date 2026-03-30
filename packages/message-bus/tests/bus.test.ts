@@ -5,7 +5,7 @@ vi.mock('../src/delivery.js', () => ({
   deliverToDirectory: vi.fn(async () => ({ success: true, error: '', retryable: false })),
 }))
 
-import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDeadLetter, markDelivered, markFailed, scheduleRetry } from '../src/db.js'
+import { cleanTestMessages, getMessage, initDatabase, insertMessage, markAcked, markDeadLetter, markDelivered, markDispatched, markFailed, scheduleRetry } from '../src/db.js'
 import { deliverToDirectory } from '../src/delivery.js'
 import { createBusRouter } from '../src/router.js'
 import { startRetryWorker, stopRetryWorker } from '../src/worker.js'
@@ -184,6 +184,7 @@ describe('message bus', () => {
       intent: 'chat',
       payload: { text: 'hi' },
     })
+    markDispatched(db, id)
     markDelivered(db, id)
 
     const response = await app.request('http://localhost/v1/beam/poll?agent=beta@beam.directory')
@@ -209,6 +210,8 @@ describe('message bus', () => {
       intent: 'chat',
       payload: { text: 'hello' },
     })
+    markDispatched(db, id)
+    markDelivered(db, id)
 
     const response = await app.request('http://localhost/v1/beam/ack', {
       method: 'POST',
@@ -259,6 +262,27 @@ describe('message bus', () => {
 
     expect(response.status).toBe(400)
     expect(await response.json()).toEqual({ error: 'status must be "acked" or "failed"', errorCode: 'INVALID_STATUS' })
+  })
+
+  it('returns 409 when /ack receives a message in the wrong lifecycle state', async () => {
+    const id = insertMessage(db, {
+      sender: 'alpha@beam.directory',
+      recipient: 'beta@beam.directory',
+      intent: 'chat',
+      payload: { text: 'hello' },
+    })
+
+    const response = await app.request('http://localhost/v1/beam/ack', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ message_id: id, status: 'acked' }),
+    })
+
+    expect(response.status).toBe(409)
+    expect(await response.json()).toEqual({
+      error: `Invalid message ${id} lifecycle transition from received to acked`,
+      errorCode: 'INVALID_STATE',
+    })
   })
 
   it('dead-letters non-retryable send failures immediately', async () => {
@@ -366,19 +390,25 @@ describe('message bus', () => {
       payload: { seq: 4 },
     })
 
+    markDispatched(db, deliveredId)
     markDelivered(db, deliveredId)
+    markDispatched(db, ackedId)
     markDelivered(db, ackedId)
     markAcked(db, ackedId, { ok: true })
+    markDispatched(db, failedId)
     markFailed(db, failedId, 'boom')
+    scheduleRetry(db, pendingId, 1, (Date.now() / 1000) + 60, 'offline')
 
-    expect(getMessage(db, pendingId)?.status).toBe('pending')
+    expect(getMessage(db, pendingId)?.status).toBe('queued')
 
     const response = await app.request('http://localhost/v1/beam/stats')
     expect(response.status).toBe(200)
 
     const body = await response.json() as Record<string, unknown>
     expect(body['total']).toBe(4)
-    expect(body['pending']).toBe(1)
+    expect(body['queued']).toBe(1)
+    expect(body['received']).toBe(0)
+    expect(body['dispatched']).toBe(0)
     expect(body['delivered']).toBe(1)
     expect(body['acked']).toBe(1)
     expect(body['failed']).toBe(1)
@@ -438,10 +468,10 @@ describe('message bus', () => {
     })
 
     expect(cleanTestMessages(db)).toBe(2)
-    expect(getMessage(db, keptId)?.status).toBe('pending')
+    expect(getMessage(db, keptId)?.status).toBe('received')
   })
 
-  it('retries pending messages with a stable nonce and dead-letters after max retries', async () => {
+  it('retries queued messages with a stable nonce and dead-letters after max retries', async () => {
     vi.useFakeTimers()
     vi.mocked(deliverToDirectory).mockResolvedValueOnce({
       success: false,

@@ -364,7 +364,7 @@ describe('directory agent enhancements', () => {
         status,
         error_code
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('n1', 'sender@testorg.beam.directory', 'recipient@testorg.beam.directory', 'chat.send', new Date().toISOString(), new Date().toISOString(), 100, 'success', null)
+    `).run('n1', 'sender@testorg.beam.directory', 'recipient@testorg.beam.directory', 'chat.send', new Date().toISOString(), new Date().toISOString(), 100, 'acked', null)
     db.prepare(`
       INSERT INTO intent_log (
         nonce,
@@ -377,7 +377,7 @@ describe('directory agent enhancements', () => {
         status,
         error_code
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `).run('n2', 'recipient@testorg.beam.directory', 'sender@testorg.beam.directory', 'chat.reply', new Date().toISOString(), new Date().toISOString(), 300, 'success', null)
+    `).run('n2', 'recipient@testorg.beam.directory', 'sender@testorg.beam.directory', 'chat.reply', new Date().toISOString(), new Date().toISOString(), 300, 'acked', null)
     db.prepare(`
       INSERT INTO intent_log (
         nonce,
@@ -388,7 +388,7 @@ describe('directory agent enhancements', () => {
         status,
         error_code
       ) VALUES (?, ?, ?, ?, ?, ?, ?)
-    `).run('n3', 'sender@testorg.beam.directory', 'recipient@testorg.beam.directory', 'chat.pending', new Date().toISOString(), 'pending', null)
+    `).run('n3', 'sender@testorg.beam.directory', 'recipient@testorg.beam.directory', 'chat.pending', new Date().toISOString(), 'received', null)
 
     const response = await app.request('http://localhost/agents/stats')
     expect(response.status).toBe(200)
