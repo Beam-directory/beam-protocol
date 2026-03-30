@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Radio, Search } from 'lucide-react'
 import { ApiError, connectIntentFeed, directoryApi, type RecentIntent } from '../lib/api'
 import { PageHeader, StatusPill } from '../components/Observability'
@@ -13,6 +13,8 @@ const WINDOW_OPTIONS = [
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All lifecycle states' },
+  { value: 'error', label: 'Failed or dead letter' },
+  { value: 'success', label: 'Acked' },
   { value: 'in_flight', label: 'In flight' },
   { value: 'received', label: 'Received' },
   { value: 'validated', label: 'Validated' },
@@ -29,8 +31,12 @@ function matchesFilters(intent: RecentIntent, filters: {
   status: string
   hours: number
 }) {
+  const lifecycleClass = classifyIntentLifecycle(intent.status)
   const matchesStatus = filters.status === 'all'
-    || (filters.status === 'in_flight' ? classifyIntentLifecycle(intent.status) === 'in_flight' : intent.status === filters.status)
+    || (filters.status === 'in_flight' ? lifecycleClass === 'in_flight' : false)
+    || (filters.status === 'error' ? lifecycleClass === 'error' : false)
+    || (filters.status === 'success' ? lifecycleClass === 'success' : false)
+    || intent.status === filters.status
   const matchesQuery = !filters.query || [
     intent.nonce,
     intent.from,
@@ -48,14 +54,31 @@ function matchesFilters(intent: RecentIntent, filters: {
 }
 
 export default function IntentsPage() {
+  const [searchParams, setSearchParams] = useSearchParams()
   const [intents, setIntents] = useState<RecentIntent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [socketState, setSocketState] = useState<'connecting' | 'live' | 'offline'>('connecting')
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [hours, setHours] = useState(24)
   const socketRef = useRef<WebSocket | null>(null)
+  const query = searchParams.get('q') ?? ''
+  const status = searchParams.get('status') ?? 'all'
+  const hours = Number.parseInt(searchParams.get('hours') ?? '24', 10) || 24
+  const alertId = searchParams.get('alert')
+  const hasDeepLinkFilters = Boolean(alertId || query || status !== 'all' || hours !== 24)
+
+  function updateSearchParam(key: string, value: string) {
+    const next = new URLSearchParams(searchParams)
+    if (!value || (key === 'status' && value === 'all') || (key === 'hours' && value === '24')) {
+      next.delete(key)
+    } else {
+      next.set(key, value)
+    }
+    setSearchParams(next, { replace: true })
+  }
+
+  function clearFilters() {
+    setSearchParams({}, { replace: true })
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -143,6 +166,19 @@ export default function IntentsPage() {
         )}
       />
 
+      {hasDeepLinkFilters ? (
+        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+          {alertId ? (
+            <span>Showing the filtered intent slice linked from alert <span className="font-mono">{alertId}</span>.</span>
+          ) : (
+            <span>Showing a filtered intent slice.</span>
+          )}
+          <button className="ml-2 text-orange-600 hover:text-orange-700 dark:text-orange-300" onClick={clearFilters} type="button">
+            Clear filters
+          </button>
+        </div>
+      ) : null}
+
       <section className="panel">
         <div className="grid gap-3 lg:grid-cols-[1.6fr,0.8fr,0.8fr]">
           <label className="relative block">
@@ -151,15 +187,15 @@ export default function IntentsPage() {
               className="input-field pl-10"
               placeholder="Search nonce, Beam ID, intent type, error code"
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => updateSearchParam('q', event.target.value)}
             />
           </label>
-          <select className="input-field" value={status} onChange={(event) => setStatus(event.target.value)}>
+          <select className="input-field" value={status} onChange={(event) => updateSearchParam('status', event.target.value)}>
             {STATUS_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
           </select>
-          <select className="input-field" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
+          <select className="input-field" value={hours} onChange={(event) => updateSearchParam('hours', event.target.value)}>
             {WINDOW_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}

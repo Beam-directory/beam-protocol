@@ -124,6 +124,8 @@ If you want Dead Letter operations in the dashboard, open `Settings` and paste:
 - Bus URL: `http://localhost:8420`
 - Bus API key: the `BEAM_BUS_API_KEY` value from `ops/quickstart/.env`
 
+For the full operator workflow after login, including alert investigation, exports, and prune safeguards, continue with the [Operator Observability](/guide/operator-observability) guide.
+
 ## 7. Tear Down
 
 ```bash

@@ -20,6 +20,10 @@ npm run dev --workspace=packages/dashboard
 
 For a full local operator stack, use the hosted quickstart in [`ops/quickstart`](../../ops/quickstart) and then open `http://localhost:5173/login`.
 
+Admin setup, login flow, exports, and prune safety are documented in the operator guide:
+
+- [docs.beam.directory/guide/operator-observability](https://docs.beam.directory/guide/operator-observability)
+
 ## Pages
 
 - `/` overview with live stats from `GET /agents/stats`

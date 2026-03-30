@@ -20,6 +20,30 @@ import type {
 
 type BindValue = string | number | null
 type AlertSeverity = 'info' | 'warning' | 'critical'
+type AlertMetricUnit = 'ratio' | 'ms' | 'count'
+type AlertLinkSurface = 'trace' | 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
+
+type ObservabilityDatasetInfo = {
+  name: string
+  description: string
+  cascadesTo?: string[]
+}
+
+type AlertLink = {
+  label: string
+  href: string
+  surface: AlertLinkSurface
+}
+
+type AlertTraceSample = {
+  nonce: string
+  from: string
+  to: string
+  intentType: string
+  requestedAt: string
+  status: IntentLifecycleStatus
+  errorCode: string | null
+}
 
 type AlertItem = {
   id: string
@@ -30,7 +54,12 @@ type AlertItem = {
   metric: string
   value: number
   threshold: number
+  valueUnit: AlertMetricUnit
   startedAt: string
+  thresholdExplanation: string
+  severityReason: string
+  links: AlertLink[]
+  sampleTraces: AlertTraceSample[]
 }
 
 type IntentQuery = {
@@ -45,6 +74,53 @@ type IntentQuery = {
 }
 
 const DEFAULT_RETENTION_DAYS = Math.max(1, Number.parseInt(process.env['BEAM_OBSERVABILITY_RETENTION_DAYS'] ?? '30', 10) || 30)
+const OBSERVABILITY_DATASETS: ObservabilityDatasetInfo[] = [
+  {
+    name: 'intents',
+    description: 'Intent log rows with lifecycle status, latency, and error summary fields.',
+    cascadesTo: ['traces'],
+  },
+  {
+    name: 'traces',
+    description: 'Per-stage lifecycle events used to reconstruct nonce timelines.',
+  },
+  {
+    name: 'audit',
+    description: 'Administrative and federation control-plane events recorded by operators and services.',
+  },
+  {
+    name: 'shield',
+    description: 'Beam Shield hold and reject decisions with anomaly context.',
+  },
+]
+
+const EXPORT_DATASETS = [
+  {
+    dataset: 'intents',
+    formats: ['json', 'csv', 'ndjson'],
+    description: 'Snapshot filtered intent rows for incident review or handoff.',
+  },
+  {
+    dataset: 'audit',
+    formats: ['json', 'csv', 'ndjson'],
+    description: 'Export control-plane activity, role changes, and prune history.',
+  },
+  {
+    dataset: 'errors',
+    formats: ['json', 'csv', 'ndjson'],
+    description: 'Download aggregated error hotspots and affected routes.',
+  },
+  {
+    dataset: 'federation',
+    formats: ['json', 'csv', 'ndjson'],
+    description: 'Capture peer status, cache age, and trust assertions.',
+  },
+  {
+    dataset: 'alerts',
+    formats: ['json', 'csv', 'ndjson'],
+    description: 'Store the current heuristic alert set with threshold reasoning.',
+  },
+] as const
 
 function parseLimit(value: string | undefined, fallback: number, max = 500): number {
   const parsed = Number.parseInt(value ?? '', 10)
@@ -96,6 +172,21 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   } catch {
     return fallback
   }
+}
+
+function buildDashboardSearch(params: Record<string, string | number | undefined | null>): string {
+  const query = new URLSearchParams()
+
+  for (const [key, value] of Object.entries(params)) {
+    if (value === undefined || value === null || value === '') {
+      continue
+    }
+
+    query.set(key, String(value))
+  }
+
+  const serialized = query.toString()
+  return serialized ? `?${serialized}` : ''
 }
 
 function percentile(values: number[], pct: number): number | null {
@@ -162,6 +253,18 @@ function serializeTraceEvent(row: IntentTraceEventRow) {
     status: lifecycleStatus,
     timestamp: row.timestamp,
     details: parseJson<Record<string, unknown> | null>(row.details, null),
+  }
+}
+
+function serializeAlertTraceSample(row: IntentLogRow): AlertTraceSample {
+  return {
+    nonce: row.nonce,
+    from: row.from_beam_id,
+    to: row.to_beam_id,
+    intentType: row.intent_type,
+    requestedAt: row.requested_at,
+    status: normalizeIntentLifecycleStatus(row.status) ?? 'received',
+    errorCode: row.error_code ?? null,
   }
 }
 
@@ -846,15 +949,70 @@ function buildErrorsPayload(db: Database, windowHours: number) {
   }
 }
 
+function recentIntentSamples(
+  db: Database,
+  whereClause: string,
+  params: BindValue[],
+  limit = 3,
+): AlertTraceSample[] {
+  if (!whereClause.trim()) {
+    return []
+  }
+
+  const rows = db.prepare(`
+    SELECT *
+    FROM intent_log
+    ${whereClause}
+    ORDER BY requested_at DESC, id DESC
+    LIMIT ${limit}
+  `).all(...params) as IntentLogRow[]
+
+  return rows.map(serializeAlertTraceSample)
+}
+
+function buildAlertLinks(
+  alertId: string,
+  primaryPath: string,
+  primaryLabel: string,
+  primarySurface: AlertLinkSurface,
+  primaryParams: Record<string, string | number | undefined | null>,
+  extra: Array<{
+    path: string
+    label: string
+    surface: AlertLinkSurface
+    params?: Record<string, string | number | undefined | null>
+  }> = [],
+): AlertLink[] {
+  return [
+    {
+      label: primaryLabel,
+      href: `${primaryPath}${buildDashboardSearch({ alert: alertId, ...primaryParams })}`,
+      surface: primarySurface,
+    },
+    ...extra.map((entry) => ({
+      label: entry.label,
+      href: `${entry.path}${buildDashboardSearch({ alert: alertId, ...entry.params })}`,
+      surface: entry.surface,
+    })),
+  ]
+}
+
 function buildAlerts(db: Database, windowHours: number): AlertItem[] {
   const overview = buildOverviewPayload(db, windowHours)
   const errors = buildErrorsPayload(db, windowHours)
   const federation = buildFederationPayload(db)
   const alerts: AlertItem[] = []
+  const since = nowMinusHours(windowHours)
 
   const completedCount = overview.summary.successCount + overview.summary.errorCount
   const errorRate = completedCount > 0 ? overview.summary.errorCount / completedCount : 0
   if (completedCount >= 10 && errorRate >= 0.1) {
+    const sampleTraces = recentIntentSamples(
+      db,
+      "WHERE requested_at >= ? AND status IN ('failed', 'dead_letter')",
+      [since],
+    )
+    const latestNonce = sampleTraces[0]?.nonce
     alerts.push({
       id: 'network-error-rate',
       severity: errorRate >= 0.25 ? 'critical' : 'warning',
@@ -864,11 +1022,53 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'error_rate',
       value: round(errorRate, 4),
       threshold: 0.1,
-      startedAt: new Date().toISOString(),
+      valueUnit: 'ratio',
+      startedAt: sampleTraces[0]?.requestedAt ?? new Date().toISOString(),
+      thresholdExplanation: 'Beam raises this alert once completed intent failures cross 10% of the selected window.',
+      severityReason: errorRate >= 0.25
+        ? 'Critical because the network error rate is at or above the 25% escalation threshold.'
+        : 'Warning because the network error rate is above the 10% investigation threshold.',
+      links: buildAlertLinks(
+        'network-error-rate',
+        '/intents',
+        'Open failing intents',
+        'intents',
+        { status: 'error', hours: windowHours },
+        [
+          latestNonce
+            ? {
+              path: `/intents/${encodeURIComponent(latestNonce)}`,
+              label: 'Open latest failing trace',
+              surface: 'trace' as const,
+            }
+            : null,
+          latestNonce
+            ? {
+              path: '/audit',
+              label: 'Open audit for latest failing trace',
+              surface: 'audit' as const,
+              params: { target: latestNonce, hours: windowHours },
+            }
+            : null,
+          {
+            path: '/errors',
+            label: 'Open error dashboard',
+            surface: 'errors' as const,
+            params: { alert: 'network-error-rate' },
+          },
+        ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      ),
+      sampleTraces,
     })
   }
 
   if ((overview.summary.p95LatencyMs ?? 0) >= 2000) {
+    const sampleTraces = recentIntentSamples(
+      db,
+      'WHERE requested_at >= ? AND round_trip_latency_ms >= ?',
+      [since, 2000],
+    )
+    const latestNonce = sampleTraces[0]?.nonce
     alerts.push({
       id: 'network-latency-p95',
       severity: (overview.summary.p95LatencyMs ?? 0) >= 5000 ? 'critical' : 'warning',
@@ -878,11 +1078,47 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'p95_latency_ms',
       value: overview.summary.p95LatencyMs ?? 0,
       threshold: 2000,
-      startedAt: new Date().toISOString(),
+      valueUnit: 'ms',
+      startedAt: sampleTraces[0]?.requestedAt ?? new Date().toISOString(),
+      thresholdExplanation: 'Beam raises this alert once p95 round-trip latency crosses 2 seconds in the selected window.',
+      severityReason: (overview.summary.p95LatencyMs ?? 0) >= 5000
+        ? 'Critical because p95 latency crossed the 5 second escalation threshold.'
+        : 'Warning because p95 latency crossed the 2 second investigation threshold.',
+      links: buildAlertLinks(
+        'network-latency-p95',
+        '/intents',
+        'Open recent intents',
+        'intents',
+        { hours: windowHours },
+        [
+          latestNonce
+            ? {
+              path: `/intents/${encodeURIComponent(latestNonce)}`,
+              label: 'Open slowest recent trace',
+              surface: 'trace' as const,
+            }
+            : null,
+          latestNonce
+            ? {
+              path: '/audit',
+              label: 'Open audit for latest slow trace',
+              surface: 'audit' as const,
+              params: { target: latestNonce, hours: windowHours },
+            }
+            : null,
+        ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      ),
+      sampleTraces,
     })
   }
 
   if (overview.summary.inFlightOlderThan15m > 0) {
+    const sampleTraces = recentIntentSamples(
+      db,
+      "WHERE status NOT IN ('acked', 'failed', 'dead_letter') AND requested_at < ?",
+      [new Date(Date.now() - 15 * 60 * 1000).toISOString()],
+    )
+    const latestNonce = sampleTraces[0]?.nonce
     alerts.push({
       id: 'network-in-flight-backlog',
       severity: overview.summary.inFlightOlderThan15m >= 5 ? 'critical' : 'warning',
@@ -892,7 +1128,37 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'in_flight_older_than_15m',
       value: overview.summary.inFlightOlderThan15m,
       threshold: 1,
-      startedAt: new Date().toISOString(),
+      valueUnit: 'count',
+      startedAt: sampleTraces[0]?.requestedAt ?? new Date().toISOString(),
+      thresholdExplanation: 'Beam raises this alert when at least one intent has been in flight for more than 15 minutes.',
+      severityReason: overview.summary.inFlightOlderThan15m >= 5
+        ? 'Critical because five or more in-flight intents exceeded the 15 minute backlog threshold.'
+        : 'Warning because at least one in-flight intent exceeded the 15 minute backlog threshold.',
+      links: buildAlertLinks(
+        'network-in-flight-backlog',
+        '/intents',
+        'Open in-flight intents',
+        'intents',
+        { status: 'in_flight', hours: windowHours },
+        [
+          latestNonce
+            ? {
+              path: `/intents/${encodeURIComponent(latestNonce)}`,
+              label: 'Open oldest in-flight trace',
+              surface: 'trace' as const,
+            }
+            : null,
+          latestNonce
+            ? {
+              path: '/audit',
+              label: 'Open audit for oldest in-flight trace',
+              surface: 'audit' as const,
+              params: { target: latestNonce, hours: windowHours },
+            }
+            : null,
+        ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      ),
+      sampleTraces,
     })
   }
 
@@ -906,7 +1172,28 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'stale_peers',
       value: federation.summary.stalePeers,
       threshold: 1,
+      valueUnit: 'count',
       startedAt: new Date().toISOString(),
+      thresholdExplanation: 'Beam raises this alert when at least one federated peer is stale or has stopped syncing.',
+      severityReason: federation.summary.stalePeers >= 2
+        ? 'Critical because two or more federation peers are stale.'
+        : 'Warning because at least one federation peer is stale.',
+      links: buildAlertLinks(
+        'federation-stale-peers',
+        '/federation',
+        'Open federation health',
+        'federation',
+        {},
+        [
+          {
+            path: '/audit',
+            label: 'Open federation audit history',
+            surface: 'audit' as const,
+            params: { q: 'federation', hours: windowHours },
+          },
+        ],
+      ),
+      sampleTraces: [],
     })
   }
 
@@ -921,6 +1208,18 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
   const rejected = shieldRow?.rejected ?? 0
   const held = shieldRow?.held ?? 0
   if (rejected >= 3 || held >= 5) {
+    const sampleTraces = recentIntentSamples(
+      db,
+      `WHERE nonce IN (
+        SELECT nonce
+        FROM shield_audit_log
+        WHERE created_at >= ? AND decision IN ('reject', 'hold') AND nonce IS NOT NULL
+        ORDER BY created_at DESC, id DESC
+        LIMIT 3
+      )`,
+      [since],
+    )
+    const latestNonce = sampleTraces[0]?.nonce
     alerts.push({
       id: 'shield-review-load',
       severity: rejected >= 5 ? 'critical' : 'warning',
@@ -930,12 +1229,46 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'shield_flagged_events',
       value: rejected + held,
       threshold: 5,
-      startedAt: new Date().toISOString(),
+      valueUnit: 'count',
+      startedAt: sampleTraces[0]?.requestedAt ?? new Date().toISOString(),
+      thresholdExplanation: 'Beam raises this alert when Shield records at least three rejects or five held requests in the selected window.',
+      severityReason: rejected >= 5
+        ? 'Critical because Shield recorded five or more rejected requests.'
+        : 'Warning because Shield review volume crossed the hold and reject thresholds.',
+      links: buildAlertLinks(
+        'shield-review-load',
+        '/audit',
+        'Open Shield audit history',
+        'audit',
+        { q: 'shield', hours: windowHours },
+        [
+          latestNonce
+            ? {
+              path: `/intents/${encodeURIComponent(latestNonce)}`,
+              label: 'Open latest flagged trace',
+              surface: 'trace' as const,
+            }
+            : null,
+          {
+            path: '/alerts',
+            label: 'Open alert feed',
+            surface: 'alerts' as const,
+            params: { hours: windowHours },
+          },
+        ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      ),
+      sampleTraces,
     })
   }
 
   const topError = errors.codes[0]
   if (topError && topError.count >= 5) {
+    const sampleTraces = recentIntentSamples(
+      db,
+      "WHERE requested_at >= ? AND error_code = ? AND status IN ('failed', 'dead_letter')",
+      [since, topError.errorCode],
+    )
+    const latestNonce = sampleTraces[0]?.nonce
     alerts.push({
       id: `error-hotspot-${topError.errorCode.toLowerCase()}`,
       severity: topError.count >= 10 ? 'critical' : 'warning',
@@ -945,7 +1278,43 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
       metric: 'error_code_count',
       value: topError.count,
       threshold: 5,
+      valueUnit: 'count',
       startedAt: topError.lastSeenAt,
+      thresholdExplanation: 'Beam raises this alert when the same error code occurs at least five times in the selected window.',
+      severityReason: topError.count >= 10
+        ? `Critical because ${topError.errorCode} crossed the 10 failure escalation threshold.`
+        : `Warning because ${topError.errorCode} crossed the 5 failure investigation threshold.`,
+      links: buildAlertLinks(
+        `error-hotspot-${topError.errorCode.toLowerCase()}`,
+        '/intents',
+        `Open ${topError.errorCode} intents`,
+        'intents',
+        { status: 'error', q: topError.errorCode, hours: windowHours },
+        [
+          latestNonce
+            ? {
+              path: `/intents/${encodeURIComponent(latestNonce)}`,
+              label: 'Open latest hotspot trace',
+              surface: 'trace' as const,
+            }
+            : null,
+          latestNonce
+            ? {
+              path: '/audit',
+              label: 'Open audit for latest hotspot trace',
+              surface: 'audit' as const,
+              params: { target: latestNonce, hours: windowHours },
+            }
+            : null,
+          {
+            path: '/errors',
+            label: 'Open error analytics',
+            surface: 'errors' as const,
+            params: { alert: `error-hotspot-${topError.errorCode.toLowerCase()}` },
+          },
+        ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      ),
+      sampleTraces,
     })
   }
 
@@ -1045,6 +1414,32 @@ function pruneDataset(db: Database, dataset: string, olderThanDays: number): { d
     case 'shield': {
       const result = db.prepare('DELETE FROM shield_audit_log WHERE created_at < ?').run(cutoff)
       return { deleted: result.changes }
+    }
+    default:
+      throw new Error(`Unsupported dataset: ${dataset}`)
+  }
+}
+
+function previewPruneDataset(db: Database, dataset: string, olderThanDays: number): { deleted: number; extra?: Record<string, number> } {
+  const cutoff = nowMinusDays(olderThanDays)
+
+  switch (dataset) {
+    case 'intents': {
+      const intents = (db.prepare('SELECT COUNT(*) AS count FROM intent_log WHERE requested_at < ?').get(cutoff) as { count: number } | undefined)?.count ?? 0
+      const traces = (db.prepare('SELECT COUNT(*) AS count FROM intent_trace_events WHERE timestamp < ?').get(cutoff) as { count: number } | undefined)?.count ?? 0
+      return { deleted: intents + traces, extra: { intents, traces } }
+    }
+    case 'traces': {
+      const deleted = (db.prepare('SELECT COUNT(*) AS count FROM intent_trace_events WHERE timestamp < ?').get(cutoff) as { count: number } | undefined)?.count ?? 0
+      return { deleted }
+    }
+    case 'audit': {
+      const deleted = (db.prepare('SELECT COUNT(*) AS count FROM audit_log WHERE timestamp < ?').get(cutoff) as { count: number } | undefined)?.count ?? 0
+      return { deleted }
+    }
+    case 'shield': {
+      const deleted = (db.prepare('SELECT COUNT(*) AS count FROM shield_audit_log WHERE created_at < ?').get(cutoff) as { count: number } | undefined)?.count ?? 0
+      return { deleted }
     }
     default:
       throw new Error(`Unsupported dataset: ${dataset}`)
@@ -1188,15 +1583,12 @@ export function observabilityRouter(db: Database): Hono {
       alerts: buildAlerts(db, windowHours),
       retention: {
         defaultDays: DEFAULT_RETENTION_DAYS,
-        datasets: ['intents', 'traces', 'audit', 'shield'],
+        minimumDays: 1,
+        confirmPhrasePrefix: 'prune',
+        datasets: OBSERVABILITY_DATASETS.map((dataset) => dataset.name),
+        details: OBSERVABILITY_DATASETS,
       },
-      exports: [
-        { dataset: 'intents', formats: ['json', 'csv', 'ndjson'] },
-        { dataset: 'audit', formats: ['json', 'csv', 'ndjson'] },
-        { dataset: 'errors', formats: ['json', 'csv', 'ndjson'] },
-        { dataset: 'federation', formats: ['json', 'csv', 'ndjson'] },
-        { dataset: 'alerts', formats: ['json', 'csv', 'ndjson'] },
-      ],
+      exports: EXPORT_DATASETS,
     })
   })
 
@@ -1208,8 +1600,40 @@ export function observabilityRouter(db: Database): Hono {
 
     return c.json({
       defaultDays: DEFAULT_RETENTION_DAYS,
-      datasets: ['intents', 'traces', 'audit', 'shield'],
+      minimumDays: 1,
+      confirmPhrasePrefix: 'prune',
+      datasets: OBSERVABILITY_DATASETS.map((dataset) => dataset.name),
+      details: OBSERVABILITY_DATASETS,
     })
+  })
+
+  router.get('/prune-preview', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const dataset = String(c.req.query('dataset') ?? '').trim()
+    const olderThanDays = parseDays(c.req.query('olderThanDays'), DEFAULT_RETENTION_DAYS)
+
+    if (!dataset) {
+      return c.json({ error: 'dataset is required', errorCode: 'INVALID_PRUNE' }, 400)
+    }
+
+    try {
+      const result = previewPruneDataset(db, dataset, olderThanDays)
+      return c.json({
+        dataset,
+        olderThanDays,
+        wouldDelete: result.deleted,
+        ...result.extra,
+      })
+    } catch (err) {
+      return c.json({
+        error: err instanceof Error ? err.message : 'Failed to preview prune dataset',
+        errorCode: 'PRUNE_PREVIEW_ERROR',
+      }, 400)
+    }
   })
 
   router.get('/export/:dataset', (c) => {
@@ -1303,9 +1727,18 @@ export function observabilityRouter(db: Database): Hono {
       raw.olderThanDays == null ? undefined : String(raw.olderThanDays),
       DEFAULT_RETENTION_DAYS,
     )
+    const confirmDataset = String(raw.confirmDataset ?? '').trim()
+    const confirmPhrase = String(raw.confirmPhrase ?? '').trim()
 
     if (!dataset) {
       return c.json({ error: 'dataset is required', errorCode: 'INVALID_PRUNE' }, 400)
+    }
+
+    if (confirmDataset !== dataset || confirmPhrase !== `prune ${dataset}`) {
+      return c.json({
+        error: 'Prune confirmation is required. Repeat the dataset name and the phrase exactly.',
+        errorCode: 'PRUNE_CONFIRMATION_REQUIRED',
+      }, 400)
     }
 
     try {

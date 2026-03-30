@@ -185,10 +185,63 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
     }))
 
     assert.equal(response.status, 200)
-    const payload = await response.json() as { alerts: Array<{ id: string }> }
+    const payload = await response.json() as {
+      alerts: Array<{
+        id: string
+        thresholdExplanation: string
+        links: Array<{ href: string }>
+        sampleTraces: Array<{ nonce: string }>
+      }>
+    }
 
-    assert.ok(payload.alerts.some((alert) => alert.id === 'network-error-rate'))
-    assert.ok(payload.alerts.some((alert) => alert.id === 'error-hotspot-timeout'))
+    const errorRateAlert = payload.alerts.find((alert) => alert.id === 'network-error-rate')
+    const hotspotAlert = payload.alerts.find((alert) => alert.id === 'error-hotspot-timeout')
+
+    assert.ok(errorRateAlert)
+    if (!errorRateAlert) {
+      throw new Error('Expected network-error-rate alert to exist')
+    }
+    assert.match(errorRateAlert.thresholdExplanation, /10%/)
+    assert.ok(errorRateAlert.links.some((link) => link.href.includes('/intents?')))
+    assert.equal(errorRateAlert.sampleTraces[0]?.nonce, 'error-9')
+
+    assert.ok(hotspotAlert)
+    if (!hotspotAlert) {
+      throw new Error('Expected error-hotspot-timeout alert to exist')
+    }
+    assert.ok(hotspotAlert.links.some((link) => link.href.includes('/audit?')))
+  } finally {
+    db.close()
+  }
+})
+
+test('prune preview returns dataset impact before destructive action', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    registerFixtureAgents(db)
+    const oldTimestamp = new Date(Date.now() - 60 * 24 * 60 * 60 * 1000).toISOString()
+    const frame = createFrame('preview-intent', oldTimestamp)
+
+    logIntentStart(db, frame)
+    appendIntentTraceEvent(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      intentType: frame.intent,
+      stage: 'received',
+      timestamp: oldTimestamp,
+    })
+
+    const app = createApp(db)
+    const response = await app.request(new Request('http://localhost/observability/prune-preview?dataset=intents&olderThanDays=30', {
+      headers: createAdminHeaders(db),
+    }))
+
+    assert.equal(response.status, 200)
+    const payload = await response.json() as { wouldDelete: number; intents: number; traces: number }
+    assert.equal(payload.intents, 1)
+    assert.equal(payload.traces, 1)
+    assert.equal(payload.wouldDelete, 2)
   } finally {
     db.close()
   }
@@ -218,7 +271,12 @@ test('prune endpoint removes aged intents and trace records', async () => {
         'content-type': 'application/json',
         ...createAdminHeaders(db),
       },
-      body: JSON.stringify({ dataset: 'intents', olderThanDays: 30 }),
+      body: JSON.stringify({
+        dataset: 'intents',
+        olderThanDays: 30,
+        confirmDataset: 'intents',
+        confirmPhrase: 'prune intents',
+      }),
     }))
 
     assert.equal(response.status, 200)
@@ -267,12 +325,44 @@ test('prune endpoint rejects read-only sessions', async () => {
         'content-type': 'application/json',
         ...createAdminHeaders(db, 'viewer@example.com', 'viewer'),
       },
-      body: JSON.stringify({ dataset: 'intents', olderThanDays: 30 }),
+      body: JSON.stringify({
+        dataset: 'intents',
+        olderThanDays: 30,
+        confirmDataset: 'intents',
+        confirmPhrase: 'prune intents',
+      }),
     }))
 
     assert.equal(response.status, 403)
     const payload = await response.json() as { errorCode: string }
     assert.equal(payload.errorCode, 'FORBIDDEN')
+  } finally {
+    db.close()
+  }
+})
+
+test('prune endpoint rejects missing confirmation phrase', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    registerFixtureAgents(db)
+    const app = createApp(db)
+    const response = await app.request(new Request('http://localhost/observability/prune', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...createAdminHeaders(db),
+      },
+      body: JSON.stringify({
+        dataset: 'intents',
+        olderThanDays: 30,
+        confirmDataset: 'intents',
+        confirmPhrase: 'delete intents',
+      }),
+    }))
+
+    assert.equal(response.status, 400)
+    const payload = await response.json() as { errorCode: string }
+    assert.equal(payload.errorCode, 'PRUNE_CONFIRMATION_REQUIRED')
   } finally {
     db.close()
   }
