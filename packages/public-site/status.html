@@ -83,7 +83,7 @@
       </div>
       <div class="card">
         <div class="metric-label">Status source</div>
-        <div class="metric-value mono">https://api.beam.directory/health</div>
+        <div class="metric-value mono">/health + /stats</div>
         <div class="metric-sub">WebSocket check: <span class="mono">wss://api.beam.directory/ws?feed=intents</span></div>
       </div>
     </section>
@@ -109,6 +109,16 @@
         <div class="metric-value" id="uptime">—</div>
         <div class="metric-sub">Reported in seconds by the directory</div>
       </div>
+      <div class="card">
+        <div class="metric-label">Release</div>
+        <div class="metric-value" id="release-version">—</div>
+        <div class="metric-sub" id="release-detail">Waiting for release metadata</div>
+      </div>
+      <div class="card">
+        <div class="metric-label">Deploy truth</div>
+        <div class="metric-value" id="release-truth">—</div>
+        <div class="metric-sub" id="release-truth-detail">Waiting for cross-endpoint comparison</div>
+      </div>
     </section>
 
     <section class="checks">
@@ -131,6 +141,7 @@
 
   <script>
     const HEALTH_URL = 'https://api.beam.directory/health';
+    const STATS_URL = 'https://api.beam.directory/stats';
     const WS_URL = 'wss://api.beam.directory/ws?feed=intents';
     const REFRESH_MS = 30_000;
 
@@ -143,6 +154,10 @@
       wsDetail: document.getElementById('ws-detail'),
       connectedAgents: document.getElementById('connected-agents'),
       uptime: document.getElementById('uptime'),
+      releaseVersion: document.getElementById('release-version'),
+      releaseDetail: document.getElementById('release-detail'),
+      releaseTruth: document.getElementById('release-truth'),
+      releaseTruthDetail: document.getElementById('release-truth-detail'),
       httpBadge: document.getElementById('http-badge'),
       httpPayload: document.getElementById('http-payload'),
       socketBadge: document.getElementById('socket-badge'),
@@ -170,23 +185,60 @@
       return `${seconds}s`;
     }
 
+    function extractRelease(payload) {
+      const release = payload && typeof payload === 'object' && payload.release && typeof payload.release === 'object'
+        ? payload.release
+        : payload || {};
+
+      return {
+        version: typeof release.version === 'string' ? release.version : '—',
+        gitSha: typeof release.gitSha === 'string' ? release.gitSha : (typeof payload.gitSha === 'string' ? payload.gitSha : null),
+        deployedAt: typeof release.deployedAt === 'string' ? release.deployedAt : (typeof payload.deployedAt === 'string' ? payload.deployedAt : null),
+      };
+    }
+
+    function sameRelease(left, right) {
+      return left.version === right.version
+        && (left.gitSha || '') === (right.gitSha || '')
+        && (left.deployedAt || '') === (right.deployedAt || '');
+    }
+
     async function checkHttp() {
       const startedAt = performance.now();
-      const response = await fetch(HEALTH_URL, { cache: 'no-store' });
+      const [healthResponse, statsResponse] = await Promise.all([
+        fetch(HEALTH_URL, { cache: 'no-store' }),
+        fetch(STATS_URL, { cache: 'no-store' }),
+      ]);
       const latency = Math.round(performance.now() - startedAt);
-      const payload = await response.json().catch(() => ({}));
+      const healthPayload = await healthResponse.json().catch(() => ({}));
+      const statsPayload = await statsResponse.json().catch(() => ({}));
 
-      if (!response.ok) {
-        throw new Error(`HTTP ${response.status}`);
+      if (!healthResponse.ok || !statsResponse.ok) {
+        throw new Error(`health ${healthResponse.status} / stats ${statsResponse.status}`);
       }
 
       setBadge(elements.httpBadge, 'ok', `Healthy · ${latency} ms`);
-      elements.httpPayload.textContent = JSON.stringify(payload, null, 2);
-      elements.apiStatus.textContent = String(payload.status || 'ok').toUpperCase();
-      elements.apiDetail.textContent = `${latency} ms · ${payload.protocol || 'beam/1'}`;
-      elements.connectedAgents.textContent = String(payload.connectedAgents ?? '—');
-      elements.uptime.textContent = formatUptime(payload.uptimeSeconds);
-      return { ok: true, payload, latency };
+      elements.httpPayload.textContent = JSON.stringify({ health: healthPayload, stats: statsPayload }, null, 2);
+      elements.apiStatus.textContent = String(healthPayload.status || 'ok').toUpperCase();
+      elements.apiDetail.textContent = `${latency} ms · ${healthPayload.protocol || 'beam/1'}`;
+      elements.connectedAgents.textContent = String(healthPayload.connectedAgents ?? '—');
+      elements.uptime.textContent = formatUptime(healthPayload.uptimeSeconds);
+
+      const healthRelease = extractRelease(healthPayload);
+      const statsRelease = extractRelease(statsPayload);
+      const consistent = sameRelease(healthRelease, statsRelease);
+
+      elements.releaseVersion.textContent = healthRelease.version;
+      elements.releaseDetail.textContent = [
+        healthRelease.gitSha ? healthRelease.gitSha.slice(0, 12) : 'no sha',
+        healthRelease.deployedAt ? new Date(healthRelease.deployedAt).toLocaleString() : 'no deploy time',
+      ].join(' · ');
+      elements.releaseTruth.textContent = consistent ? 'MATCH' : 'DRIFT';
+      elements.releaseTruthDetail.textContent = consistent
+        ? 'health and stats agree on the live release metadata.'
+        : 'health and stats disagree on version, git SHA, or deploy time.';
+
+      return { ok: true, consistent, healthPayload, statsPayload, latency };
     }
 
     function checkWebSocket() {
@@ -220,10 +272,12 @@
       elements.lastRefresh.textContent = new Date().toLocaleString();
       let httpOk = false;
       let wsOk = false;
+      let releaseConsistent = false;
 
       try {
-        await checkHttp();
+        const result = await checkHttp();
         httpOk = true;
+        releaseConsistent = Boolean(result.consistent);
       } catch (error) {
         setBadge(elements.httpBadge, 'err', 'Unavailable');
         elements.httpPayload.textContent = error instanceof Error ? error.message : 'HTTP check failed';
@@ -231,6 +285,10 @@
         elements.apiDetail.textContent = 'Health endpoint unavailable';
         elements.connectedAgents.textContent = '—';
         elements.uptime.textContent = '—';
+        elements.releaseVersion.textContent = '—';
+        elements.releaseDetail.textContent = 'Release metadata unavailable';
+        elements.releaseTruth.textContent = 'UNKNOWN';
+        elements.releaseTruthDetail.textContent = 'Could not compare health and stats.';
       }
 
       try {
@@ -243,7 +301,7 @@
         elements.wsDetail.textContent = 'Handshake failed';
       }
 
-      if (httpOk && wsOk) {
+      if (httpOk && wsOk && releaseConsistent) {
         setOverall('ok', 'All core services operational');
       } else if (httpOk || wsOk) {
         setOverall('warn', 'Partial degradation detected');
