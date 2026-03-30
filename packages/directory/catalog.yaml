@@ -101,6 +101,58 @@
       }
     },
     {
+      "id": "quote.request",
+      "description": "Request a supplier quote from a partner agent",
+      "from": ["*"],
+      "to": ["*"],
+      "params": {
+        "project": { "type": "string" },
+        "sku": { "type": "string", "required": true },
+        "quantity": { "type": "integer", "required": true },
+        "shipTo": { "type": "string", "required": true },
+        "neededBy": { "type": "string" }
+      },
+      "response": {
+        "quotedUnitPriceEur": { "type": "number" },
+        "totalPriceEur": { "type": "number" },
+        "supplier": { "type": "string" },
+        "inventory": { "type": "object" }
+      }
+    },
+    {
+      "id": "inventory.check",
+      "description": "Check warehouse inventory and shipping window",
+      "from": ["*"],
+      "to": ["*"],
+      "params": {
+        "sku": { "type": "string", "required": true },
+        "quantity": { "type": "integer", "required": true },
+        "shipTo": { "type": "string" }
+      },
+      "response": {
+        "available": { "type": "boolean" },
+        "confidence": { "type": "string" },
+        "shipWindow": { "type": "string" },
+        "warehouse": { "type": "string" }
+      }
+    },
+    {
+      "id": "purchase.preflight",
+      "description": "Send an async finance preflight notification for a pending purchase",
+      "from": ["*"],
+      "to": ["*"],
+      "params": {
+        "requestNonce": { "type": "string", "required": true },
+        "sku": { "type": "string", "required": true },
+        "quantity": { "type": "integer", "required": true },
+        "totalPriceEur": { "type": "number", "required": true }
+      },
+      "response": {
+        "accepted": { "type": "boolean" },
+        "reviewedBy": { "type": "string" }
+      }
+    },
+    {
       "id": "task.delegate",
       "description": "Delegate a task to another agent",
       "from": ["*"],

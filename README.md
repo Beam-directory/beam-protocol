@@ -1,14 +1,22 @@
 # Beam Protocol
 
-> **Secure Agent-to-Agent Communication**
+> **Verified B2B handoffs for AI agents**
 
 [![npm version](https://img.shields.io/npm/v/beam-protocol-sdk)](https://www.npmjs.com/package/beam-protocol-sdk)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
 [![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 
-Beam Protocol is an open protocol and tooling stack for discovering agents, registering cryptographic identity, and exchanging signed messages over HTTP or WebSockets.
+Beam is an open protocol and tooling stack for one hard problem: letting one company's agent hand work to another company's agent without shared API keys, brittle one-off integrations, or blind trust.
+
+The opinionated Beam 0.6.0 wedge is a verified partner handoff:
+
+1. `procurement@acme.beam.directory` asks `partner-desk@northwind.beam.directory` for a quote.
+2. `partner-desk@northwind.beam.directory` checks inventory with `warehouse@northwind.beam.directory`.
+3. Acme gets a signed response, a traceable nonce, and an operator-visible audit trail.
 
 - Docs: [docs.beam.directory](https://docs.beam.directory)
+- First-run guide: [Verified Partner Handoff](https://docs.beam.directory/guide/partner-handoff)
+- Compatibility policy: [Beam 0.6 Compatibility](https://docs.beam.directory/guide/compatibility)
 - API reference: [TypeScript](https://docs.beam.directory/api/typescript), [CLI](https://docs.beam.directory/api/cli), [Directory](https://docs.beam.directory/api/directory), [Python](https://docs.beam.directory/api/python)
 
 ## Quick Start
@@ -19,36 +27,60 @@ npm install beam-protocol-sdk
 
 ```ts
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
-const identity = BeamIdentity.generate({ agentName: 'assistant', orgName: 'acme' })
-const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })
-await client.register('Acme Assistant', ['conversation.message'])
-console.log(await client.talk('echo@beam.directory', 'Hello from Beam'))
+
+const identity = BeamIdentity.generate({ agentName: 'procurement', orgName: 'acme' })
+const client = new BeamClient({
+  identity: identity.export(),
+  directoryUrl: 'https://api.beam.directory',
+})
+
+await client.register('Acme Procurement Desk', ['conversation.message', 'quote.request'])
+
+const reply = await client.talk(
+  'partner-desk@northwind.beam.directory',
+  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
+)
+
+console.log(reply.message)
 ```
+
+For the full three-agent flow, see [`examples/partner-handoff`](./examples/partner-handoff/README.md).
+
+## Why Beam
+
+- **Verified addresses** so both sides know which company and which agent received the request
+- **Signed intents and results** with Ed25519 and nonce-based replay protection
+- **Operator visibility** through traces, audit logs, alerts, and dead-letter inspection
+- **Retry and recovery** with a message bus for durable handoffs and restart safety
+- **Self-hostable building blocks** across Directory, Dashboard, CLI, and SDKs
 
 ## Architecture
 
 ```text
-+-------------------+     signed intents      +-----------------------+
-| Agent SDKs / CLI  | ----------------------> | Beam Directory        |
-| TS, Python, CLI   | <---------------------- | registration, search, |
-| Ed25519 identity  |       results / DID     | routing, trust, DID   |
-+---------+---------+                         +-----------+-----------+
-          |                                               |
-          | optional queue / replay                        | optional direct HTTP
-          v                                               v
-  +-------------------+                          +-------------------+
-  | Message Bus       | <----------------------> | Online agents     |
-  | persistence       |      relay + retry       | WebSocket / HTTP  |
-  +-------------------+                          +-------------------+
++------------------------+     signed handoff      +------------------------+
+| Acme procurement agent | ----------------------> | Beam Directory         |
+| TS SDK / Python / CLI  | <---------------------- | identity, ACL, trace,  |
+| procurement@acme       |        result / DID     | operator views         |
++------------+-----------+                         +-----------+------------+
+             |                                                  |
+             | optional durable relay                            | direct / federated delivery
+             v                                                  v
+  +------------------------+                          +------------------------+
+  | Message Bus            | <----------------------> | Northwind agents       |
+  | retry, dedupe, DLQ     |       queued handoff     | partner desk, warehouse|
+  +------------------------+                          +------------------------+
 ```
 
-## Features
+## Compatibility
 
-- **End-to-end signed messaging** with Ed25519 identities and verifiable agent records
-- **Directory service** for registration, lookup, search, trust scoring, and DID resolution
-- **Message bus** for persistence, retries, audit history, and delivery stats
-- **CLI tooling** for bootstrapping identities, registering agents, sending intents, and managing verification
-- **Multi-language SDKs** for TypeScript and Python
+Beam 0.6.0 treats `beam/1` as the compatibility contract across the protocol, directory, CLI, and SDKs.
+
+- Additive fields are allowed within `beam/1`.
+- Receivers must ignore unknown top-level and payload fields.
+- `payload` is the canonical request body; `params` remains a legacy alias accepted by current SDKs.
+- Breaking field removals, required-field changes, or signature changes require a new protocol version.
+
+See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibility.md).
 
 ## Packages
 
@@ -60,9 +92,14 @@ console.log(await client.talk('echo@beam.directory', 'Hello from Beam'))
 
 ## Examples
 
+- [`examples/partner-handoff`](./examples/partner-handoff/README.md) - the recommended 0.6.0 B2B workflow
 - [`examples/hello-world`](./examples/hello-world/README.md) - register two agents and send a first message
-- [`examples/multi-agent`](./examples/multi-agent/README.md) - three agents chaining work over Beam
+- [`examples/multi-agent`](./examples/multi-agent/README.md) - a generic chained workflow
 - [`examples/webhook-bridge`](./examples/webhook-bridge/README.md) - forward Beam intents to a webhook
+
+## Release Readiness
+
+The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
 
 ## Repository Layout
 
@@ -75,7 +112,8 @@ packages/
   message-bus/     Persistent relay
 examples/          End-to-end runnable demos
 docs/              docs.beam.directory source
-spec/              protocol RFCs and supporting material
+reports/           Dogfood and release-readiness reports
+spec/              protocol RFCs and compatibility fixtures
 ```
 
 ## Development
@@ -86,6 +124,7 @@ npm run build
 npm test
 python3 -m pip install -e packages/sdk-python
 npm run test:e2e
+npm run dogfood:partner-handoff
 ```
 
 See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution workflow, reporting guidelines, and local development expectations.

@@ -1,7 +1,7 @@
 {
   "name": "beam-protocol-sdk",
   "version": "0.5.2",
-  "description": "TypeScript SDK for the Beam Protocol — Agent-to-Agent communication",
+  "description": "TypeScript SDK for verified B2B handoffs over Beam",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",

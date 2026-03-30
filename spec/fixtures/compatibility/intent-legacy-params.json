@@ -1,0 +1,18 @@
+{
+  "v": "1",
+  "intent": "quote.request",
+  "from": "procurement@acme.beam.directory",
+  "to": "partner-desk@northwind.beam.directory",
+  "params": {
+    "sku": "INV-240",
+    "quantity": 240,
+    "shipTo": "Mannheim, DE"
+  },
+  "nonce": "compat-quote-request-legacy-001",
+  "timestamp": "__NOW__",
+  "signature": "compat-legacy-signature",
+  "traceId": "compat-trace-legacy-001",
+  "extensions": {
+    "preferredCurrency": "EUR"
+  }
+}

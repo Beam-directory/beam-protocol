@@ -2,6 +2,15 @@
 
 `BeamClient` covers registration, profile management, verification, browsing, delegations, reports, and intent delivery.
 
+## Compatibility contract
+
+`beam-protocol-sdk` 0.6 targets `beam/1`.
+
+- additive request and response fields are allowed
+- the SDK tolerates unknown fields in current frame validation and directory responses
+- new producers should emit `payload`; legacy `params` remains accepted by the Python SDK and compatibility fixtures
+- any signature canonicalization change is a protocol-version change, not a minor SDK change
+
 ## Constructor
 
 ```ts
@@ -32,7 +41,7 @@ The SDK accepts both:
 ### `register(displayName, capabilities)`
 
 ```ts
-await client.register('Planner', ['query.text', 'booking.request'])
+await client.register('Acme Procurement Desk', ['conversation.message', 'quote.request'])
 
 // The returned record includes `apiKey` on first registration.
 ```
@@ -120,9 +129,9 @@ await client.report('spammy@beam.directory', 'Impersonation attempt')
 
 ```ts
 const result = await client.send(
-  'search@beam.directory',
-  'query.text',
-  { text: 'latest ticket status' },
+  'partner-desk@northwind.beam.directory',
+  'quote.request',
+  { sku: 'INV-240', quantity: 240, shipTo: 'Mannheim, DE' },
   30_000,
 )
 ```
@@ -134,7 +143,10 @@ Ed25519 private key immediately.
 ### `talk(to, message, options?)`
 
 ```ts
-const reply = await client.talk('assistant@beam.directory', 'Summarize the last five incidents.')
+const reply = await client.talk(
+  'partner-desk@northwind.beam.directory',
+  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
+)
 ```
 
 ### `thread(to, options?)`

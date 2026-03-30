@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "partner-handoff": "tsx partner-handoff/index.ts",
     "hello-world": "tsx hello-world/index.ts",
     "multi-agent": "tsx multi-agent/index.ts",
     "webhook-bridge": "tsx webhook-bridge/index.ts"

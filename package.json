@@ -1,7 +1,7 @@
 {
   "name": "beam-protocol",
   "version": "0.5.2",
-  "description": "Open Agent-to-Agent communication protocol — SMTP for AI Agents",
+  "description": "Verified B2B handoffs for AI agents",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -9,6 +9,7 @@
   "scripts": {
     "build": "npm run build:workspaces",
     "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus",
+    "dogfood:partner-handoff": "node scripts/dogfood/partner-handoff.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "node scripts/e2e/run.mjs",

@@ -8,6 +8,15 @@ The Beam directory handles registration, discovery, relay, and operational visib
 https://api.beam.directory
 ```
 
+## Compatibility contract
+
+The current directory family is `beam/1`.
+
+- request and response additions must remain backward compatible inside `beam/1`
+- unknown top-level fields must be ignored rather than rejected
+- `payload` is canonical for intent bodies; current SDKs still accept legacy `params`
+- breaking request validation, signature input, or required-field changes require a new protocol family rather than a silent patch
+
 ## `POST /register`
 
 In the current server implementation, agent registration is exposed as `POST /agents/register`.

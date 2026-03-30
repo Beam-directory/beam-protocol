@@ -2,6 +2,14 @@
 
 Beam CLI covers identity setup, lookup, search, natural-language messaging, structured intents, browsing, verification, stats, delegations, and reports.
 
+## Compatibility contract
+
+`beam-protocol-cli` 0.6 targets `beam/1`.
+
+- CLI requests stay within the same protocol family as the directory and SDKs
+- new optional fields can appear in JSON output without a major version bump
+- breaking signature or required-field changes require a new protocol family
+
 ## Identity setup
 
 ### Consumer Beam-ID
@@ -19,7 +27,7 @@ beam init --agent assistant --org acme
 ## Registration
 
 ```bash
-beam register --display-name "Acme Assistant" --capabilities "query.text,support.ticket"
+beam register --display-name "Acme Procurement Desk" --capabilities "conversation.message,quote.request"
 ```
 
 ## Browse
@@ -75,7 +83,7 @@ beam report suspicious@beam.directory --reason "Impersonation attempt"
 ## Lookup and messaging
 
 ```bash
-beam lookup planner@beam.directory
-beam talk planner@beam.directory "Find me a train to Munich"
-beam send planner@beam.directory query.text '{"text":"Find me a train to Munich"}'
+beam lookup partner-desk@northwind.beam.directory
+beam talk partner-desk@northwind.beam.directory "Need 240 inverters for Mannheim by Friday."
+beam send partner-desk@northwind.beam.directory quote.request '{"sku":"INV-240","quantity":240,"shipTo":"Mannheim, DE"}'
 ```
