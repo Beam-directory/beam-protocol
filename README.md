@@ -8,6 +8,8 @@
 
 Beam is an open protocol and tooling stack for one hard problem: letting one company's agent hand work to another company's agent without shared API keys, brittle one-off integrations, or blind trust.
 
+If you are evaluating Beam, start from the hosted demo before reading the rest of the repo. The right first question is not "what could this protocol become?" but "does this handoff feel trustworthy and operable now?"
+
 The opinionated Beam 0.6.0 wedge is a verified partner handoff:
 
 1. `procurement@acme.beam.directory` asks `partner-desk@northwind.beam.directory` for a quote.
@@ -30,6 +32,13 @@ npm run demo:run
 ```
 
 That boots the local directory, dashboard, message bus, and seeded Acme/Northwind demo agents so you can run the exact hosted partner handoff used in dogfood and operator docs.
+
+What you should see on the happy path:
+
+- a signed quote back from `partner-desk@northwind.beam.directory`
+- an async finance preflight accepted through the message bus
+- a traceable nonce through directory observability
+- zero alerts and zero dead letters on the baseline hosted-demo pass
 
 ## SDK Example
 
