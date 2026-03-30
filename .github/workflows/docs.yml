@@ -37,13 +37,10 @@ jobs:
         run: |
           test -f docs/.vitepress/dist/CNAME
           grep -qx 'docs.beam.directory' docs/.vitepress/dist/CNAME
-      - name: Package Pages artifact
-        run: tar -czf github-pages.tar.gz -C docs/.vitepress/dist .
       - uses: actions/configure-pages@v6
-      - uses: actions/upload-artifact@v6
+      - uses: actions/upload-pages-artifact@v4
         with:
-          name: github-pages
-          path: github-pages.tar.gz
+          path: docs/.vitepress/dist
 
   deploy:
     environment:
