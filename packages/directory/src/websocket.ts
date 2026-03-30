@@ -41,6 +41,7 @@ const STALE_PENDING_RETRY_WINDOW_MS = 2 * 60 * 1000
 const DEFAULT_RECOVERY_TIMEOUT_MS = Number(process.env.RELAY_TIMEOUT_MS || 30_000)
 const RECOVERY_SWEEP_INTERVAL_MS = Number(process.env.RELAY_RECOVERY_SWEEP_INTERVAL_MS || 5_000)
 const RETRYABLE_INTENT_ERRORS = new Set(['OFFLINE', 'TIMEOUT', 'DELIVERY_FAILED', 'DIRECT_HTTP_FAILED'])
+const PUBLIC_ECHO_BEAM_ID = 'echo@beam.directory'
 
 type ConnectionSession = {
   ws: WebSocket
@@ -242,6 +243,92 @@ function finalizeIntentWithResult(
     errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(result),
   })
+}
+
+function buildPublicEchoResult(frame: IntentFrame, latencyMs: number): ResultFrame {
+  if (frame.intent === 'conversation.message') {
+    const message = typeof frame.payload['message'] === 'string'
+      ? frame.payload['message'].trim()
+      : ''
+
+    return buildResultFrame(frame, {
+      success: true,
+      payload: {
+        message: `Echo: ${message || 'Hello from Beam.'}`,
+        from: PUBLIC_ECHO_BEAM_ID,
+        handledBy: 'builtin-echo',
+      },
+      latency: latencyMs,
+    })
+  }
+
+  return buildResultFrame(frame, {
+    success: true,
+    payload: {
+      ok: true,
+      beamId: PUBLIC_ECHO_BEAM_ID,
+      handledBy: PUBLIC_ECHO_BEAM_ID,
+      transport: 'builtin-echo',
+      intent: frame.intent,
+      message: `Mock success for ${frame.intent}`,
+      originalPayload: frame.payload ?? {},
+    },
+    latency: latencyMs,
+  })
+}
+
+function maybeDeliverPublicEcho(
+  db: Database,
+  frame: IntentFrame,
+  options: {
+    transport: 'http' | 'ws'
+    fallbackReason: 'missing_registration' | 'offline'
+  },
+): ResultFrame | null {
+  if (frame.to !== PUBLIC_ECHO_BEAM_ID) {
+    return null
+  }
+
+  const requestedAtMs = new Date(frame.timestamp).getTime()
+  const latencyMs = Number.isNaN(requestedAtMs)
+    ? 0
+    : Math.max(0, Date.now() - requestedAtMs)
+  const result = buildPublicEchoResult(frame, latencyMs)
+
+  recordIntentStage(db, frame, 'delivered', {
+    transport: options.transport,
+    fallbackReason: options.fallbackReason,
+    demoResponder: PUBLIC_ECHO_BEAM_ID,
+    builtInResponder: true,
+    latencyMs,
+  })
+  setIntentLifecycleStatus(db, {
+    nonce: frame.nonce,
+    status: 'delivered',
+  })
+  broadcastIntentFeed({
+    nonce: frame.nonce,
+    from: frame.from,
+    to: frame.to,
+    intentType: frame.intent,
+    timestamp: frame.timestamp,
+    completedAt: null,
+    roundTripLatencyMs: null,
+    status: 'delivered',
+    errorCode: null,
+  })
+
+  finalizeIntentWithResult(db, frame, result, latencyMs)
+  recordIntentStage(db, frame, 'acked', {
+    transport: options.transport,
+    fallbackReason: options.fallbackReason,
+    demoResponder: PUBLIC_ECHO_BEAM_ID,
+    builtInResponder: true,
+    latencyMs,
+  })
+  broadcastCompletedIntent(frame, result, latencyMs)
+
+  return result
 }
 
 function broadcastCompletedIntent(frame: IntentFrame, result: ResultFrame, latencyMs: number | null): void {
@@ -727,6 +814,15 @@ export async function relayIntentFromHttp(
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
+    const echoFallback = maybeDeliverPublicEcho(db, prepared, {
+      transport: 'http',
+      fallbackReason: 'missing_registration',
+    })
+    if (echoFallback) {
+      updateLastSeen(db, prepared.from)
+      return echoFallback
+    }
+
     recordIntentStage(db, prepared, 'dispatched', {
       deliveryTarget: 'federation',
     })
@@ -749,6 +845,15 @@ export async function relayIntentFromHttp(
   const recipientSession = connections.get(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    const echoFallback = maybeDeliverPublicEcho(db, prepared, {
+      transport: 'http',
+      fallbackReason: 'offline',
+    })
+    if (echoFallback) {
+      updateLastSeen(db, prepared.from)
+      return echoFallback
+    }
+
     finalizeFailedIntent(db, prepared, {
       error: `Agent ${prepared.to} is not currently connected`,
       errorCode: 'OFFLINE',
@@ -952,6 +1057,16 @@ async function handleIntent(
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
+    const echoFallback = maybeDeliverPublicEcho(db, prepared, {
+      transport: 'ws',
+      fallbackReason: 'missing_registration',
+    })
+    if (echoFallback) {
+      updateLastSeen(db, senderBeamId)
+      sendJson(senderWs, { type: 'result', frame: echoFallback })
+      return
+    }
+
     recordIntentStage(db, prepared, 'dispatched', {
       deliveryTarget: 'federation',
     })
@@ -986,6 +1101,16 @@ async function handleIntent(
   const recipientSession = connections.get(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
+    const echoFallback = maybeDeliverPublicEcho(db, prepared, {
+      transport: 'ws',
+      fallbackReason: 'offline',
+    })
+    if (echoFallback) {
+      updateLastSeen(db, senderBeamId)
+      sendJson(senderWs, { type: 'result', frame: echoFallback })
+      return
+    }
+
     finalizeFailedIntent(db, prepared, {
       error: `Agent ${prepared.to} is not currently connected`,
       errorCode: 'OFFLINE',

@@ -3,8 +3,8 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam Playground — Browser Smoke Test</title>
-  <meta name="description" content="Secondary browser playground for Beam. Create a temporary identity and smoke-test echo@beam.directory, but start with the hosted demo if you are evaluating Beam." />
+  <title>Beam Playground | Send a Test Message in Your Browser</title>
+  <meta name="description" content="Send a test message to Beam's public demo responder. This page creates a temporary Beam identity in your browser, shows the reply, and keeps the technical log available if you want it." />
   <style>
     :root {
       --bg: #0b0f14;
@@ -435,46 +435,45 @@
       </a>
       <div class="top-actions">
         <a class="link-btn" href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
-        <a class="link-btn" href="/register.html">Register Agent</a>
-        <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run Hosted Demo</a>
+        <a class="link-btn" href="/register.html">Register your own agent</a>
+        <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run full hosted demo</a>
         <a class="link-btn" href="/">Back to landing</a>
       </div>
     </div>
 
     <section class="hero">
       <div class="panel hero-copy">
-        <div class="eyebrow">Browser smoke test</div>
-        <h1>Try Beam in the browser after you have seen the hosted demo.</h1>
+        <div class="eyebrow">Quick browser test</div>
+        <h1>Send Beam a test message from your browser.</h1>
         <p>
-          This page is a lightweight sandbox for one thing: proving that a temporary browser identity can
-          register, connect, and send a signed <code>conversation.message</code> to
-          <code>echo@beam.directory</code> without installing an SDK.
+          No install, no SDK, no setup. This page creates a temporary Beam identity in your browser,
+          sends your message to Beam's public demo responder, and shows the reply.
         </p>
         <div class="hero-actions">
-          <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Launch Hosted Demo</a>
-          <a class="link-btn" href="/register.html">Register Real Agent</a>
+          <a class="link-btn primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">See the full product demo</a>
+          <a class="link-btn" href="/register.html">Register a real agent</a>
         </div>
         <div class="hero-points">
-          <div><strong>Best first step:</strong> the hosted demo shows Beam's actual wedge: partner handoff, traces, retries, and operator tooling.</div>
-          <div><strong>This page:</strong> a temporary <code>playground-*&commat;beam.directory</code> identity and a quick echo smoke test against the public directory.</div>
-          <div><strong>Use it for:</strong> lightweight demos, browser-only validation, and checking your mental model before a real integration.</div>
+          <div><strong>Best for:</strong> getting a feel for Beam in under a minute.</div>
+          <div><strong>This page does:</strong> create a temporary <code>playground-*&commat;beam.directory</code> address and send one live test message.</div>
+          <div><strong>Use the full demo for:</strong> cross-company workflows, dashboards, retries, and operator proof.</div>
         </div>
         <div class="hero-callout">
-          <strong>Recommended order:</strong> run the hosted demo first, then use this page if you want a smaller browser-only check. The playground is intentionally narrower than Beam's main product story.
+          <strong>Important:</strong> this is the smallest possible Beam demo. If you want to understand the real product, run the hosted demo next.
         </div>
       </div>
 
       <div class="panel status-grid">
         <div class="status-card">
-          <div class="status-label"><span>Identity</span><span id="identity-state">Not ready</span></div>
-          <div class="status-value" id="identity-value">A temporary Beam ID will be created when you connect.</div>
+          <div class="status-label"><span>Test identity</span><span id="identity-state">Not ready</span></div>
+          <div class="status-value" id="identity-value">A temporary Beam address appears when you start.</div>
         </div>
         <div class="status-card">
-          <div class="status-label"><span>Directory</span><span id="directory-state"><span class="dot warn"></span>Idle</span></div>
+          <div class="status-label"><span>Beam API</span><span id="directory-state"><span class="dot warn"></span>Idle</span></div>
           <div class="status-value"><code>https://api.beam.directory</code></div>
         </div>
         <div class="status-card">
-          <div class="status-label"><span>WebSocket</span><span id="socket-state"><span class="dot warn"></span>Disconnected</span></div>
+          <div class="status-label"><span>Live connection</span><span id="socket-state"><span class="dot warn"></span>Disconnected</span></div>
           <div class="status-value"><code>wss://api.beam.directory/ws</code></div>
         </div>
       </div>
@@ -484,43 +483,43 @@
       <div class="panel composer">
         <div class="stack">
           <div>
-            <h2>Playground</h2>
+            <h2>Send a test note</h2>
             <p class="helper" style="margin-top: 10px;">
-              The target Beam ID is prefilled with the public echo agent. You can swap it for any reachable Beam ID.
+              The default target is Beam's public demo responder. Advanced users can replace it with any reachable Beam ID.
             </p>
           </div>
 
           <label>
-            Beam ID
+            Send to
             <input id="target-beam-id" type="text" value="echo@beam.directory" spellcheck="false" autocomplete="off" />
           </label>
 
           <label>
             <span class="label-meta">
-              <span>Message</span>
+              <span>Your message</span>
               <span id="message-count">0 / 2000</span>
             </span>
-            <textarea id="message-input" spellcheck="true" placeholder="Hello from the Beam web playground.">Hello from the Beam web playground.</textarea>
+            <textarea id="message-input" spellcheck="true" placeholder="Hello Beam. Show me how this works.">Hello Beam. Show me how this works.</textarea>
           </label>
 
           <div class="button-row">
-            <button id="connect-button" type="button">Create temp identity</button>
-            <button id="send-button" class="primary" type="button">Send to Beam</button>
-            <button id="reset-button" type="button">Reset session</button>
+            <button id="connect-button" type="button">Start test identity</button>
+            <button id="send-button" class="primary" type="button">Send message</button>
+            <button id="reset-button" type="button">Start over</button>
           </div>
 
           <div class="meta-strip">
             <div class="metric">
-              <div class="metric-label">Temporary Beam ID</div>
+              <div class="metric-label">Your temporary Beam ID</div>
               <div class="metric-value" id="beam-id-value">Not connected</div>
             </div>
             <div class="metric">
-              <div class="metric-label">Last latency</div>
+              <div class="metric-label">Reply time</div>
               <div class="metric-value" id="latency-value">—</div>
             </div>
             <div class="metric">
-              <div class="metric-label">Last result</div>
-              <div class="metric-value" id="result-summary">Waiting for a message…</div>
+              <div class="metric-label">Last reply</div>
+              <div class="metric-value" id="result-summary">Waiting for your first reply…</div>
             </div>
           </div>
         </div>
@@ -529,13 +528,13 @@
       <aside class="panel events">
         <div class="events-header">
           <div>
-            <h3>Session events</h3>
-            <p class="helper" style="margin-top: 6px;">Registration, socket lifecycle, intent delivery, and raw replies.</p>
+            <h3>Technical log</h3>
+            <p class="helper" style="margin-top: 6px;">Raw registration, connection, delivery, and reply events for people who want the protocol detail.</p>
           </div>
           <button id="clear-log-button" type="button">Clear log</button>
         </div>
         <div class="event-log" id="event-log">
-          <div class="empty">No events yet. Create a temporary identity to begin.</div>
+          <div class="empty">No events yet. Start your test identity to begin.</div>
         </div>
       </aside>
     </section>
@@ -684,11 +683,11 @@
       }
 
       setStatus(elements.directoryState, 'warn', 'Registering');
-      addEvent('register', 'Generating a temporary Ed25519 identity in the browser…');
+      addEvent('register', 'Creating a temporary test identity in your browser…');
 
       const identity = await generateTemporaryIdentity();
       const beamId = `playground-${randomId()}@beam.directory`;
-      const displayName = `Beam Playground ${beamId.slice('playground-'.length, 'playground-'.length + 6)}`;
+      const displayName = `Beam Browser Test ${beamId.slice('playground-'.length, 'playground-'.length + 6)}`;
       const registration = {
         beamId,
         displayName,
@@ -729,7 +728,7 @@
     function attachSocketListeners(socket) {
       socket.addEventListener('open', () => {
         setStatus(elements.socketState, 'warn', 'Handshake');
-        addEvent('socket', 'WebSocket opened. Waiting for Beam connection acknowledgment…');
+        addEvent('socket', 'Connection opened. Waiting for Beam to confirm the session…');
       });
 
       socket.addEventListener('close', (event) => {
@@ -922,10 +921,10 @@
       sessionState.pending.clear();
       sessionState.latency = null;
       elements.identityState.textContent = 'Not ready';
-      elements.identityValue.textContent = 'A temporary Beam ID will be created when you connect.';
+      elements.identityValue.textContent = 'A temporary Beam address appears when you start.';
       elements.beamIdValue.textContent = 'Not connected';
       elements.latencyValue.textContent = '—';
-      elements.resultSummary.textContent = 'Waiting for a message…';
+      elements.resultSummary.textContent = 'Waiting for your first reply…';
       setStatus(elements.directoryState, 'warn', 'Idle');
       setStatus(elements.socketState, 'warn', 'Disconnected');
     }
@@ -970,7 +969,7 @@
     elements.sendButton.addEventListener('click', () => { void handleSend(); });
     elements.resetButton.addEventListener('click', () => { void handleReset(); });
     elements.clearLogButton.addEventListener('click', () => {
-      elements.eventLog.innerHTML = '<div class="empty">Log cleared. Send another Beam message to continue.</div>';
+      elements.eventLog.innerHTML = '<div class="empty">Log cleared. Send another message to continue.</div>';
     });
 
     window.addEventListener('beforeunload', () => {

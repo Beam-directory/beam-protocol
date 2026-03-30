@@ -82,14 +82,33 @@ function createSignedFrame(
   nonce = randomUUID(),
   timestamp = new Date().toISOString(),
 ): IntentFrame {
+  return createSignedFrameWithIntent(sender, {
+    to,
+    nonce,
+    timestamp,
+    intent: TEST_INTENT,
+    payload: { message: 'hello' },
+  })
+}
+
+function createSignedFrameWithIntent(
+  sender: FixtureAgent,
+  options: {
+    to: string
+    intent: string
+    payload: Record<string, unknown>
+    nonce?: string
+    timestamp?: string
+  },
+): IntentFrame {
   return signIntentFrame({
     v: '1',
     from: sender.beamId,
-    to,
-    intent: TEST_INTENT,
-    payload: { message: 'hello' },
-    nonce,
-    timestamp,
+    to: options.to,
+    intent: options.intent,
+    payload: options.payload,
+    nonce: options.nonce ?? randomUUID(),
+    timestamp: options.timestamp ?? new Date().toISOString(),
   }, sender.privateKey)
 }
 
@@ -236,6 +255,32 @@ test('relayIntentFromHttp caches direct HTTP results by nonce and suppresses dup
   }
 })
 
+test('relayIntentFromHttp falls back to the built-in public echo responder', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    const frame = createSignedFrameWithIntent(sender, {
+      to: 'echo@beam.directory',
+      intent: 'conversation.message',
+      payload: { message: 'Hello from the browser test' },
+    })
+
+    const result = await relayIntentFromHttp(db, frame, 1_000)
+    const trace = listIntentTraceEvents(db, frame.nonce)
+
+    assert.equal(result.success, true)
+    assert.equal(result.payload?.['message'], 'Echo: Hello from the browser test')
+    assert.equal(result.payload?.['handledBy'], 'builtin-echo')
+    assert.equal(getIntentLogByNonce(db, frame.nonce)?.status, 'acked')
+    assert.ok(trace.some((entry) => entry.stage === 'delivered'))
+    assert.ok(trace.some((entry) => entry.stage === 'acked'))
+  } finally {
+    db.close()
+  }
+})
+
 test('relayIntentFromHttp rejects intents signed by a rotated-out key', async () => {
   const db = createDatabase(':memory:')
   const sender = createFixtureAgent('sender@local.beam.directory')
@@ -278,6 +323,36 @@ test('relayIntentFromHttp rejects intents signed by a rotated-out key', async ()
       assert.equal(result.success, true)
     })
   } finally {
+    db.close()
+  }
+})
+
+test('websocket intent falls back to the built-in public echo responder', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const harness = await createWsHarness(db)
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    const senderWs = await connectClient(harness.url, sender.beamId)
+
+    senderWs.send(JSON.stringify({
+      type: 'intent',
+      frame: createSignedFrameWithIntent(sender, {
+        to: 'echo@beam.directory',
+        intent: 'conversation.message',
+        payload: { message: 'Hello Beam' },
+      }),
+    }))
+
+    const result = await waitForJson(senderWs)
+    assert.equal(result.type, 'result')
+    assert.equal((result.frame as { success: boolean }).success, true)
+    assert.equal((result.frame as { payload: { message: string } }).payload.message, 'Echo: Hello Beam')
+
+    await closeSocket(senderWs)
+  } finally {
+    await harness.close()
     db.close()
   }
 })
