@@ -143,7 +143,7 @@ export default function SettingsPage() {
           <InfoRow label="Health status" value={busHealth?.status ?? 'Unavailable'} />
           <InfoRow label="Service" value={busHealth?.service ?? '—'} />
           <InfoRow label="Dead letters" value={busStats ? String(busStats.dead_letter) : '—'} />
-          <InfoRow label="Pending retries" value={busStats ? String(busStats.pending) : '—'} />
+          <InfoRow label="Queued retries" value={busStats ? String(busStats.queued) : '—'} />
         </div>
       </section>
 

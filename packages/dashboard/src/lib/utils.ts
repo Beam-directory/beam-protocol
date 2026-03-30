@@ -1,4 +1,5 @@
 import { type ClassValue, clsx } from 'clsx'
+import { intentLifecycleColor } from './intent-lifecycle'
 
 export function cn(...inputs: ClassValue[]) {
   return clsx(inputs)
@@ -92,14 +93,7 @@ export function verificationTierColor(tier: string): string {
 }
 
 export function intentStatusColor(status: string): string {
-  switch (status) {
-    case 'success':
-      return 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'
-    case 'pending':
-      return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300'
-    default:
-      return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300'
-  }
+  return intentLifecycleColor(status)
 }
 
 export function alertSeverityColor(severity: string): string {

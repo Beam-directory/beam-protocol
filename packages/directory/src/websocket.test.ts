@@ -303,7 +303,7 @@ test('relayIntentFromHttp records a retryable timeout for unanswered websocket d
 
     const log = getIntentLogByNonce(db, frame.nonce)
     assert.ok(log)
-    assert.equal(log?.status, 'error')
+    assert.equal(log?.status, 'failed')
     assert.equal(log?.error_code, 'TIMEOUT')
     assert.match(log?.result_json ?? '', /"errorCode":"TIMEOUT"/)
 

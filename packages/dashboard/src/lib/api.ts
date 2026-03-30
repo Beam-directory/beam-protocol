@@ -2,6 +2,7 @@ export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
 export type AlertSeverity = 'info' | 'warning' | 'critical'
 export type ExportDataset = 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
 export type ExportFormat = 'json' | 'csv' | 'ndjson'
+export type IntentLifecycleStatus = 'received' | 'validated' | 'queued' | 'dispatched' | 'delivered' | 'acked' | 'failed' | 'dead_letter'
 
 export interface DirectoryAgent {
   beamId: string
@@ -56,7 +57,9 @@ export interface BusHealth {
 
 export interface BusStats {
   total: number
-  pending: number
+  queued: number
+  received: number
+  dispatched: number
   delivered: number
   acked: number
   failed: number
@@ -72,7 +75,7 @@ export interface DeadLetterMessage {
   recipient: string
   intent: string
   payload: Record<string, unknown>
-  status: string
+  status: IntentLifecycleStatus
   priority: number
   retry_count: number
   max_retries: number
@@ -95,7 +98,7 @@ export interface DeadLetterResponse {
 export interface RequeueDeadLetterResponse {
   message_id: string
   nonce: string
-  status: string
+  status: IntentLifecycleStatus
   requeued: boolean
   retry_count?: number
   next_retry_at?: number
@@ -111,7 +114,7 @@ export interface RecentIntent {
   timestamp: string
   completedAt: string | null
   roundTripLatencyMs: number | null
-  status: string
+  status: IntentLifecycleStatus
   errorCode: string | null
 }
 
@@ -126,8 +129,8 @@ export interface IntentTraceStage {
   from: string
   to: string
   intentType: string
-  stage: string
-  status: string
+  stage: IntentLifecycleStatus
+  status: IntentLifecycleStatus
   timestamp: string
   details: Record<string, unknown> | null
 }
@@ -173,7 +176,7 @@ export interface OverviewTimelinePoint {
   total: number
   success: number
   error: number
-  pending: number
+  inFlight: number
   p95LatencyMs: number | null
 }
 
@@ -188,11 +191,11 @@ export interface ObservabilityOverview {
     totalIntents: number
     successCount: number
     errorCount: number
-    pendingCount: number
+    inFlightCount: number
     avgLatencyMs: number | null
     p95LatencyMs: number | null
     successRate: number
-    pendingOlderThan15m: number
+    inFlightOlderThan15m: number
   }
   timeline: OverviewTimelinePoint[]
   topIntents: Array<{

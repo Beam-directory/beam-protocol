@@ -2,6 +2,14 @@ import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
 import { getAgent, listAuditLog, listIntentTraceEvents, listShieldAuditLog, logAuditEvent } from '../db.js'
+import {
+  classifyIntentLifecycle,
+  isIntentLifecycleFailure,
+  isIntentLifecycleSuccess,
+  normalizeIntentLifecycleStatus,
+  normalizeLegacyTraceLifecycle,
+  type IntentLifecycleStatus,
+} from '../intent-lifecycle.js'
 import type {
   AuditLogRow,
   FederationPeerRow,
@@ -126,6 +134,7 @@ function toBucketStart(isoTimestamp: string, bucketHours: number): string {
 }
 
 function serializeIntentRow(row: IntentLogRow) {
+  const lifecycleStatus = normalizeIntentLifecycleStatus(row.status) ?? 'received'
   return {
     nonce: row.nonce,
     from: row.from_beam_id,
@@ -134,20 +143,23 @@ function serializeIntentRow(row: IntentLogRow) {
     timestamp: row.requested_at,
     completedAt: row.completed_at,
     roundTripLatencyMs: row.round_trip_latency_ms,
-    status: row.status,
-    errorCode: row.error_code,
+    status: lifecycleStatus,
+    errorCode: isIntentLifecycleFailure(lifecycleStatus) ? row.error_code : null,
   }
 }
 
 function serializeTraceEvent(row: IntentTraceEventRow) {
+  const lifecycleStatus = normalizeIntentLifecycleStatus(row.stage)
+    ?? normalizeLegacyTraceLifecycle(row.stage, row.status)
+    ?? 'received'
   return {
     id: row.id,
     nonce: row.nonce,
     from: row.from_beam_id,
     to: row.to_beam_id,
     intentType: row.intent_type,
-    stage: row.stage,
-    status: row.status,
+    stage: lifecycleStatus,
+    status: lifecycleStatus,
     timestamp: row.timestamp,
     details: parseJson<Record<string, unknown> | null>(row.details, null),
   }
@@ -201,8 +213,20 @@ function buildIntentWhereClause(query: IntentQuery): { whereClause: string; para
   }
 
   if (query.status && query.status !== 'all') {
-    conditions.push('status = ?')
-    params.push(query.status)
+    const normalized = normalizeIntentLifecycleStatus(query.status)
+    if (query.status === 'success') {
+      conditions.push(`status = 'acked'`)
+    } else if (query.status === 'error') {
+      conditions.push(`status IN ('failed', 'dead_letter')`)
+    } else if (query.status === 'pending' || query.status === 'in_flight') {
+      conditions.push(`status NOT IN ('acked', 'failed', 'dead_letter')`)
+    } else if (normalized) {
+      conditions.push('status = ?')
+      params.push(normalized)
+    } else {
+      conditions.push('status = ?')
+      params.push(query.status)
+    }
   }
 
   if (query.errorCode) {
@@ -313,7 +337,7 @@ function buildOverviewPayload(db: Database, windowHours: number) {
     total: number
     success: number
     error: number
-    pending: number
+    inFlight: number
     latencies: number[]
   }>()
 
@@ -335,22 +359,24 @@ function buildOverviewPayload(db: Database, windowHours: number) {
     .filter((value): value is number => typeof value === 'number')
 
   for (const row of rows) {
+    const lifecycleStatus = normalizeIntentLifecycleStatus(row.status) ?? 'received'
+    const lifecycleBucket = classifyIntentLifecycle(lifecycleStatus)
     const bucketStart = toBucketStart(row.requested_at, bucketHours)
     const bucket = bucketMap.get(bucketStart) ?? {
       bucketStart,
       total: 0,
       success: 0,
       error: 0,
-      pending: 0,
+      inFlight: 0,
       latencies: [],
     }
     bucket.total += 1
-    if (row.status === 'success') {
+    if (lifecycleBucket === 'success') {
       bucket.success += 1
-    } else if (row.status === 'error') {
+    } else if (lifecycleBucket === 'error') {
       bucket.error += 1
     } else {
-      bucket.pending += 1
+      bucket.inFlight += 1
     }
     if (typeof row.round_trip_latency_ms === 'number') {
       bucket.latencies.push(row.round_trip_latency_ms)
@@ -364,7 +390,7 @@ function buildOverviewPayload(db: Database, windowHours: number) {
       latencies: [],
     }
     intentEntry.total += 1
-    if (row.status === 'error') {
+    if (lifecycleBucket === 'error') {
       intentEntry.errors += 1
     }
     if (typeof row.round_trip_latency_ms === 'number') {
@@ -392,10 +418,10 @@ function buildOverviewPayload(db: Database, windowHours: number) {
   const federatedAgents = (db.prepare('SELECT COUNT(*) AS count FROM federated_agents').get() as { count: number } | undefined)?.count ?? 0
   const federationPeers = (db.prepare('SELECT COUNT(*) AS count FROM federation_peers').get() as { count: number } | undefined)?.count ?? 0
 
-  const pendingOlderThan15m = (db.prepare(`
+  const inFlightOlderThan15m = (db.prepare(`
     SELECT COUNT(*) AS count
     FROM intent_log
-    WHERE status = 'pending' AND requested_at < ?
+    WHERE status NOT IN ('acked', 'failed', 'dead_letter') AND requested_at < ?
   `).get(new Date(Date.now() - 15 * 60 * 1000).toISOString()) as { count: number } | undefined)?.count ?? 0
 
   const timeline = Array.from(bucketMap.values())
@@ -405,7 +431,7 @@ function buildOverviewPayload(db: Database, windowHours: number) {
       total: bucket.total,
       success: bucket.success,
       error: bucket.error,
-      pending: bucket.pending,
+      inFlight: bucket.inFlight,
       p95LatencyMs: percentile(bucket.latencies, 0.95),
     }))
 
@@ -416,13 +442,13 @@ function buildOverviewPayload(db: Database, windowHours: number) {
     federatedAgents,
     federationPeers,
     totalIntents: rows.length,
-    successCount: rows.filter((row) => row.status === 'success').length,
-    errorCount: rows.filter((row) => row.status === 'error').length,
-    pendingCount: rows.filter((row) => row.status === 'pending').length,
+    successCount: rows.filter((row) => isIntentLifecycleSuccess(normalizeIntentLifecycleStatus(row.status) ?? 'received')).length,
+    errorCount: rows.filter((row) => isIntentLifecycleFailure(normalizeIntentLifecycleStatus(row.status) ?? 'received')).length,
+    inFlightCount: rows.filter((row) => classifyIntentLifecycle(normalizeIntentLifecycleStatus(row.status) ?? 'received') === 'in_flight').length,
     avgLatencyMs: latencies.length > 0 ? round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null,
     p95LatencyMs: percentile(latencies, 0.95),
-    successRate: rows.length > 0 ? round(rows.filter((row) => row.status === 'success').length / rows.length, 4) : 0,
-    pendingOlderThan15m,
+    successRate: rows.length > 0 ? round(rows.filter((row) => isIntentLifecycleSuccess(normalizeIntentLifecycleStatus(row.status) ?? 'received')).length / rows.length, 4) : 0,
+    inFlightOlderThan15m,
   }
 
   return {
@@ -460,7 +486,7 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
 
   const outbound = rows.filter((row) => row.from_beam_id === beamId)
   const inbound = rows.filter((row) => row.to_beam_id === beamId)
-  const completed = rows.filter((row) => row.status !== 'pending')
+  const completed = rows.filter((row) => classifyIntentLifecycle(normalizeIntentLifecycleStatus(row.status) ?? 'received') !== 'in_flight')
   const latencies = completed
     .map((row) => row.round_trip_latency_ms)
     .filter((value): value is number => typeof value === 'number')
@@ -496,6 +522,8 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
   }>()
 
   for (const row of rows) {
+    const lifecycleStatus = normalizeIntentLifecycleStatus(row.status) ?? 'received'
+    const lifecycleBucket = classifyIntentLifecycle(lifecycleStatus)
     const bucketStart = toBucketStart(row.requested_at, bucketHours)
     const bucket = timelineMap.get(bucketStart) ?? {
       bucketStart,
@@ -511,10 +539,10 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
     if (row.to_beam_id === beamId) {
       bucket.received += 1
     }
-    if (row.status === 'success') {
+    if (lifecycleBucket === 'success') {
       bucket.success += 1
     }
-    if (row.status === 'error') {
+    if (lifecycleBucket === 'error') {
       bucket.error += 1
     }
     if (typeof row.round_trip_latency_ms === 'number') {
@@ -534,7 +562,7 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
     } else {
       counterparty.inbound += 1
     }
-    if (row.status === 'error') {
+    if (lifecycleBucket === 'error') {
       counterparty.errors += 1
     }
     counterpartyMap.set(counterpartyBeamId, counterparty)
@@ -546,7 +574,7 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
       latencies: [],
     }
     intentEntry.total += 1
-    if (row.status === 'error') {
+    if (lifecycleBucket === 'error') {
       intentEntry.errors += 1
     }
     if (typeof row.round_trip_latency_ms === 'number') {
@@ -595,8 +623,8 @@ function buildAgentHealthPayload(db: Database, beamId: string, windowHours: numb
       sentCount: outbound.length,
       receivedCount: inbound.length,
       completedCount: completed.length,
-      successRate: completed.length > 0 ? round(completed.filter((row) => row.status === 'success').length / completed.length, 4) : 0,
-      errorRate: completed.length > 0 ? round(completed.filter((row) => row.status === 'error').length / completed.length, 4) : 0,
+      successRate: completed.length > 0 ? round(completed.filter((row) => isIntentLifecycleSuccess(normalizeIntentLifecycleStatus(row.status) ?? 'received')).length / completed.length, 4) : 0,
+      errorRate: completed.length > 0 ? round(completed.filter((row) => isIntentLifecycleFailure(normalizeIntentLifecycleStatus(row.status) ?? 'received')).length / completed.length, 4) : 0,
       avgLatencyMs: latencies.length > 0 ? round(latencies.reduce((sum, value) => sum + value, 0) / latencies.length) : null,
       p95LatencyMs: percentile(latencies, 0.95),
       uniqueCounterparties: counterpartyMap.size,
@@ -744,7 +772,7 @@ function buildErrorsPayload(db: Database, windowHours: number) {
   const rows = db.prepare(`
     SELECT *
     FROM intent_log
-    WHERE status = 'error' AND requested_at >= ?
+    WHERE status IN ('failed', 'dead_letter') AND requested_at >= ?
     ORDER BY requested_at ASC, id ASC
   `).all(since) as IntentLogRow[]
 
@@ -854,15 +882,15 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
     })
   }
 
-  if (overview.summary.pendingOlderThan15m > 0) {
+  if (overview.summary.inFlightOlderThan15m > 0) {
     alerts.push({
-      id: 'network-pending-backlog',
-      severity: overview.summary.pendingOlderThan15m >= 5 ? 'critical' : 'warning',
-      title: 'Pending intent backlog detected',
+      id: 'network-in-flight-backlog',
+      severity: overview.summary.inFlightOlderThan15m >= 5 ? 'critical' : 'warning',
+      title: 'In-flight intent backlog detected',
       scope: 'network',
-      message: `${overview.summary.pendingOlderThan15m} intents have been pending for more than 15 minutes.`,
-      metric: 'pending_older_than_15m',
-      value: overview.summary.pendingOlderThan15m,
+      message: `${overview.summary.inFlightOlderThan15m} intents have remained in-flight for more than 15 minutes.`,
+      metric: 'in_flight_older_than_15m',
+      value: overview.summary.inFlightOlderThan15m,
       threshold: 1,
       startedAt: new Date().toISOString(),
     })
@@ -928,6 +956,7 @@ function buildAlerts(db: Database, windowHours: number): AlertItem[] {
 }
 
 function createSyntheticTrace(intent: IntentLogRow): Array<ReturnType<typeof serializeTraceEvent>> {
+  const lifecycleStatus = normalizeIntentLifecycleStatus(intent.status) ?? 'received'
   const stages: Array<ReturnType<typeof serializeTraceEvent>> = [
     {
       id: 0,
@@ -936,22 +965,22 @@ function createSyntheticTrace(intent: IntentLogRow): Array<ReturnType<typeof ser
       to: intent.to_beam_id,
       intentType: intent.intent_type,
       stage: 'received',
-      status: 'pending',
+      status: 'received',
       timestamp: intent.requested_at,
       details: null,
     },
   ]
 
-  if (intent.completed_at) {
+  if (lifecycleStatus !== 'received') {
     stages.push({
       id: -1,
       nonce: intent.nonce,
       from: intent.from_beam_id,
       to: intent.to_beam_id,
       intentType: intent.intent_type,
-      stage: 'completed',
-      status: intent.status,
-      timestamp: intent.completed_at,
+      stage: lifecycleStatus,
+      status: lifecycleStatus,
+      timestamp: intent.completed_at ?? intent.requested_at,
       details: {
         latencyMs: intent.round_trip_latency_ms,
         errorCode: intent.error_code,

@@ -4,6 +4,11 @@
 
 import Database from 'better-sqlite3'
 import { randomUUID } from 'node:crypto'
+import {
+  assertBeamMessageLifecycleTransition,
+  normalizeBeamMessageLifecycleStatus,
+  type BeamMessageLifecycleStatus,
+} from './lifecycle.js'
 
 export interface BeamMessage {
   id: string
@@ -12,7 +17,7 @@ export interface BeamMessage {
   recipient: string
   intent: string
   payload: string  // JSON
-  status: 'pending' | 'delivered' | 'acked' | 'failed' | 'dead_letter' | 'expired'
+  status: BeamMessageLifecycleStatus
   priority: number
   retry_count: number
   max_retries: number
@@ -40,7 +45,7 @@ export function initDatabase(dbPath: string): Database.Database {
       recipient TEXT NOT NULL,
       intent TEXT NOT NULL,
       payload TEXT NOT NULL DEFAULT '{}',
-      status TEXT NOT NULL DEFAULT 'pending',
+      status TEXT NOT NULL DEFAULT 'received',
       priority INTEGER DEFAULT 0,
       retry_count INTEGER DEFAULT 0,
       max_retries INTEGER DEFAULT 5,
@@ -65,6 +70,14 @@ export function initDatabase(dbPath: string): Database.Database {
     UPDATE beam_messages
     SET nonce = id
     WHERE nonce IS NULL OR nonce = ''
+  `).run()
+  db.prepare(`
+    UPDATE beam_messages
+    SET status = CASE
+      WHEN status = 'pending' THEN 'queued'
+      WHEN status = 'expired' THEN 'dead_letter'
+      ELSE status
+    END
   `).run()
   db.exec('CREATE UNIQUE INDEX IF NOT EXISTS idx_beam_nonce ON beam_messages(nonce)')
 
@@ -110,7 +123,7 @@ export function insertMessage(
   db.prepare(`
     INSERT INTO beam_messages (id, nonce, sender, recipient, intent, payload, status, priority,
                                retry_count, max_retries, created_at, trace_id, metadata)
-    VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, 0, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, 'received', ?, 0, ?, ?, ?, ?)
   `).run(
     id,
     nonce,
@@ -128,51 +141,117 @@ export function insertMessage(
   return id
 }
 
+function updateMessageLifecycle(
+  db: Database.Database,
+  id: string,
+  nextStatus: BeamMessageLifecycleStatus,
+  fields: {
+    retryCount?: number
+    nextRetryAt?: number | null
+    deliveredAt?: number | null
+    ackedAt?: number | null
+    failedAt?: number | null
+    error?: string | null
+    response?: string | null
+  } = {},
+): void {
+  const message = getMessage(db, id)
+  if (!message) {
+    throw new Error(`Message ${id} not found`)
+  }
+
+  const current = normalizeBeamMessageLifecycleStatus(message.status) ?? 'received'
+  assertBeamMessageLifecycleTransition(current, nextStatus, `message ${id} lifecycle`)
+
+  db.prepare(`
+    UPDATE beam_messages
+    SET status = ?,
+        retry_count = ?,
+        next_retry_at = ?,
+        delivered_at = ?,
+        acked_at = ?,
+        failed_at = ?,
+        error = ?,
+        response = ?
+    WHERE id = ?
+  `).run(
+    nextStatus,
+    fields.retryCount ?? message.retry_count,
+    'nextRetryAt' in fields ? (fields.nextRetryAt ?? null) : message.next_retry_at,
+    'deliveredAt' in fields ? (fields.deliveredAt ?? null) : message.delivered_at,
+    'ackedAt' in fields ? (fields.ackedAt ?? null) : message.acked_at,
+    'failedAt' in fields ? (fields.failedAt ?? null) : message.failed_at,
+    'error' in fields ? (fields.error ?? null) : message.error,
+    'response' in fields ? (fields.response ?? null) : message.response,
+    id,
+  )
+}
+
+export function markDispatched(db: Database.Database, id: string): void {
+  updateMessageLifecycle(db, id, 'dispatched', {
+    nextRetryAt: null,
+  })
+}
+
 export function markDelivered(db: Database.Database, id: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, delivered_at = ?, next_retry_at = NULL, error = NULL WHERE id = ?')
-    .run('delivered', Date.now() / 1000, id)
+  updateMessageLifecycle(db, id, 'delivered', {
+    deliveredAt: Date.now() / 1000,
+    nextRetryAt: null,
+    error: null,
+  })
 }
 
 export function markFailed(db: Database.Database, id: string, error: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, failed_at = ?, next_retry_at = NULL, error = ? WHERE id = ?')
-    .run('failed', Date.now() / 1000, error, id)
+  updateMessageLifecycle(db, id, 'failed', {
+    failedAt: Date.now() / 1000,
+    nextRetryAt: null,
+    error,
+  })
 }
 
 export function markDeadLetter(db: Database.Database, id: string, error: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, failed_at = ?, next_retry_at = NULL, error = ? WHERE id = ?')
-    .run('dead_letter', Date.now() / 1000, error, id)
+  updateMessageLifecycle(db, id, 'dead_letter', {
+    failedAt: Date.now() / 1000,
+    nextRetryAt: null,
+    error,
+  })
 }
 
 export function markAcked(db: Database.Database, id: string, response?: Record<string, unknown>): void {
-  db.prepare('UPDATE beam_messages SET status = ?, acked_at = ?, next_retry_at = NULL, error = NULL, response = ? WHERE id = ?')
-    .run('acked', Date.now() / 1000, response ? JSON.stringify(response) : null, id)
+  updateMessageLifecycle(db, id, 'acked', {
+    ackedAt: Date.now() / 1000,
+    nextRetryAt: null,
+    error: null,
+    response: response ? JSON.stringify(response) : null,
+  })
 }
 
 export function scheduleRetry(db: Database.Database, id: string, retryCount: number, nextRetryAt: number, error: string): void {
-  db.prepare('UPDATE beam_messages SET status = ?, retry_count = ?, next_retry_at = ?, failed_at = NULL, error = ? WHERE id = ?')
-    .run('pending', retryCount, nextRetryAt, error, id)
+  updateMessageLifecycle(db, id, 'queued', {
+    retryCount,
+    nextRetryAt,
+    failedAt: null,
+    error,
+  })
 }
 
 export function requeueMessage(db: Database.Database, id: string): void {
-  db.prepare(`
-    UPDATE beam_messages
-    SET status = 'pending',
-        retry_count = 0,
-        next_retry_at = NULL,
-        delivered_at = NULL,
-        acked_at = NULL,
-        failed_at = NULL,
-        error = NULL,
-        response = NULL
-    WHERE id = ?
-  `).run(id)
+  updateMessageLifecycle(db, id, 'queued', {
+    retryCount: 0,
+    nextRetryAt: null,
+    deliveredAt: null,
+    ackedAt: null,
+    failedAt: null,
+    error: null,
+    response: null,
+  })
 }
 
 export function getPendingRetries(db: Database.Database, limit = 10): BeamMessage[] {
   const now = Date.now() / 1000
   return db.prepare(`
     SELECT * FROM beam_messages
-    WHERE status = 'pending' AND next_retry_at IS NOT NULL AND next_retry_at <= ?
+    WHERE status = 'queued' AND next_retry_at IS NOT NULL AND next_retry_at <= ?
     ORDER BY priority DESC, created_at ASC
     LIMIT ?
   `).all(now, limit) as BeamMessage[]
@@ -273,7 +352,9 @@ export function listDeadLetters(
 
 export interface BusStats {
   total: number
-  pending: number
+  queued: number
+  received: number
+  dispatched: number
   delivered: number
   acked: number
   failed: number
@@ -308,7 +389,9 @@ export function getStats(db: Database.Database): BusStats {
 
   return {
     total,
-    pending: statusCounts['pending'] ?? 0,
+    queued: statusCounts['queued'] ?? 0,
+    received: statusCounts['received'] ?? 0,
+    dispatched: statusCounts['dispatched'] ?? 0,
     delivered: statusCounts['delivered'] ?? 0,
     acked: statusCounts['acked'] ?? 0,
     failed: statusCounts['failed'] ?? 0,

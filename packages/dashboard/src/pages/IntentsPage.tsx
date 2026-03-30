@@ -4,10 +4,24 @@ import { Radio, Search } from 'lucide-react'
 import { ApiError, connectIntentFeed, directoryApi, type RecentIntent } from '../lib/api'
 import { PageHeader, StatusPill } from '../components/Observability'
 import { cn, formatDateTime, formatLatency, intentStatusColor, truncateBeamId } from '../lib/utils'
+import { classifyIntentLifecycle, formatIntentLifecycleLabel } from '../lib/intent-lifecycle'
 
 const WINDOW_OPTIONS = [
   { value: 24, label: '24h' },
   { value: 24 * 7, label: '7d' },
+]
+
+const STATUS_OPTIONS = [
+  { value: 'all', label: 'All lifecycle states' },
+  { value: 'in_flight', label: 'In flight' },
+  { value: 'received', label: 'Received' },
+  { value: 'validated', label: 'Validated' },
+  { value: 'queued', label: 'Queued' },
+  { value: 'dispatched', label: 'Dispatched' },
+  { value: 'delivered', label: 'Delivered' },
+  { value: 'acked', label: 'Acked' },
+  { value: 'failed', label: 'Failed' },
+  { value: 'dead_letter', label: 'Dead letter' },
 ]
 
 function matchesFilters(intent: RecentIntent, filters: {
@@ -15,7 +29,8 @@ function matchesFilters(intent: RecentIntent, filters: {
   status: string
   hours: number
 }) {
-  const matchesStatus = filters.status === 'all' || intent.status === filters.status
+  const matchesStatus = filters.status === 'all'
+    || (filters.status === 'in_flight' ? classifyIntentLifecycle(intent.status) === 'in_flight' : intent.status === filters.status)
   const matchesQuery = !filters.query || [
     intent.nonce,
     intent.from,
@@ -140,10 +155,9 @@ export default function IntentsPage() {
             />
           </label>
           <select className="input-field" value={status} onChange={(event) => setStatus(event.target.value)}>
-            <option value="all">All statuses</option>
-            <option value="success">Success</option>
-            <option value="pending">Pending</option>
-            <option value="error">Error</option>
+            {STATUS_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
           <select className="input-field" value={hours} onChange={(event) => setHours(Number(event.target.value))}>
             {WINDOW_OPTIONS.map((option) => (
@@ -192,7 +206,7 @@ export default function IntentsPage() {
                     <td className="table-cell">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className={cn('rounded-full px-2 py-1 text-xs font-medium capitalize', intentStatusColor(intent.status))}>
-                          {intent.status}
+                          {formatIntentLifecycleLabel(intent.status)}
                         </span>
                         {intent.errorCode ? <StatusPill label={intent.errorCode} tone="critical" /> : null}
                       </div>

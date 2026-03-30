@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom'
 import { ApiError, directoryApi, type IntentTraceResponse } from '../lib/api'
 import { EmptyPanel, PageHeader, StatusPill } from '../components/Observability'
 import { alertSeverityColor, cn, formatDateTime, formatLatency, intentStatusColor, truncateBeamId } from '../lib/utils'
+import { formatIntentLifecycleLabel, intentLifecycleDotColor, intentLifecycleTone } from '../lib/intent-lifecycle'
 
 export default function TraceDetailPage() {
   const { nonce } = useParams<{ nonce: string }>()
@@ -68,7 +69,7 @@ export default function TraceDetailPage() {
           <InfoRow label="Latency" value={formatLatency(trace.intent.roundTripLatencyMs)} />
           <div className="pt-1">
             <span className={cn('rounded-full px-2.5 py-1 text-xs font-medium capitalize', intentStatusColor(trace.intent.status))}>
-              {trace.intent.status}
+              {formatIntentLifecycleLabel(trace.intent.status)}
             </span>
             {trace.intent.errorCode ? <span className="ml-2 text-sm text-red-600 dark:text-red-400">{trace.intent.errorCode}</span> : null}
           </div>
@@ -106,16 +107,13 @@ export default function TraceDetailPage() {
             trace.stages.map((stage, index) => (
               <div key={`${stage.id}-${stage.stage}-${index}`} className="flex gap-4">
                 <div className="flex flex-col items-center">
-                  <div className={cn(
-                    'h-3 w-3 rounded-full',
-                    stage.status === 'success' ? 'bg-emerald-500' : stage.status === 'error' ? 'bg-red-500' : 'bg-orange-500',
-                  )} />
+                  <div className={cn('h-3 w-3 rounded-full', intentLifecycleDotColor(stage.status))} />
                   {index < trace.stages.length - 1 ? <div className="mt-2 h-full w-px bg-slate-200 dark:bg-slate-800" /> : null}
                 </div>
                 <div className="min-w-0 flex-1 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
                   <div className="flex flex-wrap items-center gap-2">
-                    <div className="font-medium capitalize">{stage.stage.split('.').join(' ')}</div>
-                    <StatusPill label={stage.status} tone={stage.status === 'success' ? 'success' : stage.status === 'error' ? 'critical' : 'warning'} />
+                    <div className="font-medium capitalize">{formatIntentLifecycleLabel(stage.stage)}</div>
+                    <StatusPill label={formatIntentLifecycleLabel(stage.status)} tone={intentLifecycleTone(stage.status)} />
                     <span className="text-xs text-slate-500 dark:text-slate-400">{formatDateTime(stage.timestamp)}</span>
                   </div>
                   {stage.details ? (

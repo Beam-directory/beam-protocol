@@ -11,9 +11,11 @@ import {
   logAuditEvent,
   logIntentStart,
   registerAgent,
+  setIntentLifecycleStatus,
 } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
 import { logShieldEvent } from './shield/audit.js'
+import { recordIntentStage } from './observability-hooks.js'
 import type { IntentFrame } from './types.js'
 
 function createAdminHeaders(db: ReturnType<typeof createDatabase>, email = 'ops@example.com', role: 'admin' | 'operator' | 'viewer' = 'admin') {
@@ -76,7 +78,6 @@ test('observability trace endpoint returns lifecycle, audit, and shield context'
       toBeamId: frame.to,
       intentType: frame.intent,
       stage: 'received',
-      status: 'pending',
       timestamp: frame.timestamp,
     })
     appendIntentTraceEvent(db, {
@@ -85,21 +86,36 @@ test('observability trace endpoint returns lifecycle, audit, and shield context'
       toBeamId: frame.to,
       intentType: frame.intent,
       stage: 'validated',
-      status: 'success',
     })
     appendIntentTraceEvent(db, {
       nonce: frame.nonce,
       fromBeamId: frame.from,
       toBeamId: frame.to,
       intentType: frame.intent,
-      stage: 'completed',
-      status: 'success',
+      stage: 'dispatched',
     })
+    appendIntentTraceEvent(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      intentType: frame.intent,
+      stage: 'delivered',
+    })
+    appendIntentTraceEvent(db, {
+      nonce: frame.nonce,
+      fromBeamId: frame.from,
+      toBeamId: frame.to,
+      intentType: frame.intent,
+      stage: 'acked',
+    })
+    setIntentLifecycleStatus(db, { nonce: frame.nonce, status: 'validated' })
+    setIntentLifecycleStatus(db, { nonce: frame.nonce, status: 'dispatched' })
+    setIntentLifecycleStatus(db, { nonce: frame.nonce, status: 'delivered' })
     finalizeIntentLog(db, {
       nonce: frame.nonce,
       fromBeamId: frame.from,
       toBeamId: frame.to,
-      success: true,
+      status: 'acked',
       latencyMs: 42,
     })
 
@@ -137,7 +153,7 @@ test('observability trace endpoint returns lifecycle, audit, and shield context'
     }
 
     assert.equal(payload.intent.nonce, frame.nonce)
-    assert.deepEqual(payload.stages.map((stage) => stage.stage), ['received', 'validated', 'completed'])
+    assert.deepEqual(payload.stages.map((stage) => stage.stage), ['received', 'validated', 'dispatched', 'delivered', 'acked'])
     assert.equal(payload.audit[0]?.action, 'federation.relay')
     assert.equal(payload.shield[0]?.decision, 'hold')
   } finally {
@@ -157,7 +173,7 @@ test('alerts endpoint surfaces elevated error rate and error hotspots', async ()
         nonce: frame.nonce,
         fromBeamId: frame.from,
         toBeamId: frame.to,
-        success: false,
+        status: 'failed',
         latencyMs: 3200,
         errorCode: 'TIMEOUT',
       })
@@ -192,7 +208,6 @@ test('prune endpoint removes aged intents and trace records', async () => {
       toBeamId: frame.to,
       intentType: frame.intent,
       stage: 'received',
-      status: 'pending',
       timestamp: oldTimestamp,
     })
 
@@ -216,6 +231,26 @@ test('prune endpoint removes aged intents and trace records', async () => {
     const remainingTraces = db.prepare('SELECT COUNT(*) AS count FROM intent_trace_events').get() as { count: number }
     assert.equal(remainingIntents.count, 0)
     assert.equal(remainingTraces.count, 0)
+  } finally {
+    db.close()
+  }
+})
+
+test('recordIntentStage rejects out-of-order lifecycle stages', () => {
+  const db = createDatabase(':memory:')
+  try {
+    registerFixtureAgents(db)
+    const frame = createFrame('invalid-order')
+
+    recordIntentStage(db, frame, 'received', undefined, frame.timestamp)
+    recordIntentStage(db, frame, 'validated')
+    recordIntentStage(db, frame, 'dispatched')
+    recordIntentStage(db, frame, 'delivered')
+
+    assert.throws(
+      () => recordIntentStage(db, frame, 'validated'),
+      /Invalid trace invalid-order transition from delivered to validated/,
+    )
   } finally {
     db.close()
   }

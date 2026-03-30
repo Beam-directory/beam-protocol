@@ -7,6 +7,7 @@ import { Hono, type Context } from 'hono'
 import type Database from 'better-sqlite3'
 import {
   insertMessage,
+  markDispatched,
   markDelivered,
   markAcked,
   markDeadLetter,
@@ -153,6 +154,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     const now = Date.now() / 1000
 
     // Attempt immediate delivery
+    markDispatched(db, msgId)
     const result = await deliverToDirectory(directoryUrl, msgId, messageNonce, sender, recipient, intent, payload)
 
     if (result.success) {
@@ -181,7 +183,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     return c.json({
       message_id: msgId,
       nonce: messageNonce,
-      status: 'pending',
+      status: 'queued',
       created_at: now,
       retry_count: retryCount,
       next_retry_at: nextRetry,
@@ -239,6 +241,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     }
 
     requeueMessage(db, messageId)
+    markDispatched(db, messageId)
     const payload = JSON.parse(message.payload) as Record<string, unknown>
     const result = await deliverToDirectory(
       directoryUrl,
@@ -279,7 +282,7 @@ export function createBusRouter(options: RouterOptions): Hono {
     return c.json({
       message_id: messageId,
       nonce: message.nonce,
-      status: 'pending',
+      status: 'queued',
       requeued: true,
       retry_count: retryCount,
       next_retry_at: nextRetry,
@@ -309,10 +312,17 @@ export function createBusRouter(options: RouterOptions): Hono {
     const msg = getMessage(db, messageId)
     if (!msg) return c.json({ error: `Message ${messageId} not found`, errorCode: 'MESSAGE_NOT_FOUND' }, 404)
 
-    if (status === 'acked') {
-      markAcked(db, messageId, response)
-    } else {
-      markFailed(db, messageId, response ? JSON.stringify(response) : 'Manually failed')
+    try {
+      if (status === 'acked') {
+        markAcked(db, messageId, response)
+      } else {
+        markFailed(db, messageId, response ? JSON.stringify(response) : 'Manually failed')
+      }
+    } catch (err) {
+      return c.json({
+        error: err instanceof Error ? err.message : 'Invalid lifecycle transition',
+        errorCode: 'INVALID_STATE',
+      }, 409)
     }
 
     return c.json({ message_id: messageId, status, updated_at: Date.now() / 1000 })

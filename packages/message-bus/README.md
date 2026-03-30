@@ -12,6 +12,7 @@ Persistent Beam relay for queued delivery, retries, audit history, and delivery 
 
 ## Delivery Model
 
+- The bus uses the canonical Beam lifecycle: `received`, `queued`, `dispatched`, `delivered`, `acked`, `failed`, `dead_letter`.
 - Every bus message gets a persisted `nonce`. If the same `nonce` is submitted again with the same sender, recipient, intent, and payload, the bus returns the existing message instead of redelivering it.
 - Retryable errors from the directory (`OFFLINE`, `TIMEOUT`, `DELIVERY_FAILED`, `DIRECT_HTTP_FAILED`, `IN_PROGRESS`, `RATE_LIMITED`, transport timeouts, and connection errors) are retried.
 - Non-retryable errors (`INVALID_INTENT`, `FORBIDDEN`, `UNAUTHORIZED`, nonce conflicts, and other hard 4xx failures) are dead-lettered immediately.

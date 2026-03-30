@@ -3,7 +3,7 @@ import { WebSocketServer, WebSocket } from 'ws'
 import type { IncomingMessage } from 'node:http'
 import type { Database } from 'better-sqlite3'
 import type { IntentFrame, ResultFrame } from './types.js'
-import { finalizeIntentLog, getAgent, getIntentLogByNonce, hasActiveDelegation, logIntentStart, updateLastSeen } from './db.js'
+import { finalizeIntentLog, getAgent, getIntentLogByNonce, hasActiveDelegation, logIntentStart, setIntentLifecycleStatus, updateLastSeen } from './db.js'
 import { isIntentAllowed } from './acl.js'
 import {
   getCachedFederatedPublicKey,
@@ -17,6 +17,13 @@ import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
+import {
+  isIntentLifecycleFailure,
+  isIntentLifecycleInFlight,
+  isIntentLifecycleSuccess,
+  normalizeIntentLifecycleStatus,
+  type IntentLifecycleStatus,
+} from './intent-lifecycle.js'
 
 const REPLAY_WINDOW_MS = 5 * 60 * 1000
 const STALE_PENDING_RETRY_WINDOW_MS = 2 * 60 * 1000
@@ -63,6 +70,12 @@ function serializeResultFrame(result: ResultFrame): string {
   return JSON.stringify(result)
 }
 
+function lifecycleErrorCode(status: IntentLifecycleStatus, errorCode: string | null | undefined): string | null {
+  return status === 'failed' || status === 'dead_letter'
+    ? (errorCode ?? 'RESULT_ERROR')
+    : null
+}
+
 function buildResultFrame(
   frame: IntentFrame,
   options: {
@@ -101,7 +114,9 @@ function claimIntentNonce(db: Database, frame: IntentFrame): NonceClaimResult {
     throw new RelayError('BAD_REQUEST', `Nonce ${frame.nonce} was already used for a different intent`)
   }
 
-  if (existing.status === 'pending') {
+  const existingStatus = normalizeIntentLifecycleStatus(existing.status) ?? 'received'
+
+  if (isIntentLifecycleInFlight(existingStatus)) {
     const existingRequestedAt = new Date(existing.requested_at).getTime()
     const ageMs = Number.isNaN(existingRequestedAt) ? 0 : Date.now() - existingRequestedAt
     if (ageMs <= STALE_PENDING_RETRY_WINDOW_MS) {
@@ -116,10 +131,10 @@ function claimIntentNonce(db: Database, frame: IntentFrame): NonceClaimResult {
     try {
       const parsed = JSON.parse(existing.result_json) as ResultFrame
       if (parsed && typeof parsed === 'object' && parsed.nonce === frame.nonce) {
-        if (existing.status === 'success') {
+        if (isIntentLifecycleSuccess(existingStatus)) {
           return { kind: 'cached', result: parsed }
         }
-        if (existing.error_code && !RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
+        if (isIntentLifecycleFailure(existingStatus) && existing.error_code && !RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
           return { kind: 'cached', result: parsed }
         }
       }
@@ -128,7 +143,7 @@ function claimIntentNonce(db: Database, frame: IntentFrame): NonceClaimResult {
     }
   }
 
-  if (existing.status === 'error' && existing.error_code && RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
+  if (isIntentLifecycleFailure(existingStatus) && existing.error_code && RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
     logIntentStart(db, frame)
     return { kind: 'accepted' }
   }
@@ -138,23 +153,18 @@ function claimIntentNonce(db: Database, frame: IntentFrame): NonceClaimResult {
 }
 
 function applyNonceClaimResult(
-  db: Database,
-  frame: IntentFrame,
+  nonce: string,
   claim: NonceClaimResult,
 ): ResultFrame | null {
   if (claim.kind === 'accepted') {
     return null
   }
 
-  recordIntentStage(db, frame, 'dedupe', 'success', {
-    outcome: claim.kind,
-  })
-
   if (claim.kind === 'cached') {
     return claim.result
   }
 
-  throw new RelayError('IN_PROGRESS', `Intent with nonce ${frame.nonce} is already being processed`)
+  throw new RelayError('IN_PROGRESS', `Intent with nonce ${nonce} is already being processed`)
 }
 
 function finalizeIntentWithResult(
@@ -167,7 +177,7 @@ function finalizeIntentWithResult(
     nonce: frame.nonce,
     fromBeamId: frame.from,
     toBeamId: frame.to,
-    success: result.success,
+    status: result.success ? 'acked' : 'failed',
     latencyMs,
     errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(result),
@@ -175,6 +185,7 @@ function finalizeIntentWithResult(
 }
 
 function broadcastCompletedIntent(frame: IntentFrame, result: ResultFrame, latencyMs: number | null): void {
+  const lifecycleStatus: IntentLifecycleStatus = result.success ? 'acked' : 'failed'
   broadcastIntentFeed({
     nonce: frame.nonce,
     from: frame.from,
@@ -183,8 +194,8 @@ function broadcastCompletedIntent(frame: IntentFrame, result: ResultFrame, laten
     timestamp: frame.timestamp,
     completedAt: new Date().toISOString(),
     roundTripLatencyMs: latencyMs,
-    status: result.success ? 'success' : 'error',
-    errorCode: result.success ? null : (result.errorCode ?? 'RESULT_ERROR'),
+    status: lifecycleStatus,
+    errorCode: lifecycleErrorCode(lifecycleStatus, result.errorCode),
   })
 }
 
@@ -207,7 +218,7 @@ function finalizeFailedIntent(
   })
 
   finalizeIntentWithResult(db, frame, result, options.latencyMs)
-  recordIntentStage(db, frame, 'completed', 'error', {
+  recordIntentStage(db, frame, 'failed', {
     transport: options.transport,
     latencyMs: options.latencyMs,
     errorCode: options.errorCode,
@@ -271,11 +282,6 @@ async function attemptDirectHttpDelivery(
   frame: IntentFrame,
   endpoint: string,
 ): Promise<ResultFrame | null> {
-  recordIntentStage(db, frame, 'delivery', 'pending', {
-    transport: 'direct-http',
-    endpoint,
-  })
-
   try {
     const startedAt = Date.now()
     const directResponse = await fetch(endpoint, {
@@ -299,9 +305,10 @@ async function attemptDirectHttpDelivery(
 
     const latencyMs = Date.now() - startedAt
     if (!directResponse.ok) {
-      recordIntentStage(db, frame, 'delivery', 'error', {
+      recordIntentStage(db, frame, 'dispatched', {
         transport: 'direct-http',
         endpoint,
+        outcome: 'fallback',
         status: directResponse.status,
         errorCode: 'DIRECT_HTTP_FAILED',
       })
@@ -316,25 +323,42 @@ async function attemptDirectHttpDelivery(
     }
 
     const result = normalizeDirectHttpResult(frame, body, latencyMs)
+    recordIntentStage(db, frame, 'delivered', {
+      transport: 'direct-http',
+      endpoint,
+      status: directResponse.status,
+      latencyMs,
+    })
+    setIntentLifecycleStatus(db, {
+      nonce: frame.nonce,
+      status: 'delivered',
+    })
+    broadcastIntentFeed({
+      nonce: frame.nonce,
+      from: frame.from,
+      to: frame.to,
+      intentType: frame.intent,
+      timestamp: frame.timestamp,
+      completedAt: null,
+      roundTripLatencyMs: null,
+      status: 'delivered',
+      errorCode: null,
+    })
     finalizeIntentWithResult(db, frame, result, latencyMs)
-    recordIntentStage(db, frame, 'delivery', result.success ? 'success' : 'error', {
+    recordIntentStage(db, frame, result.success ? 'acked' : 'failed', {
       transport: 'direct-http',
       endpoint,
       status: directResponse.status,
       latencyMs,
       errorCode: result.success ? null : (result.errorCode ?? 'DIRECT_HTTP_ERROR'),
     })
-    recordIntentStage(db, frame, 'completed', result.success ? 'success' : 'error', {
-      transport: 'direct-http',
-      latencyMs,
-      errorCode: result.success ? null : (result.errorCode ?? 'DIRECT_HTTP_ERROR'),
-    })
     broadcastCompletedIntent(frame, result, latencyMs)
     return result
   } catch (err) {
-    recordIntentStage(db, frame, 'delivery', 'error', {
+    recordIntentStage(db, frame, 'dispatched', {
       transport: 'direct-http',
       endpoint,
+      outcome: 'fallback',
       errorCode: 'DIRECT_HTTP_FAILED',
       message: err instanceof Error ? err.message : 'Direct delivery failed',
     })
@@ -443,56 +467,53 @@ export async function relayIntentFromHttp(
     throw new RelayError('BAD_REQUEST', `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`)
   }
 
-  recordIntentStage(db, prepared, 'received', 'pending', {
-    transport: 'http',
-    sourceDirectory,
-    hopCount,
-  }, prepared.timestamp)
-
   const sender = getAgent(db, prepared.from)
   const senderPublicKey = sender?.public_key ?? await resolveSenderPublicKey(db, prepared.from, sourceDirectory)
 
   if (!senderPublicKey) {
-    recordIntentStage(db, prepared, 'sender_lookup', 'error', {
-      sourceDirectory,
-      errorCode: 'UNKNOWN_SENDER',
-    })
     throw new RelayError('BAD_REQUEST', `Sender ${prepared.from} is not registered`)
   }
-
-  recordIntentStage(db, prepared, 'sender_lookup', 'success', {
-    sourceDirectory,
-    source: sender ? 'local' : 'federated',
-  })
 
   try {
     enforceSecurityChecks(db, prepared, senderPublicKey)
     recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
-    recordIntentStage(db, prepared, 'validated', 'success', {
-      transport: 'http',
-    })
   } catch (err) {
     recordShieldDecision(db, prepared, {
       decision: 'reject',
       timestamp: prepared.timestamp,
       extraFlags: [err instanceof RelayError ? err.code : 'INVALID_INTENT'],
     })
-    recordIntentStage(db, prepared, 'validated', 'error', {
-      transport: 'http',
-      errorCode: err instanceof RelayError ? err.code : 'INVALID_INTENT',
-      message: err instanceof Error ? err.message : 'Rejected by security checks',
-    })
     throw err
   }
 
-  const cachedResult = applyNonceClaimResult(db, prepared, claimIntentNonce(db, prepared))
+  const cachedResult = applyNonceClaimResult(prepared.nonce, claimIntentNonce(db, prepared))
   if (cachedResult) {
     updateLastSeen(db, prepared.from)
     return cachedResult
   }
 
-  recordIntentStage(db, prepared, 'dispatch', 'pending', {
+  recordIntentStage(db, prepared, 'received', {
+    transport: 'http',
+    sourceDirectory,
+    hopCount,
+  }, prepared.timestamp)
+  recordIntentStage(db, prepared, 'validated', {
+    transport: 'http',
+    sourceDirectory,
+    senderSource: sender ? 'local' : 'federated',
+  })
+  setIntentLifecycleStatus(db, {
+    nonce: prepared.nonce,
+    status: 'validated',
+  })
+
+  recordIntentStage(db, prepared, 'dispatched', {
     deliveryTarget: 'local-or-federated',
+    transport: 'http',
+  })
+  setIntentLifecycleStatus(db, {
+    nonce: prepared.nonce,
+    status: 'dispatched',
   })
   broadcastIntentFeed({
     nonce: prepared.nonce,
@@ -502,13 +523,13 @@ export async function relayIntentFromHttp(
     timestamp: prepared.timestamp,
     completedAt: null,
     roundTripLatencyMs: null,
-    status: 'pending',
+    status: 'dispatched',
     errorCode: null,
   })
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
-    recordIntentStage(db, prepared, 'dispatch', 'pending', {
+    recordIntentStage(db, prepared, 'dispatched', {
       deliveryTarget: 'federation',
     })
     const federatedResult = await relayIntentToFederatedPeer(db, prepared, timeoutMs, {
@@ -530,10 +551,6 @@ export async function relayIntentFromHttp(
   const recipientSession = connections.get(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
-    recordIntentStage(db, prepared, 'delivery', 'error', {
-      transport: 'ws',
-      errorCode: 'OFFLINE',
-    })
     finalizeFailedIntent(db, prepared, {
       error: `Agent ${prepared.to} is not currently connected`,
       errorCode: 'OFFLINE',
@@ -544,7 +561,7 @@ export async function relayIntentFromHttp(
   }
 
   const resultPromise = createResultWaiter(db, prepared, timeoutMs)
-  recordIntentStage(db, prepared, 'delivery', 'pending', {
+  recordIntentStage(db, prepared, 'dispatched', {
     transport: 'ws',
     timeoutMs,
   })
@@ -555,13 +572,27 @@ export async function relayIntentFromHttp(
       frame: prepared,
       senderPublicKey,
     })
+    recordIntentStage(db, prepared, 'delivered', {
+      transport: 'ws',
+      timeoutMs,
+    })
+    setIntentLifecycleStatus(db, {
+      nonce: prepared.nonce,
+      status: 'delivered',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: null,
+      roundTripLatencyMs: null,
+      status: 'delivered',
+      errorCode: null,
+    })
   } catch (err) {
     clearPendingResult(prepared.nonce)
-    recordIntentStage(db, prepared, 'delivery', 'error', {
-      transport: 'ws',
-      errorCode: 'DELIVERY_FAILED',
-      message: err instanceof Error ? err.message : 'Failed to deliver to recipient socket',
-    })
     finalizeFailedIntent(db, prepared, {
       error: err instanceof Error ? err.message : 'Failed to relay intent',
       errorCode: 'DELIVERY_FAILED',
@@ -629,12 +660,6 @@ async function handleIntent(
   try {
     senderAgent = resolveIntentSender(db, senderBeamId, prepared)
   } catch (err) {
-    recordIntentStage(db, prepared, 'sender_lookup', 'error', {
-      transport: 'ws',
-      connectedBeamId: senderBeamId,
-      errorCode: err instanceof RelayError ? err.code : 'UNKNOWN_SENDER',
-      message: err instanceof Error ? err.message : 'Sender is not registered in the directory',
-    })
     sendJson(senderWs, {
       type: 'error',
       nonce: prepared.nonce,
@@ -644,34 +669,14 @@ async function handleIntent(
     return
   }
 
-  recordIntentStage(db, prepared, 'received', 'pending', {
-    transport: 'ws',
-    connectedBeamId: senderBeamId,
-  }, prepared.timestamp)
-  recordIntentStage(db, prepared, 'sender_lookup', 'success', {
-    transport: 'ws',
-    connectedBeamId: senderBeamId,
-    actingOnBehalf: senderBeamId !== prepared.from,
-  })
-
   try {
     enforceSecurityChecks(db, prepared, senderAgent.public_key, { skipSignatureVerification: auth.authenticatedViaApiKey })
     recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
-    recordIntentStage(db, prepared, 'validated', 'success', {
-      transport: 'ws',
-      authenticatedViaApiKey: auth.authenticatedViaApiKey,
-    })
   } catch (err) {
     recordShieldDecision(db, prepared, {
       decision: 'reject',
       timestamp: prepared.timestamp,
       extraFlags: [err instanceof RelayError ? err.code : 'INVALID_INTENT'],
-    })
-    recordIntentStage(db, prepared, 'validated', 'error', {
-      transport: 'ws',
-      authenticatedViaApiKey: auth.authenticatedViaApiKey,
-      errorCode: err instanceof RelayError ? err.code : 'INVALID_INTENT',
-      message: err instanceof Error ? err.message : 'Rejected by relay security checks',
     })
     if (err instanceof RelayError && err.code === 'RATE_LIMITED') {
       sendJson(senderWs, {
@@ -695,7 +700,7 @@ async function handleIntent(
 
   let cachedResult: ResultFrame | null
   try {
-    cachedResult = applyNonceClaimResult(db, prepared, claimIntentNonce(db, prepared))
+    cachedResult = applyNonceClaimResult(prepared.nonce, claimIntentNonce(db, prepared))
   } catch (err) {
     sendJson(senderWs, {
       type: 'error',
@@ -712,8 +717,28 @@ async function handleIntent(
     return
   }
 
-  recordIntentStage(db, prepared, 'dispatch', 'pending', {
+  recordIntentStage(db, prepared, 'received', {
+    transport: 'ws',
+    connectedBeamId: senderBeamId,
+  }, prepared.timestamp)
+  recordIntentStage(db, prepared, 'validated', {
+    transport: 'ws',
+    connectedBeamId: senderBeamId,
+    actingOnBehalf: senderBeamId !== prepared.from,
+    authenticatedViaApiKey: auth.authenticatedViaApiKey,
+  })
+  setIntentLifecycleStatus(db, {
+    nonce: prepared.nonce,
+    status: 'validated',
+  })
+
+  recordIntentStage(db, prepared, 'dispatched', {
     deliveryTarget: 'local-or-federated',
+    transport: 'ws',
+  })
+  setIntentLifecycleStatus(db, {
+    nonce: prepared.nonce,
+    status: 'dispatched',
   })
   broadcastIntentFeed({
     nonce: prepared.nonce,
@@ -723,13 +748,13 @@ async function handleIntent(
     timestamp: prepared.timestamp,
     completedAt: null,
     roundTripLatencyMs: null,
-    status: 'pending',
+    status: 'dispatched',
     errorCode: null,
   })
 
   const localRecipient = getAgent(db, prepared.to)
   if (!localRecipient) {
-    recordIntentStage(db, prepared, 'dispatch', 'pending', {
+    recordIntentStage(db, prepared, 'dispatched', {
       deliveryTarget: 'federation',
     })
     try {
@@ -763,10 +788,6 @@ async function handleIntent(
   const recipientSession = connections.get(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
-    recordIntentStage(db, prepared, 'delivery', 'error', {
-      transport: 'ws',
-      errorCode: 'OFFLINE',
-    })
     finalizeFailedIntent(db, prepared, {
       error: `Agent ${prepared.to} is not currently connected`,
       errorCode: 'OFFLINE',
@@ -786,7 +807,7 @@ async function handleIntent(
   }
 
   const resultPromise = createResultWaiter(db, prepared, 30_000)
-  recordIntentStage(db, prepared, 'delivery', 'pending', {
+  recordIntentStage(db, prepared, 'dispatched', {
     transport: 'ws',
     timeoutMs: 30_000,
     actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
@@ -799,13 +820,28 @@ async function handleIntent(
       senderPublicKey: senderAgent.public_key,
       actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
     })
+    recordIntentStage(db, prepared, 'delivered', {
+      transport: 'ws',
+      timeoutMs: 30_000,
+      actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+    })
+    setIntentLifecycleStatus(db, {
+      nonce: prepared.nonce,
+      status: 'delivered',
+    })
+    broadcastIntentFeed({
+      nonce: prepared.nonce,
+      from: prepared.from,
+      to: prepared.to,
+      intentType: prepared.intent,
+      timestamp: prepared.timestamp,
+      completedAt: null,
+      roundTripLatencyMs: null,
+      status: 'delivered',
+      errorCode: null,
+    })
   } catch (err) {
     clearPendingResult(prepared.nonce)
-    recordIntentStage(db, prepared, 'delivery', 'error', {
-      transport: 'ws',
-      errorCode: 'DELIVERY_FAILED',
-      message: err instanceof Error ? err.message : 'Failed to deliver to recipient socket',
-    })
     finalizeFailedIntent(db, prepared, {
       error: err instanceof Error ? err.message : 'Failed to relay intent',
       errorCode: 'DELIVERY_FAILED',
@@ -878,9 +914,6 @@ async function relayIntentToFederatedPeer(
   const peerUrl = resolved?.directoryUrl
 
   if (!resolved || !peerUrl || peerUrl === getLocalDirectoryUrl()) {
-    recordIntentStage(db, frame, 'federation.resolve', 'error', {
-      errorCode: 'OFFLINE',
-    })
     finalizeFailedIntent(db, frame, {
       error: `Agent ${frame.to} is not available locally or through federation`,
       errorCode: 'OFFLINE',
@@ -890,17 +923,14 @@ async function relayIntentToFederatedPeer(
     throw new RelayError('OFFLINE', `Agent ${frame.to} is not available locally or through federation`)
   }
 
-  recordIntentStage(db, frame, 'federation.resolve', 'success', {
+  recordIntentStage(db, frame, 'dispatched', {
     peerUrl,
     scope: resolved.scope,
+    transport: 'federation',
   })
 
   const nextHopCount = options.hopCount + 1
   if (nextHopCount > MAX_FEDERATION_HOPS) {
-    recordIntentStage(db, frame, 'federation.relay', 'error', {
-      errorCode: 'BAD_REQUEST',
-      hopCount: nextHopCount,
-    })
     finalizeFailedIntent(db, frame, {
       error: `Federation hop limit exceeded (${MAX_FEDERATION_HOPS})`,
       errorCode: 'BAD_REQUEST',
@@ -914,9 +944,10 @@ async function relayIntentToFederatedPeer(
   }
 
   const startedAt = Date.now()
-  recordIntentStage(db, frame, 'federation.relay', 'pending', {
+  recordIntentStage(db, frame, 'dispatched', {
     peerUrl,
     hopCount: nextHopCount,
+    transport: 'federation',
   })
   try {
     const response = await fetch(`${peerUrl}/federation/relay`, {
@@ -932,12 +963,6 @@ async function relayIntentToFederatedPeer(
 
     const latencyMs = Date.now() - startedAt
     if (!response.ok) {
-      recordIntentStage(db, frame, 'federation.relay', 'error', {
-        peerUrl,
-        hopCount: nextHopCount,
-        errorCode: 'DELIVERY_FAILED',
-        status: response.status,
-      })
       finalizeFailedIntent(db, frame, {
         error: `Federated relay failed with status ${response.status}`,
         errorCode: 'DELIVERY_FAILED',
@@ -954,13 +979,29 @@ async function relayIntentToFederatedPeer(
 
     const result = await response.json() as ResultFrame
     const resolvedLatencyMs = typeof result.latency === 'number' ? result.latency : latencyMs
-    recordIntentStage(db, frame, 'federation.relay', result.success ? 'success' : 'error', {
+    recordIntentStage(db, frame, 'delivered', {
       peerUrl,
       hopCount: nextHopCount,
-      errorCode: result.success ? null : (result.errorCode ?? 'RESULT_ERROR'),
+      transport: 'federation',
+      latencyMs: resolvedLatencyMs,
+    })
+    setIntentLifecycleStatus(db, {
+      nonce: frame.nonce,
+      status: 'delivered',
+    })
+    broadcastIntentFeed({
+      nonce: frame.nonce,
+      from: frame.from,
+      to: frame.to,
+      intentType: frame.intent,
+      timestamp: frame.timestamp,
+      completedAt: null,
+      roundTripLatencyMs: null,
+      status: 'delivered',
+      errorCode: null,
     })
     finalizeIntentWithResult(db, frame, result, resolvedLatencyMs)
-    recordIntentStage(db, frame, 'completed', result.success ? 'success' : 'error', {
+    recordIntentStage(db, frame, result.success ? 'acked' : 'failed', {
       transport: 'federation',
       peerUrl,
       latencyMs: resolvedLatencyMs,
@@ -975,12 +1016,6 @@ async function relayIntentToFederatedPeer(
 
     const latencyMs = Date.now() - startedAt
     const message = err instanceof Error ? err.message : 'Federated relay failed'
-    recordIntentStage(db, frame, 'federation.relay', 'error', {
-      peerUrl,
-      hopCount: nextHopCount,
-      errorCode: 'DELIVERY_FAILED',
-      message,
-    })
     finalizeFailedIntent(db, frame, {
       error: message,
       errorCode: 'DELIVERY_FAILED',
@@ -1160,7 +1195,7 @@ function handleResult(db: Database, frame: ResultFrame): void {
       from: pending.fromBeamId,
       to: pending.toBeamId,
       intent: pending.intentType,
-    }, 'completed', frame.success ? 'success' : 'error', {
+    }, frame.success ? 'acked' : 'failed', {
       transport: 'ws',
       latencyMs,
       errorCode: frame.success ? null : (frame.errorCode ?? 'RESULT_ERROR'),
@@ -1183,11 +1218,12 @@ function handleResult(db: Database, frame: ResultFrame): void {
     return
   }
 
-  if (existing.status === 'success') {
+  const existingStatus = normalizeIntentLifecycleStatus(existing.status) ?? 'received'
+  if (isIntentLifecycleSuccess(existingStatus)) {
     return
   }
 
-  if (existing.status === 'error' && existing.error_code && !RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
+  if (isIntentLifecycleFailure(existingStatus) && existing.error_code && !RETRYABLE_INTENT_ERRORS.has(existing.error_code)) {
     return
   }
 
@@ -1200,7 +1236,7 @@ function handleResult(db: Database, frame: ResultFrame): void {
     nonce: frame.nonce,
     fromBeamId: existing.from_beam_id,
     toBeamId: existing.to_beam_id,
-    success: frame.success,
+    status: frame.success ? 'acked' : 'failed',
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(frame),
@@ -1210,7 +1246,7 @@ function handleResult(db: Database, frame: ResultFrame): void {
     from: existing.from_beam_id,
     to: existing.to_beam_id,
     intent: existing.intent_type,
-  }, 'completed', frame.success ? 'success' : 'error', {
+  }, frame.success ? 'acked' : 'failed', {
     transport: 'ws',
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? null : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
@@ -1286,7 +1322,7 @@ function broadcastIntentFeed(entry: {
   timestamp: string
   completedAt: string | null
   roundTripLatencyMs: number | null
-  status: string
+  status: IntentLifecycleStatus
   errorCode: string | null
 }): void {
   for (const ws of intentFeedSubscribers) {
