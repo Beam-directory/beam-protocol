@@ -169,12 +169,6 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
       ON waitlist(created_at DESC);
 
-    CREATE INDEX IF NOT EXISTS idx_waitlist_status
-      ON waitlist(status, created_at DESC);
-
-    CREATE INDEX IF NOT EXISTS idx_waitlist_owner
-      ON waitlist(owner, created_at DESC);
-
     CREATE TABLE IF NOT EXISTS intent_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       nonce TEXT NOT NULL UNIQUE,
