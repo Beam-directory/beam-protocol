@@ -1,0 +1,59 @@
+name: Deploy Public Site
+
+# Requires:
+# - repo secret `VERCEL_TOKEN`
+# - repo variable `VERCEL_ORG_ID`
+# - repo variable `VERCEL_PUBLIC_SITE_PROJECT_ID`
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/public-site/**'
+      - '.github/workflows/public-site.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: public-site-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: ${{ secrets.VERCEL_TOKEN != '' }}
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PUBLIC_SITE_PROJECT_ID: ${{ vars.VERCEL_PUBLIC_SITE_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Validate Vercel configuration
+        run: |
+          test -n "$VERCEL_TOKEN" || { echo "Missing VERCEL_TOKEN repo secret" >&2; exit 1; }
+          test -n "$VERCEL_ORG_ID" || { echo "Missing VERCEL_ORG_ID repo variable" >&2; exit 1; }
+          test -n "$VERCEL_PUBLIC_SITE_PROJECT_ID" || { echo "Missing VERCEL_PUBLIC_SITE_PROJECT_ID repo variable" >&2; exit 1; }
+
+      - name: Install Vercel CLI
+        run: npm install --global vercel@latest
+
+      - name: Link beam.directory project
+        working-directory: packages/public-site
+        run: vercel link --yes --team "$VERCEL_ORG_ID" --project "$VERCEL_PUBLIC_SITE_PROJECT_ID" --token "$VERCEL_TOKEN"
+
+      - name: Pull production project settings
+        working-directory: packages/public-site
+        run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
+
+      - name: Deploy beam.directory to production
+        working-directory: packages/public-site
+        run: vercel deploy --prod --yes --token "$VERCEL_TOKEN"

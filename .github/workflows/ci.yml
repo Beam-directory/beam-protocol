@@ -151,3 +151,39 @@ jobs:
         run: npm publish --workspace=packages/cli --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Publish GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          NOTES_FILE="reports/${VERSION}-release-notes-draft.md"
+
+          if [ ! -f "$NOTES_FILE" ]; then
+            echo "Expected release notes file not found: $NOTES_FILE" >&2
+            exit 1
+          fi
+
+          if gh release view "$TAG_NAME" >/dev/null 2>&1; then
+            gh release edit "$TAG_NAME" \
+              --title "$TAG_NAME" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          else
+            gh release create "$TAG_NAME" \
+              --verify-tag \
+              --title "$TAG_NAME" \
+              --notes-file "$NOTES_FILE" \
+              --latest
+          fi
