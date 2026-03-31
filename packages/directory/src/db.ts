@@ -25,6 +25,9 @@ import type {
   ShieldAuditLogRow,
   TrustScoreRow,
   VerificationTier,
+  WorkspaceIdentityBindingRow,
+  WorkspacePolicyRow,
+  WorkspaceRow,
 } from './types.js'
 import { generateDIDDocument, generateDIDDocumentWithKeys, toBeamDID, type DIDDocument } from './did.js'
 import {
@@ -174,6 +177,93 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_waitlist_created_at
       ON waitlist(created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS workspaces (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL UNIQUE,
+      name TEXT NOT NULL,
+      org_name TEXT,
+      description TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused', 'archived')),
+      default_thread_scope TEXT NOT NULL DEFAULT 'internal' CHECK(default_thread_scope IN ('internal', 'handoff')),
+      external_handoffs_enabled INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspaces_status
+      ON workspaces(status, updated_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_workspaces_org_name
+      ON workspaces(org_name, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS workspace_members (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id INTEGER NOT NULL,
+      principal_id TEXT NOT NULL,
+      principal_type TEXT NOT NULL CHECK(principal_type IN ('human', 'agent', 'service', 'partner')),
+      role TEXT NOT NULL CHECK(role IN ('owner', 'operator', 'viewer')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      UNIQUE(workspace_id, principal_id, principal_type)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace
+      ON workspace_members(workspace_id, role, principal_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_identity_bindings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id INTEGER NOT NULL,
+      beam_id TEXT NOT NULL,
+      binding_type TEXT NOT NULL CHECK(binding_type IN ('agent', 'service', 'partner')),
+      owner TEXT,
+      runtime_type TEXT,
+      policy_profile TEXT,
+      default_thread_scope TEXT NOT NULL DEFAULT 'internal' CHECK(default_thread_scope IN ('internal', 'handoff')),
+      can_initiate_external INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused')),
+      notes TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      UNIQUE(workspace_id, beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_identity_bindings_workspace
+      ON workspace_identity_bindings(workspace_id, status, beam_id);
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_identity_bindings_beam_id
+      ON workspace_identity_bindings(beam_id, status);
+
+    CREATE TABLE IF NOT EXISTS workspace_partner_channels (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id INTEGER NOT NULL,
+      partner_beam_id TEXT NOT NULL,
+      label TEXT,
+      owner TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'trial', 'blocked')),
+      notes TEXT,
+      last_success_at TEXT,
+      last_failure_at TEXT,
+      last_intent_nonce TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      UNIQUE(workspace_id, partner_beam_id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_partner_channels_workspace
+      ON workspace_partner_channels(workspace_id, status, partner_beam_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_policies (
+      workspace_id INTEGER PRIMARY KEY,
+      policy_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL,
+      updated_by TEXT,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
 
     CREATE TABLE IF NOT EXISTS operator_notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -829,6 +919,277 @@ export function createOrg(
 export function getOrg(db: DB, name: string): OrgRow | null {
   const row = db.prepare('SELECT * FROM orgs WHERE name = ?').get(name) as OrgRow | undefined
   return row ?? null
+}
+
+function ensureWorkspacePolicyRecord(db: DB, workspaceId: number, updatedAt: string, updatedBy: string | null = null): void {
+  db.prepare(`
+    INSERT OR IGNORE INTO workspace_policies (workspace_id, policy_json, updated_at, updated_by)
+    VALUES (?, '{}', ?, ?)
+  `).run(workspaceId, updatedAt, updatedBy)
+}
+
+export function createWorkspace(
+  db: DB,
+  input: {
+    slug: string
+    name: string
+    orgName?: string | null
+    description?: string | null
+    status?: WorkspaceRow['status']
+    defaultThreadScope?: WorkspaceRow['default_thread_scope']
+    externalHandoffsEnabled?: boolean
+  },
+): WorkspaceRow {
+  const now = nowIso()
+
+  const result = db.prepare(`
+    INSERT INTO workspaces (
+      slug,
+      name,
+      org_name,
+      description,
+      status,
+      default_thread_scope,
+      external_handoffs_enabled,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.slug,
+    input.name,
+    input.orgName ?? null,
+    input.description ?? null,
+    input.status ?? 'active',
+    input.defaultThreadScope ?? 'internal',
+    input.externalHandoffsEnabled ? 1 : 0,
+    now,
+    now,
+  )
+
+  const workspace = getWorkspaceById(db, Number(result.lastInsertRowid))
+  if (!workspace) {
+    throw new Error('Workspace insert succeeded but row was not found')
+  }
+
+  ensureWorkspacePolicyRecord(db, workspace.id, now)
+  return workspace
+}
+
+export function getWorkspaceById(db: DB, id: number): WorkspaceRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspaces
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspaceRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspaceBySlug(db: DB, slug: string): WorkspaceRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspaces
+    WHERE slug = ?
+    LIMIT 1
+  `).get(slug) as WorkspaceRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspaces(db: DB): WorkspaceRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspaces
+    ORDER BY datetime(updated_at) DESC, slug ASC
+  `).all() as WorkspaceRow[]
+}
+
+export function getWorkspaceSummary(
+  db: DB,
+  workspaceId: number,
+): {
+  identityCount: number
+  externalInitiatorCount: number
+  memberCount: number
+  partnerChannelCount: number
+} {
+  const identityCount = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM workspace_identity_bindings
+    WHERE workspace_id = ?
+  `).get(workspaceId) as { count: number } | undefined)?.count ?? 0
+
+  const externalInitiatorCount = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM workspace_identity_bindings
+    WHERE workspace_id = ? AND can_initiate_external = 1 AND status = 'active'
+  `).get(workspaceId) as { count: number } | undefined)?.count ?? 0
+
+  const memberCount = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM workspace_members
+    WHERE workspace_id = ?
+  `).get(workspaceId) as { count: number } | undefined)?.count ?? 0
+
+  const partnerChannelCount = (db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM workspace_partner_channels
+    WHERE workspace_id = ?
+  `).get(workspaceId) as { count: number } | undefined)?.count ?? 0
+
+  return {
+    identityCount,
+    externalInitiatorCount,
+    memberCount,
+    partnerChannelCount,
+  }
+}
+
+export function getWorkspacePolicy(db: DB, workspaceId: number): WorkspacePolicyRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_policies
+    WHERE workspace_id = ?
+    LIMIT 1
+  `).get(workspaceId) as WorkspacePolicyRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspaceIdentityBindingById(db: DB, id: number): WorkspaceIdentityBindingRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_identity_bindings
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspaceIdentityBindingRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspaceIdentityBindingByBeamId(
+  db: DB,
+  workspaceId: number,
+  beamId: string,
+): WorkspaceIdentityBindingRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_identity_bindings
+    WHERE workspace_id = ? AND beam_id = ?
+    LIMIT 1
+  `).get(workspaceId, beamId) as WorkspaceIdentityBindingRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspaceIdentityBindings(db: DB, workspaceId: number): WorkspaceIdentityBindingRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspace_identity_bindings
+    WHERE workspace_id = ?
+    ORDER BY
+      CASE status
+        WHEN 'active' THEN 0
+        ELSE 1
+      END ASC,
+      COALESCE(owner, '') ASC,
+      beam_id ASC
+  `).all(workspaceId) as WorkspaceIdentityBindingRow[]
+}
+
+export function createWorkspaceIdentityBinding(
+  db: DB,
+  input: {
+    workspaceId: number
+    beamId: string
+    bindingType: WorkspaceIdentityBindingRow['binding_type']
+    owner?: string | null
+    runtimeType?: string | null
+    policyProfile?: string | null
+    defaultThreadScope?: WorkspaceIdentityBindingRow['default_thread_scope']
+    canInitiateExternal?: boolean
+    status?: WorkspaceIdentityBindingRow['status']
+    notes?: string | null
+  },
+): WorkspaceIdentityBindingRow {
+  const now = nowIso()
+  const result = db.prepare(`
+    INSERT INTO workspace_identity_bindings (
+      workspace_id,
+      beam_id,
+      binding_type,
+      owner,
+      runtime_type,
+      policy_profile,
+      default_thread_scope,
+      can_initiate_external,
+      status,
+      notes,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.workspaceId,
+    input.beamId,
+    input.bindingType,
+    input.owner ?? null,
+    input.runtimeType ?? null,
+    input.policyProfile ?? null,
+    input.defaultThreadScope ?? 'internal',
+    input.canInitiateExternal ? 1 : 0,
+    input.status ?? 'active',
+    input.notes ?? null,
+    now,
+    now,
+  )
+
+  const binding = getWorkspaceIdentityBindingById(db, Number(result.lastInsertRowid))
+  if (!binding) {
+    throw new Error('Workspace identity binding insert succeeded but row was not found')
+  }
+
+  return binding
+}
+
+export function updateWorkspaceIdentityBinding(
+  db: DB,
+  input: {
+    id: number
+    owner: string | null
+    runtimeType: string | null
+    policyProfile: string | null
+    defaultThreadScope: WorkspaceIdentityBindingRow['default_thread_scope']
+    canInitiateExternal: boolean
+    status: WorkspaceIdentityBindingRow['status']
+    notes: string | null
+  },
+): WorkspaceIdentityBindingRow | null {
+  const updatedAt = nowIso()
+  db.prepare(`
+    UPDATE workspace_identity_bindings
+    SET owner = ?,
+        runtime_type = ?,
+        policy_profile = ?,
+        default_thread_scope = ?,
+        can_initiate_external = ?,
+        status = ?,
+        notes = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.owner,
+    input.runtimeType,
+    input.policyProfile,
+    input.defaultThreadScope,
+    input.canInitiateExternal ? 1 : 0,
+    input.status,
+    input.notes,
+    updatedAt,
+    input.id,
+  )
+
+  return getWorkspaceIdentityBindingById(db, input.id)
 }
 
 export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Partial<AgentRow>> {

@@ -22,6 +22,7 @@ import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, ob
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
+import { workspacesRouter } from './routes/workspaces.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import {
   createWebSocketServer,
@@ -3276,6 +3277,8 @@ export function createApp(db: Database): Hono {
       return c.json({ error: 'Failed to load audit log', errorCode: 'DB_ERROR' }, 500)
     }
   })
+
+  app.route('/admin/workspaces', workspacesRouter(db))
 
   // List all agents with connection status (before sub-router to avoid conflict)
   app.get('/directory/agents', (c) => {

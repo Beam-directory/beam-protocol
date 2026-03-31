@@ -325,3 +325,72 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     rmSync(root, { force: true, recursive: true })
   }
 })
+
+test('createDatabase adds beam workspace foundation tables to legacy databases', () => {
+  const { root, dbPath } = createTempDbPath()
+  const legacyDb = new Database(dbPath)
+
+  try {
+    legacyDb.exec(`
+      CREATE TABLE agents (
+        beam_id TEXT PRIMARY KEY,
+        org TEXT,
+        personal INTEGER NOT NULL DEFAULT 0,
+        display_name TEXT NOT NULL,
+        capabilities TEXT NOT NULL DEFAULT '[]',
+        public_key TEXT NOT NULL,
+        api_key_hash TEXT,
+        email TEXT,
+        email_verified INTEGER NOT NULL DEFAULT 0,
+        description TEXT,
+        logo_url TEXT,
+        website TEXT,
+        trust_score REAL NOT NULL DEFAULT 0.5,
+        verified INTEGER NOT NULL DEFAULT 0,
+        verification_tier TEXT NOT NULL DEFAULT 'basic',
+        email_token TEXT,
+        created_at TEXT NOT NULL,
+        last_seen TEXT NOT NULL
+      );
+    `)
+  } finally {
+    legacyDb.close()
+  }
+
+  const db = createDatabase(dbPath)
+
+  try {
+    const tables = db.prepare(`
+      SELECT name
+      FROM sqlite_master
+      WHERE type = 'table'
+        AND name IN (
+          'workspaces',
+          'workspace_members',
+          'workspace_identity_bindings',
+          'workspace_partner_channels',
+          'workspace_policies'
+        )
+      ORDER BY name ASC
+    `).all() as Array<{ name: string }>
+
+    assert.deepEqual(
+      tables.map((row) => row.name),
+      [
+        'workspace_identity_bindings',
+        'workspace_members',
+        'workspace_partner_channels',
+        'workspace_policies',
+        'workspaces',
+      ],
+    )
+
+    const bindingColumns = db.prepare('PRAGMA table_info(workspace_identity_bindings)').all() as Array<{ name: string }>
+    assert.ok(bindingColumns.some((column) => column.name === 'default_thread_scope'))
+    assert.ok(bindingColumns.some((column) => column.name === 'can_initiate_external'))
+    assert.ok(bindingColumns.some((column) => column.name === 'runtime_type'))
+  } finally {
+    db.close()
+    rmSync(root, { force: true, recursive: true })
+  }
+})
