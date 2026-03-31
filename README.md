@@ -121,7 +121,7 @@ See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibilit
 ## Release Readiness
 
 The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
-The current hosted-beta dogfood pass lives in [`reports/0.7.0-hosted-demo-readiness.md`](./reports/0.7.0-hosted-demo-readiness.md), and the measured local bring-up timing lives in [`reports/0.7.0-clean-start-onboarding.md`](./reports/0.7.0-clean-start-onboarding.md).
+The current release-control evidence lives in [`reports/0.8.0-buyer-final-pass.md`](./reports/0.8.0-buyer-final-pass.md), [`reports/0.8.0-operator-final-pass.md`](./reports/0.8.0-operator-final-pass.md), and [`reports/0.8.0-rc1-checklist.md`](./reports/0.8.0-rc1-checklist.md).
 
 ## Repository Layout
 

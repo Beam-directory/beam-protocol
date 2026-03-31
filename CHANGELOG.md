@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.8.0 (draft)
+## v0.8.0 (2026-03-31)
 
 ### Buyer Path
 - keep Beam on one plain-language path: landing page -> guided evaluation -> hosted pilot request
@@ -11,10 +11,11 @@
 - add first-party funnel analytics and repo-visible dry-run evidence for buyer and operator flows
 - fix live CORS allowlists for the real dashboard production URL on both Directory and Message Bus
 - enable live admin magic-link delivery for the real dashboard with explicit admin emails, dashboard URL, and Resend-backed delivery
+- prove the live hosted-beta queue and operator notification loop end to end on the `0.8.0` candidate
 
 ### Release Control
 - add repo-visible `0.8.0` dry-run reports, cut checklist, and release-notes draft
-- record the live operator-auth fix and keep `0.8.0` gated behind one final integrated cut pass
+- record the final buyer and operator passes on the `0.8.0` candidate
 
 ## v0.7.0 (2026-03-30)
 

@@ -73,5 +73,5 @@ If that is your problem, Beam is aimed directly at it. If it is not, Beam should
 - [Getting Started](/guide/getting-started)
 - [Compatibility Policy](/guide/compatibility)
 - [Hosted Beta Request](https://beam.directory/hosted-beta.html)
-- [0.7.0 Hosted Demo Readiness Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-hosted-demo-readiness.md)
-- [0.7.0 Clean-Start Onboarding Report](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.7.0-clean-start-onboarding.md)
+- [0.8.0 Buyer Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-buyer-final-pass.md)
+- [0.8.0 Operator Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-operator-final-pass.md)
