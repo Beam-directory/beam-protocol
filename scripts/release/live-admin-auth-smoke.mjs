@@ -112,13 +112,48 @@ async function fetchMailboxMessages({ token, mailbox, top = 10 }) {
   return Array.isArray(json?.value) ? json.value : []
 }
 
+function decodeTrackedMagicLink(candidate) {
+  if (!candidate) {
+    return null
+  }
+
+  if (candidate.includes('/auth/callback?token=')) {
+    return candidate
+  }
+
+  const encodedMatch = candidate.match(/(https:%2F%2F[^"'\s<]+%2Fauth%2Fcallback%3Ftoken(?:=|%3D)[^"'\s<]+)/i)
+  if (!encodedMatch) {
+    return null
+  }
+
+  try {
+    const decoded = decodeURIComponent(encodedMatch[1])
+    const directMatch = decoded.match(/https:\/\/[^"'\s<]+\/auth\/callback\?token=[A-Za-z0-9]+/i)
+    return directMatch ? directMatch[0] : null
+  } catch {
+    return null
+  }
+}
+
 function extractMagicLink(body) {
   if (!body) {
     return null
   }
 
-  const match = body.match(/https:\/\/[^"'\\s<]+\/auth\/callback\?token=[A-Za-z0-9]+/i)
-  return match ? match[0] : null
+  for (const match of body.matchAll(/href="([^"]+)"/gi)) {
+    const decoded = decodeTrackedMagicLink(match[1])
+    if (decoded) {
+      return decoded
+    }
+  }
+
+  const directMatch = body.match(/https:\/\/[^"'\s<]+\/auth\/callback\?token=[A-Za-z0-9]+/i)
+  if (directMatch) {
+    return directMatch[0]
+  }
+
+  const wrappedMatch = body.match(/https:\/\/[^"'\s<]+/i)
+  return wrappedMatch ? decodeTrackedMagicLink(wrappedMatch[0]) : null
 }
 
 async function waitForMagicLink({ mailbox, subject, issuedAfter, attempts, delayMs }) {
