@@ -152,9 +152,69 @@ jobs:
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
-  release:
+  deploy-directory:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [publish]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Prepare tagged release metadata
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          VERSION="${TAG_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Tag version $VERSION does not match package.json version $PACKAGE_VERSION" >&2
+            exit 1
+          fi
+
+          DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+
+          node scripts/release/write-directory-release-metadata.mjs \
+            --version "$VERSION" \
+            --git-sha "$GITHUB_SHA" \
+            --deployed-at "$DEPLOYED_AT"
+
+          echo "BEAM_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BEAM_RELEASE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "BEAM_DEPLOYED_AT=$DEPLOYED_AT" >> "$GITHUB_ENV"
+
+      - name: Install Flyctl
+        run: curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/home/runner/.fly sh
+
+      - name: Deploy directory API to Fly.io
+        working-directory: packages/directory
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl deploy \
+            --config fly.toml \
+            --app beam-protocol \
+            --remote-only \
+            --yes
+
+      - name: Verify live API release truth
+        run: |
+          node scripts/release/verify-api-release-truth.mjs \
+            --base-url "https://api.beam.directory" \
+            --version "$BEAM_RELEASE_VERSION" \
+            --git-sha "$BEAM_RELEASE_SHA" \
+            --deployed-at "$BEAM_DEPLOYED_AT"
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [publish, deploy-directory]
     runs-on: ubuntu-latest
     permissions:
       contents: write

@@ -9,6 +9,7 @@ COPY tsconfig.json ./tsconfig.json
 COPY src ./src
 COPY catalog.yaml ./catalog.yaml
 COPY litestream.yml ./litestream.yml
+COPY release.json ./release.json
 RUN npm run build && npm prune --omit=dev
 
 FROM node:22-slim
@@ -29,6 +30,7 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist/
 COPY --from=builder /app/catalog.yaml ./catalog.yaml
 COPY --from=builder /app/litestream.yml ./litestream.yml
+COPY --from=builder /app/release.json ./release.json
 
 RUN mkdir -p /data
 
