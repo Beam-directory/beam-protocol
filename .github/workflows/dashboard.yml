@@ -1,0 +1,147 @@
+name: Deploy Dashboard
+
+# Requires:
+# - repo secret `VERCEL_TOKEN`
+# - repo variable `VERCEL_ORG_ID`
+# - repo variable `VERCEL_DASHBOARD_PROJECT_ID`
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'packages/dashboard/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/dashboard.yml'
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Deployment target
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - production
+      api_url:
+        description: VITE_API_URL override
+        required: false
+        default: https://api.beam.directory
+        type: string
+      bus_url:
+        description: VITE_BEAM_BUS_URL override
+        required: false
+        default: https://beam-message-bus.fly.dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dashboard-deploy
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_DASHBOARD_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Resolve deployment readiness
+        id: config
+        run: |
+          ready=true
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Missing VERCEL_TOKEN repo secret"
+            ready=false
+          fi
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "Missing VERCEL_ORG_ID repo variable"
+            ready=false
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing VERCEL_DASHBOARD_PROJECT_ID repo variable"
+            ready=false
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - name: Skip deploy when Vercel config is missing
+        if: ${{ steps.config.outputs.ready != 'true' }}
+        run: echo "Skipping dashboard deploy because Vercel configuration is incomplete."
+
+      - name: Resolve deployment target
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        id: target
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            DEPLOY_TARGET="${{ inputs.target }}"
+            API_URL="${{ inputs.api_url }}"
+            BUS_URL="${{ inputs.bus_url }}"
+          else
+            DEPLOY_TARGET="production"
+            API_URL="https://api.beam.directory"
+            BUS_URL="https://beam-message-bus.fly.dev"
+          fi
+
+          if [ "$DEPLOY_TARGET" = "production" ]; then
+            PULL_ENV="production"
+          else
+            PULL_ENV="preview"
+          fi
+
+          echo "deploy_target=$DEPLOY_TARGET" >> "$GITHUB_OUTPUT"
+          echo "pull_env=$PULL_ENV" >> "$GITHUB_OUTPUT"
+          echo "api_url=$API_URL" >> "$GITHUB_OUTPUT"
+          echo "bus_url=$BUS_URL" >> "$GITHUB_OUTPUT"
+
+      - name: Install Vercel CLI
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        run: npm install --global vercel@latest
+
+      - name: Pull project settings
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        working-directory: packages/dashboard
+        run: vercel pull --yes --environment='${{ steps.target.outputs.pull_env }}' --token "$VERCEL_TOKEN"
+
+      - name: Deploy dashboard
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        id: deploy
+        working-directory: packages/dashboard
+        run: |
+          COMMON_ARGS=(
+            --yes
+            --token "$VERCEL_TOKEN"
+            --build-env "VITE_API_URL=${{ steps.target.outputs.api_url }}"
+            --build-env "VITE_BEAM_BUS_URL=${{ steps.target.outputs.bus_url }}"
+          )
+
+          if [ "${{ steps.target.outputs.deploy_target }}" = "production" ]; then
+            DEPLOY_URL="$(vercel deploy --prod "${COMMON_ARGS[@]}" | tail -n1)"
+          else
+            DEPLOY_URL="$(vercel deploy --target=preview "${COMMON_ARGS[@]}" | tail -n1)"
+          fi
+
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "Dashboard deployed to $DEPLOY_URL"
+
+      - name: Write deployment summary
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        run: |
+          {
+            echo "## Dashboard Deploy"
+            echo
+            echo "- target: \`${{ steps.target.outputs.deploy_target }}\`"
+            echo "- api url: \`${{ steps.target.outputs.api_url }}\`"
+            echo "- bus url: \`${{ steps.target.outputs.bus_url }}\`"
+            echo "- deployment: ${{ steps.deploy.outputs.url }}"
+          } >> "$GITHUB_STEP_SUMMARY"

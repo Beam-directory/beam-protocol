@@ -1,0 +1,183 @@
+name: Deploy Operator Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      candidate_version:
+        description: Candidate version label exposed by the API release endpoints
+        required: true
+        default: 0.9.0-rc1
+        type: string
+      dashboard_target:
+        description: Where to deploy the dashboard candidate
+        required: true
+        default: production
+        type: choice
+        options:
+          - production
+          - preview
+      api_url:
+        description: API base URL used by the dashboard candidate
+        required: true
+        default: https://api.beam.directory
+        type: string
+      bus_url:
+        description: Message bus URL used by the dashboard candidate
+        required: true
+        default: https://beam-message-bus.fly.dev
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: operator-candidate
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_DASHBOARD_PROJECT_ID }}
+      VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
+      - name: Resolve candidate metadata
+        id: candidate
+        env:
+          CANDIDATE_VERSION: ${{ inputs.candidate_version }}
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          VERSION="$(printf '%s' "$CANDIDATE_VERSION" | xargs)"
+          if [ -z "$VERSION" ]; then
+            echo "Candidate version cannot be empty" >&2
+            exit 1
+          fi
+
+          DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+
+          node scripts/release/write-directory-release-metadata.mjs \
+            --version "$VERSION" \
+            --git-sha "$GITHUB_SHA" \
+            --deployed-at "$DEPLOYED_AT"
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "git_sha=$GITHUB_SHA" >> "$GITHUB_OUTPUT"
+          echo "deployed_at=$DEPLOYED_AT" >> "$GITHUB_OUTPUT"
+
+      - name: Install Flyctl
+        run: curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/home/runner/.fly sh
+
+      - name: Clear stale Fly release env overrides
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl secrets unset \
+            BEAM_RELEASE_VERSION \
+            BEAM_RELEASE_SHA \
+            BEAM_DEPLOYED_AT \
+            --app beam-protocol \
+            --stage || true
+
+      - name: Deploy candidate API to Fly.io
+        working-directory: packages/directory
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl deploy \
+            --config fly.toml \
+            --app beam-protocol \
+            --remote-only \
+            --yes
+
+      - name: Verify candidate API release truth
+        run: |
+          node scripts/release/verify-api-release-truth.mjs \
+            --base-url "${{ inputs.api_url }}" \
+            --version "${{ steps.candidate.outputs.version }}" \
+            --git-sha "${{ steps.candidate.outputs.git_sha }}" \
+            --deployed-at "${{ steps.candidate.outputs.deployed_at }}"
+
+      - name: Resolve dashboard deploy readiness
+        id: dashboard_config
+        run: |
+          ready=true
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Missing VERCEL_TOKEN repo secret"
+            ready=false
+          fi
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "Missing VERCEL_ORG_ID repo variable"
+            ready=false
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing VERCEL_DASHBOARD_PROJECT_ID repo variable"
+            ready=false
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve dashboard target
+        if: ${{ steps.dashboard_config.outputs.ready == 'true' }}
+        id: dashboard_target
+        run: |
+          if [ "${{ inputs.dashboard_target }}" = "production" ]; then
+            echo "pull_env=production" >> "$GITHUB_OUTPUT"
+          else
+            echo "pull_env=preview" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install Vercel CLI
+        if: ${{ steps.dashboard_config.outputs.ready == 'true' }}
+        run: npm install --global vercel@latest
+
+      - name: Pull dashboard project settings
+        if: ${{ steps.dashboard_config.outputs.ready == 'true' }}
+        working-directory: packages/dashboard
+        run: vercel pull --yes --environment='${{ steps.dashboard_target.outputs.pull_env }}' --token "$VERCEL_TOKEN"
+
+      - name: Deploy dashboard candidate
+        if: ${{ steps.dashboard_config.outputs.ready == 'true' }}
+        id: dashboard
+        working-directory: packages/dashboard
+        run: |
+          COMMON_ARGS=(
+            --yes
+            --token "$VERCEL_TOKEN"
+            --build-env "VITE_API_URL=${{ inputs.api_url }}"
+            --build-env "VITE_BEAM_BUS_URL=${{ inputs.bus_url }}"
+          )
+
+          if [ "${{ inputs.dashboard_target }}" = "production" ]; then
+            DEPLOY_URL="$(vercel deploy --prod "${COMMON_ARGS[@]}" | tail -n1)"
+          else
+            DEPLOY_URL="$(vercel deploy --target=preview "${COMMON_ARGS[@]}" | tail -n1)"
+          fi
+
+          echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
+          echo "Dashboard candidate deployed to $DEPLOY_URL"
+
+      - name: Write candidate summary
+        run: |
+          {
+            echo "## Operator Candidate"
+            echo
+            echo "- candidate version: \`${{ steps.candidate.outputs.version }}\`"
+            echo "- candidate sha: \`${{ steps.candidate.outputs.git_sha }}\`"
+            echo "- deployed at: \`${{ steps.candidate.outputs.deployed_at }}\`"
+            echo "- api url: \`${{ inputs.api_url }}\`"
+            echo "- dashboard target: \`${{ inputs.dashboard_target }}\`"
+            if [ "${{ steps.dashboard_config.outputs.ready }}" = "true" ]; then
+              echo "- dashboard url: ${{ steps.dashboard.outputs.url }}"
+            else
+              echo "- dashboard url: skipped (missing Vercel configuration)"
+            fi
+            echo
+            echo "Use this stack for the operator dry run before cutting the final tag."
+          } >> "$GITHUB_STEP_SUMMARY"
