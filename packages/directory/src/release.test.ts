@@ -8,6 +8,18 @@ import { getReleaseInfo } from './release.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const releaseMetadataPath = resolve(__dirname, '../release.json')
+const releaseEnvKeys = [
+  'BEAM_RELEASE_VERSION',
+  'BEAM_RELEASE_SHA',
+  'BEAM_DEPLOYED_AT',
+  'VERCEL_GIT_COMMIT_SHA',
+  'SOURCE_VERSION',
+  'GITHUB_SHA',
+  'VERCEL_DEPLOYMENT_CREATED_AT',
+  'DEPLOYED_AT',
+] as const
+
+type ReleaseEnvKey = (typeof releaseEnvKeys)[number]
 
 function restoreReleaseMetadata(originalContents: string | null) {
   if (originalContents === null) {
@@ -29,16 +41,34 @@ function restoreReleaseMetadata(originalContents: string | null) {
   writeFileSync(releaseMetadataPath, originalContents)
 }
 
+function snapshotReleaseEnv(): Record<ReleaseEnvKey, string | undefined> {
+  return Object.fromEntries(releaseEnvKeys.map((key) => [key, process.env[key]])) as Record<ReleaseEnvKey, string | undefined>
+}
+
+function clearReleaseEnv() {
+  for (const key of releaseEnvKeys) {
+    delete process.env[key]
+  }
+}
+
+function restoreReleaseEnv(snapshot: Record<ReleaseEnvKey, string | undefined>) {
+  for (const key of releaseEnvKeys) {
+    const value = snapshot[key]
+    if (value === undefined) {
+      delete process.env[key]
+      continue
+    }
+
+    process.env[key] = value
+  }
+}
+
 test('getReleaseInfo reads directory release metadata file when env is absent', () => {
   const originalContents = existsSync(releaseMetadataPath) ? readFileSync(releaseMetadataPath, 'utf8') : null
-  const originalVersion = process.env['BEAM_RELEASE_VERSION']
-  const originalSha = process.env['BEAM_RELEASE_SHA']
-  const originalDeployedAt = process.env['BEAM_DEPLOYED_AT']
+  const originalEnv = snapshotReleaseEnv()
 
   try {
-    delete process.env['BEAM_RELEASE_VERSION']
-    delete process.env['BEAM_RELEASE_SHA']
-    delete process.env['BEAM_DEPLOYED_AT']
+    clearReleaseEnv()
 
     writeFileSync(
       releaseMetadataPath,
@@ -60,24 +90,17 @@ test('getReleaseInfo reads directory release metadata file when env is absent', 
     assert.equal(release.deployedAt, '2026-03-31T08:15:00.000Z')
   } finally {
     restoreReleaseMetadata(originalContents)
-    if (originalVersion === undefined) delete process.env['BEAM_RELEASE_VERSION']
-    else process.env['BEAM_RELEASE_VERSION'] = originalVersion
-
-    if (originalSha === undefined) delete process.env['BEAM_RELEASE_SHA']
-    else process.env['BEAM_RELEASE_SHA'] = originalSha
-
-    if (originalDeployedAt === undefined) delete process.env['BEAM_DEPLOYED_AT']
-    else process.env['BEAM_DEPLOYED_AT'] = originalDeployedAt
+    restoreReleaseEnv(originalEnv)
   }
 })
 
 test('getReleaseInfo lets env overrides win over release metadata file', () => {
   const originalContents = existsSync(releaseMetadataPath) ? readFileSync(releaseMetadataPath, 'utf8') : null
-  const originalVersion = process.env['BEAM_RELEASE_VERSION']
-  const originalSha = process.env['BEAM_RELEASE_SHA']
-  const originalDeployedAt = process.env['BEAM_DEPLOYED_AT']
+  const originalEnv = snapshotReleaseEnv()
 
   try {
+    clearReleaseEnv()
+
     writeFileSync(
       releaseMetadataPath,
       JSON.stringify(
@@ -102,13 +125,6 @@ test('getReleaseInfo lets env overrides win over release metadata file', () => {
     assert.equal(release.deployedAt, '2026-03-31T08:25:00.000Z')
   } finally {
     restoreReleaseMetadata(originalContents)
-    if (originalVersion === undefined) delete process.env['BEAM_RELEASE_VERSION']
-    else process.env['BEAM_RELEASE_VERSION'] = originalVersion
-
-    if (originalSha === undefined) delete process.env['BEAM_RELEASE_SHA']
-    else process.env['BEAM_RELEASE_SHA'] = originalSha
-
-    if (originalDeployedAt === undefined) delete process.env['BEAM_DEPLOYED_AT']
-    else process.env['BEAM_DEPLOYED_AT'] = originalDeployedAt
+    restoreReleaseEnv(originalEnv)
   }
 })
