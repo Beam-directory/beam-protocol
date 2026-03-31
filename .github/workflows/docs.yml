@@ -11,6 +11,12 @@ on:
       - '.github/workflows/docs.yml'
   workflow_dispatch:
 
+env:
+  # actions/upload-pages-artifact@v4 still shells through upload-artifact v4.
+  # Force GitHub-hosted JS actions onto Node 24 now so the docs path stays quiet
+  # ahead of the Node 20 runner deprecation.
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 permissions:
   contents: read
   pages: write
