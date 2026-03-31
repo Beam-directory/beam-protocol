@@ -50,7 +50,7 @@ Default local endpoints:
 
 ### Verification and email
 
-- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM`
+- `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (or `SMTP_PASSWORD`), `SMTP_FROM`
 - `RESEND_API_KEY`
 - `COMPANIES_HOUSE_API_KEY`
 
