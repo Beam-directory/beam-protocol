@@ -6,6 +6,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const repoRoot = resolve(__dirname, '../../../')
 const rootPackageJsonPath = resolve(repoRoot, 'package.json')
 const directoryPackageJsonPath = resolve(__dirname, '../package.json')
+const releaseMetadataPath = resolve(__dirname, '../release.json')
 const gitRootPath = resolve(repoRoot, '.git')
 
 export type ReleaseInfo = {
@@ -13,6 +14,48 @@ export type ReleaseInfo = {
   gitSha: string | null
   gitShaShort: string | null
   deployedAt: string
+}
+
+type ReleaseMetadata = Partial<ReleaseInfo>
+
+function normalizeVersion(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const trimmed = value.trim()
+  return trimmed.length > 0 ? trimmed : null
+}
+
+function normalizeDeployedAt(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return null
+  }
+
+  return parsed.toISOString()
+}
+
+function readReleaseMetadataFile(): ReleaseMetadata {
+  try {
+    const raw = JSON.parse(readFileSync(releaseMetadataPath, 'utf8')) as {
+      version?: unknown
+      gitSha?: unknown
+      deployedAt?: unknown
+    }
+
+    return {
+      version: normalizeVersion(raw.version) ?? undefined,
+      gitSha: normalizeSha(typeof raw.gitSha === 'string' ? raw.gitSha : null) ?? undefined,
+      deployedAt: normalizeDeployedAt(raw.deployedAt) ?? undefined,
+    }
+  } catch {
+    return {}
+  }
 }
 
 function readPackageVersion(): string {
@@ -101,7 +144,7 @@ function readGitShaFromRepo(): string | null {
   }
 }
 
-function readGitSha(): string | null {
+function readGitSha(releaseMetadata: ReleaseMetadata): string | null {
   const fromEnv = normalizeSha(
     process.env['BEAM_RELEASE_SHA']
       ?? process.env['VERCEL_GIT_COMMIT_SHA']
@@ -110,10 +153,10 @@ function readGitSha(): string | null {
       ?? null,
   )
 
-  return fromEnv ?? readGitShaFromRepo()
+  return fromEnv ?? releaseMetadata.gitSha ?? readGitShaFromRepo()
 }
 
-function readDeployedAt(startedAtMs: number): string {
+function readDeployedAt(startedAtMs: number, releaseMetadata: ReleaseMetadata): string {
   const candidate = (
     process.env['BEAM_DEPLOYED_AT']
       ?? process.env['VERCEL_DEPLOYMENT_CREATED_AT']
@@ -128,17 +171,22 @@ function readDeployedAt(startedAtMs: number): string {
     }
   }
 
+  if (releaseMetadata.deployedAt) {
+    return releaseMetadata.deployedAt
+  }
+
   return new Date(startedAtMs).toISOString()
 }
 
 export function getReleaseInfo(startedAtMs: number): ReleaseInfo {
-  const version = (process.env['BEAM_RELEASE_VERSION'] ?? readPackageVersion()).trim()
-  const gitSha = readGitSha()
+  const releaseMetadata = readReleaseMetadataFile()
+  const version = (process.env['BEAM_RELEASE_VERSION'] ?? releaseMetadata.version ?? readPackageVersion()).trim()
+  const gitSha = readGitSha(releaseMetadata)
 
   return {
     version,
     gitSha,
     gitShaShort: gitSha ? gitSha.slice(0, 7) : null,
-    deployedAt: readDeployedAt(startedAtMs),
+    deployedAt: readDeployedAt(startedAtMs, releaseMetadata),
   }
 }
