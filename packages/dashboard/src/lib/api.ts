@@ -6,7 +6,7 @@ export type IntentLifecycleStatus = 'received' | 'validated' | 'queued' | 'dispa
 export type AlertMetricUnit = 'ratio' | 'ms' | 'count'
 export type AlertLinkSurface = 'trace' | 'intents' | 'audit' | 'errors' | 'federation' | 'alerts'
 export type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
-export type BetaRequestAttention = 'unowned' | 'stale'
+export type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
 export type BetaRequestExportFormat = 'json' | 'csv'
 export type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 export type OperatorNotificationSource = 'beta_request' | 'critical_alert'
@@ -572,8 +572,15 @@ export interface BetaRequest {
   operatorNotes: string | null
   nextAction: string | null
   lastContactAt: string | null
+  nextMeetingAt: string | null
+  reminderAt: string | null
+  stageEnteredAt: string
+  stageAgeHours: number
+  stageAgeLabel: string
   stale: boolean
   staleReason: string | null
+  followUpDue: boolean
+  followUpReason: string | null
   attentionFlags: BetaRequestAttention[]
   notificationId: number | null
   notificationStatus: OperatorNotificationStatus | null
@@ -596,6 +603,7 @@ export interface BetaRequestSummary {
   active: number
   unowned: number
   stale: number
+  followUpDue: number
   needsAttention: number
   byStatus: Record<BetaRequestStatus, number>
 }
@@ -616,6 +624,8 @@ export interface BetaRequestUpdateInput {
   operatorNotes?: string | null
   nextAction?: string | null
   lastContactAt?: string | null
+  nextMeetingAt?: string | null
+  reminderAt?: string | null
 }
 
 export interface BetaRequestUpdateResponse {

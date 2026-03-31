@@ -253,10 +253,13 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     assert.ok(waitlistColumns.some((column) => column.name === 'operator_notes'))
     assert.ok(waitlistColumns.some((column) => column.name === 'next_action'))
     assert.ok(waitlistColumns.some((column) => column.name === 'last_contact_at'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'next_meeting_at'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'reminder_at'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'stage_entered_at'))
     assert.ok(waitlistColumns.some((column) => column.name === 'updated_at'))
 
     const waitlistRow = db.prepare(`
-      SELECT email, status, owner, operator_notes, next_action, last_contact_at, updated_at, created_at
+      SELECT email, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, stage_entered_at, updated_at, created_at
       FROM waitlist
       LIMIT 1
     `).get() as {
@@ -266,6 +269,9 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
       operator_notes: string | null
       next_action: string | null
       last_contact_at: string | null
+      next_meeting_at: string | null
+      reminder_at: string | null
+      stage_entered_at: string
       updated_at: string
       created_at: string
     } | undefined
@@ -277,12 +283,17 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     assert.equal(waitlistRow?.operator_notes ?? null, null)
     assert.equal(waitlistRow?.next_action ?? null, null)
     assert.equal(waitlistRow?.last_contact_at ?? null, null)
+    assert.equal(waitlistRow?.next_meeting_at ?? null, null)
+    assert.equal(waitlistRow?.reminder_at ?? null, null)
+    assert.equal(waitlistRow?.stage_entered_at, waitlistRow?.created_at)
     assert.equal(waitlistRow?.updated_at, waitlistRow?.created_at)
 
     const indexes = db.prepare("PRAGMA index_list('waitlist')").all() as Array<{ name: string }>
     assert.ok(indexes.some((index) => index.name === 'idx_waitlist_status'))
     assert.ok(indexes.some((index) => index.name === 'idx_waitlist_owner'))
     assert.ok(indexes.some((index) => index.name === 'idx_waitlist_last_contact'))
+    assert.ok(indexes.some((index) => index.name === 'idx_waitlist_next_meeting'))
+    assert.ok(indexes.some((index) => index.name === 'idx_waitlist_reminder'))
 
     const notificationColumns = db.prepare('PRAGMA table_info(operator_notifications)').all() as Array<{ name: string }>
     assert.ok(notificationColumns.some((column) => column.name === 'source_type'))

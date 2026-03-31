@@ -27,6 +27,7 @@ const ATTENTION_OPTIONS: Array<{ value: '' | BetaRequestAttention; label: string
   { value: '', label: 'All requests' },
   { value: 'unowned', label: 'Unowned' },
   { value: 'stale', label: 'Stale' },
+  { value: 'follow_up_due', label: 'Follow-up due' },
 ]
 
 const SORT_OPTIONS = [
@@ -53,6 +54,7 @@ export default function BetaRequestsPage() {
     active: number
     unowned: number
     stale: number
+    followUpDue: number
     needsAttention: number
     byStatus: Record<BetaRequestStatus, number>
   } | null>(null)
@@ -78,6 +80,8 @@ export default function BetaRequestsPage() {
   const [draftOwner, setDraftOwner] = useState('')
   const [draftNextAction, setDraftNextAction] = useState('')
   const [draftLastContactAt, setDraftLastContactAt] = useState('')
+  const [draftNextMeetingAt, setDraftNextMeetingAt] = useState('')
+  const [draftReminderAt, setDraftReminderAt] = useState('')
   const [draftNotes, setDraftNotes] = useState('')
 
   function updateSearchParam(key: string, value: string) {
@@ -108,6 +112,8 @@ export default function BetaRequestsPage() {
       setDraftOwner('')
       setDraftNextAction('')
       setDraftLastContactAt('')
+      setDraftNextMeetingAt('')
+      setDraftReminderAt('')
       setDraftNotes('')
       return
     }
@@ -116,6 +122,8 @@ export default function BetaRequestsPage() {
     setDraftOwner(selectedRequest.owner ?? '')
     setDraftNextAction(selectedRequest.nextAction ?? '')
     setDraftLastContactAt(toDateTimeLocalValue(selectedRequest.lastContactAt))
+    setDraftNextMeetingAt(toDateTimeLocalValue(selectedRequest.nextMeetingAt))
+    setDraftReminderAt(toDateTimeLocalValue(selectedRequest.reminderAt))
     setDraftNotes(selectedRequest.operatorNotes ?? '')
   }, [selectedRequest])
 
@@ -158,6 +166,8 @@ export default function BetaRequestsPage() {
         owner: draftOwner || null,
         nextAction: draftNextAction || null,
         lastContactAt: draftLastContactAt || null,
+        nextMeetingAt: draftNextMeetingAt || null,
+        reminderAt: draftReminderAt || null,
         operatorNotes: draftNotes || null,
       })
       setRequests((current) => current.map((entry) => (
@@ -194,7 +204,7 @@ export default function BetaRequestsPage() {
     <div className="space-y-6">
       <PageHeader
         title="Hosted Beta Requests"
-        description="Run hosted beta intake as a real operator queue with stage, ownership, next action, and follow-up state."
+        description="Run hosted beta intake as a real operator queue with stage, ownership, next action, meeting state, and follow-up timing."
         actions={(
           <div className="flex flex-wrap gap-2">
             <button className="btn-secondary" onClick={() => void exportRequests('json')} type="button">
@@ -214,11 +224,12 @@ export default function BetaRequestsPage() {
       />
 
       {summary ? (
-        <section className="grid gap-4 md:grid-cols-4 xl:grid-cols-5">
+        <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
           <MetricCard label="Total requests" value={String(summary.total)} hint="All hosted beta requests in the current filter." />
-          <MetricCard label="Need attention" value={String(summary.needsAttention)} hint="Requests that are unowned or stale." tone={summary.needsAttention > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Need attention" value={String(summary.needsAttention)} hint="Requests that are unowned, stale, or due for follow-up." tone={summary.needsAttention > 0 ? 'warning' : 'default'} />
           <MetricCard label="Unowned" value={String(summary.unowned)} hint="Requests without an assigned operator." tone={summary.unowned > 0 ? 'critical' : 'default'} />
           <MetricCard label="Stale" value={String(summary.stale)} hint="Requests that have gone too long without contact." tone={summary.stale > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Follow-up due" value={String(summary.followUpDue)} hint="Requests with a due reminder or missing next meeting state." tone={summary.followUpDue > 0 ? 'warning' : 'default'} />
           <MetricCard label="Active" value={String(summary.active)} hint="Everything that is not closed." tone="success" />
         </section>
       ) : null}
@@ -305,7 +316,7 @@ export default function BetaRequestsPage() {
                       <StatusPill label={entry.stage} tone={stageTone(entry.stage)} />
                       {entry.notificationStatus ? <StatusPill label={`signal ${entry.notificationStatus}`} tone={signalTone(entry.notificationStatus)} /> : null}
                       {entry.attentionFlags.map((flag) => (
-                        <StatusPill key={`${entry.id}-${flag}`} label={flag} tone={flag === 'unowned' ? 'critical' : 'warning'} />
+                        <StatusPill key={`${entry.id}-${flag}`} label={formatAttentionFlag(flag)} tone={flag === 'unowned' ? 'critical' : 'warning'} />
                       ))}
                     </div>
 
@@ -322,7 +333,10 @@ export default function BetaRequestsPage() {
                     <div className="grid gap-2 text-xs text-slate-500 dark:text-slate-400 sm:grid-cols-2">
                       <span>Owner: {entry.owner ?? 'unassigned'}</span>
                       <span>Updated {formatRelativeTime(entry.updatedAt)}</span>
+                      <span>Stage age: {entry.stageAgeLabel}</span>
                       <span>Last contact: {entry.lastContactAt ? formatRelativeTime(entry.lastContactAt) : 'not recorded'}</span>
+                      <span>Next meeting: {entry.nextMeetingAt ? formatRelativeTime(entry.nextMeetingAt) : 'not scheduled'}</span>
+                      <span>Reminder: {entry.reminderAt ? formatRelativeTime(entry.reminderAt) : 'not set'}</span>
                       <span>Source: {entry.source ?? 'unknown'}</span>
                     </div>
 
@@ -330,10 +344,14 @@ export default function BetaRequestsPage() {
                       {entry.nextAction ?? 'No next action is recorded yet.'}
                     </div>
 
-                    {entry.staleReason ? (
-                      <div className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                        <TriangleAlert size={16} className="mt-0.5 shrink-0" />
-                        <span>{entry.staleReason}</span>
+                    {entry.staleReason || entry.followUpReason ? (
+                      <div className="space-y-2">
+                        {[entry.followUpReason, entry.staleReason].filter(Boolean).map((message) => (
+                          <div key={message} className="flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                            <TriangleAlert size={16} className="mt-0.5 shrink-0" />
+                            <span>{message}</span>
+                          </div>
+                        ))}
                       </div>
                     ) : null}
                   </button>
@@ -357,7 +375,11 @@ export default function BetaRequestsPage() {
                   <InfoRow label="Signal" value={selectedRequest.notificationStatus ?? 'no operator signal'} />
                   <InfoRow label="Created" value={formatDateTime(selectedRequest.createdAt)} />
                   <InfoRow label="Updated" value={formatDateTime(selectedRequest.updatedAt)} />
+                  <InfoRow label="Stage entered" value={formatDateTime(selectedRequest.stageEnteredAt)} />
+                  <InfoRow label="Stage age" value={selectedRequest.stageAgeLabel} />
                   <InfoRow label="Last contact" value={formatDateTime(selectedRequest.lastContactAt)} />
+                  <InfoRow label="Next meeting" value={formatDateTime(selectedRequest.nextMeetingAt)} />
+                  <InfoRow label="Reminder" value={formatDateTime(selectedRequest.reminderAt)} />
                   <InfoRow label="Owner" value={selectedRequest.owner ?? 'unassigned'} />
                 </div>
 
@@ -379,9 +401,13 @@ export default function BetaRequestsPage() {
                   ) : null}
                 </div>
 
-                {selectedRequest.staleReason ? (
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-                    {selectedRequest.staleReason}
+                {selectedRequest.staleReason || selectedRequest.followUpReason ? (
+                  <div className="space-y-3">
+                    {[selectedRequest.followUpReason, selectedRequest.staleReason].filter(Boolean).map((message) => (
+                      <div key={message} className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                        {message}
+                      </div>
+                    ))}
                   </div>
                 ) : null}
               </>
@@ -443,15 +469,59 @@ export default function BetaRequestsPage() {
                   />
                 </label>
 
-                <button
-                  className="btn-secondary"
-                  disabled={!canEdit || saving}
-                  onClick={() => setDraftLastContactAt(toDateTimeLocalValue(new Date().toISOString()))}
-                  type="button"
-                >
-                  <Clock3 size={16} />
-                  <span>Mark contact now</span>
-                </button>
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <label className="block space-y-2">
+                    <span className="text-sm font-medium">Next meeting</span>
+                    <input
+                      className="input-field"
+                      disabled={!canEdit || saving}
+                      type="datetime-local"
+                      value={draftNextMeetingAt}
+                      onChange={(event) => setDraftNextMeetingAt(event.target.value)}
+                    />
+                  </label>
+
+                  <label className="block space-y-2">
+                    <span className="text-sm font-medium">Reminder</span>
+                    <input
+                      className="input-field"
+                      disabled={!canEdit || saving}
+                      type="datetime-local"
+                      value={draftReminderAt}
+                      onChange={(event) => setDraftReminderAt(event.target.value)}
+                    />
+                  </label>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving}
+                    onClick={() => setDraftLastContactAt(toDateTimeLocalValue(new Date().toISOString()))}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    <span>Mark contact now</span>
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving}
+                    onClick={() => setDraftNextMeetingAt(futureDateTimeLocalValue({ days: 3 }))}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    <span>Set meeting +3 days</span>
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving}
+                    onClick={() => setDraftReminderAt(futureDateTimeLocalValue({ days: 1 }))}
+                    type="button"
+                  >
+                    <Clock3 size={16} />
+                    <span>Set reminder +1 day</span>
+                  </button>
+                </div>
 
                 <label className="block space-y-2">
                   <span className="text-sm font-medium">Operator notes</span>
@@ -536,6 +606,18 @@ function formatWorkflowType(value: string | null): string {
     .join(' ')
 }
 
+function formatAttentionFlag(flag: BetaRequestAttention): string {
+  switch (flag) {
+    case 'follow_up_due':
+      return 'follow-up due'
+    case 'unowned':
+      return 'unowned'
+    case 'stale':
+    default:
+      return 'stale'
+  }
+}
+
 function stageTone(stage: BetaRequestStatus): 'default' | 'success' | 'warning' | 'critical' {
   switch (stage) {
     case 'active':
@@ -581,6 +663,12 @@ function toDateTimeLocalValue(value?: string | null): string {
   const offset = date.getTimezoneOffset()
   const localDate = new Date(date.getTime() - offset * 60_000)
   return localDate.toISOString().slice(0, 16)
+}
+
+function futureDateTimeLocalValue(input: { days?: number; hours?: number }): string {
+  const days = input.days ?? 0
+  const hours = input.hours ?? 0
+  return toDateTimeLocalValue(new Date(Date.now() + (days * 24 + hours) * 60 * 60 * 1000).toISOString())
 }
 
 function templateAnchorForStage(stage: BetaRequestStatus): string {

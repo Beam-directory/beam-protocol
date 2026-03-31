@@ -74,7 +74,7 @@ type WaitlistSignupInput = {
 }
 
 type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
-type BetaRequestAttention = 'unowned' | 'stale'
+type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
 type BetaRequestSort = 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
 type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 type OperatorNotificationSource = 'beta_request' | 'critical_alert'
@@ -100,6 +100,8 @@ type BetaRequestUpdateInput = {
   operatorNotes?: string | null
   nextAction?: string | null
   lastContactAt?: string | null
+  nextMeetingAt?: string | null
+  reminderAt?: string | null
 }
 
 type BetaRequestFilters = {
@@ -144,6 +146,9 @@ type WaitlistRow = {
   operator_notes: string | null
   next_action: string | null
   last_contact_at: string | null
+  next_meeting_at: string | null
+  reminder_at: string | null
+  stage_entered_at: string | null
   created_at: string
   updated_at: string
 }
@@ -152,7 +157,7 @@ const BETA_REQUEST_STATUSES: BetaRequestStatus[] = ['new', 'reviewing', 'contact
 const BETA_REQUEST_STATUS_SET = new Set<string>(BETA_REQUEST_STATUSES)
 const BETA_REQUEST_SORTS: BetaRequestSort[] = ['attention', 'updated_desc', 'created_desc', 'stage', 'owner', 'last_contact_desc']
 const BETA_REQUEST_SORT_SET = new Set<string>(BETA_REQUEST_SORTS)
-const BETA_REQUEST_ATTENTION_SET = new Set<BetaRequestAttention>(['unowned', 'stale'])
+const BETA_REQUEST_ATTENTION_SET = new Set<BetaRequestAttention>(['unowned', 'stale', 'follow_up_due'])
 const OPERATOR_NOTIFICATION_STATUSES: OperatorNotificationStatus[] = ['new', 'acknowledged', 'acted']
 const OPERATOR_NOTIFICATION_STATUS_SET = new Set<string>(OPERATOR_NOTIFICATION_STATUSES)
 const OPERATOR_NOTIFICATION_SOURCES: OperatorNotificationSource[] = ['beta_request', 'critical_alert']
@@ -389,12 +394,39 @@ function betaRequestNotificationSourceKey(id: number): string {
 }
 
 function getBetaRequestContactTimestamp(row: WaitlistRow): string {
-  return row.last_contact_at ?? row.updated_at ?? row.created_at
+  return row.last_contact_at ?? row.stage_entered_at ?? row.created_at
+}
+
+function getBetaRequestStageTimestamp(row: WaitlistRow): string {
+  return row.stage_entered_at ?? row.updated_at ?? row.created_at
+}
+
+function formatBetaRequestAgeLabel(hours: number): string {
+  if (hours < 1) {
+    return '<1h'
+  }
+
+  if (hours < 24) {
+    return `${Math.round(hours)}h`
+  }
+
+  const days = hours / 24
+  if (days < 7) {
+    return `${Math.round(days)}d`
+  }
+
+  return `${Math.round(days / 7)}w`
 }
 
 function getBetaRequestAttention(row: WaitlistRow) {
   const stage = normalizeBetaRequestStatus(row.status) ?? 'new'
   const attentionFlags: BetaRequestAttention[] = []
+  const stageTimestamp = getBetaRequestStageTimestamp(row)
+  const stageTime = new Date(stageTimestamp).getTime()
+  const stageAgeHours = Number.isNaN(stageTime)
+    ? 0
+    : Math.max(0, (Date.now() - stageTime) / (1000 * 60 * 60))
+  const stageAgeLabel = formatBetaRequestAgeLabel(stageAgeHours)
 
   if (stage !== 'closed' && !row.owner) {
     attentionFlags.push('unowned')
@@ -403,26 +435,43 @@ function getBetaRequestAttention(row: WaitlistRow) {
   let stale = false
   let staleReason: string | null = null
   const thresholdHours = BETA_REQUEST_STALE_HOURS[stage]
-  const contactTimestamp = getBetaRequestContactTimestamp(row)
+  if (thresholdHours != null && stageAgeHours >= thresholdHours) {
+    stale = true
+    staleReason = `This request has stayed in the ${stage} stage for ${thresholdHours}+ hours.`
+    attentionFlags.push('stale')
+  }
 
-  if (thresholdHours != null) {
-    const contactTime = new Date(contactTimestamp).getTime()
-    if (!Number.isNaN(contactTime)) {
-      const ageHours = (Date.now() - contactTime) / (1000 * 60 * 60)
-      if (ageHours >= thresholdHours) {
-        stale = true
-        staleReason = row.last_contact_at
-          ? `No operator contact has been recorded for ${thresholdHours}+ hours in the ${stage} stage.`
-          : `This request has sat in the ${stage} stage for ${thresholdHours}+ hours without a recorded operator contact.`
-        attentionFlags.push('stale')
+  let followUpDue = false
+  let followUpReason: string | null = null
+
+  if (stage !== 'closed') {
+    if (row.reminder_at) {
+      const reminderTime = new Date(row.reminder_at).getTime()
+      if (!Number.isNaN(reminderTime) && reminderTime <= Date.now()) {
+        followUpDue = true
+        followUpReason = 'A follow-up reminder is due now.'
       }
     }
+
+    if (!followUpDue && stage === 'scheduled' && !row.next_meeting_at) {
+      followUpDue = true
+      followUpReason = 'This request is scheduled, but the next meeting time is still missing.'
+    }
+  }
+
+  if (followUpDue) {
+    attentionFlags.push('follow_up_due')
   }
 
   return {
     stage,
+    stageEnteredAt: stageTimestamp,
+    stageAgeHours,
+    stageAgeLabel,
     stale,
     staleReason,
+    followUpDue,
+    followUpReason,
     attentionFlags,
   }
 }
@@ -479,8 +528,15 @@ function serializeBetaRequest(
     operatorNotes: row.operator_notes,
     nextAction,
     lastContactAt: row.last_contact_at,
+    nextMeetingAt: row.next_meeting_at,
+    reminderAt: row.reminder_at,
+    stageEnteredAt: attention.stageEnteredAt,
+    stageAgeHours: attention.stageAgeHours,
+    stageAgeLabel: attention.stageAgeLabel,
     stale: attention.stale,
     staleReason: attention.staleReason,
+    followUpDue: attention.followUpDue,
+    followUpReason: attention.followUpReason,
     attentionFlags: attention.attentionFlags,
     notificationId: notification?.id ?? null,
     notificationStatus: notification?.status ?? null,
@@ -677,6 +733,9 @@ function listBetaRequestRows(db: Database, filters: {
       operator_notes,
       next_action,
       last_contact_at,
+      next_meeting_at,
+      reminder_at,
+      stage_entered_at,
       created_at,
       updated_at
     FROM waitlist
@@ -712,6 +771,9 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
       operator_notes,
       next_action,
       last_contact_at,
+      next_meeting_at,
+      reminder_at,
+      stage_entered_at,
       created_at,
       updated_at
     FROM waitlist
@@ -756,8 +818,14 @@ function compareBetaRequestRows(left: WaitlistRow, right: WaitlistRow, sort: Bet
       return rightUpdated - leftUpdated
     case 'attention':
     default: {
-      const leftAttentionScore = Number(leftAttention.attentionFlags.includes('unowned')) * 2 + Number(leftAttention.attentionFlags.includes('stale'))
-      const rightAttentionScore = Number(rightAttention.attentionFlags.includes('unowned')) * 2 + Number(rightAttention.attentionFlags.includes('stale'))
+      const leftAttentionScore =
+        Number(leftAttention.attentionFlags.includes('unowned')) * 4
+        + Number(leftAttention.attentionFlags.includes('follow_up_due')) * 2
+        + Number(leftAttention.attentionFlags.includes('stale'))
+      const rightAttentionScore =
+        Number(rightAttention.attentionFlags.includes('unowned')) * 4
+        + Number(rightAttention.attentionFlags.includes('follow_up_due')) * 2
+        + Number(rightAttention.attentionFlags.includes('stale'))
       return rightAttentionScore - leftAttentionScore
         || compareStageOrder(leftStage, rightStage)
         || rightUpdated - leftUpdated
@@ -771,6 +839,7 @@ function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
   let unowned = 0
   let active = 0
   let stale = 0
+  let followUpDue = 0
   let needsAttention = 0
 
   for (const row of rows) {
@@ -781,6 +850,9 @@ function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
     }
     if (attention.attentionFlags.includes('stale')) {
       stale += 1
+    }
+    if (attention.attentionFlags.includes('follow_up_due')) {
+      followUpDue += 1
     }
     if (attention.attentionFlags.length > 0) {
       needsAttention += 1
@@ -795,6 +867,7 @@ function summarizeBetaRequests(rows: WaitlistRow[], total: number) {
     active,
     unowned,
     stale,
+    followUpDue,
     needsAttention,
     byStatus,
   }
@@ -817,6 +890,11 @@ function buildBetaRequestCsv(
     'operator_notes',
     'next_action',
     'last_contact_at',
+    'next_meeting_at',
+    'reminder_at',
+    'stage_entered_at',
+    'stage_age_hours',
+    'follow_up_due',
     'notification_status',
     'stale',
     'attention_flags',
@@ -841,6 +919,11 @@ function buildBetaRequestCsv(
       row.operator_notes,
       row.next_action ?? getBetaRequestNextStep(row.status),
       row.last_contact_at,
+      row.next_meeting_at,
+      row.reminder_at,
+      getBetaRequestStageTimestamp(row),
+      attention.stageAgeHours.toFixed(1),
+      attention.followUpDue ? 'true' : 'false',
       notification?.status ?? null,
       attention.stale ? 'true' : 'false',
       attention.attentionFlags.join('|'),
@@ -913,6 +996,9 @@ function ensureBetaRequestNotification(
       workflowType: row.workflow_type,
       stage: normalizeBetaRequestStatus(row.status) ?? 'new',
       nextAction: row.next_action ?? getBetaRequestNextStep(row.status),
+      nextMeetingAt: row.next_meeting_at,
+      reminderAt: row.reminder_at,
+      stageEnteredAt: getBetaRequestStageTimestamp(row),
     },
   })
 }
@@ -1925,7 +2011,31 @@ export function createApp(db: Database): Hono {
       patch.lastContactAt = lastContactAt
     }
 
-    if (!('status' in patch) && !('owner' in patch) && !('operatorNotes' in patch) && !('nextAction' in patch) && !('lastContactAt' in patch)) {
+    if ('nextMeetingAt' in raw) {
+      const nextMeetingAt = normalizeOptionalIsoDateTime(raw.nextMeetingAt)
+      if (raw.nextMeetingAt != null && raw.nextMeetingAt !== '' && !nextMeetingAt) {
+        return c.json({ error: 'Invalid nextMeetingAt timestamp', errorCode: 'INVALID_NEXT_MEETING' }, 400)
+      }
+      patch.nextMeetingAt = nextMeetingAt
+    }
+
+    if ('reminderAt' in raw) {
+      const reminderAt = normalizeOptionalIsoDateTime(raw.reminderAt)
+      if (raw.reminderAt != null && raw.reminderAt !== '' && !reminderAt) {
+        return c.json({ error: 'Invalid reminderAt timestamp', errorCode: 'INVALID_REMINDER' }, 400)
+      }
+      patch.reminderAt = reminderAt
+    }
+
+    if (
+      !('status' in patch)
+      && !('owner' in patch)
+      && !('operatorNotes' in patch)
+      && !('nextAction' in patch)
+      && !('lastContactAt' in patch)
+      && !('nextMeetingAt' in patch)
+      && !('reminderAt' in patch)
+    ) {
       return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
     }
 
@@ -1940,7 +2050,12 @@ export function createApp(db: Database): Hono {
       const nextOperatorNotes = 'operatorNotes' in patch ? patch.operatorNotes ?? null : existing.operator_notes
       const nextAction = 'nextAction' in patch ? patch.nextAction ?? null : existing.next_action
       let nextLastContactAt = 'lastContactAt' in patch ? patch.lastContactAt ?? null : existing.last_contact_at
+      const nextMeetingAt = 'nextMeetingAt' in patch ? patch.nextMeetingAt ?? null : existing.next_meeting_at
+      const nextReminderAt = 'reminderAt' in patch ? patch.reminderAt ?? null : existing.reminder_at
       const updatedAt = new Date().toISOString()
+      const nextStageEnteredAt = 'status' in patch && patch.status && patch.status !== existing.status
+        ? updatedAt
+        : (existing.stage_entered_at ?? existing.updated_at ?? existing.created_at)
 
       if (!('lastContactAt' in patch) && ['contacted', 'scheduled', 'active'].includes(nextStatus) && !nextLastContactAt) {
         nextLastContactAt = updatedAt
@@ -1948,9 +2063,9 @@ export function createApp(db: Database): Hono {
 
       db.prepare(`
         UPDATE waitlist
-        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, updated_at = ?
+        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, next_meeting_at = ?, reminder_at = ?, stage_entered_at = ?, updated_at = ?
         WHERE id = ?
-      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, updatedAt, id)
+      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, nextMeetingAt, nextReminderAt, nextStageEnteredAt, updatedAt, id)
 
       const updated = getBetaRequestById(db, id)
       if (!updated) {
@@ -1972,6 +2087,8 @@ export function createApp(db: Database): Hono {
           operatorNotesChanged: 'operatorNotes' in patch,
           nextActionChanged: 'nextAction' in patch,
           lastContactChanged: 'lastContactAt' in patch,
+          nextMeetingChanged: 'nextMeetingAt' in patch,
+          reminderChanged: 'reminderAt' in patch,
         },
       })
 
@@ -2451,7 +2568,7 @@ export function createApp(db: Database): Hono {
 
     try {
       const existing = db.prepare(`
-        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, created_at, updated_at
+        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, stage_entered_at, created_at, updated_at
         FROM waitlist
         WHERE email = ?
         ORDER BY created_at DESC, id DESC
@@ -2471,9 +2588,19 @@ export function createApp(db: Database): Hono {
 
         db.prepare(`
           UPDATE waitlist
-          SET source = ?, company = ?, agent_count = ?, workflow_type = ?, workflow_summary = ?, status = ?, updated_at = ?
+          SET source = ?, company = ?, agent_count = ?, workflow_type = ?, workflow_summary = ?, status = ?, stage_entered_at = ?, updated_at = ?
           WHERE id = ?
-        `).run(nextSource, nextCompany, nextAgentCount, nextWorkflowType, nextWorkflowSummary, nextStatus, timestamp, existing.id)
+        `).run(
+          nextSource,
+          nextCompany,
+          nextAgentCount,
+          nextWorkflowType,
+          nextWorkflowSummary,
+          nextStatus,
+          nextStatus !== existing.status ? timestamp : (existing.stage_entered_at ?? existing.updated_at ?? existing.created_at),
+          timestamp,
+          existing.id,
+        )
 
         const updated = getBetaRequestById(db, existing.id)
         if (!updated) {
@@ -2510,6 +2637,8 @@ export function createApp(db: Database): Hono {
           operatorNotes: updated.operator_notes,
           nextAction: updated.next_action ?? getBetaRequestNextStep(updated.status),
           lastContactAt: updated.last_contact_at,
+          nextMeetingAt: updated.next_meeting_at,
+          reminderAt: updated.reminder_at,
           createdAt: updated.created_at,
           updatedAt: updated.updated_at,
           request: serializeBetaRequest(updated, notification),
@@ -2530,10 +2659,13 @@ export function createApp(db: Database): Hono {
           operator_notes,
           next_action,
           last_contact_at,
+          next_meeting_at,
+          reminder_at,
+          stage_entered_at,
           created_at,
           updated_at
         )
-        VALUES (?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL, NULL, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 'new', NULL, NULL, NULL, NULL, NULL, NULL, ?, ?, ?)
       `).run(
         signup.email,
         signup.source,
@@ -2541,6 +2673,7 @@ export function createApp(db: Database): Hono {
         signup.agentCount,
         signup.workflowType,
         signup.workflowSummary,
+        timestamp,
         timestamp,
         timestamp,
       )
@@ -2591,6 +2724,8 @@ export function createApp(db: Database): Hono {
         operatorNotes: created.operator_notes,
         nextAction: created.next_action ?? getBetaRequestNextStep(created.status),
         lastContactAt: created.last_contact_at,
+        nextMeetingAt: created.next_meeting_at,
+        reminderAt: created.reminder_at,
         createdAt: created.created_at,
         updatedAt: created.updated_at,
         request: serializeBetaRequest(created, notification),
