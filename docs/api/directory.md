@@ -334,6 +334,8 @@ Request events use the same path, but require a compatible `workflowType`. Demo 
 `GET /admin/funnel` returns:
 
 - milestone progression across landing, guided evaluation, hosted beta, request, and demo proof
+- partner motion metrics across hosted beta request, qualified, scheduled, pilot-complete, and next-step readiness
+- stage aging, overdue follow-up counts, and a current stall list for weekly operator review
 - entry pages
 - CTA click summaries
 - request workflow breakdown

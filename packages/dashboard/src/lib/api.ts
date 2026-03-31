@@ -784,6 +784,56 @@ export interface FunnelRecentEvent {
   createdAt: string
 }
 
+export interface PartnerMotionStage {
+  stage: BetaRequestStatus
+  count: number
+  averageAgeHours: number | null
+  oldestAgeHours: number | null
+  stale: number
+  followUpDue: number
+  unowned: number
+  proofLinked: number
+}
+
+export interface PartnerMotionStall {
+  id: number
+  company: string | null
+  email: string
+  workflowType: string | null
+  stage: BetaRequestStatus
+  owner: string | null
+  stageAgeHours: number
+  stageAgeLabel: string
+  followUpDue: boolean
+  stale: boolean
+  attentionFlags: BetaRequestAttention[]
+  followUpReason: string | null
+  staleReason: string | null
+  nextAction: string | null
+  lastContactAt: string | null
+  nextMeetingAt: string | null
+  reminderAt: string | null
+  proofIntentNonce: string | null
+}
+
+export interface PartnerMotionWeeklyPoint {
+  weekStart: string
+  requests: number
+  qualified: number
+  scheduled: number
+  pilotComplete: number
+  nextStepReady: number
+}
+
+export interface PartnerMotionWorkflow {
+  workflowType: string
+  requests: number
+  qualified: number
+  scheduled: number
+  pilotComplete: number
+  overdue: number
+}
+
 export interface FunnelAnalyticsResponse {
   days: number
   generatedAt: string
@@ -817,6 +867,26 @@ export interface FunnelAnalyticsResponse {
   }>
   timeline: FunnelTimelinePoint[]
   recentEvents: FunnelRecentEvent[]
+  partnerMotion: {
+    summary: {
+      requests: number
+      qualified: number
+      scheduled: number
+      pilotComplete: number
+      nextStepReady: number
+      overdueFollowUps: number
+      stalledRequests: number
+      unowned: number
+      qualificationRate: number | null
+      schedulingRate: number | null
+      pilotCompleteRate: number | null
+      nextStepRate: number | null
+    }
+    byStage: PartnerMotionStage[]
+    stalled: PartnerMotionStall[]
+    weekly: PartnerMotionWeeklyPoint[]
+    workflows: PartnerMotionWorkflow[]
+  }
 }
 
 export interface IntentFeedMessage {

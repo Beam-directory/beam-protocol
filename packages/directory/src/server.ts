@@ -1379,6 +1379,33 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
   return row ?? null
 }
 
+function listPartnerAnalyticsRows(db: Database, sinceIso: string): WaitlistRow[] {
+  return db.prepare(`
+    SELECT
+      id,
+      email,
+      source,
+      company,
+      agent_count,
+      workflow_type,
+      workflow_summary,
+      proof_intent_nonce,
+      status,
+      owner,
+      operator_notes,
+      next_action,
+      last_contact_at,
+      next_meeting_at,
+      reminder_at,
+      stage_entered_at,
+      created_at,
+      updated_at
+    FROM waitlist
+    WHERE created_at >= ?
+    ORDER BY created_at DESC, id DESC
+  `).all(sinceIso) as WaitlistRow[]
+}
+
 function compareStageOrder(left: BetaRequestStatus, right: BetaRequestStatus): number {
   return BETA_REQUEST_STATUSES.indexOf(left) - BETA_REQUEST_STATUSES.indexOf(right)
 }
@@ -1859,6 +1886,190 @@ function summarizeFunnel(rows: Array<{
     workflows: requestsByWorkflow,
     timeline,
     recentEvents: rows.slice(0, 40).map((row) => serializeFunnelEvent(row)),
+  }
+}
+
+function toWeekStart(isoTimestamp: string): string {
+  const date = new Date(isoTimestamp)
+  if (Number.isNaN(date.getTime())) {
+    return isoTimestamp.slice(0, 10)
+  }
+
+  const day = (date.getUTCDay() + 6) % 7
+  date.setUTCDate(date.getUTCDate() - day)
+  date.setUTCHours(0, 0, 0, 0)
+  return date.toISOString().slice(0, 10)
+}
+
+function summarizePartnerMotion(rows: WaitlistRow[]) {
+  const byStage = new Map(BETA_REQUEST_STATUSES.map((stage) => [stage, {
+    stage,
+    count: 0,
+    averageAgeHours: null as number | null,
+    oldestAgeHours: null as number | null,
+    stale: 0,
+    followUpDue: 0,
+    unowned: 0,
+    proofLinked: 0,
+  }]))
+  const weekly = new Map<string, {
+    weekStart: string
+    requests: number
+    qualified: number
+    scheduled: number
+    pilotComplete: number
+    nextStepReady: number
+  }>()
+  const workflows = new Map<string, {
+    workflowType: string
+    requests: number
+    qualified: number
+    scheduled: number
+    pilotComplete: number
+    overdue: number
+  }>()
+
+  let qualified = 0
+  let scheduled = 0
+  let pilotComplete = 0
+  let nextStepReady = 0
+  let overdueFollowUps = 0
+  let stalledRequests = 0
+  let unowned = 0
+
+  const stalled = rows
+    .map((row) => {
+      const attention = getBetaRequestAttention(row)
+      const stage = attention.stage
+      const isQualified = stage !== 'new'
+      const isScheduled = ['scheduled', 'active', 'closed'].includes(stage) || Boolean(row.next_meeting_at)
+      const isPilotComplete = Boolean(row.proof_intent_nonce) || stage === 'closed'
+      const hasNextStep = Boolean(row.next_action || row.next_meeting_at || row.reminder_at)
+      const isStalled = attention.stale || attention.followUpDue
+      const workflowType = row.workflow_type ?? 'unknown'
+      const stageBucket = byStage.get(stage)
+
+      if (isQualified) {
+        qualified += 1
+      }
+      if (isScheduled) {
+        scheduled += 1
+      }
+      if (isPilotComplete) {
+        pilotComplete += 1
+      }
+      if (hasNextStep) {
+        nextStepReady += 1
+      }
+      if (attention.followUpDue) {
+        overdueFollowUps += 1
+      }
+      if (attention.attentionFlags.includes('unowned')) {
+        unowned += 1
+      }
+      if (isStalled) {
+        stalledRequests += 1
+      }
+
+      if (stageBucket) {
+        stageBucket.count += 1
+        stageBucket.averageAgeHours = (stageBucket.averageAgeHours ?? 0) + attention.stageAgeHours
+        stageBucket.oldestAgeHours = Math.max(stageBucket.oldestAgeHours ?? 0, attention.stageAgeHours)
+        stageBucket.stale += Number(attention.stale)
+        stageBucket.followUpDue += Number(attention.followUpDue)
+        stageBucket.unowned += Number(attention.attentionFlags.includes('unowned'))
+        stageBucket.proofLinked += Number(Boolean(row.proof_intent_nonce))
+      }
+
+      const weekStart = toWeekStart(row.created_at)
+      const weeklyEntry = weekly.get(weekStart) ?? {
+        weekStart,
+        requests: 0,
+        qualified: 0,
+        scheduled: 0,
+        pilotComplete: 0,
+        nextStepReady: 0,
+      }
+      weeklyEntry.requests += 1
+      weeklyEntry.qualified += Number(isQualified)
+      weeklyEntry.scheduled += Number(isScheduled)
+      weeklyEntry.pilotComplete += Number(isPilotComplete)
+      weeklyEntry.nextStepReady += Number(hasNextStep)
+      weekly.set(weekStart, weeklyEntry)
+
+      const workflowEntry = workflows.get(workflowType) ?? {
+        workflowType,
+        requests: 0,
+        qualified: 0,
+        scheduled: 0,
+        pilotComplete: 0,
+        overdue: 0,
+      }
+      workflowEntry.requests += 1
+      workflowEntry.qualified += Number(isQualified)
+      workflowEntry.scheduled += Number(isScheduled)
+      workflowEntry.pilotComplete += Number(isPilotComplete)
+      workflowEntry.overdue += Number(attention.followUpDue)
+      workflows.set(workflowType, workflowEntry)
+
+      return {
+        id: row.id,
+        company: row.company,
+        email: row.email,
+        workflowType: row.workflow_type,
+        stage,
+        owner: row.owner,
+        stageAgeHours: Number(attention.stageAgeHours.toFixed(1)),
+        stageAgeLabel: attention.stageAgeLabel,
+        followUpDue: attention.followUpDue,
+        stale: attention.stale,
+        attentionFlags: attention.attentionFlags,
+        followUpReason: attention.followUpReason,
+        staleReason: attention.staleReason,
+        nextAction: row.next_action ?? getBetaRequestNextStep(stage),
+        lastContactAt: row.last_contact_at,
+        nextMeetingAt: row.next_meeting_at,
+        reminderAt: row.reminder_at,
+        proofIntentNonce: row.proof_intent_nonce,
+      }
+    })
+    .filter((row) => row.stale || row.followUpDue)
+    .sort((left, right) => {
+      const rightScore = Number(right.followUpDue) * 10000 + Number(right.stale) * 1000 + right.stageAgeHours
+      const leftScore = Number(left.followUpDue) * 10000 + Number(left.stale) * 1000 + left.stageAgeHours
+      return rightScore - leftScore
+    })
+    .slice(0, 12)
+
+  return {
+    summary: {
+      requests: rows.length,
+      qualified,
+      scheduled,
+      pilotComplete,
+      nextStepReady,
+      overdueFollowUps,
+      stalledRequests,
+      unowned,
+      qualificationRate: ratio(qualified, rows.length),
+      schedulingRate: ratio(scheduled, rows.length),
+      pilotCompleteRate: ratio(pilotComplete, rows.length),
+      nextStepRate: ratio(nextStepReady, rows.length),
+    },
+    byStage: Array.from(byStage.values())
+      .map((entry) => ({
+        ...entry,
+        averageAgeHours: entry.count > 0 && entry.averageAgeHours != null
+          ? Number((entry.averageAgeHours / entry.count).toFixed(1))
+          : null,
+        oldestAgeHours: entry.oldestAgeHours == null ? null : Number(entry.oldestAgeHours.toFixed(1)),
+      }))
+      .filter((entry) => entry.count > 0)
+      .sort((left, right) => compareStageOrder(left.stage, right.stage)),
+    stalled,
+    weekly: Array.from(weekly.values()).sort((left, right) => left.weekStart.localeCompare(right.weekStart)),
+    workflows: Array.from(workflows.values())
+      .sort((left, right) => right.requests - left.requests || right.overdue - left.overdue),
   }
 }
 
@@ -2831,17 +3042,20 @@ export function createApp(db: Database): Hono {
     const days = Math.max(1, Math.min(180, Number.parseInt(c.req.query('days') ?? '30', 10) || 30))
 
     try {
+      const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString()
       const rows = listFunnelEvents(db, {
-        since: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+        since,
         limit: 10000,
       })
       const summary = summarizeFunnel(rows)
+      const partnerRows = listPartnerAnalyticsRows(db, since)
 
       c.header('Cache-Control', 'no-store')
       return c.json({
         days,
         generatedAt: new Date().toISOString(),
         ...summary,
+        partnerMotion: summarizePartnerMotion(partnerRows),
       })
     } catch (err) {
       console.error('Funnel summary error:', err)
