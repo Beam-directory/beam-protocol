@@ -42,6 +42,7 @@ SMTP_HOST=smtp.example.com
 SMTP_PORT=587
 SMTP_USER=beam
 SMTP_PASS=replace-me
+# or: SMTP_PASSWORD=replace-me
 SMTP_FROM=beam@example.com
 ```
 

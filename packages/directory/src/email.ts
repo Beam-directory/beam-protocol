@@ -8,24 +8,49 @@ type MailTransport = {
   }): Promise<unknown>
 }
 
+export type SmtpConfig = {
+  host: string | null
+  port: number
+  secure: boolean
+  user: string | null
+  pass: string | null
+  from: string | null
+}
+
+export function getSmtpConfig(): SmtpConfig {
+  const host = process.env['SMTP_HOST']?.trim() || null
+  const port = Number(process.env['SMTP_PORT'] ?? '587')
+  const user = process.env['SMTP_USER']?.trim() || null
+  const pass = process.env['SMTP_PASS']?.trim() || process.env['SMTP_PASSWORD']?.trim() || null
+  const from = process.env['SMTP_FROM']?.trim() || null
+
+  return {
+    host,
+    port,
+    secure: port === 465,
+    user,
+    pass,
+    from,
+  }
+}
+
 export function isEmailDeliveryConfigured(): boolean {
-  return Boolean(process.env['SMTP_HOST'] || process.env['RESEND_API_KEY'])
+  return Boolean(getSmtpConfig().host || process.env['RESEND_API_KEY'])
 }
 
 async function createTransport(): Promise<MailTransport> {
   const nodemailerModule = await import('nodemailer')
   const nodemailer = 'default' in nodemailerModule ? nodemailerModule.default : nodemailerModule
-  const smtpUser = process.env['SMTP_USER']
-  const smtpPass = process.env['SMTP_PASS']
+  const smtp = getSmtpConfig()
 
   return nodemailer.createTransport({
-    host: process.env['SMTP_HOST'],
-    port: Number(process.env['SMTP_PORT'] ?? '587'),
-    secure: Number(process.env['SMTP_PORT'] ?? '587') === 465,
-    auth: smtpUser || smtpPass
+    host: smtp.host ?? undefined,
+    port: smtp.port,
+    secure: smtp.secure,
+    auth: smtp.user || smtp.pass
       ? {
-          user: smtpUser,
-          pass: smtpPass,
+          user: smtp.user ?? undefined,
+          pass: smtp.pass ?? undefined,
         }
       : undefined,
   })
@@ -73,14 +98,14 @@ export async function sendAgentVerificationEmail(input: {
   verificationUrl.searchParams.set('token', input.token)
 
   const message = {
-    from: process.env['SMTP_FROM'],
+    from: getSmtpConfig().from ?? undefined,
     to: input.email,
     subject: `Verify your Beam Directory email for ${input.beamId}`,
     text: `Verify your Beam Directory email for ${input.beamId}: ${verificationUrl.toString()}`,
     html: `<p>Verify your Beam Directory email for <strong>${input.beamId}</strong>.</p><p><a href="${verificationUrl.toString()}">Verify email</a></p>`,
   }
 
-  if (process.env['SMTP_HOST']) {
+  if (getSmtpConfig().host) {
     const transporter = await createTransport()
     await transporter.sendMail(message)
     return true
@@ -101,14 +126,14 @@ export async function sendAdminMagicLinkEmail(input: {
   role: 'admin' | 'operator' | 'viewer'
 }): Promise<boolean> {
   const message = {
-    from: process.env['SMTP_FROM'],
+    from: getSmtpConfig().from ?? undefined,
     to: input.email,
     subject: 'Beam admin sign-in link',
     text: `Use this Beam admin sign-in link to continue as ${input.role}: ${input.url}`,
     html: `<p>Use this Beam admin sign-in link to continue as <strong>${input.role}</strong>.</p><p><a href="${input.url}">Sign in to Beam Dashboard</a></p>`,
   }
 
-  if (process.env['SMTP_HOST']) {
+  if (getSmtpConfig().host) {
     const transporter = await createTransport()
     await transporter.sendMail(message)
     return true

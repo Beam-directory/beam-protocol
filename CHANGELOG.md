@@ -10,10 +10,11 @@
 - tighten alert, dead-letter, and recovery shortcuts around owner and next action
 - add first-party funnel analytics and repo-visible dry-run evidence for buyer and operator flows
 - fix live CORS allowlists for the real dashboard production URL on both Directory and Message Bus
+- enable live admin magic-link delivery for the real dashboard with explicit admin emails, dashboard URL, and Resend-backed delivery
 
 ### Release Control
 - add repo-visible `0.8.0` dry-run reports, cut checklist, and release-notes draft
-- keep `0.8.0` as a no-go until the live operator auth blocker is resolved
+- record the live operator-auth fix and keep `0.8.0` gated behind one final integrated cut pass
 
 ## v0.7.0 (2026-03-30)
 
