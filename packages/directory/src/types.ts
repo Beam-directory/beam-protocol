@@ -159,6 +159,75 @@ export interface OperatorNotificationRow {
   details_json: string | null
 }
 
+export type WorkspaceStatus = 'active' | 'paused' | 'archived'
+export type WorkspaceThreadScope = 'internal' | 'handoff'
+export type WorkspaceMemberRole = 'owner' | 'operator' | 'viewer'
+export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
+export type WorkspaceIdentityBindingType = 'agent' | 'service' | 'partner'
+export type WorkspaceIdentityBindingStatus = 'active' | 'paused'
+export type WorkspacePartnerChannelStatus = 'active' | 'trial' | 'blocked'
+
+export interface WorkspaceRow {
+  id: number
+  slug: string
+  name: string
+  org_name: string | null
+  description: string | null
+  status: WorkspaceStatus
+  default_thread_scope: WorkspaceThreadScope
+  external_handoffs_enabled: number
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceMemberRow {
+  id: number
+  workspace_id: number
+  principal_id: string
+  principal_type: WorkspacePrincipalType
+  role: WorkspaceMemberRole
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceIdentityBindingRow {
+  id: number
+  workspace_id: number
+  beam_id: string
+  binding_type: WorkspaceIdentityBindingType
+  owner: string | null
+  runtime_type: string | null
+  policy_profile: string | null
+  default_thread_scope: WorkspaceThreadScope
+  can_initiate_external: number
+  status: WorkspaceIdentityBindingStatus
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspacePartnerChannelRow {
+  id: number
+  workspace_id: number
+  partner_beam_id: string
+  label: string | null
+  owner: string | null
+  status: WorkspacePartnerChannelStatus
+  notes: string | null
+  last_success_at: string | null
+  last_failure_at: string | null
+  last_intent_nonce: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspacePolicyRow {
+  workspace_id: number
+  policy_json: string
+  updated_at: string
+  updated_by: string | null
+}
+
 export type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
 
 export interface FunnelEventRow {

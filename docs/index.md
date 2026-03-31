@@ -45,7 +45,8 @@ Use the docs when you need one of these supporting paths:
 2. The [Production Partner Onboarding Pack](/guide/design-partner-onboarding) for prerequisites, proof expectations, and operator follow-up templates.
 3. The [Production Go-Live Checklist](/guide/production-go-live-checklist) if the workflow is moving from pilot to production.
 4. The [Hosted Quickstart](/guide/hosted-quickstart) if you want to run the same proof stack locally.
-5. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
+5. The [Beam Workspaces guide](/guide/beam-workspaces) if you want the first identity and control-plane model for teams, agents, and partner-facing access.
+6. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
 
 ## Choose Your Path
 
@@ -71,6 +72,7 @@ If that is your problem, Beam is aimed directly at it. If it is not, Beam should
 - [First Production Partner Workflow Contract](/guide/production-partner-workflow)
 - [Production Partner Onboarding Pack](/guide/design-partner-onboarding)
 - [Production Go-Live Checklist](/guide/production-go-live-checklist)
+- [Beam Workspaces](/guide/beam-workspaces)
 - [Hosted Quickstart](/guide/hosted-quickstart)
 - [Register a Real Agent](https://beam.directory/register.html)
 - [Partner Handoff Guide](/guide/partner-handoff)

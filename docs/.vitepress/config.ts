@@ -26,6 +26,7 @@ export default defineConfig({
         { text: 'First Production Partner Workflow', link: '/guide/production-partner-workflow' },
         { text: 'Production Partner Onboarding Pack', link: '/guide/design-partner-onboarding' },
         { text: 'Production Go-Live Checklist', link: '/guide/production-go-live-checklist' },
+        { text: 'Beam Workspaces', link: '/guide/beam-workspaces' },
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Hosted Quickstart', link: '/guide/hosted-quickstart' },
         { text: 'Compatibility', link: '/guide/compatibility' },
