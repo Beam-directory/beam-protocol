@@ -1,6 +1,6 @@
 # Changelog
 
-## v0.9.0 (draft)
+## v0.9.0 (2026-03-31)
 
 ### Design-Partner Motion
 - extend hosted-beta requests with stage age, reminders, next meeting, and follow-up due signals
@@ -15,6 +15,10 @@
 - add repo-visible `0.9.0` buyer and operator dry runs before the final cut
 - add an explicit `0.9.0` cut checklist and release-notes draft before release week
 - track current operator blockers as explicit GitHub issues instead of chat-only notes
+- rerun the operator path on the real `0.9.0-rc1` candidate with shared-inbox admin auth before release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `0.9.0` remains on `beam/1`.
 
 ## v0.8.1 (2026-03-31)
 
@@ -24,9 +28,6 @@
 - automate API release-truth injection so tagged version, SHA, and deploy timestamp are written into the directory image and verified live after deploy
 - isolate the remaining GitHub Pages Node 20 deprecation noise behind the explicit Node 24 opt-in workaround for JavaScript actions
 - add one repo-visible release smoke path for API, public site, docs, and npm, plus a checked-in baseline evidence report
-
-### Compatibility Note
-- No protocol-family change in this release train. Beam `0.8.1` remains on `beam/1`.
 
 ## v0.8.0 (2026-03-31)
 
