@@ -183,6 +183,200 @@ test('first-party funnel analytics ingest and summary stay available through the
   }
 })
 
+test('partner-stage analytics and overdue follow-up reporting stay available through the funnel API', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+
+    const createdIds: number[] = []
+    for (const input of [
+      {
+        email: 'new@example.com',
+        company: 'Fresh Intake',
+        workflowSummary: 'New design-partner request.',
+      },
+      {
+        email: 'reviewing@example.com',
+        company: 'Qualified Buyer',
+        workflowSummary: 'Operator is qualifying the workflow.',
+      },
+      {
+        email: 'scheduled@example.com',
+        company: 'Scheduled Pilot',
+        workflowSummary: 'The pilot review is already booked.',
+      },
+      {
+        email: 'closed@example.com',
+        company: 'Completed Pilot',
+        workflowSummary: 'The pilot finished and needs a clear rollout step.',
+      },
+    ]) {
+      const response = await app.request(new Request('http://localhost/waitlist', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          Origin: 'https://beam.directory',
+        },
+        body: JSON.stringify({
+          ...input,
+          source: 'hosted-beta-page',
+          workflowType: 'hosted-beta-partner-handoff',
+          agentCount: 4,
+        }),
+      }))
+      assert.equal(response.status, 201)
+      const body = await response.json() as { request: { id: number } }
+      createdIds.push(body.request.id)
+    }
+
+    const [newId, reviewingId, scheduledId, closedId] = createdIds
+
+    const reviewingResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${reviewingId}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'reviewing',
+        owner: 'ops@example.com',
+        nextAction: 'Qualify the workflow and confirm the pilot scope.',
+      }),
+    }))
+    assert.equal(reviewingResponse.status, 200)
+
+    const scheduledResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${scheduledId}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'scheduled',
+        owner: 'ops@example.com',
+        nextAction: 'Run the pilot review and confirm the next deployment step.',
+        nextMeetingAt: '2026-04-03T09:00:00.000Z',
+        reminderAt: '2026-03-30T09:00:00.000Z',
+      }),
+    }))
+    assert.equal(scheduledResponse.status, 200)
+
+    const closedResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${closedId}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'closed',
+        owner: 'ops@example.com',
+        nextAction: 'Move the completed pilot into a scoped rollout plan.',
+      }),
+    }))
+    assert.equal(closedResponse.status, 200)
+
+    db.prepare(`
+      UPDATE waitlist
+      SET stage_entered_at = ?, updated_at = ?
+      WHERE id = ?
+    `).run('2026-03-26T09:00:00.000Z', '2026-03-26T09:00:00.000Z', newId)
+
+    const analyticsResponse = await app.request(new Request('http://localhost/admin/funnel?days=30', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(analyticsResponse.status, 200)
+
+    const analytics = await analyticsResponse.json() as {
+      partnerMotion: {
+        summary: {
+          requests: number
+          qualified: number
+          scheduled: number
+          pilotComplete: number
+          nextStepReady: number
+          overdueFollowUps: number
+          stalledRequests: number
+          unowned: number
+        }
+        byStage: Array<{
+          stage: string
+          count: number
+          stale: number
+          followUpDue: number
+          unowned: number
+        }>
+        stalled: Array<{
+          id: number
+          stage: string
+          attentionFlags: string[]
+          followUpReason: string | null
+          staleReason: string | null
+        }>
+        weekly: Array<{
+          weekStart: string
+          requests: number
+          qualified: number
+          scheduled: number
+          pilotComplete: number
+          nextStepReady: number
+        }>
+        workflows: Array<{
+          workflowType: string
+          requests: number
+          qualified: number
+          scheduled: number
+          pilotComplete: number
+          overdue: number
+        }>
+      }
+    }
+
+    assert.equal(analytics.partnerMotion.summary.requests, 4)
+    assert.equal(analytics.partnerMotion.summary.qualified, 3)
+    assert.equal(analytics.partnerMotion.summary.scheduled, 2)
+    assert.equal(analytics.partnerMotion.summary.pilotComplete, 1)
+    assert.equal(analytics.partnerMotion.summary.nextStepReady, 3)
+    assert.equal(analytics.partnerMotion.summary.overdueFollowUps, 1)
+    assert.equal(analytics.partnerMotion.summary.stalledRequests, 2)
+    assert.equal(analytics.partnerMotion.summary.unowned, 1)
+
+    const newStage = analytics.partnerMotion.byStage.find((entry) => entry.stage === 'new')
+    assert.equal(newStage?.count, 1)
+    assert.equal(newStage?.stale, 1)
+    assert.equal(newStage?.unowned, 1)
+
+    const scheduledStage = analytics.partnerMotion.byStage.find((entry) => entry.stage === 'scheduled')
+    assert.equal(scheduledStage?.count, 1)
+    assert.equal(scheduledStage?.followUpDue, 1)
+
+    assert.equal(analytics.partnerMotion.stalled.length, 2)
+    assert.equal(analytics.partnerMotion.stalled[0]?.id, scheduledId)
+    assert.ok(analytics.partnerMotion.stalled[0]?.attentionFlags.includes('follow_up_due'))
+    assert.match(analytics.partnerMotion.stalled[0]?.followUpReason ?? '', /reminder/i)
+    assert.equal(analytics.partnerMotion.stalled[1]?.id, newId)
+    assert.ok(analytics.partnerMotion.stalled[1]?.attentionFlags.includes('stale'))
+    assert.match(analytics.partnerMotion.stalled[1]?.staleReason ?? '', /24\+ hours/i)
+
+    assert.ok(analytics.partnerMotion.weekly.length >= 1)
+    assert.equal(analytics.partnerMotion.weekly[0]?.requests, 4)
+    assert.equal(analytics.partnerMotion.weekly[0]?.qualified, 3)
+    assert.equal(analytics.partnerMotion.weekly[0]?.scheduled, 2)
+    assert.equal(analytics.partnerMotion.weekly[0]?.pilotComplete, 1)
+    assert.equal(analytics.partnerMotion.weekly[0]?.nextStepReady, 3)
+
+    assert.equal(analytics.partnerMotion.workflows[0]?.workflowType, 'hosted-beta-partner-handoff')
+    assert.equal(analytics.partnerMotion.workflows[0]?.requests, 4)
+    assert.equal(analytics.partnerMotion.workflows[0]?.qualified, 3)
+    assert.equal(analytics.partnerMotion.workflows[0]?.scheduled, 2)
+    assert.equal(analytics.partnerMotion.workflows[0]?.pilotComplete, 1)
+    assert.equal(analytics.partnerMotion.workflows[0]?.overdue, 1)
+  } finally {
+    db.close()
+  }
+})
+
 test('waitlist signups are idempotent by email and preserve the original created timestamp', async () => {
   const db = createDatabase(':memory:')
 
