@@ -442,7 +442,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
 
     const contactTimestamp = '2026-03-30T20:15:00.000Z'
     const meetingTimestamp = '2026-04-02T14:00:00.000Z'
-    const reminderTimestamp = '2020-01-01T09:00:00.000Z'
+    const reminderTimestamp = '2026-03-30T21:00:00.000Z'
     const contactResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
       method: 'PATCH',
       headers: {
@@ -479,6 +479,35 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(contacted.request.reminderAt, reminderTimestamp)
     assert.equal(contacted.request.notificationStatus, 'acted')
     assert.deepEqual(contacted.request.attentionFlags, ['follow_up_due'])
+
+    const detailResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(detailResponse.status, 200)
+
+    const detail = await detailResponse.json() as {
+      request: {
+        id: number
+        stage: string
+        notificationStatus: string | null
+      }
+      activity: Array<{
+        title: string
+        kind: string
+        href: string | null
+      }>
+    }
+    assert.equal(detail.request.id, created.request.id)
+    assert.equal(detail.request.stage, 'scheduled')
+    assert.equal(detail.request.notificationStatus, 'acted')
+    assert.ok(detail.activity.length >= 6)
+    assert.ok(detail.activity.some((entry) => entry.title === 'Hosted beta request captured'))
+    assert.ok(detail.activity.some((entry) => entry.title === 'Stage moved to Scheduled'))
+    assert.ok(detail.activity.some((entry) => entry.title === 'Last contact recorded'))
+    assert.ok(detail.activity.some((entry) => entry.title === 'Next meeting is scheduled'))
+    assert.ok(detail.activity.some((entry) => entry.title === 'Follow-up reminder is due'))
+    assert.ok(detail.activity.some((entry) => entry.title === 'Operator signal marked acted'))
+    assert.ok(detail.activity.some((entry) => entry.href === `/inbox?id=${created.request.notificationId}`))
 
     const dueResponse = await app.request(new Request('http://localhost/admin/beta-requests?attention=follow_up_due&status=scheduled', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),

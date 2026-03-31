@@ -58,7 +58,7 @@ import {
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
-import type { AgentRow, IntentFrame, OperatorNotificationRow } from './types.js'
+import type { AgentRow, AuditLogRow, IntentFrame, OperatorNotificationRow } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
@@ -78,6 +78,15 @@ type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
 type BetaRequestSort = 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
 type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 type OperatorNotificationSource = 'beta_request' | 'critical_alert'
+type BetaRequestActivityKind =
+  | 'request_created'
+  | 'stage_changed'
+  | 'request_updated'
+  | 'contact_logged'
+  | 'meeting_scheduled'
+  | 'reminder'
+  | 'notification'
+type BetaRequestActivityTone = 'default' | 'success' | 'warning'
 type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
 type FunnelPageKey =
   | 'landing'
@@ -151,6 +160,18 @@ type WaitlistRow = {
   stage_entered_at: string | null
   created_at: string
   updated_at: string
+}
+
+type BetaRequestActivityEntry = {
+  key: string
+  kind: BetaRequestActivityKind
+  timestamp: string
+  title: string
+  detail: string
+  actor: string | null
+  tone: BetaRequestActivityTone
+  href: string | null
+  upcoming: boolean
 }
 
 const BETA_REQUEST_STATUSES: BetaRequestStatus[] = ['new', 'reviewing', 'contacted', 'scheduled', 'active', 'closed']
@@ -543,6 +564,309 @@ function serializeBetaRequest(
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
+}
+
+function parseAuditDetails(details: string | null | undefined): Record<string, unknown> | null {
+  if (!details) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(details)
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>
+    }
+  } catch {
+    return null
+  }
+
+  return null
+}
+
+function formatBetaRequestStatusLabel(value: string | null | undefined): string {
+  if (!value) {
+    return 'Unknown'
+  }
+
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
+
+function describeBetaRequestAuditEntry(log: AuditLogRow): BetaRequestActivityEntry {
+  const details = parseAuditDetails(log.details)
+  const detailParts: string[] = []
+  const nextStatus = typeof details?.status === 'string' ? details.status : null
+  const owner = typeof details?.owner === 'string' ? details.owner : null
+
+  if (owner) {
+    detailParts.push(`Owner: ${owner}.`)
+  }
+
+  if (details?.nextActionChanged === true) {
+    detailParts.push('Next action updated.')
+  }
+
+  if (details?.operatorNotesChanged === true) {
+    detailParts.push('Operator notes updated.')
+  }
+
+  if (details?.lastContactChanged === true) {
+    detailParts.push('Last contact refreshed.')
+  }
+
+  if (details?.nextMeetingChanged === true) {
+    detailParts.push('Next meeting updated.')
+  }
+
+  if (details?.reminderChanged === true) {
+    detailParts.push('Reminder timing updated.')
+  }
+
+  let kind: BetaRequestActivityKind = 'request_updated'
+  let title = 'Operator updated the partner request'
+  let tone: BetaRequestActivityTone = 'default'
+
+  if (nextStatus) {
+    kind = 'stage_changed'
+    title = `Stage moved to ${formatBetaRequestStatusLabel(nextStatus)}`
+    tone = nextStatus === 'active' || nextStatus === 'closed' ? 'success' : 'default'
+  } else if (details?.lastContactChanged === true) {
+    kind = 'contact_logged'
+    title = 'Last contact was recorded'
+    tone = 'success'
+  } else if (details?.nextMeetingChanged === true) {
+    kind = 'meeting_scheduled'
+    title = 'Next meeting plan changed'
+  } else if (details?.reminderChanged === true) {
+    kind = 'reminder'
+    title = 'Follow-up reminder changed'
+    tone = 'warning'
+  }
+
+  return {
+    key: `audit-${log.id}`,
+    kind,
+    timestamp: log.timestamp,
+    title,
+    detail: detailParts.join(' ') || 'Operator metadata changed for this partner request.',
+    actor: log.actor,
+    tone,
+    href: null,
+    upcoming: false,
+  }
+}
+
+function describeNotificationAuditEntry(
+  log: AuditLogRow,
+  notificationId: number | null,
+): BetaRequestActivityEntry | null {
+  const details = parseAuditDetails(log.details)
+  if (details?.sourceType !== 'beta_request') {
+    return null
+  }
+
+  const detailParts: string[] = []
+  const status = typeof details?.status === 'string' ? details.status : null
+  const owner = typeof details?.owner === 'string' ? details.owner : null
+  const nextAction = typeof details?.nextAction === 'string' ? details.nextAction : null
+
+  if (owner) {
+    detailParts.push(`Owner: ${owner}.`)
+  }
+
+  if (nextAction) {
+    detailParts.push(`Next: ${nextAction}`)
+  }
+
+  let title = 'Operator signal updated'
+  let tone: BetaRequestActivityTone = 'default'
+
+  if (status === 'new') {
+    title = 'Operator signal reset to new'
+    tone = 'warning'
+  } else if (status === 'acknowledged') {
+    title = 'Operator signal acknowledged'
+  } else if (status === 'acted') {
+    title = 'Operator signal marked acted'
+    tone = 'success'
+  }
+
+  return {
+    key: `notification-audit-${log.id}`,
+    kind: 'notification',
+    timestamp: log.timestamp,
+    title,
+    detail: detailParts.join(' ') || 'Operator signal state changed for this partner request.',
+    actor: log.actor,
+    tone,
+    href: notificationId ? `/inbox?id=${notificationId}` : '/inbox',
+    upcoming: false,
+  }
+}
+
+function buildBetaRequestActivityTimeline(
+  db: Database,
+  row: WaitlistRow,
+  notification?: OperatorNotificationRow | null,
+): BetaRequestActivityEntry[] {
+  const activities: BetaRequestActivityEntry[] = []
+  const stage = normalizeBetaRequestStatus(row.status) ?? 'new'
+  const requestHref = `/beta-requests?id=${row.id}`
+  const notificationHref = notification?.id ? `/inbox?id=${notification.id}` : '/inbox'
+  const workflowLabel = row.workflow_type
+    ? row.workflow_type.replace(/^hosted-beta-/, '').replaceAll('-', ' ')
+    : 'workflow review'
+
+  activities.push({
+    key: `request-${row.id}-created`,
+    kind: 'request_created',
+    timestamp: row.created_at,
+    title: 'Hosted beta request captured',
+    detail: `${row.company ?? row.email} entered Beam through ${row.source ?? 'the public intake'} for ${workflowLabel}.`,
+    actor: row.email,
+    tone: 'default',
+    href: requestHref,
+    upcoming: false,
+  })
+
+  if (row.stage_entered_at) {
+    activities.push({
+      key: `request-${row.id}-stage-${row.stage_entered_at}`,
+      kind: 'stage_changed',
+      timestamp: row.stage_entered_at,
+      title: `Current stage is ${formatBetaRequestStatusLabel(stage)}`,
+      detail: row.next_action ?? getBetaRequestNextStep(stage),
+      actor: row.owner,
+      tone: stage === 'active' || stage === 'closed' ? 'success' : 'default',
+      href: requestHref,
+      upcoming: false,
+    })
+  }
+
+  if (row.last_contact_at) {
+    activities.push({
+      key: `request-${row.id}-contact-${row.last_contact_at}`,
+      kind: 'contact_logged',
+      timestamp: row.last_contact_at,
+      title: 'Last contact recorded',
+      detail: row.owner
+        ? `Beam has a recorded touchpoint from ${row.owner}.`
+        : 'Beam has a recorded touchpoint for this partner request.',
+      actor: row.owner,
+      tone: 'success',
+      href: requestHref,
+      upcoming: false,
+    })
+  }
+
+  if (row.next_meeting_at) {
+    const meetingTime = new Date(row.next_meeting_at).getTime()
+    const meetingUpcoming = !Number.isNaN(meetingTime) && meetingTime > Date.now()
+    activities.push({
+      key: `request-${row.id}-meeting-${row.next_meeting_at}`,
+      kind: 'meeting_scheduled',
+      timestamp: row.next_meeting_at,
+      title: meetingUpcoming ? 'Next meeting is scheduled' : 'Meeting time is in the past',
+      detail: row.next_action ?? 'A follow-up meeting is attached to this partner request.',
+      actor: row.owner,
+      tone: meetingUpcoming ? 'default' : 'warning',
+      href: requestHref,
+      upcoming: meetingUpcoming,
+    })
+  }
+
+  if (row.reminder_at) {
+    const reminderTime = new Date(row.reminder_at).getTime()
+    const reminderDue = !Number.isNaN(reminderTime) && reminderTime <= Date.now()
+    const attention = getBetaRequestAttention(row)
+    activities.push({
+      key: `request-${row.id}-reminder-${row.reminder_at}`,
+      kind: 'reminder',
+      timestamp: row.reminder_at,
+      title: reminderDue ? 'Follow-up reminder is due' : 'Follow-up reminder is scheduled',
+      detail: attention.followUpDue
+        ? (attention.followUpReason ?? 'A follow-up touchpoint is due.')
+        : 'Beam has a scheduled reminder for the next partner touchpoint.',
+      actor: row.owner,
+      tone: reminderDue ? 'warning' : 'default',
+      href: requestHref,
+      upcoming: !reminderDue,
+    })
+  }
+
+  if (notification) {
+    activities.push({
+      key: `notification-${notification.id}-created`,
+      kind: 'notification',
+      timestamp: notification.created_at,
+      title: 'Operator signal opened',
+      detail: notification.message,
+      actor: notification.actor,
+      tone: 'default',
+      href: notificationHref,
+      upcoming: false,
+    })
+
+    if (notification.acknowledged_at) {
+      activities.push({
+        key: `notification-${notification.id}-acknowledged`,
+        kind: 'notification',
+        timestamp: notification.acknowledged_at,
+        title: 'Operator signal acknowledged',
+        detail: notification.next_action ?? 'Someone took ownership of the next response.',
+        actor: notification.actor,
+        tone: 'default',
+        href: notificationHref,
+        upcoming: false,
+      })
+    }
+
+    if (notification.acted_at) {
+      activities.push({
+        key: `notification-${notification.id}-acted`,
+        kind: 'notification',
+        timestamp: notification.acted_at,
+        title: 'Operator signal marked acted',
+        detail: notification.next_action ?? 'A concrete next step was recorded on the operator signal.',
+        actor: notification.actor,
+        tone: 'success',
+        href: notificationHref,
+        upcoming: false,
+      })
+    }
+  }
+
+  for (const audit of listAuditLog(db, {
+    action: 'admin.beta_request.updated',
+    target: String(row.id),
+    limit: 40,
+  })) {
+    activities.push(describeBetaRequestAuditEntry(audit))
+  }
+
+  for (const audit of listAuditLog(db, {
+    action: 'admin.operator_notification.updated',
+    limit: 80,
+  })) {
+    const details = parseAuditDetails(audit.details)
+    if (details?.sourceKey !== betaRequestNotificationSourceKey(row.id)) {
+      continue
+    }
+
+    const entry = describeNotificationAuditEntry(audit, notification?.id ?? null)
+    if (entry) {
+      activities.push(entry)
+    }
+  }
+
+  return activities.sort((left, right) => {
+    const leftTime = new Date(left.timestamp).getTime()
+    const rightTime = new Date(right.timestamp).getTime()
+    if (leftTime !== rightTime) {
+      return rightTime - leftTime
+    }
+
+    return left.key.localeCompare(right.key)
+  })
 }
 
 function getBetaRequestNextStep(status: string): string {
@@ -1951,7 +2275,10 @@ export function createApp(db: Database): Hono {
       }
       const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(row.id))
       c.header('Cache-Control', 'no-store')
-      return c.json({ request: serializeBetaRequest(row, notification) })
+      return c.json({
+        request: serializeBetaRequest(row, notification),
+        activity: buildBetaRequestActivityTimeline(db, row, notification),
+      })
     } catch (err) {
       console.error('Admin beta request detail error:', err)
       return c.json({ error: 'Failed to load beta request', errorCode: 'DB_ERROR' }, 500)

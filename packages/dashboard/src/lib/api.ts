@@ -588,6 +588,29 @@ export interface BetaRequest {
   updatedAt: string
 }
 
+export type BetaRequestActivityKind =
+  | 'request_created'
+  | 'stage_changed'
+  | 'request_updated'
+  | 'contact_logged'
+  | 'meeting_scheduled'
+  | 'reminder'
+  | 'notification'
+
+export type BetaRequestActivityTone = 'default' | 'success' | 'warning'
+
+export interface BetaRequestActivityEntry {
+  key: string
+  kind: BetaRequestActivityKind
+  timestamp: string
+  title: string
+  detail: string
+  actor: string | null
+  tone: BetaRequestActivityTone
+  href: string | null
+  upcoming: boolean
+}
+
 export type WaitlistEntry = BetaRequest
 
 export interface WaitlistListResponse {
@@ -616,6 +639,7 @@ export interface BetaRequestListResponse {
 
 export interface BetaRequestDetailResponse {
   request: BetaRequest
+  activity: BetaRequestActivityEntry[]
 }
 
 export interface BetaRequestUpdateInput {
