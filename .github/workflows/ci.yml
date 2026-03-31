@@ -192,6 +192,18 @@ jobs:
       - name: Install Flyctl
         run: curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/home/runner/.fly sh
 
+      - name: Clear stale Fly release env overrides
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl secrets unset \
+            BEAM_RELEASE_VERSION \
+            BEAM_RELEASE_SHA \
+            BEAM_DEPLOYED_AT \
+            --app beam-protocol \
+            --stage || true
+
       - name: Deploy directory API to Fly.io
         working-directory: packages/directory
         env:
