@@ -22,11 +22,10 @@ concurrency:
 
 jobs:
   deploy:
-    if: ${{ secrets.VERCEL_TOKEN != '' }}
     runs-on: ubuntu-latest
     env:
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
-      VERCEL_PUBLIC_SITE_PROJECT_ID: ${{ vars.VERCEL_PUBLIC_SITE_PROJECT_ID }}
+      VERCEL_PROJECT_ID: ${{ vars.VERCEL_PUBLIC_SITE_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
     steps:
       - name: Checkout
@@ -37,23 +36,38 @@ jobs:
         with:
           node-version: 22
 
-      - name: Validate Vercel configuration
+      - name: Resolve deployment readiness
+        id: config
         run: |
-          test -n "$VERCEL_TOKEN" || { echo "Missing VERCEL_TOKEN repo secret" >&2; exit 1; }
-          test -n "$VERCEL_ORG_ID" || { echo "Missing VERCEL_ORG_ID repo variable" >&2; exit 1; }
-          test -n "$VERCEL_PUBLIC_SITE_PROJECT_ID" || { echo "Missing VERCEL_PUBLIC_SITE_PROJECT_ID repo variable" >&2; exit 1; }
+          ready=true
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "Missing VERCEL_TOKEN repo secret"
+            ready=false
+          fi
+          if [ -z "$VERCEL_ORG_ID" ]; then
+            echo "Missing VERCEL_ORG_ID repo variable"
+            ready=false
+          fi
+          if [ -z "$VERCEL_PROJECT_ID" ]; then
+            echo "Missing VERCEL_PUBLIC_SITE_PROJECT_ID repo variable"
+            ready=false
+          fi
+          echo "ready=$ready" >> "$GITHUB_OUTPUT"
+
+      - name: Skip deploy when Vercel config is missing
+        if: ${{ steps.config.outputs.ready != 'true' }}
+        run: echo "Skipping public-site deploy because Vercel configuration is incomplete."
 
       - name: Install Vercel CLI
+        if: ${{ steps.config.outputs.ready == 'true' }}
         run: npm install --global vercel@latest
 
-      - name: Link beam.directory project
-        working-directory: packages/public-site
-        run: vercel link --yes --team "$VERCEL_ORG_ID" --project "$VERCEL_PUBLIC_SITE_PROJECT_ID" --token "$VERCEL_TOKEN"
-
       - name: Pull production project settings
+        if: ${{ steps.config.outputs.ready == 'true' }}
         working-directory: packages/public-site
         run: vercel pull --yes --environment=production --token "$VERCEL_TOKEN"
 
       - name: Deploy beam.directory to production
+        if: ${{ steps.config.outputs.ready == 'true' }}
         working-directory: packages/public-site
         run: vercel deploy --prod --yes --token "$VERCEL_TOKEN"
