@@ -611,6 +611,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         status: 'reviewing',
         owner: 'operator@example.com',
         operatorNotes: 'Intro email sent, follow-up call pending.',
+        blockedPrerequisites: ['workflow_owner_confirmed', 'security_review_confirmed'],
       }),
     }))
     assert.equal(updateResponse.status, 200)
@@ -624,6 +625,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         operatorNotes: string
         notificationStatus: string
         attentionFlags: string[]
+        blockedPrerequisites: string[]
       }
     }
     assert.equal(updated.ok, true)
@@ -633,6 +635,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.match(updated.request.operatorNotes, /Intro email/)
     assert.equal(updated.request.notificationStatus, 'acknowledged')
     assert.deepEqual(updated.request.attentionFlags, [])
+    assert.deepEqual(updated.request.blockedPrerequisites, ['workflow_owner_confirmed', 'security_review_confirmed'])
 
     const proofNonce = 'pilot-proof-demo-0001'
     registerAgent(db, {
@@ -745,6 +748,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         nextMeetingAt: meetingTimestamp,
         reminderAt: reminderTimestamp,
         proofIntentNonce: proofNonce,
+        blockedPrerequisites: ['go_live_window_confirmed'],
       }),
     }))
     assert.equal(contactResponse.status, 200)
@@ -760,6 +764,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         proofIntentNonce: string | null
         notificationStatus: string
         attentionFlags: string[]
+        blockedPrerequisites: string[]
       }
     }
     assert.equal(contacted.ok, true)
@@ -771,6 +776,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(contacted.request.proofIntentNonce, proofNonce)
     assert.equal(contacted.request.notificationStatus, 'acted')
     assert.deepEqual(contacted.request.attentionFlags, ['follow_up_due'])
+    assert.deepEqual(contacted.request.blockedPrerequisites, ['go_live_window_confirmed'])
 
     const detailResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
@@ -783,6 +789,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         stage: string
         proofIntentNonce: string | null
         notificationStatus: string | null
+        blockedPrerequisites: string[]
       }
       activity: Array<{
         title: string
@@ -820,6 +827,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(detail.request.stage, 'scheduled')
     assert.equal(detail.request.proofIntentNonce, proofNonce)
     assert.equal(detail.request.notificationStatus, 'acted')
+    assert.deepEqual(detail.request.blockedPrerequisites, ['go_live_window_confirmed'])
     assert.ok(detail.activity.length >= 6)
     assert.ok(detail.activity.some((entry) => entry.title === 'Hosted beta request captured'))
     assert.ok(detail.activity.some((entry) => entry.title === 'Stage moved to Scheduled'))

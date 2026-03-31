@@ -167,6 +167,7 @@ function initSchema(db: DB): void {
       operator_notes TEXT,
       next_action TEXT,
       last_contact_at TEXT,
+      blocked_prerequisites TEXT,
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
@@ -533,6 +534,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'waitlist', 'last_contact_at', 'TEXT')
   ensureColumn(db, 'waitlist', 'next_meeting_at', 'TEXT')
   ensureColumn(db, 'waitlist', 'reminder_at', 'TEXT')
+  ensureColumn(db, 'waitlist', 'blocked_prerequisites', 'TEXT')
   ensureColumn(db, 'waitlist', 'stage_entered_at', 'TEXT')
   ensureColumn(db, 'waitlist', 'updated_at', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_status ON waitlist(status, created_at DESC)')

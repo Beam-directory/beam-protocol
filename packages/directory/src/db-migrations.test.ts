@@ -255,11 +255,12 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     assert.ok(waitlistColumns.some((column) => column.name === 'last_contact_at'))
     assert.ok(waitlistColumns.some((column) => column.name === 'next_meeting_at'))
     assert.ok(waitlistColumns.some((column) => column.name === 'reminder_at'))
+    assert.ok(waitlistColumns.some((column) => column.name === 'blocked_prerequisites'))
     assert.ok(waitlistColumns.some((column) => column.name === 'stage_entered_at'))
     assert.ok(waitlistColumns.some((column) => column.name === 'updated_at'))
 
     const waitlistRow = db.prepare(`
-      SELECT email, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, stage_entered_at, updated_at, created_at
+      SELECT email, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, blocked_prerequisites, stage_entered_at, updated_at, created_at
       FROM waitlist
       LIMIT 1
     `).get() as {
@@ -271,6 +272,7 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
       last_contact_at: string | null
       next_meeting_at: string | null
       reminder_at: string | null
+      blocked_prerequisites: string | null
       stage_entered_at: string
       updated_at: string
       created_at: string
@@ -285,6 +287,7 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
     assert.equal(waitlistRow?.last_contact_at ?? null, null)
     assert.equal(waitlistRow?.next_meeting_at ?? null, null)
     assert.equal(waitlistRow?.reminder_at ?? null, null)
+    assert.equal(waitlistRow?.blocked_prerequisites ?? null, null)
     assert.equal(waitlistRow?.stage_entered_at, waitlistRow?.created_at)
     assert.equal(waitlistRow?.updated_at, waitlistRow?.created_at)
 

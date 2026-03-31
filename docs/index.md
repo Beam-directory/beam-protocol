@@ -41,16 +41,19 @@ If you only do one thing, open the public [Guided Evaluation](https://beam.direc
 
 Use the docs when you need one of these supporting paths:
 
-1. The [Design-Partner Onboarding Pack](/guide/design-partner-onboarding) for prerequisites, evaluation expectations, and operator follow-up templates.
-2. The [Hosted Quickstart](/guide/hosted-quickstart) if you want to run the same proof stack locally.
-3. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
+1. The [First Production Partner Workflow Contract](/guide/production-partner-workflow) if you want the exact `1.0.0` workflow Beam is anchoring on.
+2. The [Production Partner Onboarding Pack](/guide/design-partner-onboarding) for prerequisites, proof expectations, and operator follow-up templates.
+3. The [Production Go-Live Checklist](/guide/production-go-live-checklist) if the workflow is moving from pilot to production.
+4. The [Hosted Quickstart](/guide/hosted-quickstart) if you want to run the same proof stack locally.
+5. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
 
 ## Choose Your Path
 
 1. **See the proof first.** Open the [Guided Evaluation](https://beam.directory/guided-evaluation.html), inspect the real screenshots and operator evidence, then decide whether Beam is worth more time.
-2. **Prepare the evaluation properly.** Use the [Design-Partner Onboarding Pack](/guide/design-partner-onboarding) to align prerequisites, proof expectations, and next-step language before the call starts.
-3. **Request hosted beta.** If you want a guided rollout around one real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
-4. **Run the technical proof yourself.** Use the [Hosted Quickstart](/guide/hosted-quickstart) when you want to self-run the same baseline locally.
+2. **Check the exact workflow contract.** Open the [First Production Partner Workflow Contract](/guide/production-partner-workflow) to see the named sender, recipient, latency, failure handling, and proof contract for `1.0.0`.
+3. **Prepare the evaluation properly.** Use the [Production Partner Onboarding Pack](/guide/design-partner-onboarding) to align prerequisites, proof expectations, and next-step language before the call starts.
+4. **Request hosted beta.** If you want a guided rollout around one real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
+5. **Run the technical proof yourself.** Use the [Hosted Quickstart](/guide/hosted-quickstart) when you want to self-run the same baseline locally.
 
 ## What Beam Is For
 
@@ -65,7 +68,9 @@ If that is your problem, Beam is aimed directly at it. If it is not, Beam should
 ## Continue
 
 - [Guided Evaluation](https://beam.directory/guided-evaluation.html)
-- [Design-Partner Onboarding Pack](/guide/design-partner-onboarding)
+- [First Production Partner Workflow Contract](/guide/production-partner-workflow)
+- [Production Partner Onboarding Pack](/guide/design-partner-onboarding)
+- [Production Go-Live Checklist](/guide/production-go-live-checklist)
 - [Hosted Quickstart](/guide/hosted-quickstart)
 - [Register a Real Agent](https://beam.directory/register.html)
 - [Partner Handoff Guide](/guide/partner-handoff)

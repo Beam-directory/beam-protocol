@@ -45,7 +45,17 @@ const SORT_OPTIONS = [
 type SortOption = typeof SORT_OPTIONS[number]['value']
 
 const ONBOARDING_PACK_URL = 'https://docs.beam.directory/guide/design-partner-onboarding'
+const WORKFLOW_CONTRACT_URL = 'https://docs.beam.directory/guide/production-partner-workflow'
+const GO_LIVE_CHECKLIST_URL = 'https://docs.beam.directory/guide/production-go-live-checklist'
 const GUIDED_EVALUATION_URL = 'https://beam.directory/guided-evaluation.html'
+const BLOCKED_PREREQUISITES = [
+  { value: 'workflow_owner_confirmed', label: 'Workflow owner confirmed', detail: 'The buyer-side business owner is named and reachable.' },
+  { value: 'sender_receiver_confirmed', label: 'Sender and receiver confirmed', detail: 'The first sender and first receiving system are fixed.' },
+  { value: 'success_metric_confirmed', label: 'Success metric confirmed', detail: 'The pilot has one explicit success condition.' },
+  { value: 'security_review_confirmed', label: 'Security review confirmed', detail: 'The compliance and security expectations are agreed.' },
+  { value: 'go_live_window_confirmed', label: 'Go-live window confirmed', detail: 'The first live rollout window is scheduled and owned.' },
+  { value: 'proof_recipients_confirmed', label: 'Proof recipients confirmed', detail: 'Both sides know who will receive the proof pack and recap.' },
+] as const
 
 export default function BetaRequestsPage() {
   const { session } = useAdminAuth()
@@ -92,6 +102,7 @@ export default function BetaRequestsPage() {
   const [draftNextMeetingAt, setDraftNextMeetingAt] = useState('')
   const [draftReminderAt, setDraftReminderAt] = useState('')
   const [draftProofIntentNonce, setDraftProofIntentNonce] = useState('')
+  const [draftBlockedPrerequisites, setDraftBlockedPrerequisites] = useState<string[]>([])
   const [draftNotes, setDraftNotes] = useState('')
 
   function updateSearchParam(key: string, value: string) {
@@ -125,6 +136,7 @@ export default function BetaRequestsPage() {
       setDraftNextMeetingAt('')
       setDraftReminderAt('')
       setDraftProofIntentNonce('')
+      setDraftBlockedPrerequisites([])
       setDraftNotes('')
       return
     }
@@ -136,6 +148,7 @@ export default function BetaRequestsPage() {
     setDraftNextMeetingAt(toDateTimeLocalValue(detailRequest.nextMeetingAt))
     setDraftReminderAt(toDateTimeLocalValue(detailRequest.reminderAt))
     setDraftProofIntentNonce(detailRequest.proofIntentNonce ?? '')
+    setDraftBlockedPrerequisites(detailRequest.blockedPrerequisites ?? [])
     setDraftNotes(detailRequest.operatorNotes ?? '')
   }, [detailRequest])
 
@@ -206,6 +219,7 @@ export default function BetaRequestsPage() {
         nextMeetingAt: draftNextMeetingAt || null,
         reminderAt: draftReminderAt || null,
         proofIntentNonce: draftProofIntentNonce || null,
+        blockedPrerequisites: draftBlockedPrerequisites,
         operatorNotes: draftNotes || null,
       })
       setRequests((current) => current.map((entry) => (
@@ -369,6 +383,9 @@ export default function BetaRequestsPage() {
                     <div className="flex flex-wrap items-center gap-2">
                       <StatusPill label={entry.stage} tone={stageTone(entry.stage)} />
                       {entry.notificationStatus ? <StatusPill label={`signal ${entry.notificationStatus}`} tone={signalTone(entry.notificationStatus)} /> : null}
+                      {entry.blockedPrerequisites.length > 0 ? (
+                        <StatusPill label={`blocked ${entry.blockedPrerequisites.length}`} tone="warning" />
+                      ) : null}
                       {entry.attentionFlags.map((flag) => (
                         <StatusPill key={`${entry.id}-${flag}`} label={formatAttentionFlag(flag)} tone={flag === 'unowned' ? 'critical' : 'warning'} />
                       ))}
@@ -453,6 +470,36 @@ export default function BetaRequestsPage() {
                       </Link>
                     </div>
                   ) : null}
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Production workflow contract</div>
+                  <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                    Beam `1.0.0` is anchored on the quote approval handoff. Every production-partner request should map back to that contract before go-live.
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-3">
+                    <a className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" href={WORKFLOW_CONTRACT_URL} rel="noreferrer" target="_blank">
+                      Open workflow contract
+                    </a>
+                    <a className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" href={GO_LIVE_CHECKLIST_URL} rel="noreferrer" target="_blank">
+                      Open go-live checklist
+                    </a>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Blocked go-live prerequisites</div>
+                  {detailRequest.blockedPrerequisites.length === 0 ? (
+                    <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
+                      No blocked prerequisites are recorded for this partner yet.
+                    </div>
+                  ) : (
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      {detailRequest.blockedPrerequisites.map((entry) => (
+                        <StatusPill key={entry} label={formatBlockedPrerequisiteLabel(entry)} tone="warning" />
+                      ))}
+                    </div>
+                  )}
                 </div>
 
                 {detailRequest.staleReason || detailRequest.followUpReason ? (
@@ -667,6 +714,41 @@ export default function BetaRequestsPage() {
                   </span>
                 </label>
 
+                <div className="space-y-3 rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Blocked go-live prerequisites</div>
+                    <div className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                      Mark the specific items that still block a production rollout. Clear them when the partner is ready.
+                    </div>
+                  </div>
+                  <div className="grid gap-3">
+                    {BLOCKED_PREREQUISITES.map((entry) => {
+                      const checked = draftBlockedPrerequisites.includes(entry.value)
+                      return (
+                        <label key={entry.value} className="flex items-start gap-3 rounded-xl border border-slate-200 px-3 py-3 text-sm dark:border-slate-800">
+                          <input
+                            checked={checked}
+                            className="mt-1 h-4 w-4"
+                            disabled={!canEdit || saving}
+                            onChange={() => {
+                              setDraftBlockedPrerequisites((current) => (
+                                current.includes(entry.value)
+                                  ? current.filter((item) => item !== entry.value)
+                                  : [...current, entry.value]
+                              ))
+                            }}
+                            type="checkbox"
+                          />
+                          <span className="space-y-1">
+                            <span className="block font-medium text-slate-900 dark:text-slate-100">{entry.label}</span>
+                            <span className="block text-slate-500 dark:text-slate-400">{entry.detail}</span>
+                          </span>
+                        </label>
+                      )
+                    })}
+                  </div>
+                </div>
+
                 <div className="flex flex-wrap gap-3">
                   {session?.email ? (
                     <button
@@ -736,6 +818,15 @@ export default function BetaRequestsPage() {
                     <CheckCircle2 size={16} />
                     <span>Mark follow-up active</span>
                   </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving || draftBlockedPrerequisites.length === 0}
+                    onClick={() => setDraftBlockedPrerequisites([])}
+                    type="button"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Clear blockers</span>
+                  </button>
                 </div>
 
                 <label className="block space-y-2">
@@ -771,9 +862,17 @@ export default function BetaRequestsPage() {
           <div className="panel space-y-4">
             <div className="panel-title">Onboarding pack</div>
             <p className="text-sm text-slate-500 dark:text-slate-400">
-              Keep external evaluations on the same script: public proof first, then the onboarding pack, then the stage-specific follow-up template.
+              Keep production-partner work on the same script: workflow contract first, then the onboarding pack, then the operator go-live checklist.
             </p>
             <div className="grid gap-3">
+              <a
+                className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
+                href={WORKFLOW_CONTRACT_URL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open workflow contract
+              </a>
               <a
                 className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
                 href={GUIDED_EVALUATION_URL}
@@ -789,6 +888,14 @@ export default function BetaRequestsPage() {
                 target="_blank"
               >
                 Open onboarding pack
+              </a>
+              <a
+                className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
+                href={GO_LIVE_CHECKLIST_URL}
+                rel="noreferrer"
+                target="_blank"
+              >
+                Open go-live checklist
               </a>
               {detailRequest ? (
                 <a
@@ -838,6 +945,25 @@ function formatAttentionFlag(flag: BetaRequestAttention): string {
     case 'stale':
     default:
       return 'stale'
+  }
+}
+
+function formatBlockedPrerequisiteLabel(value: string): string {
+  switch (value) {
+    case 'workflow_owner_confirmed':
+      return 'workflow owner confirmed'
+    case 'sender_receiver_confirmed':
+      return 'sender and receiver confirmed'
+    case 'success_metric_confirmed':
+      return 'success metric confirmed'
+    case 'security_review_confirmed':
+      return 'security review confirmed'
+    case 'go_live_window_confirmed':
+      return 'go-live window confirmed'
+    case 'proof_recipients_confirmed':
+      return 'proof recipients confirmed'
+    default:
+      return value.split('_').join(' ')
   }
 }
 
