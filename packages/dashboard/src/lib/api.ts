@@ -10,6 +10,17 @@ export type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
 export type BetaRequestExportFormat = 'json' | 'csv'
 export type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 export type OperatorNotificationSource = 'beta_request' | 'critical_alert'
+export type WorkspaceStatus = 'active' | 'paused' | 'archived'
+export type WorkspaceThreadScope = 'internal' | 'handoff'
+export type WorkspaceBindingType = 'agent' | 'service' | 'partner'
+export type WorkspaceBindingStatus = 'active' | 'paused'
+export type WorkspaceOverviewAttentionCode =
+  | 'identity_missing'
+  | 'stale_check_in'
+  | 'binding_paused'
+  | 'workspace_handoffs_disabled'
+  | 'manual_review_required'
+export type WorkspaceOverviewHandoffDirection = 'outbound' | 'inbound'
 
 export interface DirectoryAgent {
   beamId: string
@@ -78,6 +89,110 @@ export interface RootStatsResponse {
   gitSha?: string | null
   deployedAt?: string
   release?: DirectoryReleaseInfo
+}
+
+export interface WorkspaceRecord {
+  id: number
+  slug: string
+  name: string
+  orgName: string | null
+  description: string | null
+  status: WorkspaceStatus
+  defaultThreadScope: WorkspaceThreadScope
+  externalHandoffsEnabled: boolean
+  createdAt: string
+  updatedAt: string
+  summary: {
+    identities: number
+    externalInitiators: number
+    members: number
+    partnerChannels: number
+  }
+  policyConfigured: boolean
+}
+
+export interface WorkspaceListResponse {
+  workspaces: WorkspaceRecord[]
+  total: number
+}
+
+export interface WorkspaceIdentityBinding {
+  id: number
+  workspaceId: number
+  beamId: string
+  bindingType: WorkspaceBindingType
+  owner: string | null
+  runtimeType: string | null
+  policyProfile: string | null
+  defaultThreadScope: WorkspaceThreadScope
+  canInitiateExternal: boolean
+  status: WorkspaceBindingStatus
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  identity: {
+    existsLocally: boolean
+    beamId: string
+    displayName: string | null
+    org: string | null
+    personal: boolean
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+    capabilities: string[]
+    keyState: object | null
+  }
+}
+
+export interface WorkspaceOverviewAttentionItem {
+  binding: WorkspaceIdentityBinding
+  reasonCode: WorkspaceOverviewAttentionCode
+  reason: string
+  lastSeenAgeHours: number | null
+}
+
+export interface WorkspaceOverviewHandoff {
+  nonce: string
+  intentType: string
+  status: IntentLifecycleStatus
+  requestedAt: string
+  completedAt: string | null
+  latencyMs: number | null
+  errorCode: string | null
+  direction: WorkspaceOverviewHandoffDirection
+  fromBeamId: string
+  toBeamId: string
+  workspaceSide: {
+    beamId: string
+    displayName: string | null
+    bindingType: WorkspaceBindingType | null
+  }
+  counterparty: {
+    beamId: string
+    displayName: string | null
+    bindingType: WorkspaceBindingType | null
+    inWorkspace: boolean
+  }
+}
+
+export interface WorkspaceOverviewResponse {
+  workspace: WorkspaceRecord
+  generatedAt: string
+  staleAfterHours: number
+  summary: {
+    totalIdentities: number
+    activeIdentities: number
+    localIdentities: number
+    partnerIdentities: number
+    externalReadyIdentities: number
+    staleIdentities: number
+    pendingApprovals: number
+    blockedExternalMotion: number
+    recentExternalHandoffs: number
+  }
+  staleBindings: WorkspaceOverviewAttentionItem[]
+  blockedExternalMotion: WorkspaceOverviewAttentionItem[]
+  recentExternalHandoffs: WorkspaceOverviewHandoff[]
 }
 
 export interface BusHealth {
@@ -1165,6 +1280,8 @@ export const directoryApi = {
     return request<AgentSearchResponse>(`/agents/search${query.toString() ? `?${query.toString()}` : ''}`)
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
+  listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
+  getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
   heartbeat: (beamId: string) => request<DirectoryAgent>(`/agents/${encodeURIComponent(beamId)}/heartbeat`, { method: 'POST' }),
   registerAgent: (input: RegisterAgentInput) => request<DirectoryAgent>('/agents/register', {
     method: 'POST',

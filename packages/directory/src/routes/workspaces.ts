@@ -18,6 +18,7 @@ import {
   updateWorkspaceIdentityBinding,
 } from '../db.js'
 import type {
+  IntentLogRow,
   WorkspaceIdentityBindingRow,
   WorkspaceIdentityBindingStatus,
   WorkspaceIdentityBindingType,
@@ -31,6 +32,97 @@ const WORKSPACE_THREAD_SCOPE_SET = new Set<WorkspaceThreadScope>(['internal', 'h
 const WORKSPACE_BINDING_TYPE_SET = new Set<WorkspaceIdentityBindingType>(['agent', 'service', 'partner'])
 const WORKSPACE_BINDING_STATUS_SET = new Set<WorkspaceIdentityBindingStatus>(['active', 'paused'])
 const WORKSPACE_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
+const WORKSPACE_OVERVIEW_STALE_AFTER_HOURS = 24
+const WORKSPACE_OVERVIEW_RECENT_HANDOFF_LIMIT = 8
+const WORKSPACE_OVERVIEW_INTENT_SCAN_LIMIT = 96
+
+type SerializedWorkspace = {
+  id: number
+  slug: string
+  name: string
+  orgName: string | null
+  description: string | null
+  status: WorkspaceRow['status']
+  defaultThreadScope: WorkspaceThreadScope
+  externalHandoffsEnabled: boolean
+  createdAt: string
+  updatedAt: string
+  summary: {
+    identities: number
+    externalInitiators: number
+    members: number
+    partnerChannels: number
+  }
+  policyConfigured: boolean
+}
+
+type SerializedWorkspaceIdentityBinding = {
+  id: number
+  workspaceId: number
+  beamId: string
+  bindingType: WorkspaceIdentityBindingType
+  owner: string | null
+  runtimeType: string | null
+  policyProfile: string | null
+  defaultThreadScope: WorkspaceThreadScope
+  canInitiateExternal: boolean
+  status: WorkspaceIdentityBindingStatus
+  notes: string | null
+  createdAt: string
+  updatedAt: string
+  identity: {
+    existsLocally: boolean
+    beamId: string
+    displayName: string | null
+    org: string | null
+    personal: boolean
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+    capabilities: string[]
+    keyState: object | null
+  }
+}
+
+type WorkspaceOverviewAttentionCode =
+  | 'identity_missing'
+  | 'stale_check_in'
+  | 'binding_paused'
+  | 'workspace_handoffs_disabled'
+  | 'manual_review_required'
+
+type WorkspaceOverviewAttentionItem = {
+  binding: SerializedWorkspaceIdentityBinding
+  reasonCode: WorkspaceOverviewAttentionCode
+  reason: string
+  lastSeenAgeHours: number | null
+}
+
+type WorkspaceOverviewHandoffDirection = 'outbound' | 'inbound'
+
+type WorkspaceOverviewHandoff = {
+  nonce: string
+  intentType: string
+  status: IntentLogRow['status']
+  requestedAt: string
+  completedAt: string | null
+  latencyMs: number | null
+  errorCode: string | null
+  direction: WorkspaceOverviewHandoffDirection
+  fromBeamId: string
+  toBeamId: string
+  workspaceSide: {
+    beamId: string
+    displayName: string | null
+    bindingType: WorkspaceIdentityBindingType | null
+  }
+  counterparty: {
+    beamId: string
+    displayName: string | null
+    bindingType: WorkspaceIdentityBindingType | null
+    inWorkspace: boolean
+  }
+}
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
@@ -99,7 +191,66 @@ function normalizeWorkspaceSlug(value: unknown, fallback: string): string | null
   return candidate
 }
 
-function serializeWorkspace(db: Database, row: WorkspaceRow): Record<string, unknown> {
+function hoursSince(value: string | null): number | null {
+  if (!value) {
+    return null
+  }
+
+  const timestamp = Date.parse(value)
+  if (!Number.isFinite(timestamp)) {
+    return null
+  }
+
+  return Math.round(((Date.now() - timestamp) / 3_600_000) * 10) / 10
+}
+
+function isLocalWorkspaceBinding(row: WorkspaceIdentityBindingRow): boolean {
+  return row.binding_type !== 'partner'
+}
+
+function classifyWorkspaceHandoffDirection(
+  fromBinding: WorkspaceIdentityBindingRow | undefined,
+  toBinding: WorkspaceIdentityBindingRow | undefined,
+): WorkspaceOverviewHandoffDirection | null {
+  if (fromBinding && !toBinding) {
+    return fromBinding.binding_type === 'partner' ? null : 'outbound'
+  }
+
+  if (!fromBinding && toBinding) {
+    return toBinding.binding_type === 'partner' ? null : 'inbound'
+  }
+
+  if (fromBinding && toBinding) {
+    if (fromBinding.binding_type !== 'partner' && toBinding.binding_type === 'partner') {
+      return 'outbound'
+    }
+
+    if (fromBinding.binding_type === 'partner' && toBinding.binding_type !== 'partner') {
+      return 'inbound'
+    }
+  }
+
+  return null
+}
+
+function getDisplayNameForBeamId(
+  db: Database,
+  beamId: string,
+  binding: WorkspaceIdentityBindingRow | null = null,
+): string | null {
+  const agent = getAgent(db, beamId)
+  if (agent?.display_name) {
+    return agent.display_name
+  }
+
+  if (binding) {
+    return binding.beam_id.split('@')[0] ?? null
+  }
+
+  return null
+}
+
+function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspace {
   const summary = getWorkspaceSummary(db, row.id)
   const policy = getWorkspacePolicy(db, row.id)
 
@@ -124,7 +275,7 @@ function serializeWorkspace(db: Database, row: WorkspaceRow): Record<string, unk
   }
 }
 
-function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityBindingRow): Record<string, unknown> {
+function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityBindingRow): SerializedWorkspaceIdentityBinding {
   const agent = getAgent(db, row.beam_id)
   const keyState = agent ? serializeAgentKeyState(listAgentKeys(db, row.beam_id)) : null
 
@@ -165,6 +316,199 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
       capabilities: [],
       keyState,
     },
+  }
+}
+
+function listRecentWorkspaceExternalHandoffs(
+  db: Database,
+  bindings: WorkspaceIdentityBindingRow[],
+  limit = WORKSPACE_OVERVIEW_RECENT_HANDOFF_LIMIT,
+): WorkspaceOverviewHandoff[] {
+  if (bindings.length === 0) {
+    return []
+  }
+
+  const beamIds = [...new Set(bindings.map((row) => row.beam_id))]
+  const placeholders = beamIds.map(() => '?').join(', ')
+  const rows = db.prepare(`
+    SELECT *
+    FROM intent_log
+    WHERE from_beam_id IN (${placeholders}) OR to_beam_id IN (${placeholders})
+    ORDER BY requested_at DESC, id DESC
+    LIMIT ?
+  `).all(...beamIds, ...beamIds, WORKSPACE_OVERVIEW_INTENT_SCAN_LIMIT) as IntentLogRow[]
+
+  const bindingByBeamId = new Map(bindings.map((row) => [row.beam_id, row]))
+  const handoffs: WorkspaceOverviewHandoff[] = []
+
+  for (const row of rows) {
+    const fromBinding = bindingByBeamId.get(row.from_beam_id)
+    const toBinding = bindingByBeamId.get(row.to_beam_id)
+    const direction = classifyWorkspaceHandoffDirection(fromBinding, toBinding)
+    if (!direction) {
+      continue
+    }
+
+    const workspaceBinding = direction === 'outbound'
+      ? (fromBinding && fromBinding.binding_type !== 'partner' ? fromBinding : fromBinding ?? null)
+      : (toBinding && toBinding.binding_type !== 'partner' ? toBinding : toBinding ?? null)
+
+    const counterpartyBeamId = direction === 'outbound' ? row.to_beam_id : row.from_beam_id
+    const counterpartyBinding = bindingByBeamId.get(counterpartyBeamId) ?? null
+
+    handoffs.push({
+      nonce: row.nonce,
+      intentType: row.intent_type,
+      status: row.status,
+      requestedAt: row.requested_at,
+      completedAt: row.completed_at,
+      latencyMs: row.round_trip_latency_ms,
+      errorCode: row.error_code,
+      direction,
+      fromBeamId: row.from_beam_id,
+      toBeamId: row.to_beam_id,
+      workspaceSide: {
+        beamId: workspaceBinding?.beam_id ?? (direction === 'outbound' ? row.from_beam_id : row.to_beam_id),
+        displayName: getDisplayNameForBeamId(
+          db,
+          workspaceBinding?.beam_id ?? (direction === 'outbound' ? row.from_beam_id : row.to_beam_id),
+          workspaceBinding,
+        ),
+        bindingType: workspaceBinding?.binding_type ?? null,
+      },
+      counterparty: {
+        beamId: counterpartyBeamId,
+        displayName: getDisplayNameForBeamId(db, counterpartyBeamId, counterpartyBinding),
+        bindingType: counterpartyBinding?.binding_type ?? null,
+        inWorkspace: Boolean(counterpartyBinding),
+      },
+    })
+
+    if (handoffs.length >= limit) {
+      break
+    }
+  }
+
+  return handoffs
+}
+
+function buildWorkspaceOverview(db: Database, workspace: WorkspaceRow) {
+  const bindings = listWorkspaceIdentityBindings(db, workspace.id)
+  const staleBindings: WorkspaceOverviewAttentionItem[] = []
+  const blockedExternalMotion: WorkspaceOverviewAttentionItem[] = []
+
+  let activeIdentities = 0
+  let localIdentities = 0
+  let partnerIdentities = 0
+  let externalReadyIdentities = 0
+  let pendingApprovals = 0
+
+  for (const row of bindings) {
+    const binding = serializeWorkspaceIdentityBinding(db, row)
+    const lastSeenAgeHours = hoursSince(binding.identity.lastSeen)
+    const isLocal = isLocalWorkspaceBinding(row)
+
+    if (row.status === 'active') {
+      activeIdentities += 1
+    }
+    if (isLocal) {
+      localIdentities += 1
+    } else {
+      partnerIdentities += 1
+    }
+    if (isLocal && row.status === 'active' && row.can_initiate_external === 1 && workspace.external_handoffs_enabled === 1) {
+      externalReadyIdentities += 1
+    }
+
+    if (isLocal) {
+      if (!binding.identity.existsLocally) {
+        staleBindings.push({
+          binding,
+          reasonCode: 'identity_missing',
+          reason: 'This workspace binding points to a local identity that is no longer registered in the directory.',
+          lastSeenAgeHours: null,
+        })
+      } else if (lastSeenAgeHours !== null && lastSeenAgeHours >= WORKSPACE_OVERVIEW_STALE_AFTER_HOURS) {
+        staleBindings.push({
+          binding,
+          reasonCode: 'stale_check_in',
+          reason: `This identity has not checked in within ${WORKSPACE_OVERVIEW_STALE_AFTER_HOURS} hours.`,
+          lastSeenAgeHours,
+        })
+      }
+
+      if (row.status !== 'active') {
+        blockedExternalMotion.push({
+          binding,
+          reasonCode: 'binding_paused',
+          reason: 'This identity binding is paused and cannot initiate external handoffs.',
+          lastSeenAgeHours,
+        })
+      } else if (workspace.external_handoffs_enabled !== 1) {
+        blockedExternalMotion.push({
+          binding,
+          reasonCode: 'workspace_handoffs_disabled',
+          reason: 'Workspace-level external handoffs are disabled, so outbound motion is blocked.',
+          lastSeenAgeHours,
+        })
+      } else if (row.can_initiate_external !== 1) {
+        blockedExternalMotion.push({
+          binding,
+          reasonCode: 'manual_review_required',
+          reason: 'This identity can work internally, but external motion still requires manual approval.',
+          lastSeenAgeHours,
+        })
+        pendingApprovals += 1
+      }
+    }
+  }
+
+  const recentExternalHandoffs = listRecentWorkspaceExternalHandoffs(db, bindings)
+
+  staleBindings.sort((left, right) => {
+    if (left.reasonCode === 'identity_missing' && right.reasonCode !== 'identity_missing') {
+      return -1
+    }
+    if (left.reasonCode !== 'identity_missing' && right.reasonCode === 'identity_missing') {
+      return 1
+    }
+    return (right.lastSeenAgeHours ?? 0) - (left.lastSeenAgeHours ?? 0)
+  })
+
+  blockedExternalMotion.sort((left, right) => {
+    const priority = (item: WorkspaceOverviewAttentionItem) => {
+      switch (item.reasonCode) {
+        case 'workspace_handoffs_disabled':
+          return 0
+        case 'binding_paused':
+          return 1
+        case 'manual_review_required':
+          return 2
+        default:
+          return 3
+      }
+    }
+
+    return priority(left) - priority(right)
+  })
+
+  return {
+    generatedAt: new Date().toISOString(),
+    staleAfterHours: WORKSPACE_OVERVIEW_STALE_AFTER_HOURS,
+    summary: {
+      totalIdentities: bindings.length,
+      activeIdentities,
+      localIdentities,
+      partnerIdentities,
+      externalReadyIdentities,
+      staleIdentities: staleBindings.length,
+      pendingApprovals,
+      blockedExternalMotion: blockedExternalMotion.length,
+      recentExternalHandoffs: recentExternalHandoffs.length,
+    },
+    staleBindings,
+    blockedExternalMotion,
+    recentExternalHandoffs,
   }
 }
 
@@ -290,6 +634,24 @@ export function workspacesRouter(db: Database): Hono {
 
     c.header('Cache-Control', 'no-store')
     return c.json({ workspace: serializeWorkspace(db, workspace) })
+  })
+
+  router.get('/:slug/overview', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      ...buildWorkspaceOverview(db, workspace),
+    })
   })
 
   router.get('/:slug/identities', (c) => {
