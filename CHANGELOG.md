@@ -1,5 +1,21 @@
 # Changelog
 
+## v0.9.0 (draft)
+
+### Design-Partner Motion
+- extend hosted-beta requests with stage age, reminders, next meeting, and follow-up due signals
+- add partner-stage analytics so operators can see where requests stall during weekly funnel review
+- add shareable pilot proof summaries tied to real trace evidence inside the beta-request workflow
+
+### Public Funnel
+- keep the landing page, guided evaluation path, hosted beta intake, and onboarding pack on one proof-first design-partner story
+- make the buyer path easier to understand in plain language before any deeper technical evaluation
+
+### Release Control
+- add repo-visible `0.9.0` buyer and operator dry runs before the final cut
+- add an explicit `0.9.0` cut checklist and release-notes draft before release week
+- track current operator blockers as explicit GitHub issues instead of chat-only notes
+
 ## v0.8.1 (2026-03-31)
 
 ### Release Hygiene
