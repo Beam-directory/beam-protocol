@@ -14,6 +14,7 @@
     "dogfood:partner-handoff": "node scripts/dogfood/partner-handoff.mjs",
     "dogfood:hosted-demo": "node scripts/demo/dogfood-hosted-demo.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
+    "release:smoke": "node scripts/release/release-smoke.mjs",
     "test": "npm run test --workspaces --if-present",
     "test:e2e": "node scripts/e2e/run.mjs",
     "dev:directory": "npm run dev --workspace=packages/directory",
