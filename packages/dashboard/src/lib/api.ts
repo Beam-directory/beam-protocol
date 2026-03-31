@@ -575,6 +575,7 @@ export interface BetaRequest {
   lastContactAt: string | null
   nextMeetingAt: string | null
   reminderAt: string | null
+  blockedPrerequisites: string[]
   stageEnteredAt: string
   stageAgeHours: number
   stageAgeLabel: string
@@ -696,6 +697,7 @@ export interface BetaRequestUpdateInput {
   nextMeetingAt?: string | null
   reminderAt?: string | null
   proofIntentNonce?: string | null
+  blockedPrerequisites?: string[] | null
 }
 
 export interface BetaRequestUpdateResponse {

@@ -78,6 +78,13 @@ type WaitlistSignupInput = {
 
 type BetaRequestStatus = 'new' | 'reviewing' | 'contacted' | 'scheduled' | 'active' | 'closed'
 type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
+type BetaRequestBlockedPrerequisite =
+  | 'workflow_owner_confirmed'
+  | 'sender_receiver_confirmed'
+  | 'success_metric_confirmed'
+  | 'security_review_confirmed'
+  | 'go_live_window_confirmed'
+  | 'proof_recipients_confirmed'
 type BetaRequestSort = 'attention' | 'updated_desc' | 'created_desc' | 'stage' | 'owner' | 'last_contact_desc'
 type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 type OperatorNotificationSource = 'beta_request' | 'critical_alert'
@@ -115,6 +122,7 @@ type BetaRequestUpdateInput = {
   nextMeetingAt?: string | null
   reminderAt?: string | null
   proofIntentNonce?: string | null
+  blockedPrerequisites?: BetaRequestBlockedPrerequisite[] | null
 }
 
 type BetaRequestFilters = {
@@ -162,6 +170,7 @@ type WaitlistRow = {
   last_contact_at: string | null
   next_meeting_at: string | null
   reminder_at: string | null
+  blocked_prerequisites: string | null
   stage_entered_at: string | null
   created_at: string
   updated_at: string
@@ -227,6 +236,15 @@ const BETA_REQUEST_STATUS_SET = new Set<string>(BETA_REQUEST_STATUSES)
 const BETA_REQUEST_SORTS: BetaRequestSort[] = ['attention', 'updated_desc', 'created_desc', 'stage', 'owner', 'last_contact_desc']
 const BETA_REQUEST_SORT_SET = new Set<string>(BETA_REQUEST_SORTS)
 const BETA_REQUEST_ATTENTION_SET = new Set<BetaRequestAttention>(['unowned', 'stale', 'follow_up_due'])
+const BETA_REQUEST_BLOCKED_PREREQUISITES: BetaRequestBlockedPrerequisite[] = [
+  'workflow_owner_confirmed',
+  'sender_receiver_confirmed',
+  'success_metric_confirmed',
+  'security_review_confirmed',
+  'go_live_window_confirmed',
+  'proof_recipients_confirmed',
+]
+const BETA_REQUEST_BLOCKED_PREREQUISITE_SET = new Set<string>(BETA_REQUEST_BLOCKED_PREREQUISITES)
 const OPERATOR_NOTIFICATION_STATUSES: OperatorNotificationStatus[] = ['new', 'acknowledged', 'acted']
 const OPERATOR_NOTIFICATION_STATUS_SET = new Set<string>(OPERATOR_NOTIFICATION_STATUSES)
 const OPERATOR_NOTIFICATION_SOURCES: OperatorNotificationSource[] = ['beta_request', 'critical_alert']
@@ -345,6 +363,80 @@ function normalizeBetaRequestSort(value: unknown): BetaRequestSort {
   }
 
   return normalized as BetaRequestSort
+}
+
+function normalizeBlockedPrerequisites(value: unknown): BetaRequestBlockedPrerequisite[] | null {
+  if (value == null) {
+    return []
+  }
+
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const normalized: BetaRequestBlockedPrerequisite[] = []
+  for (const entry of value) {
+    if (typeof entry !== 'string') {
+      return null
+    }
+
+    const next = entry.trim().toLowerCase()
+    if (!BETA_REQUEST_BLOCKED_PREREQUISITE_SET.has(next)) {
+      return null
+    }
+
+    if (!normalized.includes(next as BetaRequestBlockedPrerequisite)) {
+      normalized.push(next as BetaRequestBlockedPrerequisite)
+    }
+  }
+
+  return normalized
+}
+
+function parseBlockedPrerequisites(value: string | null | undefined): BetaRequestBlockedPrerequisite[] {
+  if (!value) {
+    return []
+  }
+
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) {
+      return []
+    }
+
+    return parsed.filter((entry): entry is BetaRequestBlockedPrerequisite => (
+      typeof entry === 'string' && BETA_REQUEST_BLOCKED_PREREQUISITE_SET.has(entry)
+    ))
+  } catch {
+    return []
+  }
+}
+
+function serializeBlockedPrerequisites(value: BetaRequestBlockedPrerequisite[] | null | undefined): string | null {
+  if (!value || value.length === 0) {
+    return null
+  }
+
+  return JSON.stringify(value)
+}
+
+function formatBlockedPrerequisiteLabel(value: BetaRequestBlockedPrerequisite): string {
+  switch (value) {
+    case 'workflow_owner_confirmed':
+      return 'workflow owner confirmed'
+    case 'sender_receiver_confirmed':
+      return 'sender and receiver confirmed'
+    case 'success_metric_confirmed':
+      return 'success metric confirmed'
+    case 'security_review_confirmed':
+      return 'security review confirmed'
+    case 'go_live_window_confirmed':
+      return 'go-live window confirmed'
+    case 'proof_recipients_confirmed':
+      return 'proof recipients confirmed'
+    default:
+      return String(value).split('_').join(' ')
+  }
 }
 
 function normalizeOperatorNotificationStatus(value: unknown): OperatorNotificationStatus | null {
@@ -592,6 +684,7 @@ function serializeBetaRequest(
 ) {
   const attention = getBetaRequestAttention(row)
   const nextAction = row.next_action ?? getBetaRequestNextStep(row.status)
+  const blockedPrerequisites = parseBlockedPrerequisites(row.blocked_prerequisites)
   return {
     id: row.id,
     email: row.email,
@@ -609,6 +702,7 @@ function serializeBetaRequest(
     lastContactAt: row.last_contact_at,
     nextMeetingAt: row.next_meeting_at,
     reminderAt: row.reminder_at,
+    blockedPrerequisites,
     stageEnteredAt: attention.stageEnteredAt,
     stageAgeHours: attention.stageAgeHours,
     stageAgeLabel: attention.stageAgeLabel,
@@ -687,6 +781,15 @@ function describeBetaRequestAuditEntry(log: AuditLogRow): BetaRequestActivityEnt
     detailParts.push('Pilot proof trace updated.')
   }
 
+  if (details?.blockedPrerequisitesChanged === true) {
+    const count = typeof details?.blockedPrerequisiteCount === 'number' ? details.blockedPrerequisiteCount : null
+    detailParts.push(
+      count && count > 0
+        ? `Go-live blockers: ${count}.`
+        : 'Go-live blockers cleared.',
+    )
+  }
+
   let kind: BetaRequestActivityKind = 'request_updated'
   let title = 'Operator updated the partner request'
   let tone: BetaRequestActivityTone = 'default'
@@ -705,6 +808,9 @@ function describeBetaRequestAuditEntry(log: AuditLogRow): BetaRequestActivityEnt
   } else if (details?.reminderChanged === true) {
     kind = 'reminder'
     title = 'Follow-up reminder changed'
+    tone = 'warning'
+  } else if (details?.blockedPrerequisitesChanged === true) {
+    title = 'Go-live blockers updated'
     tone = 'warning'
   }
 
@@ -856,6 +962,21 @@ function buildBetaRequestActivityTimeline(
       tone: reminderDue ? 'warning' : 'default',
       href: requestHref,
       upcoming: !reminderDue,
+    })
+  }
+
+  const blockedPrerequisites = parseBlockedPrerequisites(row.blocked_prerequisites)
+  if (blockedPrerequisites.length > 0) {
+    activities.push({
+      key: `request-${row.id}-blocked-${row.updated_at}`,
+      kind: 'request_updated',
+      timestamp: row.updated_at,
+      title: 'Go-live blockers recorded',
+      detail: `Still blocked on ${blockedPrerequisites.map(formatBlockedPrerequisiteLabel).join(', ')}.`,
+      actor: row.owner,
+      tone: 'warning',
+      href: requestHref,
+      upcoming: false,
     })
   }
 
@@ -1329,6 +1450,7 @@ function listBetaRequestRows(db: Database, filters: {
       last_contact_at,
       next_meeting_at,
       reminder_at,
+      blocked_prerequisites,
       stage_entered_at,
       created_at,
       updated_at
@@ -1368,6 +1490,7 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
       last_contact_at,
       next_meeting_at,
       reminder_at,
+      blocked_prerequisites,
       stage_entered_at,
       created_at,
       updated_at
@@ -1397,6 +1520,7 @@ function listPartnerAnalyticsRows(db: Database, sinceIso: string): WaitlistRow[]
       last_contact_at,
       next_meeting_at,
       reminder_at,
+      blocked_prerequisites,
       stage_entered_at,
       created_at,
       updated_at
@@ -1515,6 +1639,7 @@ function buildBetaRequestCsv(
     'last_contact_at',
     'next_meeting_at',
     'reminder_at',
+    'blocked_prerequisites',
     'stage_entered_at',
     'stage_age_hours',
     'follow_up_due',
@@ -1545,6 +1670,7 @@ function buildBetaRequestCsv(
       row.last_contact_at,
       row.next_meeting_at,
       row.reminder_at,
+      parseBlockedPrerequisites(row.blocked_prerequisites).join('|'),
       getBetaRequestStageTimestamp(row),
       attention.stageAgeHours.toFixed(1),
       attention.followUpDue ? 'true' : 'false',
@@ -2848,6 +2974,14 @@ export function createApp(db: Database): Hono {
       patch.proofIntentNonce = proofIntentNonce
     }
 
+    if ('blockedPrerequisites' in raw) {
+      const blockedPrerequisites = normalizeBlockedPrerequisites(raw.blockedPrerequisites)
+      if (raw.blockedPrerequisites !== null && !blockedPrerequisites) {
+        return c.json({ error: 'Invalid blockedPrerequisites', errorCode: 'INVALID_BLOCKED_PREREQUISITES' }, 400)
+      }
+      patch.blockedPrerequisites = blockedPrerequisites ?? []
+    }
+
     if (
       !('status' in patch)
       && !('owner' in patch)
@@ -2857,6 +2991,7 @@ export function createApp(db: Database): Hono {
       && !('nextMeetingAt' in patch)
       && !('reminderAt' in patch)
       && !('proofIntentNonce' in patch)
+      && !('blockedPrerequisites' in patch)
     ) {
       return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
     }
@@ -2875,6 +3010,9 @@ export function createApp(db: Database): Hono {
       const nextMeetingAt = 'nextMeetingAt' in patch ? patch.nextMeetingAt ?? null : existing.next_meeting_at
       const nextReminderAt = 'reminderAt' in patch ? patch.reminderAt ?? null : existing.reminder_at
       const nextProofIntentNonce = 'proofIntentNonce' in patch ? patch.proofIntentNonce ?? null : existing.proof_intent_nonce
+      const nextBlockedPrerequisites = 'blockedPrerequisites' in patch
+        ? (patch.blockedPrerequisites ?? [])
+        : parseBlockedPrerequisites(existing.blocked_prerequisites)
       const updatedAt = new Date().toISOString()
       const nextStageEnteredAt = 'status' in patch && patch.status && patch.status !== existing.status
         ? updatedAt
@@ -2890,9 +3028,9 @@ export function createApp(db: Database): Hono {
 
       db.prepare(`
         UPDATE waitlist
-        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, next_meeting_at = ?, reminder_at = ?, proof_intent_nonce = ?, stage_entered_at = ?, updated_at = ?
+        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, next_meeting_at = ?, reminder_at = ?, proof_intent_nonce = ?, blocked_prerequisites = ?, stage_entered_at = ?, updated_at = ?
         WHERE id = ?
-      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, nextMeetingAt, nextReminderAt, nextProofIntentNonce, nextStageEnteredAt, updatedAt, id)
+      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, nextMeetingAt, nextReminderAt, nextProofIntentNonce, serializeBlockedPrerequisites(nextBlockedPrerequisites), nextStageEnteredAt, updatedAt, id)
 
       const updated = getBetaRequestById(db, id)
       if (!updated) {
@@ -2917,6 +3055,9 @@ export function createApp(db: Database): Hono {
           nextMeetingChanged: 'nextMeetingAt' in patch,
           reminderChanged: 'reminderAt' in patch,
           proofIntentChanged: 'proofIntentNonce' in patch,
+          blockedPrerequisitesChanged: 'blockedPrerequisites' in patch,
+          blockedPrerequisiteCount: nextBlockedPrerequisites.length,
+          blockedPrerequisites: nextBlockedPrerequisites,
           proofIntentNonce: nextProofIntentNonce,
         },
       })
@@ -3400,7 +3541,7 @@ export function createApp(db: Database): Hono {
 
     try {
       const existing = db.prepare(`
-        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, stage_entered_at, created_at, updated_at
+        SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, blocked_prerequisites, stage_entered_at, created_at, updated_at
         FROM waitlist
         WHERE email = ?
         ORDER BY created_at DESC, id DESC
