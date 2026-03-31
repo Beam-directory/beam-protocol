@@ -46,7 +46,7 @@ async function main() {
     headers: { Authorization: `Bearer ${runtime.busApiKey}` },
   })
 
-  const report = `# 0.7.0 Hosted Demo Readiness
+  const report = `# 0.8.0 Hosted Demo Readiness
 
 Generated at: ${new Date().toISOString()}
 
@@ -91,7 +91,7 @@ The operator investigation path matched the runbook:
 ${formatList(audit.entries.slice(0, 8).map((entry) => `${entry.timestamp} ${entry.action} ${entry.actor} -> ${entry.target}`))}
 `
 
-  const reportPath = path.join(repoRoot, 'reports/0.7.0-hosted-demo-readiness.md')
+  const reportPath = path.join(repoRoot, 'reports/0.8.0-hosted-demo-readiness.md')
   await writeFile(reportPath, report, 'utf8')
 
   console.log(`Hosted demo dogfood passed. Report written to ${reportPath}`)
