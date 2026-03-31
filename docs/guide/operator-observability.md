@@ -72,6 +72,42 @@ POST /admin/auth/logout
 
 The browser stores only the short-lived session token. The old static pasted admin key flow is no longer used.
 
+## Reproducible Live Admin Path
+
+For release-control dry runs, use one shared inbox instead of a personal mailbox.
+
+Current recommended path:
+
+```bash
+BEAM_ADMIN_EMAILS=jarvis@coppen.de
+```
+
+If you need to keep an existing personal operator inbox live during the transition, include both:
+
+```bash
+BEAM_ADMIN_EMAILS=jarvis@coppen.de,tobias.kub@appfor.de
+```
+
+On a machine that already has COPPEN Microsoft Graph credentials, you can request, read, and verify the live admin magic link end to end:
+
+```bash
+source /Users/tobik/.openclaw/workspace/secrets/all-keys.env
+npm run release:admin-auth -- \
+  --api-url https://api.beam.directory \
+  --email jarvis@coppen.de \
+  --mailbox jarvis@coppen.de
+```
+
+The helper script:
+
+- requests `POST /admin/auth/magic-link`
+- polls `jarvis@coppen.de` through Microsoft Graph for the latest `Beam admin sign-in link`
+- extracts the callback token
+- verifies it through `POST /admin/auth/verify`
+- confirms the live session with `GET /admin/auth/session`
+
+That gives the operator dry run a repo-owned, repeatable path instead of relying on one personal inbox.
+
 ## Incident Workflow
 
 ### 1. Start From Alerts

@@ -26,6 +26,16 @@ on:
         required: true
         default: https://beam-message-bus.fly.dev
         type: string
+      admin_emails:
+        description: Optional comma-separated admin inbox list to stage on the live candidate API
+        required: false
+        default: ''
+        type: string
+      dashboard_url:
+        description: Dashboard URL embedded into admin magic links
+        required: true
+        default: https://dashboard-phi-five-73.vercel.app
+        type: string
 
 permissions:
   contents: read
@@ -86,6 +96,16 @@ jobs:
             BEAM_DEPLOYED_AT \
             --app beam-protocol \
             --stage || true
+
+      - name: Stage candidate admin inbox config
+        if: ${{ inputs.admin_emails != '' }}
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl secrets set \
+            BEAM_ADMIN_EMAILS='${{ inputs.admin_emails }}' \
+            BEAM_DASHBOARD_URL='${{ inputs.dashboard_url }}' \
+            --app beam-protocol \
+            --stage
 
       - name: Deploy candidate API to Fly.io
         working-directory: packages/directory
@@ -173,6 +193,10 @@ jobs:
             echo "- deployed at: \`${{ steps.candidate.outputs.deployed_at }}\`"
             echo "- api url: \`${{ inputs.api_url }}\`"
             echo "- dashboard target: \`${{ inputs.dashboard_target }}\`"
+            echo "- dashboard callback url: \`${{ inputs.dashboard_url }}\`"
+            if [ -n "${{ inputs.admin_emails }}" ]; then
+              echo "- staged admin inboxes: \`${{ inputs.admin_emails }}\`"
+            fi
             if [ "${{ steps.dashboard_config.outputs.ready }}" = "true" ]; then
               echo "- dashboard url: ${{ steps.dashboard.outputs.url }}"
             else
