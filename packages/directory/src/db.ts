@@ -529,14 +529,20 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'waitlist', 'operator_notes', 'TEXT')
   ensureColumn(db, 'waitlist', 'next_action', 'TEXT')
   ensureColumn(db, 'waitlist', 'last_contact_at', 'TEXT')
+  ensureColumn(db, 'waitlist', 'next_meeting_at', 'TEXT')
+  ensureColumn(db, 'waitlist', 'reminder_at', 'TEXT')
+  ensureColumn(db, 'waitlist', 'stage_entered_at', 'TEXT')
   ensureColumn(db, 'waitlist', 'updated_at', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_status ON waitlist(status, created_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_owner ON waitlist(owner, created_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_last_contact ON waitlist(last_contact_at, updated_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_next_meeting ON waitlist(next_meeting_at, updated_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_reminder ON waitlist(reminder_at, updated_at DESC)')
   db.prepare(`
     UPDATE waitlist
     SET status = COALESCE(NULLIF(status, ''), 'new'),
-        updated_at = COALESCE(NULLIF(updated_at, ''), created_at)
+        updated_at = COALESCE(NULLIF(updated_at, ''), created_at),
+        stage_entered_at = COALESCE(NULLIF(stage_entered_at, ''), NULLIF(updated_at, ''), created_at)
   `).run()
   db.prepare(`
     UPDATE waitlist

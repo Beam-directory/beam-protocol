@@ -723,13 +723,13 @@
           <h1>Request a guided Beam pilot for one real workflow.</h1>
           <p>
             If your AI needs another company's AI to do something real, Beam can scope a small
-            pilot around that handoff. We start narrow, prove it, set expectations up front, and
-            only expand if it works.
+            pilot around that handoff. We start narrow, prove it, write down the recap, and only
+            expand if the first pilot earns a bigger footprint.
           </p>
           <ul>
             <li>One workflow first, not a platform rollout.</li>
-            <li>Shared proof for both companies and one operator owner.</li>
-            <li>Managed directory, dashboard, and follow-up around the pilot.</li>
+            <li>Shared proof pack for both companies and one operator owner.</li>
+            <li>Managed directory, dashboard, and follow-up until one next decision is clear.</li>
           </ul>
           <div class="hero-metrics">
             <div class="metric">
@@ -746,7 +746,7 @@
             </div>
             <div class="metric">
               <strong>Guided rollout</strong>
-              <span>Beam helps scope the first evaluation, shares the onboarding pack, and sets the next concrete step after it.</span>
+              <span>Beam helps scope the first evaluation, shares the onboarding pack, and leaves the pilot with a recap, proof links, and one next concrete step.</span>
             </div>
           </div>
         </div>
@@ -848,11 +848,12 @@
           <div class="expect-grid">
           <div class="expect-card">
             <div class="section-kicker">01 · what you get</div>
-            <h3>Managed Beam surfaces</h3>
-            <p>Directory, dashboard, intake, and operator guidance stay aligned to the same proof path used on the public site.</p>
+            <h3>Managed Beam surfaces plus a proof pack</h3>
+            <p>Directory, dashboard, intake, and operator guidance stay aligned to the same proof path used on the public site, and the first pilot ends with something your team can reuse.</p>
             <ul>
               <li>Managed directory and dashboard instead of only self-hosting.</li>
               <li>Operator runbook, demo path, and rollout guidance around one workflow.</li>
+              <li>Workflow recap, proof links, and an explicit next-step recommendation.</li>
               <li>Support for traces, alerts, stuck-work queues, rate limits, and recovery.</li>
             </ul>
           </div>
@@ -876,6 +877,7 @@
               <li>Run the hosted demo first if the use case is still fuzzy.</li>
               <li>Use the intake to scope one workflow, not a broad platform conversation.</li>
               <li>Treat pricing and rollout as workflow-scoped, not as an open-ended beta promise.</li>
+              <li>End the first pilot with a go, no-go, or narrower next step instead of a vague follow-up thread.</li>
             </ul>
           </div>
           </div>
@@ -888,6 +890,7 @@
               <ul>
                 <li>One workflow, one owner, one success condition</li>
                 <li>What proof Beam should show during the walkthrough</li>
+                <li>What the buyer should take away after the first pilot</li>
                 <li>What happens after the call if the fit is real</li>
               </ul>
               <div class="submit-row" style="margin-top: 18px;">
@@ -927,6 +930,13 @@
             <p>
               The first step is a short fit conversation. If there is a fit, Beam scopes one
               workflow before anything broader.
+            </p>
+          </div>
+          <div class="faq-card">
+            <h3>What should come out of the first pilot?</h3>
+            <p>
+              A short workflow recap, proof links from the operator surface, and one clear next
+              decision. If Beam cannot produce that, the pilot stayed too fuzzy.
             </p>
           </div>
           <div class="faq-card">
@@ -1024,6 +1034,7 @@
             `<strong>You are already on the hosted beta list.</strong><br />` +
             `Beam refreshed the latest workflow context for <code>${email}</code> and kept the original intake.` +
             `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Expected outcome: workflow recap, proof links, and one next-step decision.</span>` +
             `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
             (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original intake: ${createdAt}</span>` : ''),
           )
@@ -1033,6 +1044,7 @@
             `<strong>Hosted beta request recorded.</strong><br />` +
             `Beam queued <strong>${workflowLabel}</strong> for <strong>${company}</strong>.` +
             `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
+            `<br /><span style="color: inherit; opacity: 0.8;">Expected outcome: workflow recap, proof links, and one next-step decision.</span>` +
             `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
             (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Recorded: ${createdAt}</span>` : ''),
           )

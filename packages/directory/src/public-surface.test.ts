@@ -325,6 +325,8 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         workflowSummary: string
         requestStatus: string
         stage: string
+        nextMeetingAt: string | null
+        reminderAt: string | null
         notificationId: number
         notificationStatus: string
         attentionFlags: string[]
@@ -337,6 +339,8 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.match(created.request.workflowSummary, /Procurement/)
     assert.equal(created.request.requestStatus, 'new')
     assert.equal(created.request.stage, 'new')
+    assert.equal(created.request.nextMeetingAt, null)
+    assert.equal(created.request.reminderAt, null)
     assert.ok(created.request.notificationId > 0)
     assert.equal(created.request.notificationStatus, 'new')
     assert.deepEqual(created.request.attentionFlags, ['unowned'])
@@ -361,6 +365,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         total: number
         unowned: number
         stale: number
+        followUpDue: number
         needsAttention: number
         byStatus: Record<string, number>
       }
@@ -369,6 +374,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(listed.summary.total, 1)
     assert.equal(listed.summary.unowned, 1)
     assert.equal(listed.summary.stale, 0)
+    assert.equal(listed.summary.followUpDue, 0)
     assert.equal(listed.summary.needsAttention, 1)
     assert.equal(listed.summary.byStatus['new'], 1)
     assert.equal(listed.requests[0]?.email, 'buyer@example.com')
@@ -435,6 +441,8 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.deepEqual(updated.request.attentionFlags, [])
 
     const contactTimestamp = '2026-03-30T20:15:00.000Z'
+    const meetingTimestamp = '2026-04-02T14:00:00.000Z'
+    const reminderTimestamp = '2020-01-01T09:00:00.000Z'
     const contactResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
       method: 'PATCH',
       headers: {
@@ -442,9 +450,11 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         'content-type': 'application/json',
       },
       body: JSON.stringify({
-        status: 'contacted',
+        status: 'scheduled',
         nextAction: 'Schedule a 30 minute pilot review with procurement and finance.',
         lastContactAt: contactTimestamp,
+        nextMeetingAt: meetingTimestamp,
+        reminderAt: reminderTimestamp,
       }),
     }))
     assert.equal(contactResponse.status, 200)
@@ -455,14 +465,44 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         requestStatus: string
         nextAction: string
         lastContactAt: string | null
+        nextMeetingAt: string | null
+        reminderAt: string | null
         notificationStatus: string
+        attentionFlags: string[]
       }
     }
     assert.equal(contacted.ok, true)
-    assert.equal(contacted.request.requestStatus, 'contacted')
+    assert.equal(contacted.request.requestStatus, 'scheduled')
     assert.equal(contacted.request.nextAction, 'Schedule a 30 minute pilot review with procurement and finance.')
     assert.equal(contacted.request.lastContactAt, contactTimestamp)
+    assert.equal(contacted.request.nextMeetingAt, meetingTimestamp)
+    assert.equal(contacted.request.reminderAt, reminderTimestamp)
     assert.equal(contacted.request.notificationStatus, 'acted')
+    assert.deepEqual(contacted.request.attentionFlags, ['follow_up_due'])
+
+    const dueResponse = await app.request(new Request('http://localhost/admin/beta-requests?attention=follow_up_due&status=scheduled', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(dueResponse.status, 200)
+
+    const duePayload = await dueResponse.json() as {
+      total: number
+      summary: {
+        followUpDue: number
+      }
+      requests: Array<{
+        id: number
+        followUpDue: boolean
+        followUpReason: string | null
+        stageAgeHours: number
+      }>
+    }
+    assert.equal(duePayload.total, 1)
+    assert.equal(duePayload.summary.followUpDue, 1)
+    assert.equal(duePayload.requests[0]?.id, created.request.id)
+    assert.equal(duePayload.requests[0]?.followUpDue, true)
+    assert.match(duePayload.requests[0]?.followUpReason ?? '', /reminder/i)
+    assert.ok((duePayload.requests[0]?.stageAgeHours ?? 0) >= 0)
 
     const actedInboxResponse = await app.request(new Request('http://localhost/admin/operator-notifications?source=beta_request&status=acted', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
@@ -489,6 +529,9 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.match(csv, /workflow_summary/)
     assert.match(csv, /next_action/)
     assert.match(csv, /last_contact_at/)
+    assert.match(csv, /next_meeting_at/)
+    assert.match(csv, /reminder_at/)
+    assert.match(csv, /follow_up_due/)
     assert.match(csv, /notification_status/)
     assert.match(csv, /attention_flags/)
     assert.match(csv, /Northwind Systems/)
