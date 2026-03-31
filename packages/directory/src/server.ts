@@ -18,7 +18,7 @@ import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
-import { buildAlertsWithNotificationState, observabilityRouter } from './routes/observability.js'
+import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
@@ -40,15 +40,18 @@ import {
   deleteDirectoryRole,
   getAgent,
   getDIDDocument,
+  getIntentLogByNonce,
   getOperatorNotificationBySourceKey,
   insertFunnelEvent,
   listAgentKeys,
   listAuditLog,
   listFunnelEvents,
+  listIntentTraceEvents,
   listDirectoryRoles,
   listOperatorNotifications,
   listOperatorNotificationsBySourceKeys,
   listRecentIntentLogs,
+  listShieldAuditLog,
   listTrustScores,
   logAuditEvent,
   updateOperatorNotificationStatus,
@@ -58,7 +61,7 @@ import {
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
-import type { AgentRow, AuditLogRow, IntentFrame, OperatorNotificationRow } from './types.js'
+import type { AgentRow, AuditLogRow, IntentFrame, IntentTraceEventRow, OperatorNotificationRow } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
@@ -111,6 +114,7 @@ type BetaRequestUpdateInput = {
   lastContactAt?: string | null
   nextMeetingAt?: string | null
   reminderAt?: string | null
+  proofIntentNonce?: string | null
 }
 
 type BetaRequestFilters = {
@@ -150,6 +154,7 @@ type WaitlistRow = {
   agent_count: number | null
   workflow_type: string | null
   workflow_summary: string | null
+  proof_intent_nonce: string | null
   status: string
   owner: string | null
   operator_notes: string | null
@@ -172,6 +177,49 @@ type BetaRequestActivityEntry = {
   tone: BetaRequestActivityTone
   href: string | null
   upcoming: boolean
+}
+
+type BetaRequestProofSummaryParty = {
+  beamId: string
+  displayName: string
+  verificationTier: string
+  trustScore: number | null
+  verified: boolean
+}
+
+type BetaRequestProofSummary = {
+  generatedAt: string
+  proofIntentNonce: string
+  headline: string
+  summary: string
+  recommendation: string
+  markdown: string
+  identity: {
+    sender: BetaRequestProofSummaryParty
+    recipient: BetaRequestProofSummaryParty
+  }
+  delivery: {
+    intentType: string
+    status: string
+    requestedAt: string
+    completedAt: string | null
+    latencyMs: number | null
+    traceStageCount: number
+    stages: string[]
+    routeLabel: string | null
+    shieldDecision: string | null
+  }
+  operatorVisibility: {
+    signalStatus: OperatorNotificationStatus | 'missing'
+    signalOwner: string | null
+    nextAction: string | null
+    activityCount: number
+    liveAgents: number
+    activeAlerts: number
+    traceHref: string
+    signalHref: string | null
+    requestHref: string
+  }
 }
 
 const BETA_REQUEST_STATUSES: BetaRequestStatus[] = ['new', 'reviewing', 'contacted', 'scheduled', 'active', 'closed']
@@ -227,6 +275,15 @@ const BETA_REQUEST_STALE_HOURS: Record<BetaRequestStatus, number | null> = {
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function normalizeOptionalNonce(value: unknown): string | null {
+  const normalized = normalizeOptionalString(value)
+  if (!normalized) {
+    return null
+  }
+
+  return /^[A-Za-z0-9:_-]{8,200}$/.test(normalized) ? normalized : null
 }
 
 function normalizeOptionalIsoDateTime(value: unknown): string | null {
@@ -543,6 +600,7 @@ function serializeBetaRequest(
     agentCount: row.agent_count,
     workflowType: row.workflow_type,
     workflowSummary: row.workflow_summary,
+    proofIntentNonce: row.proof_intent_nonce,
     requestStatus: attention.stage,
     stage: attention.stage,
     owner: row.owner,
@@ -566,13 +624,13 @@ function serializeBetaRequest(
   }
 }
 
-function parseAuditDetails(details: string | null | undefined): Record<string, unknown> | null {
-  if (!details) {
+function parseJsonRecord(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) {
     return null
   }
 
   try {
-    const parsed = JSON.parse(details)
+    const parsed = JSON.parse(value)
     if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
       return parsed as Record<string, unknown>
     }
@@ -581,6 +639,10 @@ function parseAuditDetails(details: string | null | undefined): Record<string, u
   }
 
   return null
+}
+
+function parseAuditDetails(details: string | null | undefined): Record<string, unknown> | null {
+  return parseJsonRecord(details)
 }
 
 function formatBetaRequestStatusLabel(value: string | null | undefined): string {
@@ -619,6 +681,10 @@ function describeBetaRequestAuditEntry(log: AuditLogRow): BetaRequestActivityEnt
 
   if (details?.reminderChanged === true) {
     detailParts.push('Reminder timing updated.')
+  }
+
+  if (details?.proofIntentChanged === true) {
+    detailParts.push('Pilot proof trace updated.')
   }
 
   let kind: BetaRequestActivityKind = 'request_updated'
@@ -869,6 +935,209 @@ function buildBetaRequestActivityTimeline(
   })
 }
 
+function formatIntentLifecycleLabel(status: string): string {
+  return status
+    .split('_')
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ')
+}
+
+function formatBuyerDeliveryOutcome(status: string): string {
+  switch (status) {
+    case 'acked':
+      return 'acknowledged'
+    case 'dead_letter':
+      return 'dead-lettered'
+    default:
+      return formatIntentLifecycleLabel(status).toLowerCase()
+  }
+}
+
+function formatProofParty(agent: AgentRow | null, fallbackBeamId: string): BetaRequestProofSummaryParty {
+  return {
+    beamId: fallbackBeamId,
+    displayName: agent?.display_name ?? fallbackBeamId,
+    verificationTier: agent?.verification_tier ?? 'unknown',
+    trustScore: typeof agent?.trust_score === 'number' ? Number(agent.trust_score.toFixed(2)) : null,
+    verified: agent ? agent.verified === 1 || agent.verification_tier !== 'basic' : false,
+  }
+}
+
+function formatProofPartyLabel(party: BetaRequestProofSummaryParty): string {
+  return party.displayName === party.beamId
+    ? party.beamId
+    : `${party.displayName} (${party.beamId})`
+}
+
+function formatTrustScoreLabel(value: number | null): string {
+  if (value == null) {
+    return 'n/a'
+  }
+
+  return `${Math.round(value * 100)}%`
+}
+
+function findTraceRouteLabel(trace: IntentTraceEventRow[]): string | null {
+  const details = trace
+    .map((entry) => parseJsonRecord(entry.details))
+    .filter((entry): entry is Record<string, unknown> => Boolean(entry))
+    .reverse()
+
+  for (const detail of details) {
+    const route = typeof detail.route === 'string'
+      ? detail.route
+      : typeof detail.transport === 'string'
+        ? detail.transport
+        : typeof detail.deliveryMode === 'string'
+          ? detail.deliveryMode
+          : typeof detail.via === 'string'
+            ? detail.via
+            : typeof detail.channel === 'string'
+              ? detail.channel
+              : null
+    if (route) {
+      return route
+    }
+  }
+
+  return null
+}
+
+function getBetaRequestProofRecommendation(row: WaitlistRow): string {
+  if (row.next_action) {
+    return row.next_action
+  }
+
+  switch (normalizeBetaRequestStatus(row.status) ?? 'new') {
+    case 'reviewing':
+      return 'Confirm the operator owner and move this workflow into a scheduled design-partner review.'
+    case 'contacted':
+      return 'Book the buyer walkthrough and agree on the smallest production workflow to validate next.'
+    case 'scheduled':
+      return 'Use the pilot review to lock the first design-partner scope, success criteria, and next operator check-in.'
+    case 'active':
+      return 'Convert this pilot into a scoped design-partner rollout with named owners and a written success checkpoint.'
+    case 'closed':
+      return 'Reuse this proof summary only as historical evidence; open a fresh request if the workflow changed.'
+    default:
+      return 'Review the workflow, assign an owner, and agree on the first production-grade handoff to validate.'
+  }
+}
+
+function toDashboardUrl(path: string): string {
+  const normalizedPath = path.startsWith('/') ? path : `/${path}`
+  return `https://dashboard.beam.directory${normalizedPath}`
+}
+
+function buildBetaRequestProofMarkdown(summary: BetaRequestProofSummary): string {
+  return [
+    '# Beam pilot proof summary',
+    '',
+    `**Outcome:** ${summary.headline}`,
+    '',
+    summary.summary,
+    '',
+    '## Identity proof',
+    `- Sender: ${formatProofPartyLabel(summary.identity.sender)} · ${summary.identity.sender.verificationTier} · trust ${formatTrustScoreLabel(summary.identity.sender.trustScore)}`,
+    `- Recipient: ${formatProofPartyLabel(summary.identity.recipient)} · ${summary.identity.recipient.verificationTier} · trust ${formatTrustScoreLabel(summary.identity.recipient.trustScore)}`,
+    '',
+    '## Delivery proof',
+    `- Nonce: ${summary.proofIntentNonce}`,
+    `- Intent: ${summary.delivery.intentType}`,
+    `- Final status: ${formatIntentLifecycleLabel(summary.delivery.status)}`,
+    `- Requested at: ${summary.delivery.requestedAt}`,
+    `- Completed at: ${summary.delivery.completedAt ?? 'in flight'}`,
+    `- Latency: ${summary.delivery.latencyMs == null ? 'n/a' : `${summary.delivery.latencyMs}ms`}`,
+    `- Trace stages: ${summary.delivery.stages.join(' -> ')}`,
+    `- Route: ${summary.delivery.routeLabel ?? 'not recorded'}`,
+    `- Shield decision: ${summary.delivery.shieldDecision ?? 'not recorded'}`,
+    '',
+    '## Operator visibility',
+    `- Signal status: ${summary.operatorVisibility.signalStatus}`,
+    `- Signal owner: ${summary.operatorVisibility.signalOwner ?? 'unassigned'}`,
+    `- Next action: ${summary.operatorVisibility.nextAction ?? 'not recorded'}`,
+    `- Activity entries: ${summary.operatorVisibility.activityCount}`,
+    `- Live agents (24h): ${summary.operatorVisibility.liveAgents}`,
+    `- Active alerts (24h): ${summary.operatorVisibility.activeAlerts}`,
+    `- Trace: ${toDashboardUrl(summary.operatorVisibility.traceHref)}`,
+    `- Operator signal: ${summary.operatorVisibility.signalHref ? toDashboardUrl(summary.operatorVisibility.signalHref) : 'not linked yet'}`,
+    `- Request record: ${toDashboardUrl(summary.operatorVisibility.requestHref)}`,
+    '',
+    '## Recommended next step',
+    summary.recommendation,
+  ].join('\n')
+}
+
+function buildBetaRequestProofSummary(
+  db: Database,
+  row: WaitlistRow,
+  notification: OperatorNotificationRow | null | undefined,
+  activity: BetaRequestActivityEntry[],
+): BetaRequestProofSummary | null {
+  if (!row.proof_intent_nonce) {
+    return null
+  }
+
+  const intentLog = getIntentLogByNonce(db, row.proof_intent_nonce)
+  if (!intentLog) {
+    return null
+  }
+
+  const trace = listIntentTraceEvents(db, row.proof_intent_nonce)
+  const sender = formatProofParty(getAgent(db, intentLog.from_beam_id), intentLog.from_beam_id)
+  const recipient = formatProofParty(getAgent(db, intentLog.to_beam_id), intentLog.to_beam_id)
+  const overview = buildOverviewPayload(db, 24)
+  const alerts = buildAlerts(db, 24)
+  const shieldDecision = listShieldAuditLog(db, { nonce: row.proof_intent_nonce, limit: 1 })[0]?.decision ?? null
+  const stages = Array.from(new Set(trace.map((entry) => entry.stage)))
+  const routeLabel = findTraceRouteLabel(trace)
+  const requestHref = `/beta-requests?id=${row.id}`
+  const signalHref = notification?.id ? `/inbox?id=${notification.id}` : null
+  const traceHref = `/intents/${encodeURIComponent(row.proof_intent_nonce)}`
+  const latencyText = intentLog.round_trip_latency_ms == null ? 'without a recorded round-trip latency' : `in ${intentLog.round_trip_latency_ms}ms`
+  const routeText = routeLabel ? ` over ${routeLabel}` : ''
+  const shieldText = shieldDecision ? ` Beam shield recorded a ${shieldDecision} decision for the same nonce.` : ''
+  const headline = `Beam verified a pilot handoff from ${sender.displayName} to ${recipient.displayName} that was ${formatBuyerDeliveryOutcome(intentLog.status)}.`
+  const summary = `${formatProofPartyLabel(sender)} (${sender.verificationTier}, trust ${formatTrustScoreLabel(sender.trustScore)}) sent ${intentLog.intent_type} to ${formatProofPartyLabel(recipient)} (${recipient.verificationTier}, trust ${formatTrustScoreLabel(recipient.trustScore)}). Beam recorded ${Math.max(stages.length, 1)} lifecycle stage${Math.max(stages.length, 1) === 1 ? '' : 's'} and finished ${formatBuyerDeliveryOutcome(intentLog.status)} ${latencyText}${routeText}.${shieldText} Operators can open the exact trace${signalHref ? ' and linked signal' : ''} in the dashboard; ${overview.summary.liveAgents} agent(s) were live in the last 24 hours and ${alerts.length} active alert(s) were visible during the same window.`
+  const result: BetaRequestProofSummary = {
+    generatedAt: new Date().toISOString(),
+    proofIntentNonce: row.proof_intent_nonce,
+    headline,
+    summary,
+    recommendation: getBetaRequestProofRecommendation(row),
+    markdown: '',
+    identity: {
+      sender,
+      recipient,
+    },
+    delivery: {
+      intentType: intentLog.intent_type,
+      status: intentLog.status,
+      requestedAt: intentLog.requested_at,
+      completedAt: intentLog.completed_at,
+      latencyMs: intentLog.round_trip_latency_ms,
+      traceStageCount: Math.max(stages.length, 1),
+      stages: stages.length > 0 ? stages : [intentLog.status],
+      routeLabel,
+      shieldDecision,
+    },
+    operatorVisibility: {
+      signalStatus: notification?.status ?? 'missing',
+      signalOwner: notification?.owner ?? row.owner ?? null,
+      nextAction: notification?.next_action ?? row.next_action ?? null,
+      activityCount: activity.length,
+      liveAgents: overview.summary.liveAgents,
+      activeAlerts: alerts.length,
+      traceHref,
+      signalHref,
+      requestHref,
+    },
+  }
+  result.markdown = buildBetaRequestProofMarkdown(result)
+  return result
+}
+
 function getBetaRequestNextStep(status: string): string {
   switch (status) {
     case 'reviewing':
@@ -1052,6 +1321,7 @@ function listBetaRequestRows(db: Database, filters: {
       agent_count,
       workflow_type,
       workflow_summary,
+      proof_intent_nonce,
       status,
       owner,
       operator_notes,
@@ -1090,6 +1360,7 @@ function getBetaRequestById(db: Database, id: number): WaitlistRow | null {
       agent_count,
       workflow_type,
       workflow_summary,
+      proof_intent_nonce,
       status,
       owner,
       operator_notes,
@@ -1208,6 +1479,7 @@ function buildBetaRequestCsv(
     'source',
     'workflow_type',
     'workflow_summary',
+    'proof_intent_nonce',
     'agent_count',
     'status',
     'owner',
@@ -1237,6 +1509,7 @@ function buildBetaRequestCsv(
       row.source,
       row.workflow_type,
       row.workflow_summary,
+      row.proof_intent_nonce,
       row.agent_count,
       row.status,
       row.owner,
@@ -2274,10 +2547,12 @@ export function createApp(db: Database): Hono {
         return c.json({ error: 'Beta request not found', errorCode: 'NOT_FOUND' }, 404)
       }
       const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(row.id))
+      const activity = buildBetaRequestActivityTimeline(db, row, notification)
       c.header('Cache-Control', 'no-store')
       return c.json({
         request: serializeBetaRequest(row, notification),
-        activity: buildBetaRequestActivityTimeline(db, row, notification),
+        activity,
+        proofSummary: buildBetaRequestProofSummary(db, row, notification, activity),
       })
     } catch (err) {
       console.error('Admin beta request detail error:', err)
@@ -2354,6 +2629,14 @@ export function createApp(db: Database): Hono {
       patch.reminderAt = reminderAt
     }
 
+    if ('proofIntentNonce' in raw) {
+      const proofIntentNonce = normalizeOptionalNonce(raw.proofIntentNonce)
+      if (raw.proofIntentNonce != null && raw.proofIntentNonce !== '' && !proofIntentNonce) {
+        return c.json({ error: 'Invalid proofIntentNonce', errorCode: 'INVALID_PROOF_INTENT_NONCE' }, 400)
+      }
+      patch.proofIntentNonce = proofIntentNonce
+    }
+
     if (
       !('status' in patch)
       && !('owner' in patch)
@@ -2362,6 +2645,7 @@ export function createApp(db: Database): Hono {
       && !('lastContactAt' in patch)
       && !('nextMeetingAt' in patch)
       && !('reminderAt' in patch)
+      && !('proofIntentNonce' in patch)
     ) {
       return c.json({ error: 'No supported fields to update', errorCode: 'EMPTY_PATCH' }, 400)
     }
@@ -2379,10 +2663,15 @@ export function createApp(db: Database): Hono {
       let nextLastContactAt = 'lastContactAt' in patch ? patch.lastContactAt ?? null : existing.last_contact_at
       const nextMeetingAt = 'nextMeetingAt' in patch ? patch.nextMeetingAt ?? null : existing.next_meeting_at
       const nextReminderAt = 'reminderAt' in patch ? patch.reminderAt ?? null : existing.reminder_at
+      const nextProofIntentNonce = 'proofIntentNonce' in patch ? patch.proofIntentNonce ?? null : existing.proof_intent_nonce
       const updatedAt = new Date().toISOString()
       const nextStageEnteredAt = 'status' in patch && patch.status && patch.status !== existing.status
         ? updatedAt
         : (existing.stage_entered_at ?? existing.updated_at ?? existing.created_at)
+
+      if (nextProofIntentNonce && !getIntentLogByNonce(db, nextProofIntentNonce)) {
+        return c.json({ error: 'Linked proof intent was not found', errorCode: 'PROOF_INTENT_NOT_FOUND' }, 404)
+      }
 
       if (!('lastContactAt' in patch) && ['contacted', 'scheduled', 'active'].includes(nextStatus) && !nextLastContactAt) {
         nextLastContactAt = updatedAt
@@ -2390,9 +2679,9 @@ export function createApp(db: Database): Hono {
 
       db.prepare(`
         UPDATE waitlist
-        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, next_meeting_at = ?, reminder_at = ?, stage_entered_at = ?, updated_at = ?
+        SET status = ?, owner = ?, operator_notes = ?, next_action = ?, last_contact_at = ?, next_meeting_at = ?, reminder_at = ?, proof_intent_nonce = ?, stage_entered_at = ?, updated_at = ?
         WHERE id = ?
-      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, nextMeetingAt, nextReminderAt, nextStageEnteredAt, updatedAt, id)
+      `).run(nextStatus, nextOwner, nextOperatorNotes, nextAction, nextLastContactAt, nextMeetingAt, nextReminderAt, nextProofIntentNonce, nextStageEnteredAt, updatedAt, id)
 
       const updated = getBetaRequestById(db, id)
       if (!updated) {
@@ -2416,6 +2705,8 @@ export function createApp(db: Database): Hono {
           lastContactChanged: 'lastContactAt' in patch,
           nextMeetingChanged: 'nextMeetingAt' in patch,
           reminderChanged: 'reminderAt' in patch,
+          proofIntentChanged: 'proofIntentNonce' in patch,
+          proofIntentNonce: nextProofIntentNonce,
         },
       })
 

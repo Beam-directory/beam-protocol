@@ -1,4 +1,4 @@
-import { ArrowUpRight, CalendarClock, CheckCircle2, Clock3, Download, RefreshCw, Search, TriangleAlert, UserRoundPlus } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, CheckCircle2, Clock3, Copy, Download, RefreshCw, Search, TriangleAlert, UserRoundPlus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
@@ -7,6 +7,8 @@ import {
   ApiError,
   directoryApi,
   type BetaRequestActivityEntry,
+  type BetaRequestDetailResponse,
+  type BetaRequestProofSummary,
   type BetaRequest,
   type BetaRequestAttention,
   type BetaRequestStatus,
@@ -49,7 +51,7 @@ export default function BetaRequestsPage() {
   const { session } = useAdminAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [requests, setRequests] = useState<BetaRequest[]>([])
-  const [selectedDetail, setSelectedDetail] = useState<{ request: BetaRequest; activity: BetaRequestActivityEntry[] } | null>(null)
+  const [selectedDetail, setSelectedDetail] = useState<BetaRequestDetailResponse | null>(null)
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<{
     total: number
@@ -65,6 +67,7 @@ export default function BetaRequestsPage() {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [copyNotice, setCopyNotice] = useState<string | null>(null)
 
   const query = searchParams.get('q') ?? ''
   const status = (searchParams.get('status') ?? '') as '' | BetaRequestStatus
@@ -80,6 +83,7 @@ export default function BetaRequestsPage() {
   )
   const detailRequest = selectedDetail?.request ?? selectedRequest
   const activity = selectedDetail?.activity ?? []
+  const proofSummary = selectedDetail?.proofSummary ?? null
 
   const [draftStatus, setDraftStatus] = useState<BetaRequestStatus>('new')
   const [draftOwner, setDraftOwner] = useState('')
@@ -87,6 +91,7 @@ export default function BetaRequestsPage() {
   const [draftLastContactAt, setDraftLastContactAt] = useState('')
   const [draftNextMeetingAt, setDraftNextMeetingAt] = useState('')
   const [draftReminderAt, setDraftReminderAt] = useState('')
+  const [draftProofIntentNonce, setDraftProofIntentNonce] = useState('')
   const [draftNotes, setDraftNotes] = useState('')
 
   function updateSearchParam(key: string, value: string) {
@@ -119,6 +124,7 @@ export default function BetaRequestsPage() {
       setDraftLastContactAt('')
       setDraftNextMeetingAt('')
       setDraftReminderAt('')
+      setDraftProofIntentNonce('')
       setDraftNotes('')
       return
     }
@@ -129,12 +135,14 @@ export default function BetaRequestsPage() {
     setDraftLastContactAt(toDateTimeLocalValue(detailRequest.lastContactAt))
     setDraftNextMeetingAt(toDateTimeLocalValue(detailRequest.nextMeetingAt))
     setDraftReminderAt(toDateTimeLocalValue(detailRequest.reminderAt))
+    setDraftProofIntentNonce(detailRequest.proofIntentNonce ?? '')
     setDraftNotes(detailRequest.operatorNotes ?? '')
   }, [detailRequest])
 
   async function loadRequestDetail(id: number) {
     try {
       setDetailLoading(true)
+      setCopyNotice(null)
       const response = await directoryApi.getBetaRequest(id)
       setSelectedDetail(response)
       setError(null)
@@ -189,6 +197,7 @@ export default function BetaRequestsPage() {
     try {
       setSaving(true)
       setNotice(null)
+      setCopyNotice(null)
       const response = await directoryApi.updateBetaRequest(detailRequest.id, {
         status: draftStatus,
         owner: draftOwner || null,
@@ -196,6 +205,7 @@ export default function BetaRequestsPage() {
         lastContactAt: draftLastContactAt || null,
         nextMeetingAt: draftNextMeetingAt || null,
         reminderAt: draftReminderAt || null,
+        proofIntentNonce: draftProofIntentNonce || null,
         operatorNotes: draftNotes || null,
       })
       setRequests((current) => current.map((entry) => (
@@ -225,6 +235,16 @@ export default function BetaRequestsPage() {
       setNotice(`Exported hosted beta requests as ${format.toUpperCase()}.`)
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to export beta requests')
+    }
+  }
+
+  async function copyProofMarkdown(summary: BetaRequestProofSummary) {
+    try {
+      await navigator.clipboard.writeText(summary.markdown)
+      setCopyNotice('Pilot proof summary copied.')
+      setError(null)
+    } catch {
+      setError('Failed to copy the pilot proof summary.')
     }
   }
 
@@ -312,6 +332,12 @@ export default function BetaRequestsPage() {
       {notice ? (
         <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
           {notice}
+        </div>
+      ) : null}
+
+      {copyNotice ? (
+        <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300">
+          {copyNotice}
         </div>
       ) : null}
 
@@ -443,6 +469,63 @@ export default function BetaRequestsPage() {
           </div>
 
           <div className="panel space-y-4">
+            <div className="panel-title">Pilot proof summary</div>
+            {!detailRequest ? (
+              <EmptyPanel label="Select a request to generate a buyer-friendly proof summary from a live pilot trace." />
+            ) : !proofSummary ? (
+              <EmptyPanel label={detailRequest.proofIntentNonce
+                ? 'Beam could not generate a proof summary for the linked nonce yet.'
+                : 'Link a pilot trace nonce to this request to generate a shareable proof summary.'}
+              />
+            ) : (
+              <>
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                  <div className="font-medium">{proofSummary.headline}</div>
+                  <div className="mt-2">{proofSummary.summary}</div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <InfoRow label="Proof nonce" value={proofSummary.proofIntentNonce} />
+                  <InfoRow label="Intent" value={proofSummary.delivery.intentType} />
+                  <InfoRow label="Delivery status" value={proofSummary.delivery.status} />
+                  <InfoRow label="Latency" value={proofSummary.delivery.latencyMs == null ? 'n/a' : `${proofSummary.delivery.latencyMs}ms`} />
+                  <InfoRow label="Sender" value={proofSummary.identity.sender.displayName} />
+                  <InfoRow label="Recipient" value={proofSummary.identity.recipient.displayName} />
+                  <InfoRow label="Sender trust" value={formatTrustScore(proofSummary.identity.sender.trustScore)} />
+                  <InfoRow label="Recipient trust" value={formatTrustScore(proofSummary.identity.recipient.trustScore)} />
+                  <InfoRow label="Signal status" value={proofSummary.operatorVisibility.signalStatus} />
+                  <InfoRow label="Live agents (24h)" value={String(proofSummary.operatorVisibility.liveAgents)} />
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Recommended next step</div>
+                  <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">{proofSummary.recommendation}</div>
+                </div>
+
+                <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Shareable markdown</div>
+                  <pre className="mt-3 overflow-x-auto whitespace-pre-wrap text-xs leading-6 text-slate-600 dark:text-slate-300">{proofSummary.markdown}</pre>
+                </div>
+
+                <div className="flex flex-wrap gap-3">
+                  <button className="btn-secondary" onClick={() => void copyProofMarkdown(proofSummary)} type="button">
+                    <Copy size={16} />
+                    <span>Copy summary</span>
+                  </button>
+                  <Link className="btn-secondary" to={proofSummary.operatorVisibility.traceHref}>
+                    <span>Open trace</span>
+                  </Link>
+                  {proofSummary.operatorVisibility.signalHref ? (
+                    <Link className="btn-secondary" to={proofSummary.operatorVisibility.signalHref}>
+                      <span>Open signal</span>
+                    </Link>
+                  ) : null}
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="panel space-y-4">
             <div className="panel-title">Activity timeline</div>
             {!detailRequest ? (
               <EmptyPanel label="Select a request to inspect the partner activity timeline and the next planned follow-up." />
@@ -569,6 +652,20 @@ export default function BetaRequestsPage() {
                     />
                   </label>
                 </div>
+
+                <label className="block space-y-2">
+                  <span className="text-sm font-medium">Proof trace nonce</span>
+                  <input
+                    className="input-field"
+                    disabled={!canEdit || saving}
+                    placeholder="beam-proof-123456"
+                    value={draftProofIntentNonce}
+                    onChange={(event) => setDraftProofIntentNonce(event.target.value)}
+                  />
+                  <span className="text-xs text-slate-500 dark:text-slate-400">
+                    Link the exact pilot trace that should back the buyer-facing proof summary.
+                  </span>
+                </label>
 
                 <div className="flex flex-wrap gap-3">
                   {session?.email ? (
@@ -722,6 +819,14 @@ function formatWorkflowType(value: string | null): string {
     .filter(Boolean)
     .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
     .join(' ')
+}
+
+function formatTrustScore(value: number | null): string {
+  if (value == null) {
+    return 'n/a'
+  }
+
+  return `${Math.round(value * 100)}%`
 }
 
 function formatAttentionFlag(flag: BetaRequestAttention): string {

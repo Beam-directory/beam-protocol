@@ -438,7 +438,7 @@ function searchAuditRows(
   return { entries, total: totalRow?.count ?? entries.length }
 }
 
-function buildOverviewPayload(db: Database, windowHours: number) {
+export function buildOverviewPayload(db: Database, windowHours: number) {
   const since = nowMinusHours(windowHours)
   const rows = db.prepare(`
     SELECT *

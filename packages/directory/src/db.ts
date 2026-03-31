@@ -161,6 +161,7 @@ function initSchema(db: DB): void {
       agent_count INTEGER,
       workflow_type TEXT,
       workflow_summary TEXT,
+      proof_intent_nonce TEXT,
       status TEXT NOT NULL DEFAULT 'new',
       owner TEXT,
       operator_notes TEXT,
@@ -524,6 +525,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'waitlist', 'workflow_type', 'TEXT')
   ensureColumn(db, 'waitlist', 'workflow_summary', 'TEXT')
+  ensureColumn(db, 'waitlist', 'proof_intent_nonce', 'TEXT')
   ensureColumn(db, 'waitlist', 'status', "TEXT NOT NULL DEFAULT 'new'")
   ensureColumn(db, 'waitlist', 'owner', 'TEXT')
   ensureColumn(db, 'waitlist', 'operator_notes', 'TEXT')
@@ -538,6 +540,7 @@ function initSchema(db: DB): void {
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_last_contact ON waitlist(last_contact_at, updated_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_next_meeting ON waitlist(next_meeting_at, updated_at DESC)')
   db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_reminder ON waitlist(reminder_at, updated_at DESC)')
+  db.exec('CREATE INDEX IF NOT EXISTS idx_waitlist_proof_intent_nonce ON waitlist(proof_intent_nonce)')
   db.prepare(`
     UPDATE waitlist
     SET status = COALESCE(NULLIF(status, ''), 'new'),
