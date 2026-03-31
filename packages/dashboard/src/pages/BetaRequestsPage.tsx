@@ -1,4 +1,4 @@
-import { Clock3, Download, RefreshCw, Search, TriangleAlert } from 'lucide-react'
+import { ArrowUpRight, CalendarClock, CheckCircle2, Clock3, Download, RefreshCw, Search, TriangleAlert, UserRoundPlus } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
@@ -6,6 +6,7 @@ import { useAdminAuth } from '../lib/admin-auth'
 import {
   ApiError,
   directoryApi,
+  type BetaRequestActivityEntry,
   type BetaRequest,
   type BetaRequestAttention,
   type BetaRequestStatus,
@@ -48,6 +49,7 @@ export default function BetaRequestsPage() {
   const { session } = useAdminAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [requests, setRequests] = useState<BetaRequest[]>([])
+  const [selectedDetail, setSelectedDetail] = useState<{ request: BetaRequest; activity: BetaRequestActivityEntry[] } | null>(null)
   const [total, setTotal] = useState(0)
   const [summary, setSummary] = useState<{
     total: number
@@ -59,6 +61,7 @@ export default function BetaRequestsPage() {
     byStatus: Record<BetaRequestStatus, number>
   } | null>(null)
   const [loading, setLoading] = useState(true)
+  const [detailLoading, setDetailLoading] = useState(false)
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
@@ -75,6 +78,8 @@ export default function BetaRequestsPage() {
     () => requests.find((entry) => entry.id === selectedId) ?? requests[0] ?? null,
     [requests, selectedId],
   )
+  const detailRequest = selectedDetail?.request ?? selectedRequest
+  const activity = selectedDetail?.activity ?? []
 
   const [draftStatus, setDraftStatus] = useState<BetaRequestStatus>('new')
   const [draftOwner, setDraftOwner] = useState('')
@@ -107,7 +112,7 @@ export default function BetaRequestsPage() {
   }, [searchParams, selectedId, selectedRequest, setSearchParams])
 
   useEffect(() => {
-    if (!selectedRequest) {
+    if (!detailRequest) {
       setDraftStatus('new')
       setDraftOwner('')
       setDraftNextAction('')
@@ -118,14 +123,27 @@ export default function BetaRequestsPage() {
       return
     }
 
-    setDraftStatus(selectedRequest.stage)
-    setDraftOwner(selectedRequest.owner ?? '')
-    setDraftNextAction(selectedRequest.nextAction ?? '')
-    setDraftLastContactAt(toDateTimeLocalValue(selectedRequest.lastContactAt))
-    setDraftNextMeetingAt(toDateTimeLocalValue(selectedRequest.nextMeetingAt))
-    setDraftReminderAt(toDateTimeLocalValue(selectedRequest.reminderAt))
-    setDraftNotes(selectedRequest.operatorNotes ?? '')
-  }, [selectedRequest])
+    setDraftStatus(detailRequest.stage)
+    setDraftOwner(detailRequest.owner ?? '')
+    setDraftNextAction(detailRequest.nextAction ?? '')
+    setDraftLastContactAt(toDateTimeLocalValue(detailRequest.lastContactAt))
+    setDraftNextMeetingAt(toDateTimeLocalValue(detailRequest.nextMeetingAt))
+    setDraftReminderAt(toDateTimeLocalValue(detailRequest.reminderAt))
+    setDraftNotes(detailRequest.operatorNotes ?? '')
+  }, [detailRequest])
+
+  async function loadRequestDetail(id: number) {
+    try {
+      setDetailLoading(true)
+      const response = await directoryApi.getBetaRequest(id)
+      setSelectedDetail(response)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to load request detail')
+    } finally {
+      setDetailLoading(false)
+    }
+  }
 
   async function load() {
     try {
@@ -153,15 +171,25 @@ export default function BetaRequestsPage() {
     void load()
   }, [attention, ownerFilter, query, sort, status])
 
+  useEffect(() => {
+    if (!selectedRequest) {
+      setSelectedDetail(null)
+      setDetailLoading(false)
+      return
+    }
+
+    void loadRequestDetail(selectedRequest.id)
+  }, [selectedRequest?.id])
+
   async function saveRequest() {
-    if (!selectedRequest || !canEdit) {
+    if (!detailRequest || !canEdit) {
       return
     }
 
     try {
       setSaving(true)
       setNotice(null)
-      const response = await directoryApi.updateBetaRequest(selectedRequest.id, {
+      const response = await directoryApi.updateBetaRequest(detailRequest.id, {
         status: draftStatus,
         owner: draftOwner || null,
         nextAction: draftNextAction || null,
@@ -174,7 +202,7 @@ export default function BetaRequestsPage() {
         entry.id === response.request.id ? response.request : entry
       )))
       setNotice('Operator updates saved.')
-      await load()
+      await Promise.all([load(), loadRequestDetail(response.request.id)])
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to save beta request')
     } finally {
@@ -364,46 +392,46 @@ export default function BetaRequestsPage() {
         <div className="space-y-4">
           <div className="panel space-y-4">
             <div className="panel-title">Request detail</div>
-            {!selectedRequest ? (
+            {!detailRequest ? (
               <EmptyPanel label="Select a hosted beta request to inspect its workflow summary and operator state." />
             ) : (
               <>
                 <div className="grid gap-4 sm:grid-cols-2">
-                  <InfoRow label="Company" value={selectedRequest.company ?? '—'} />
-                  <InfoRow label="Email" value={selectedRequest.email} />
-                  <InfoRow label="Stage" value={selectedRequest.stage} />
-                  <InfoRow label="Signal" value={selectedRequest.notificationStatus ?? 'no operator signal'} />
-                  <InfoRow label="Created" value={formatDateTime(selectedRequest.createdAt)} />
-                  <InfoRow label="Updated" value={formatDateTime(selectedRequest.updatedAt)} />
-                  <InfoRow label="Stage entered" value={formatDateTime(selectedRequest.stageEnteredAt)} />
-                  <InfoRow label="Stage age" value={selectedRequest.stageAgeLabel} />
-                  <InfoRow label="Last contact" value={formatDateTime(selectedRequest.lastContactAt)} />
-                  <InfoRow label="Next meeting" value={formatDateTime(selectedRequest.nextMeetingAt)} />
-                  <InfoRow label="Reminder" value={formatDateTime(selectedRequest.reminderAt)} />
-                  <InfoRow label="Owner" value={selectedRequest.owner ?? 'unassigned'} />
+                  <InfoRow label="Company" value={detailRequest.company ?? '—'} />
+                  <InfoRow label="Email" value={detailRequest.email} />
+                  <InfoRow label="Stage" value={detailRequest.stage} />
+                  <InfoRow label="Signal" value={detailRequest.notificationStatus ?? 'no operator signal'} />
+                  <InfoRow label="Created" value={formatDateTime(detailRequest.createdAt)} />
+                  <InfoRow label="Updated" value={formatDateTime(detailRequest.updatedAt)} />
+                  <InfoRow label="Stage entered" value={formatDateTime(detailRequest.stageEnteredAt)} />
+                  <InfoRow label="Stage age" value={detailRequest.stageAgeLabel} />
+                  <InfoRow label="Last contact" value={formatDateTime(detailRequest.lastContactAt)} />
+                  <InfoRow label="Next meeting" value={formatDateTime(detailRequest.nextMeetingAt)} />
+                  <InfoRow label="Reminder" value={formatDateTime(detailRequest.reminderAt)} />
+                  <InfoRow label="Owner" value={detailRequest.owner ?? 'unassigned'} />
                 </div>
 
                 <div className="rounded-xl bg-slate-50 p-4 text-sm text-slate-600 dark:bg-slate-950 dark:text-slate-300">
-                  {selectedRequest.workflowSummary || 'No workflow summary was provided in the intake.'}
+                  {detailRequest.workflowSummary || 'No workflow summary was provided in the intake.'}
                 </div>
 
                 <div className="rounded-xl border border-slate-200 p-4 dark:border-slate-800">
                   <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Next action</div>
                   <div className="mt-1 text-sm text-slate-600 dark:text-slate-300">
-                    {selectedRequest.nextAction ?? 'No next action is recorded yet.'}
+                    {detailRequest.nextAction ?? 'No next action is recorded yet.'}
                   </div>
-                  {selectedRequest.notificationId ? (
+                  {detailRequest.notificationId ? (
                     <div className="mt-3">
-                      <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to="/inbox">
+                      <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/inbox?id=${detailRequest.notificationId}`}>
                         Open operator inbox signal
                       </Link>
                     </div>
                   ) : null}
                 </div>
 
-                {selectedRequest.staleReason || selectedRequest.followUpReason ? (
+                {detailRequest.staleReason || detailRequest.followUpReason ? (
                   <div className="space-y-3">
-                    {[selectedRequest.followUpReason, selectedRequest.staleReason].filter(Boolean).map((message) => (
+                    {[detailRequest.followUpReason, detailRequest.staleReason].filter(Boolean).map((message) => (
                       <div key={message} className="rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
                         {message}
                       </div>
@@ -415,8 +443,57 @@ export default function BetaRequestsPage() {
           </div>
 
           <div className="panel space-y-4">
+            <div className="panel-title">Activity timeline</div>
+            {!detailRequest ? (
+              <EmptyPanel label="Select a request to inspect the partner activity timeline and the next planned follow-up." />
+            ) : detailLoading ? (
+              <div className="text-sm text-slate-500 dark:text-slate-400">Loading recent partner activity…</div>
+            ) : activity.length === 0 ? (
+              <EmptyPanel label="No partner activity has been recorded for this request yet." />
+            ) : (
+              <>
+                <p className="text-sm text-slate-500 dark:text-slate-400">
+                  Recent operator movement plus the next scheduled touchpoints for this design-partner thread.
+                </p>
+                <div className="space-y-3">
+                  {activity.map((entry) => (
+                    <div key={entry.key} className={`rounded-xl border px-4 py-4 ${activityToneClasses(entry.tone)}`}>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <div className="text-sm font-medium">{entry.title}</div>
+                        <div className="text-xs opacity-80">{formatDateTime(entry.timestamp)}</div>
+                      </div>
+                      <div className="mt-2 text-sm opacity-90">{entry.detail}</div>
+                      <div className="mt-3 flex flex-wrap items-center gap-3 text-xs opacity-80">
+                        <span>{formatActivityKind(entry.kind)}</span>
+                        <span>{entry.actor ? `Actor: ${entry.actor}` : 'Actor: system'}</span>
+                        {entry.upcoming ? <span>Upcoming</span> : null}
+                        {entry.href ? (
+                          <Link className="inline-flex items-center gap-1 text-orange-700 hover:text-orange-800 dark:text-orange-300 dark:hover:text-orange-200" to={entry.href}>
+                            <span>Open linked surface</span>
+                            <ArrowUpRight size={14} />
+                          </Link>
+                        ) : null}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="flex flex-wrap gap-3">
+                  {detailRequest.notificationId ? (
+                    <Link className="btn-secondary" to={`/inbox?id=${detailRequest.notificationId}`}>
+                      <span>Open operator signal</span>
+                    </Link>
+                  ) : null}
+                  <Link className="btn-secondary" to="/inbox?source=beta_request">
+                    <span>Open beta inbox</span>
+                  </Link>
+                </div>
+              </>
+            )}
+          </div>
+
+          <div className="panel space-y-4">
             <div className="panel-title">Operator assignment</div>
-            {!selectedRequest ? (
+            {!detailRequest ? (
               <EmptyPanel label="Select a request to assign an owner, move the stage, and capture follow-up." />
             ) : (
               <>
@@ -494,6 +571,17 @@ export default function BetaRequestsPage() {
                 </div>
 
                 <div className="flex flex-wrap gap-3">
+                  {session?.email ? (
+                    <button
+                      className="btn-secondary"
+                      disabled={!canEdit || saving}
+                      onClick={() => setDraftOwner(session.email)}
+                      type="button"
+                    >
+                      <UserRoundPlus size={16} />
+                      <span>Assign to me</span>
+                    </button>
+                  ) : null}
                   <button
                     className="btn-secondary"
                     disabled={!canEdit || saving}
@@ -520,6 +608,36 @@ export default function BetaRequestsPage() {
                   >
                     <Clock3 size={16} />
                     <span>Set reminder +1 day</span>
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving}
+                    onClick={() => {
+                      setDraftStatus('scheduled')
+                      setDraftNextMeetingAt(futureDateTimeLocalValue({ days: 3 }))
+                      if (!draftReminderAt) {
+                        setDraftReminderAt(futureDateTimeLocalValue({ days: 1 }))
+                      }
+                    }}
+                    type="button"
+                  >
+                    <CalendarClock size={16} />
+                    <span>Queue walkthrough</span>
+                  </button>
+                  <button
+                    className="btn-secondary"
+                    disabled={!canEdit || saving}
+                    onClick={() => {
+                      setDraftStatus('active')
+                      setDraftLastContactAt(toDateTimeLocalValue(new Date().toISOString()))
+                      if (!draftReminderAt) {
+                        setDraftReminderAt(futureDateTimeLocalValue({ days: 2 }))
+                      }
+                    }}
+                    type="button"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>Mark follow-up active</span>
                   </button>
                 </div>
 
@@ -575,14 +693,14 @@ export default function BetaRequestsPage() {
               >
                 Open onboarding pack
               </a>
-              {selectedRequest ? (
+              {detailRequest ? (
                 <a
                   className="rounded-xl border border-slate-200 px-4 py-3 text-sm font-medium text-slate-900 transition hover:border-orange-300 hover:bg-orange-50 dark:border-slate-800 dark:text-slate-100 dark:hover:border-orange-400/40 dark:hover:bg-orange-500/10"
-                  href={`${ONBOARDING_PACK_URL}${templateAnchorForStage(selectedRequest.stage)}`}
+                  href={`${ONBOARDING_PACK_URL}${templateAnchorForStage(detailRequest.stage)}`}
                   rel="noreferrer"
                   target="_blank"
                 >
-                  Open template for {selectedRequest.stage}
+                  Open template for {detailRequest.stage}
                 </a>
               ) : null}
             </div>
@@ -615,6 +733,38 @@ function formatAttentionFlag(flag: BetaRequestAttention): string {
     case 'stale':
     default:
       return 'stale'
+  }
+}
+
+function formatActivityKind(kind: BetaRequestActivityEntry['kind']): string {
+  switch (kind) {
+    case 'request_created':
+      return 'Intake'
+    case 'stage_changed':
+      return 'Stage'
+    case 'contact_logged':
+      return 'Contact'
+    case 'meeting_scheduled':
+      return 'Meeting'
+    case 'reminder':
+      return 'Reminder'
+    case 'notification':
+      return 'Signal'
+    case 'request_updated':
+    default:
+      return 'Update'
+  }
+}
+
+function activityToneClasses(tone: BetaRequestActivityEntry['tone']): string {
+  switch (tone) {
+    case 'success':
+      return 'border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200'
+    case 'warning':
+      return 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200'
+    case 'default':
+    default:
+      return 'border-slate-200 bg-white text-slate-900 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-100'
   }
 }
 
