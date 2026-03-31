@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
-import { assignDirectoryRole, createDatabase, upsertOperatorNotification } from './db.js'
+import { appendIntentTraceEvent, assignDirectoryRole, createDatabase, finalizeIntentLog, logIntentStart, registerAgent, setIntentLifecycleStatus, upsertOperatorNotification } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
 
 function createAdminHeaders(
@@ -440,6 +440,101 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(updated.request.notificationStatus, 'acknowledged')
     assert.deepEqual(updated.request.attentionFlags, [])
 
+    const proofNonce = 'pilot-proof-demo-0001'
+    registerAgent(db, {
+      beamId: 'procurement@acme.beam.directory',
+      displayName: 'Acme Procurement',
+      capabilities: ['procurement'],
+      publicKey: 'MCowBQYDK2VwAyEAEHzHjWwTn/RZiC407+hCtk8nde/GEVUn85iOaZBH2Bw=',
+      verificationTier: 'business',
+      email: 'procurement@acme.example',
+      emailVerified: true,
+    })
+    registerAgent(db, {
+      beamId: 'finance@northwind.beam.directory',
+      displayName: 'Northwind Finance',
+      capabilities: ['finance'],
+      publicKey: 'MCowBQYDK2VwAyEAr+N7jwgoTnwP/02HeC88JezBI3D/FbtcWbhOOyUpM8Y=',
+      verificationTier: 'verified',
+      email: 'finance@northwind.example',
+      emailVerified: true,
+    })
+    logIntentStart(db, {
+      v: '1',
+      nonce: proofNonce,
+      from: 'procurement@acme.beam.directory',
+      to: 'finance@northwind.beam.directory',
+      intent: 'conversation.message',
+      payload: { message: 'Can you approve the async quote?' },
+      timestamp: '2026-03-30T20:15:30.000Z',
+    })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'received',
+      timestamp: '2026-03-30T20:15:30.000Z',
+      details: { channel: 'websocket' },
+    })
+    setIntentLifecycleStatus(db, { nonce: proofNonce, status: 'validated' })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'validated',
+      timestamp: '2026-03-30T20:15:31.000Z',
+      details: { signatureVerified: true },
+    })
+    setIntentLifecycleStatus(db, { nonce: proofNonce, status: 'queued' })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'queued',
+      timestamp: '2026-03-30T20:15:32.000Z',
+      details: { queue: 'default' },
+    })
+    setIntentLifecycleStatus(db, { nonce: proofNonce, status: 'dispatched' })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'dispatched',
+      timestamp: '2026-03-30T20:15:33.000Z',
+      details: { transport: 'direct-http' },
+    })
+    setIntentLifecycleStatus(db, { nonce: proofNonce, status: 'delivered' })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'delivered',
+      timestamp: '2026-03-30T20:15:34.000Z',
+      details: { route: 'direct-http' },
+    })
+    finalizeIntentLog(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      status: 'acked',
+      latencyMs: 220,
+      resultJson: JSON.stringify({ success: true }),
+    })
+    appendIntentTraceEvent(db, {
+      nonce: proofNonce,
+      fromBeamId: 'procurement@acme.beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      intentType: 'conversation.message',
+      stage: 'acked',
+      timestamp: '2026-03-30T20:15:35.000Z',
+      details: { route: 'direct-http' },
+    })
+
     const contactTimestamp = '2026-03-30T20:15:00.000Z'
     const meetingTimestamp = '2026-04-02T14:00:00.000Z'
     const reminderTimestamp = '2026-03-30T21:00:00.000Z'
@@ -455,6 +550,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         lastContactAt: contactTimestamp,
         nextMeetingAt: meetingTimestamp,
         reminderAt: reminderTimestamp,
+        proofIntentNonce: proofNonce,
       }),
     }))
     assert.equal(contactResponse.status, 200)
@@ -467,6 +563,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         lastContactAt: string | null
         nextMeetingAt: string | null
         reminderAt: string | null
+        proofIntentNonce: string | null
         notificationStatus: string
         attentionFlags: string[]
       }
@@ -477,6 +574,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.equal(contacted.request.lastContactAt, contactTimestamp)
     assert.equal(contacted.request.nextMeetingAt, meetingTimestamp)
     assert.equal(contacted.request.reminderAt, reminderTimestamp)
+    assert.equal(contacted.request.proofIntentNonce, proofNonce)
     assert.equal(contacted.request.notificationStatus, 'acted')
     assert.deepEqual(contacted.request.attentionFlags, ['follow_up_due'])
 
@@ -489,6 +587,7 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
       request: {
         id: number
         stage: string
+        proofIntentNonce: string | null
         notificationStatus: string | null
       }
       activity: Array<{
@@ -496,9 +595,36 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
         kind: string
         href: string | null
       }>
+      proofSummary: {
+        headline: string
+        recommendation: string
+        markdown: string
+        identity: {
+          sender: {
+            beamId: string
+            verificationTier: string
+          }
+          recipient: {
+            beamId: string
+            verificationTier: string
+          }
+        }
+        delivery: {
+          status: string
+          latencyMs: number | null
+          stages: string[]
+          routeLabel: string | null
+        }
+        operatorVisibility: {
+          signalStatus: string
+          traceHref: string
+          signalHref: string | null
+        }
+      } | null
     }
     assert.equal(detail.request.id, created.request.id)
     assert.equal(detail.request.stage, 'scheduled')
+    assert.equal(detail.request.proofIntentNonce, proofNonce)
     assert.equal(detail.request.notificationStatus, 'acted')
     assert.ok(detail.activity.length >= 6)
     assert.ok(detail.activity.some((entry) => entry.title === 'Hosted beta request captured'))
@@ -508,6 +634,21 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
     assert.ok(detail.activity.some((entry) => entry.title === 'Follow-up reminder is due'))
     assert.ok(detail.activity.some((entry) => entry.title === 'Operator signal marked acted'))
     assert.ok(detail.activity.some((entry) => entry.href === `/inbox?id=${created.request.notificationId}`))
+    assert.ok(detail.proofSummary)
+    assert.match(detail.proofSummary?.headline ?? '', /pilot handoff .* acknowledged/i)
+    assert.equal(detail.proofSummary?.identity.sender.beamId, 'procurement@acme.beam.directory')
+    assert.equal(detail.proofSummary?.identity.sender.verificationTier, 'business')
+    assert.equal(detail.proofSummary?.identity.recipient.beamId, 'finance@northwind.beam.directory')
+    assert.equal(detail.proofSummary?.identity.recipient.verificationTier, 'verified')
+    assert.equal(detail.proofSummary?.delivery.status, 'acked')
+    assert.equal(detail.proofSummary?.delivery.latencyMs, 220)
+    assert.deepEqual(detail.proofSummary?.delivery.stages, ['received', 'validated', 'queued', 'dispatched', 'delivered', 'acked'])
+    assert.equal(detail.proofSummary?.delivery.routeLabel, 'direct-http')
+    assert.equal(detail.proofSummary?.operatorVisibility.signalStatus, 'acted')
+    assert.equal(detail.proofSummary?.operatorVisibility.traceHref, `/intents/${proofNonce}`)
+    assert.equal(detail.proofSummary?.operatorVisibility.signalHref, `/inbox?id=${created.request.notificationId}`)
+    assert.match(detail.proofSummary?.recommendation ?? '', /pilot review/i)
+    assert.match(detail.proofSummary?.markdown ?? '', /Beam pilot proof summary/)
 
     const dueResponse = await app.request(new Request('http://localhost/admin/beta-requests?attention=follow_up_due&status=scheduled', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),

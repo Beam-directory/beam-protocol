@@ -566,6 +566,7 @@ export interface BetaRequest {
   agentCount: number | null
   workflowType: string | null
   workflowSummary: string | null
+  proofIntentNonce: string | null
   requestStatus: BetaRequestStatus
   stage: BetaRequestStatus
   owner: string | null
@@ -611,6 +612,49 @@ export interface BetaRequestActivityEntry {
   upcoming: boolean
 }
 
+export interface BetaRequestProofSummaryParty {
+  beamId: string
+  displayName: string
+  verificationTier: string
+  trustScore: number | null
+  verified: boolean
+}
+
+export interface BetaRequestProofSummary {
+  generatedAt: string
+  proofIntentNonce: string
+  headline: string
+  summary: string
+  recommendation: string
+  markdown: string
+  identity: {
+    sender: BetaRequestProofSummaryParty
+    recipient: BetaRequestProofSummaryParty
+  }
+  delivery: {
+    intentType: string
+    status: IntentLifecycleStatus
+    requestedAt: string
+    completedAt: string | null
+    latencyMs: number | null
+    traceStageCount: number
+    stages: string[]
+    routeLabel: string | null
+    shieldDecision: string | null
+  }
+  operatorVisibility: {
+    signalStatus: OperatorNotificationStatus | 'missing'
+    signalOwner: string | null
+    nextAction: string | null
+    activityCount: number
+    liveAgents: number
+    activeAlerts: number
+    traceHref: string
+    signalHref: string | null
+    requestHref: string
+  }
+}
+
 export type WaitlistEntry = BetaRequest
 
 export interface WaitlistListResponse {
@@ -640,6 +684,7 @@ export interface BetaRequestListResponse {
 export interface BetaRequestDetailResponse {
   request: BetaRequest
   activity: BetaRequestActivityEntry[]
+  proofSummary: BetaRequestProofSummary | null
 }
 
 export interface BetaRequestUpdateInput {
@@ -650,6 +695,7 @@ export interface BetaRequestUpdateInput {
   lastContactAt?: string | null
   nextMeetingAt?: string | null
   reminderAt?: string | null
+  proofIntentNonce?: string | null
 }
 
 export interface BetaRequestUpdateResponse {

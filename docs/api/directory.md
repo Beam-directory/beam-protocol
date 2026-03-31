@@ -247,11 +247,17 @@ List filtering currently supports:
   "owner": "operator@beam.directory",
   "operatorNotes": "Intro email sent, follow-up call pending.",
   "nextAction": "Prepare a 30 minute buyer walkthrough.",
-  "lastContactAt": "2026-03-31T09:30:00.000Z"
+  "lastContactAt": "2026-03-31T09:30:00.000Z",
+  "proofIntentNonce": "pilot-proof-123456"
 }
 ```
 
-The response request record carries the same pipeline fields plus notification state, so operators can tell whether a request is still `new`, already `acknowledged`, or fully `acted` on.
+The response request record carries the same pipeline fields plus notification state and an optional `proofIntentNonce`, so operators can tell whether a request is still `new`, already `acknowledged`, or fully `acted` on.
+
+`GET /admin/beta-requests/:id` also returns:
+
+- `activity`: the operator and follow-up timeline
+- `proofSummary`: a buyer-friendly artifact generated from the linked `proofIntentNonce`, including identity proof, delivery proof, operator visibility, and a recommended next step
 
 Hosted beta export includes:
 
