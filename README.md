@@ -121,12 +121,12 @@ See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibilit
 ## Release Readiness
 
 The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
-The current release-control evidence lives in [`reports/0.8.0-buyer-final-pass.md`](./reports/0.8.0-buyer-final-pass.md), [`reports/0.8.0-operator-final-pass.md`](./reports/0.8.0-operator-final-pass.md), [`reports/0.8.0-rc1-checklist.md`](./reports/0.8.0-rc1-checklist.md), and [`reports/0.8.0-release-smoke.md`](./reports/0.8.0-release-smoke.md).
+The current release-control evidence lives in [`reports/0.8.0-buyer-final-pass.md`](./reports/0.8.0-buyer-final-pass.md), [`reports/0.8.0-operator-final-pass.md`](./reports/0.8.0-operator-final-pass.md), [`reports/0.8.0-rc1-checklist.md`](./reports/0.8.0-rc1-checklist.md), [`reports/0.8.0-release-smoke.md`](./reports/0.8.0-release-smoke.md), and [`reports/0.8.1-release-notes-draft.md`](./reports/0.8.1-release-notes-draft.md).
 
 For post-release verification, run:
 
 ```bash
-npm run release:smoke -- --version 0.8.0 --git-sha <tagged-sha> --output reports/0.8.0-release-smoke.md
+npm run release:smoke -- --version <release-version> --git-sha <tagged-sha> --output reports/<release-version>-release-smoke.md
 ```
 
 ## Repository Layout
