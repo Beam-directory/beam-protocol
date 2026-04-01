@@ -1,7 +1,8 @@
-import { randomUUID } from 'node:crypto'
+import { generateKeyPairSync, randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
+import { createAgentApiKey, hashApiKey } from '../api-key.js'
 import {
   createWorkspace,
   createWorkspaceIdentityBinding,
@@ -29,6 +30,7 @@ import {
   listWorkspaceThreads,
   listWorkspaces,
   logAuditEvent,
+  registerAgent,
   updateWorkspaceThread,
   updateWorkspacePartnerChannel,
   updateWorkspacePolicyDocument,
@@ -46,6 +48,7 @@ import type {
   WorkspacePartnerChannelRow,
   WorkspacePartnerChannelStatus,
   WorkspacePolicy,
+  WorkspacePolicyRuleExternalInitiation,
   WorkspacePrincipalType,
   WorkspaceRow,
   WorkspaceTimelineEventKind,
@@ -61,6 +64,7 @@ import { evaluateWorkspacePolicy } from '../workspace-policy.js'
 import { RelayError, isAgentConnected, relayIntentFromHttp } from '../websocket.js'
 import { sendOperatorDigestEmail } from '../email.js'
 import { validateIntentPayload } from '../validation.js'
+import { toBeamDID } from '../did.js'
 
 const WORKSPACE_STATUS_SET = new Set<WorkspaceRow['status']>(['active', 'paused', 'archived'])
 const WORKSPACE_THREAD_SCOPE_SET = new Set<WorkspaceThreadScope>(['internal', 'handoff'])
@@ -127,6 +131,12 @@ type SerializedWorkspaceIdentityBinding = {
   identity: {
     existsLocally: boolean
     beamId: string
+    did: {
+      id: string
+      resolutionUrl: string
+      agentUrl: string
+      keysUrl: string
+    }
     displayName: string | null
     org: string | null
     personal: boolean
@@ -134,7 +144,37 @@ type SerializedWorkspaceIdentityBinding = {
     trustScore: number | null
     lastSeen: string | null
     capabilities: string[]
-    keyState: object | null
+    keyState: {
+      active: object | null
+      revoked: object[]
+      keys: object[]
+      total: number
+    } | null
+  }
+  workspacePolicy: {
+    effective: SerializedWorkspacePolicyPreview
+    bindingRule: {
+      externalInitiation: WorkspacePolicyRuleExternalInitiation
+      allowedPartners: string[]
+    } | null
+  }
+}
+
+type SerializedWorkspaceIdentityCredential = {
+  format: 'beam-local-identity/v1'
+  beamId: string
+  did: string
+  displayName: string | null
+  workspaceSlug: string
+  directoryUrl: string
+  generatedAt: string
+  publicKey: string
+  privateKey: string
+  apiKey: string
+  urls: {
+    didResolution: string
+    agent: string
+    keys: string
   }
 }
 
@@ -458,6 +498,35 @@ function normalizeBoolean(value: unknown): boolean | null {
   return null
 }
 
+function normalizeExternalInitiationRule(value: unknown): WorkspacePolicyRuleExternalInitiation | null {
+  if (value === 'inherit' || value === 'allow' || value === 'deny') {
+    return value
+  }
+
+  return null
+}
+
+function normalizeStringList(value: unknown): string[] | null {
+  if (value == null) {
+    return []
+  }
+
+  if (Array.isArray(value)) {
+    const normalized = value
+      .filter((entry): entry is string => typeof entry === 'string')
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+
+    return normalized.length === value.length ? [...new Set(normalized)] : null
+  }
+
+  if (typeof value === 'string') {
+    return [...new Set(value.split(',').map((entry) => entry.trim()).filter(Boolean))]
+  }
+
+  return null
+}
+
 function normalizeWorkspaceSlug(value: unknown, fallback: string): string | null {
   const candidate = typeof value === 'string' && value.trim().length > 0 ? value.trim().toLowerCase() : slugify(fallback)
   if (!candidate || !WORKSPACE_SLUG_RE.test(candidate)) {
@@ -465,6 +534,21 @@ function normalizeWorkspaceSlug(value: unknown, fallback: string): string | null
   }
 
   return candidate
+}
+
+function getDirectoryBaseUrl(): string {
+  return (process.env['BEAM_DIRECTORY_BASE_URL'] ?? 'https://beam.directory').replace(/\/$/, '')
+}
+
+function buildWorkspaceIdentityDid(beamId: string): SerializedWorkspaceIdentityBinding['identity']['did'] {
+  const did = toBeamDID(beamId)
+  const baseUrl = getDirectoryBaseUrl()
+  return {
+    id: did,
+    resolutionUrl: `${baseUrl}/did/${encodeURIComponent(did)}`,
+    agentUrl: `${baseUrl}/agents/${encodeURIComponent(beamId)}`,
+    keysUrl: `${baseUrl}/agents/${encodeURIComponent(beamId)}/keys`,
+  }
 }
 
 function hoursSince(value: string | null): number | null {
@@ -671,6 +755,10 @@ function summarizeWorkspaceAuditAction(action: string, details: Record<string, u
       return 'Workspace identity binding added.'
     case 'admin.workspace_identity.updated':
       return 'Workspace identity binding updated.'
+    case 'admin.workspace_identity.policy_updated':
+      return 'Workspace identity policy updated.'
+    case 'admin.workspace_identity.credential_reissued':
+      return 'Local Beam credential reissued.'
     case 'admin.workspace_thread.created':
       return 'Workspace thread created.'
     case 'admin.workspace_thread.dispatched':
@@ -718,7 +806,9 @@ function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspac
 
 function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityBindingRow): SerializedWorkspaceIdentityBinding {
   const agent = getAgent(db, row.beam_id)
-  const keyState = agent ? serializeAgentKeyState(listAgentKeys(db, row.beam_id)) : null
+  const keyState = agent
+    ? serializeAgentKeyState(listAgentKeys(db, row.beam_id)) as SerializedWorkspaceIdentityBinding['identity']['keyState']
+    : null
   const lastSeenAgeHours = hoursSince(agent?.last_seen ?? null)
   const runtime = parseRuntimeMetadata(row.binding_type, row.runtime_type)
   const connected = agent ? isAgentConnected(agent.beam_id) : false
@@ -738,6 +828,9 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     keyState,
     owner: row.owner,
   })
+  const { policy } = getWorkspacePolicyDocument(db, row.workspace_id)
+  const effectivePolicy = buildWorkspacePolicyPreview(policy, row)
+  const bindingRule = [...policy.bindingRules].reverse().find((rule) => rule.beamId === row.beam_id) ?? null
 
   return {
     id: row.id,
@@ -765,6 +858,7 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     identity: agent ? {
       existsLocally: true,
       beamId: agent.beam_id,
+      did: buildWorkspaceIdentityDid(agent.beam_id),
       displayName: agent.display_name,
       org: agent.org,
       personal: agent.personal === 1,
@@ -776,6 +870,7 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     } : {
       existsLocally: false,
       beamId: row.beam_id,
+      did: buildWorkspaceIdentityDid(row.beam_id),
       displayName: null,
       org: null,
       personal: false,
@@ -784,6 +879,15 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
       lastSeen: null,
       capabilities: [],
       keyState,
+    },
+    workspacePolicy: {
+      effective: effectivePolicy,
+      bindingRule: bindingRule
+        ? {
+            externalInitiation: bindingRule.externalInitiation,
+            allowedPartners: bindingRule.allowedPartners,
+          }
+        : null,
     },
   }
 }
@@ -2867,6 +2971,194 @@ export function workspacesRouter(db: Database): Hono {
 
     c.header('Cache-Control', 'no-store')
     return c.json({ binding: serializeWorkspaceIdentityBinding(db, updated) })
+  })
+
+  router.patch('/:slug/identities/:id/policy', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const bindingId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(bindingId) || bindingId <= 0) {
+      return c.json({ error: 'Invalid identity binding id', errorCode: 'INVALID_BINDING_ID' }, 400)
+    }
+
+    const binding = getWorkspaceIdentityBindingById(db, bindingId)
+    if (!binding || binding.workspace_id !== workspace.id) {
+      return c.json({ error: 'Workspace identity not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const externalInitiation = 'externalInitiation' in raw
+      ? normalizeExternalInitiationRule(raw.externalInitiation)
+      : 'inherit'
+    if ('externalInitiation' in raw && !externalInitiation) {
+      return c.json({ error: 'Invalid externalInitiation', errorCode: 'INVALID_EXTERNAL_INITIATION' }, 400)
+    }
+
+    const allowedPartners = 'allowedPartners' in raw
+      ? normalizeStringList(raw.allowedPartners)
+      : []
+    if ('allowedPartners' in raw && !allowedPartners) {
+      return c.json({ error: 'allowedPartners must be an array of strings or a comma-separated string', errorCode: 'INVALID_ALLOWED_PARTNERS' }, 400)
+    }
+
+    const currentPolicy = getWorkspacePolicyDocument(db, workspace.id).policy
+    const nextBindingRules = currentPolicy.bindingRules.filter((rule) => rule.beamId !== binding.beam_id)
+
+    if ((externalInitiation ?? 'inherit') !== 'inherit' || (allowedPartners?.length ?? 0) > 0) {
+      nextBindingRules.push({
+        beamId: binding.beam_id,
+        bindingType: binding.binding_type,
+        policyProfile: binding.policy_profile,
+        externalInitiation: externalInitiation ?? 'inherit',
+        allowedPartners: allowedPartners ?? [],
+      })
+    }
+
+    const updatedPolicy = updateWorkspacePolicyDocument(db, workspace.id, {
+      bindingRules: nextBindingRules,
+    }, auth.session.email)
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_identity.policy_updated',
+      actor: auth.session.email,
+      target: `${workspace.slug}:${binding.beam_id}`,
+      details: {
+        role: auth.session.role,
+        externalInitiation: externalInitiation ?? 'inherit',
+        allowedPartners: allowedPartners ?? [],
+      },
+    })
+
+    const refreshedBinding = getWorkspaceIdentityBindingById(db, binding.id)
+    if (!refreshedBinding) {
+      return c.json({ error: 'Workspace identity not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      updatedAt: updatedPolicy.updatedAt,
+      updatedBy: updatedPolicy.updatedBy,
+      rule: [...updatedPolicy.policy.bindingRules]
+        .reverse()
+        .find((rule) => rule.beamId === binding.beam_id) ?? null,
+      preview: buildWorkspacePolicyPreview(updatedPolicy.policy, refreshedBinding),
+      binding: serializeWorkspaceIdentityBinding(db, refreshedBinding),
+    })
+  })
+
+  router.post('/:slug/identities/:id/reissue-local-credential', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const bindingId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(bindingId) || bindingId <= 0) {
+      return c.json({ error: 'Invalid identity binding id', errorCode: 'INVALID_BINDING_ID' }, 400)
+    }
+
+    const binding = getWorkspaceIdentityBindingById(db, bindingId)
+    if (!binding || binding.workspace_id !== workspace.id) {
+      return c.json({ error: 'Workspace identity not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    if (binding.binding_type === 'partner') {
+      return c.json({ error: 'Partner bindings do not own local Beam credentials', errorCode: 'PARTNER_BINDING_NO_LOCAL_CREDENTIAL' }, 400)
+    }
+
+    const agent = getAgent(db, binding.beam_id)
+    if (!agent) {
+      return c.json({ error: 'Local Beam identity not found', errorCode: 'AGENT_NOT_FOUND' }, 404)
+    }
+
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+    const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    const apiKey = createAgentApiKey(agent.beam_id)
+    const updatedAgent = registerAgent(db, {
+      beamId: agent.beam_id,
+      displayName: agent.display_name,
+      capabilities: JSON.parse(agent.capabilities) as string[],
+      publicKey: publicKeyBase64,
+      apiKeyHash: hashApiKey(apiKey),
+      org: agent.org,
+      personal: agent.personal === 1,
+      email: agent.email,
+      emailVerified: agent.email_verified === 1,
+      description: agent.description,
+      logoUrl: agent.logo_url,
+      website: agent.website,
+      verificationTier: agent.verification_tier,
+      visibility: agent.visibility,
+      httpEndpoint: agent.http_endpoint,
+      dhPublicKey: agent.dh_public_key,
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_identity.credential_reissued',
+      actor: auth.session.email,
+      target: `${workspace.slug}:${binding.beam_id}`,
+      details: {
+        role: auth.session.role,
+        did: toBeamDID(binding.beam_id),
+        workspace: workspace.slug,
+      },
+    })
+
+    const refreshedBinding = getWorkspaceIdentityBindingById(db, binding.id)
+    if (!refreshedBinding) {
+      return c.json({ error: 'Workspace identity not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const urls = buildWorkspaceIdentityDid(updatedAgent.beam_id)
+    const credential: SerializedWorkspaceIdentityCredential = {
+      format: 'beam-local-identity/v1',
+      beamId: updatedAgent.beam_id,
+      did: urls.id,
+      displayName: updatedAgent.display_name,
+      workspaceSlug: workspace.slug,
+      directoryUrl: getDirectoryBaseUrl(),
+      generatedAt: new Date().toISOString(),
+      publicKey: publicKeyBase64,
+      privateKey: privateKeyBase64,
+      apiKey,
+      urls: {
+        didResolution: urls.resolutionUrl,
+        agent: urls.agentUrl,
+        keys: urls.keysUrl,
+      },
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      binding: serializeWorkspaceIdentityBinding(db, refreshedBinding),
+      credential,
+    })
   })
 
   return router

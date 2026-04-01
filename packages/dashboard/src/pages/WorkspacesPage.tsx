@@ -10,6 +10,7 @@ import {
   type WorkspaceDigestActionItem,
   type WorkspaceDigestResponse,
   type WorkspaceIdentityBinding,
+  type WorkspaceIdentityCredentialBundle,
   type WorkspaceIdentityLifecycleStatus,
   type WorkspaceOverviewAttentionCode,
   type WorkspaceOverviewAttentionItem,
@@ -18,6 +19,7 @@ import {
   type WorkspacePartnerChannelHealth,
   type WorkspacePartnerChannelStatus,
   type WorkspacePolicyResponse,
+  type WorkspacePolicyRuleExternalInitiation,
   type WorkspaceRecord,
   type WorkspaceStatus,
   type WorkspaceThread,
@@ -177,6 +179,32 @@ function parseCsvList(value: string): string[] {
 
 function summarizeList(values: string[], fallback: string): string {
   return values.length > 0 ? values.join(', ') : fallback
+}
+
+function summarizeKeyState(binding: WorkspaceIdentityBinding): string {
+  const keyState = binding.identity.keyState
+  if (!keyState) {
+    return binding.identity.existsLocally ? 'No key history recorded yet' : 'No local key material'
+  }
+
+  const active = keyState.active ? '1 active key' : 'No active key'
+  const revoked = keyState.revoked.length > 0 ? `${keyState.revoked.length} revoked` : '0 revoked'
+  return `${active} · ${revoked}`
+}
+
+function createBindingPolicyDraft(binding: WorkspaceIdentityBinding): {
+  externalInitiation: WorkspacePolicyRuleExternalInitiation
+  allowedPartners: string
+} {
+  return {
+    externalInitiation: binding.workspacePolicy.bindingRule?.externalInitiation ?? 'inherit',
+    allowedPartners: binding.workspacePolicy.bindingRule?.allowedPartners.join(', ') ?? '',
+  }
+}
+
+function credentialDownloadName(bundle: WorkspaceIdentityCredentialBundle): string {
+  const safeBeamId = bundle.beamId.replace(/[^a-z0-9._-]+/gi, '-')
+  return `${safeBeamId}.beam-identity.json`
 }
 
 function getIntentRules(intent: IntentCatalogItem | null): Record<string, NonNullable<IntentCatalogItem['params']>[string]> {
@@ -386,6 +414,14 @@ export default function WorkspacesPage() {
     partnerChannelId: '',
     linkedIntentNonce: '',
   })
+  const [bindingPolicyDrafts, setBindingPolicyDrafts] = useState<Record<number, {
+    externalInitiation: WorkspacePolicyRuleExternalInitiation
+    allowedPartners: string
+  }>>({})
+  const [issuedCredential, setIssuedCredential] = useState<{
+    bindingId: number
+    bundle: WorkspaceIdentityCredentialBundle
+  } | null>(null)
 
   const selectedSlug = searchParams.get('workspace') ?? ''
   const selectedThreadId = useMemo(() => {
@@ -437,6 +473,16 @@ export default function WorkspacesPage() {
 
     return channels.find((channel) => channel.partnerBeamId === partnerBeamId)?.workspaceRoute ?? null
   }, [channels, threadDetail])
+
+  useEffect(() => {
+    setBindingPolicyDrafts((current) => {
+      const next: typeof current = {}
+      for (const binding of bindings) {
+        next[binding.id] = current[binding.id] ?? createBindingPolicyDraft(binding)
+      }
+      return next
+    })
+  }, [bindings])
 
   async function loadWorkspaces() {
     const response = await directoryApi.listWorkspaces()
@@ -697,6 +743,72 @@ export default function WorkspacesPage() {
       await directoryApi.updateWorkspaceIdentity(selectedWorkspace.slug, binding.id, patch)
       await loadWorkspaceSurface(selectedWorkspace.slug)
     }, `${binding.beamId} updated.`)
+  }
+
+  function updateBindingPolicyDraft(
+    bindingId: number,
+    patch: Partial<{
+      externalInitiation: WorkspacePolicyRuleExternalInitiation
+      allowedPartners: string
+    }>,
+  ) {
+    setBindingPolicyDrafts((current) => ({
+      ...current,
+      [bindingId]: {
+        ...(current[bindingId] ?? {
+          externalInitiation: 'inherit',
+          allowedPartners: '',
+        }),
+        ...patch,
+      },
+    }))
+  }
+
+  async function handleBindingPolicySubmit(binding: WorkspaceIdentityBinding) {
+    if (!selectedWorkspace) return
+    const draft = bindingPolicyDrafts[binding.id] ?? createBindingPolicyDraft(binding)
+    await runAction(`binding-policy-${binding.id}`, async () => {
+      const response = await directoryApi.updateWorkspaceIdentityPolicy(selectedWorkspace.slug, binding.id, {
+        externalInitiation: draft.externalInitiation,
+        allowedPartners: parseCsvList(draft.allowedPartners),
+      })
+      setBindingPolicyDrafts((current) => ({
+        ...current,
+        [binding.id]: createBindingPolicyDraft(response.binding),
+      }))
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+    }, `${binding.beamId} policy updated.`)
+  }
+
+  async function handleReissueCredential(binding: WorkspaceIdentityBinding) {
+    if (!selectedWorkspace) return
+    await runAction(`binding-credential-${binding.id}`, async () => {
+      const response = await directoryApi.reissueWorkspaceIdentityCredential(selectedWorkspace.slug, binding.id)
+      setIssuedCredential({
+        bindingId: binding.id,
+        bundle: response.credential,
+      })
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+    }, `${binding.beamId} local credential reissued.`)
+  }
+
+  async function handleCopyCredential(bundle: WorkspaceIdentityCredentialBundle) {
+    try {
+      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2))
+      setNotice(`Credential bundle copied for ${bundle.beamId}.`)
+    } catch {
+      setError('Clipboard access failed while copying the credential bundle.')
+    }
+  }
+
+  function handleDownloadCredential(bundle: WorkspaceIdentityCredentialBundle) {
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = credentialDownloadName(bundle)
+    anchor.click()
+    URL.revokeObjectURL(url)
   }
 
   async function handlePartnerChannelSubmit(event: FormEvent<HTMLFormElement>) {
@@ -1106,6 +1218,46 @@ export default function WorkspacesPage() {
                         <div>{binding.identity.capabilities.length > 0 ? `${binding.identity.capabilities.length} capabilities declared` : 'No capabilities declared'}</div>
                       </div>
 
+                      <div className="mt-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Beam DID</div>
+                            <div className="mt-1 truncate font-mono text-xs text-slate-700 dark:text-slate-200">{binding.identity.did.id}</div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <StatusPill
+                              label={binding.workspacePolicy.effective.externalInitiation === 'allow' ? 'Outbound allowed' : 'Outbound blocked'}
+                              tone={binding.workspacePolicy.effective.externalInitiation === 'allow' ? 'success' : 'warning'}
+                            />
+                            <StatusPill
+                              label={binding.workspacePolicy.effective.approvalRequired ? 'Approval path' : 'Direct path'}
+                              tone={binding.workspacePolicy.effective.approvalRequired ? 'warning' : 'success'}
+                            />
+                          </div>
+                        </div>
+
+                        <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                          <div>{summarizeKeyState(binding)}</div>
+                          <div>{summarizeList(binding.workspacePolicy.effective.allowedPartners, 'No partner allowlist override')}</div>
+                          <div>{binding.workspacePolicy.bindingRule ? 'Per-agent policy override active' : 'Inheriting workspace defaults'}</div>
+                          <div>{binding.workspacePolicy.effective.approvalRequired ? `Approvers: ${summarizeList(binding.workspacePolicy.effective.approvers, 'Not listed')}` : 'No workflow approvers attached here'}</div>
+                        </div>
+
+                        <div className="mt-3 flex flex-wrap gap-3 text-xs">
+                          <a className="text-orange-600 hover:text-orange-700 dark:text-orange-300" href={binding.identity.did.resolutionUrl} rel="noreferrer" target="_blank">
+                            Resolve DID
+                          </a>
+                          <a className="text-orange-600 hover:text-orange-700 dark:text-orange-300" href={binding.identity.did.keysUrl} rel="noreferrer" target="_blank">
+                            Open key history
+                          </a>
+                          {binding.identity.existsLocally ? (
+                            <a className="text-orange-600 hover:text-orange-700 dark:text-orange-300" href={binding.identity.did.agentUrl} rel="noreferrer" target="_blank">
+                              Open agent record
+                            </a>
+                          ) : null}
+                        </div>
+                      </div>
+
                       {binding.notes ? (
                         <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{binding.notes}</div>
                       ) : null}
@@ -1142,7 +1294,103 @@ export default function WorkspacesPage() {
                             Open agent
                           </Link>
                         ) : null}
+                        {binding.bindingType !== 'partner' && binding.identity.existsLocally ? (
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={actionBusy === `binding-credential-${binding.id}`}
+                            onClick={() => { void handleReissueCredential(binding) }}
+                          >
+                            {actionBusy === `binding-credential-${binding.id}` ? 'Issuing…' : 'Reissue local credential'}
+                          </button>
+                        ) : null}
                       </div>
+
+                      {binding.bindingType !== 'partner' ? (
+                        <div className="mt-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                          <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Per-agent partner control</div>
+                          <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                            Keep workspace defaults, or attach an explicit outbound override for this identity only.
+                          </div>
+                          <div className="mt-3 grid gap-3 md:grid-cols-2">
+                            <select
+                              className="input-field"
+                              value={(bindingPolicyDrafts[binding.id] ?? createBindingPolicyDraft(binding)).externalInitiation}
+                              onChange={(event) => updateBindingPolicyDraft(binding.id, {
+                                externalInitiation: event.target.value as WorkspacePolicyRuleExternalInitiation,
+                              })}
+                            >
+                              <option value="inherit">inherit workspace default</option>
+                              <option value="allow">allow outbound</option>
+                              <option value="deny">deny outbound</option>
+                            </select>
+                            <input
+                              className="input-field"
+                              placeholder="finance@northwind.beam.directory, *@partner.beam.directory"
+                              value={(bindingPolicyDrafts[binding.id] ?? createBindingPolicyDraft(binding)).allowedPartners}
+                              onChange={(event) => updateBindingPolicyDraft(binding.id, {
+                                allowedPartners: event.target.value,
+                              })}
+                            />
+                          </div>
+                          <div className="mt-3 flex flex-wrap gap-2">
+                            <button
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                              type="button"
+                              disabled={actionBusy === `binding-policy-${binding.id}`}
+                              onClick={() => { void handleBindingPolicySubmit(binding) }}
+                            >
+                              {actionBusy === `binding-policy-${binding.id}` ? 'Saving…' : 'Save agent policy'}
+                            </button>
+                            <button
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                              type="button"
+                              onClick={() => {
+                                setBindingPolicyDrafts((current) => ({
+                                  ...current,
+                                  [binding.id]: createBindingPolicyDraft(binding),
+                                }))
+                              }}
+                            >
+                              Reset form
+                            </button>
+                          </div>
+                        </div>
+                      ) : null}
+
+                      {issuedCredential?.bindingId === binding.id ? (
+                        <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/20 dark:bg-emerald-500/10">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">One-time local credential bundle</div>
+                              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                                Copy or download this now. The API key is only returned at issuance time.
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2">
+                              <button
+                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                type="button"
+                                onClick={() => { void handleCopyCredential(issuedCredential.bundle) }}
+                              >
+                                Copy JSON
+                              </button>
+                              <button
+                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
+                                type="button"
+                                onClick={() => { handleDownloadCredential(issuedCredential.bundle) }}
+                              >
+                                Download
+                              </button>
+                            </div>
+                          </div>
+                          <textarea
+                            className="input-field mt-3 min-h-56 font-mono text-xs"
+                            readOnly
+                            value={JSON.stringify(issuedCredential.bundle, null, 2)}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ))
                 )}

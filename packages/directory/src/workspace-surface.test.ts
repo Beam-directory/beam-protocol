@@ -208,12 +208,23 @@ test('workspace identity bindings can be created, listed, and updated through th
         status: string
         identity: {
           existsLocally: boolean
+          did: {
+            id: string
+          }
+        }
+        workspacePolicy: {
+          effective: {
+            externalInitiation: string
+          }
         }
       }>
     }
     assert.equal(listBody.total, 2)
     const partnerBinding = listBody.bindings.find((entry) => entry.beamId === 'finance-agent@northwind.beam.directory')
     assert.equal(partnerBinding?.identity.existsLocally, false)
+    const localBinding = listBody.bindings.find((entry) => entry.beamId === 'ops-bot@beam.directory')
+    assert.equal(localBinding?.identity.did.id, 'did:beam:ops-bot')
+    assert.equal(localBinding?.workspacePolicy.effective.externalInitiation, 'allow')
 
     const patchResponse = await app.request(new Request(`http://localhost/admin/workspaces/northwind-partner-ops/identities/${localBindingBody.binding.id}`, {
       method: 'PATCH',
@@ -238,6 +249,144 @@ test('workspace identity bindings can be created, listed, and updated through th
     assert.equal(patchBody.binding.status, 'paused')
     assert.equal(patchBody.binding.canInitiateExternal, false)
     assert.match(patchBody.binding.notes ?? '', /policy review/i)
+  } finally {
+    db.close()
+  }
+})
+
+test('workspace identities expose explicit did control, per-binding partner overrides, and local credential reissue', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['triage', 'handoff'],
+      publicKey: 'MCowBQYDK2VwAyEAzJmQH9I0mL6MZzQ1+Qv6cMo5+2dH6+f8A6m2nYJ7rVY=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+
+    const workspaceResponse = await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        name: 'Acme Agent Control',
+        slug: 'acme-agent-control',
+      }),
+    }))
+    assert.equal(workspaceResponse.status, 201)
+
+    const bindResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-agent-control/identities', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'openclaw:workspace',
+        canInitiateExternal: false,
+      }),
+    }))
+    assert.equal(bindResponse.status, 201)
+    const bindBody = await bindResponse.json() as {
+      binding: {
+        id: number
+      }
+    }
+
+    const policyResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${bindBody.binding.id}/policy`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        externalInitiation: 'allow',
+        allowedPartners: ['finance@northwind.beam.directory'],
+      }),
+    }))
+    assert.equal(policyResponse.status, 200)
+    const policyBody = await policyResponse.json() as {
+      rule: {
+        externalInitiation: string
+        allowedPartners: string[]
+      } | null
+      preview: {
+        externalInitiation: string
+        allowedPartners: string[]
+      }
+      binding: {
+        workspacePolicy: {
+          bindingRule: {
+            externalInitiation: string
+            allowedPartners: string[]
+          } | null
+        }
+      }
+    }
+    assert.equal(policyBody.rule?.externalInitiation, 'allow')
+    assert.deepEqual(policyBody.rule?.allowedPartners, ['finance@northwind.beam.directory'])
+    assert.equal(policyBody.preview.externalInitiation, 'allow')
+    assert.deepEqual(policyBody.preview.allowedPartners, ['finance@northwind.beam.directory'])
+    assert.equal(policyBody.binding.workspacePolicy.bindingRule?.externalInitiation, 'allow')
+
+    const reissueResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${bindBody.binding.id}/reissue-local-credential`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(reissueResponse.status, 200)
+    const reissueBody = await reissueResponse.json() as {
+      binding: {
+        beamId: string
+        identity: {
+          did: {
+            id: string
+            resolutionUrl: string
+            keysUrl: string
+          }
+          keyState: {
+            total: number
+            active: { publicKey: string } | null
+            revoked: Array<{ publicKey: string }>
+          } | null
+        }
+      }
+      credential: {
+        format: string
+        beamId: string
+        did: string
+        apiKey: string
+        publicKey: string
+        privateKey: string
+        urls: {
+          didResolution: string
+          keys: string
+        }
+      }
+    }
+    assert.equal(reissueBody.binding.beamId, 'ops-bot@beam.directory')
+    assert.equal(reissueBody.binding.identity.did.id, 'did:beam:ops-bot')
+    assert.match(reissueBody.binding.identity.did.resolutionUrl, /\/did\//)
+    assert.match(reissueBody.credential.apiKey, /^bk_/)
+    assert.equal(reissueBody.credential.format, 'beam-local-identity/v1')
+    assert.equal(reissueBody.credential.beamId, 'ops-bot@beam.directory')
+    assert.equal(reissueBody.credential.did, 'did:beam:ops-bot')
+    assert.match(reissueBody.credential.privateKey, /^[A-Za-z0-9+/=]+$/)
+    assert.match(reissueBody.credential.publicKey, /^[A-Za-z0-9+/=]+$/)
+    assert.match(reissueBody.credential.urls.didResolution, /\/did\//)
+    assert.match(reissueBody.credential.urls.keys, /\/keys$/)
+    assert.equal(reissueBody.binding.identity.keyState?.total, 2)
+    assert.equal(reissueBody.binding.identity.keyState?.revoked.length, 1)
+    assert.equal(reissueBody.binding.identity.keyState?.active?.publicKey, reissueBody.credential.publicKey)
   } finally {
     db.close()
   }
