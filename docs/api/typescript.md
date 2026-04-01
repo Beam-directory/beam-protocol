@@ -4,7 +4,7 @@
 
 ## Compatibility contract
 
-`beam-protocol-sdk` 0.6 targets `beam/1`.
+`beam-protocol-sdk` 1.1 targets `beam/1`.
 
 - additive request and response fields are allowed
 - the SDK tolerates unknown fields in current frame validation and directory responses

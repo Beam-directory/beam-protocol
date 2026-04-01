@@ -55,9 +55,9 @@ Within `beam/1`, the signed content for frames is fixed. If you need a different
 
 ### 6. CLI and SDK releases must track server compatibility explicitly
 
-- `beam-protocol-cli 0.6.x` targets `beam/1`
-- `beam-protocol-sdk 0.6.x` targets `beam/1`
-- `beam-directory 0.6.x` targets `beam/1`
+- `beam-protocol-cli 1.1.x` targets `beam/1`
+- `beam-protocol-sdk 1.1.x` targets `beam/1`
+- `beam-directory 1.1.x` targets `beam/1`
 
 Feature additions may land in minor releases, but protocol compatibility must remain intact.
 
@@ -75,7 +75,7 @@ If any answer is "no", you are not making a minor change anymore.
 
 ## Fixtures and Tests
 
-Beam 0.6 ships two compatibility fixture layers under [`spec/fixtures/compatibility`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility):
+Beam 1.1 ships two compatibility fixture layers under [`spec/fixtures/compatibility`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility):
 
 - parser fixtures in the root folder for additive decode behavior such as unknown-field tolerance and legacy `params`
 - archived signed release fixtures in [`spec/fixtures/compatibility/releases`](https://github.com/Beam-directory/beam-protocol/tree/main/spec/fixtures/compatibility/releases) for `v0.6.0` and `v0.6.1`
