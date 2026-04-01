@@ -15,10 +15,14 @@ export type WorkspaceStatus = 'active' | 'paused' | 'archived'
 export type WorkspaceThreadScope = 'internal' | 'handoff'
 export type WorkspaceBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceBindingStatus = 'active' | 'paused'
+export type WorkspaceIdentityLifecycleStatus = 'healthy' | 'stale' | 'paused' | 'missing' | 'revoked' | 'unowned'
 export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
 export type WorkspaceThreadKind = 'internal' | 'handoff'
 export type WorkspaceThreadStatus = 'open' | 'blocked' | 'closed'
 export type WorkspaceThreadParticipantRole = 'owner' | 'participant' | 'observer' | 'approver'
+export type WorkspacePartnerChannelStatus = 'active' | 'trial' | 'blocked'
+export type WorkspacePartnerChannelHealth = 'healthy' | 'watch' | 'critical'
+export type WorkspaceTimelineEventKind = 'workspace' | 'policy' | 'identity' | 'partner_channel' | 'thread' | 'digest'
 export type WorkspacePolicyDefaultExternalInitiation = 'binding' | 'deny'
 export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 export type WorkspaceOverviewAttentionCode =
@@ -137,6 +141,14 @@ export interface WorkspaceIdentityBinding {
   notes: string | null
   createdAt: string
   updatedAt: string
+  lastSeenAgeHours: number | null
+  ownershipState: 'owned' | 'unowned'
+  lifecycleStatus: WorkspaceIdentityLifecycleStatus
+  runtime: {
+    mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
+    connector: string | null
+    label: string | null
+  }
   identity: {
     existsLocally: boolean
     beamId: string
@@ -149,6 +161,105 @@ export interface WorkspaceIdentityBinding {
     capabilities: string[]
     keyState: object | null
   }
+}
+
+export interface WorkspaceIdentitiesResponse {
+  workspace: WorkspaceRecord
+  bindings: WorkspaceIdentityBinding[]
+  total: number
+}
+
+export interface WorkspacePartnerChannel {
+  id: number
+  workspaceId: number
+  partnerBeamId: string
+  label: string | null
+  owner: string | null
+  status: WorkspacePartnerChannelStatus
+  healthStatus: WorkspacePartnerChannelHealth
+  notes: string | null
+  lastSuccessAt: string | null
+  lastFailureAt: string | null
+  lastIntentNonce: string | null
+  createdAt: string
+  updatedAt: string
+  stats: {
+    recentSuccesses: number
+    recentFailures: number
+    totalObserved: number
+  }
+  partner: {
+    existsLocally: boolean
+    displayName: string | null
+    org: string | null
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+  }
+  trace: {
+    nonce: string
+    status: IntentLifecycleStatus
+    intentType: string
+    requestedAt: string
+    completedAt: string | null
+    errorCode: string | null
+    href: string
+  } | null
+}
+
+export interface WorkspacePartnerChannelsResponse {
+  workspace: WorkspaceRecord
+  channels: WorkspacePartnerChannel[]
+  total: number
+}
+
+export interface WorkspaceTimelineEntry {
+  id: number
+  kind: WorkspaceTimelineEventKind
+  action: string
+  actor: string
+  target: string
+  timestamp: string
+  summary: string
+  details: Record<string, unknown> | null
+  href: string | null
+  traceHref: string | null
+}
+
+export interface WorkspaceTimelineResponse {
+  workspace: WorkspaceRecord
+  entries: WorkspaceTimelineEntry[]
+  total: number
+}
+
+export interface WorkspaceDigestActionItem {
+  id: string
+  category: 'approval' | 'identity' | 'partner_channel' | 'thread'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
+}
+
+export interface WorkspaceDigestResponse {
+  workspace: WorkspaceRecord
+  generatedAt: string
+  days: number
+  summary: {
+    actionItems: number
+    escalations: number
+    partnerChannels: number
+    openThreads: number
+    staleIdentities: number
+    blockedExternalMotion: number
+  }
+  actionItems: WorkspaceDigestActionItem[]
+  escalations: WorkspaceDigestActionItem[]
+  partnerChannels: WorkspacePartnerChannel[]
+  timeline: WorkspaceTimelineEntry[]
+  markdown: string
 }
 
 export interface WorkspaceOverviewAttentionItem {
@@ -323,6 +434,54 @@ export interface WorkspacePolicyResponse {
 }
 
 export type WorkspacePolicyPatchInput = Partial<WorkspacePolicyDocument>
+
+export interface WorkspaceIdentityPatchInput {
+  owner?: string | null
+  runtimeType?: string | null
+  policyProfile?: string | null
+  defaultThreadScope?: WorkspaceThreadScope
+  canInitiateExternal?: boolean
+  status?: WorkspaceBindingStatus
+  notes?: string | null
+}
+
+export interface WorkspacePartnerChannelCreateInput {
+  partnerBeamId: string
+  label?: string | null
+  owner?: string | null
+  status?: WorkspacePartnerChannelStatus
+  notes?: string | null
+}
+
+export interface WorkspacePartnerChannelPatchInput {
+  label?: string | null
+  owner?: string | null
+  status?: WorkspacePartnerChannelStatus
+  notes?: string | null
+  lastSuccessAt?: string | null
+  lastFailureAt?: string | null
+  lastIntentNonce?: string | null
+}
+
+export interface WorkspaceThreadParticipantInput {
+  principalId: string
+  principalType: WorkspacePrincipalType
+  displayName?: string | null
+  beamId?: string | null
+  workspaceBindingId?: number | null
+  role?: WorkspaceThreadParticipantRole
+}
+
+export interface WorkspaceThreadCreateInput {
+  kind: WorkspaceThreadKind
+  title: string
+  summary?: string | null
+  owner?: string | null
+  status?: WorkspaceThreadStatus
+  workflowType?: string | null
+  linkedIntentNonce?: string | null
+  participants?: WorkspaceThreadParticipantInput[]
+}
 
 export interface BusHealth {
   status: string
@@ -1588,12 +1747,36 @@ export const directoryApi = {
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
+  listWorkspaceIdentities: (slug: string) => request<WorkspaceIdentitiesResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities`, undefined, { admin: true }),
+  updateWorkspaceIdentity: (slug: string, id: number, input: WorkspaceIdentityPatchInput) => request<{ binding: WorkspaceIdentityBinding }>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  listWorkspacePartnerChannels: (slug: string) => request<WorkspacePartnerChannelsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, undefined, { admin: true }),
+  createWorkspacePartnerChannel: (slug: string, input: WorkspacePartnerChannelCreateInput) => request<{ channel: WorkspacePartnerChannel }>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  updateWorkspacePartnerChannel: (slug: string, id: number, input: WorkspacePartnerChannelPatchInput) => request<{ channel: WorkspacePartnerChannel }>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   listWorkspaceThreads: (slug: string) => request<WorkspaceThreadsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads`, undefined, { admin: true }),
+  createWorkspaceThread: (slug: string, input: WorkspaceThreadCreateInput) => request<WorkspaceThreadDetailResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   getWorkspaceThread: (slug: string, id: number) => request<WorkspaceThreadDetailResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads/${id}`, undefined, { admin: true }),
   getWorkspacePolicy: (slug: string) => request<WorkspacePolicyResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, undefined, { admin: true }),
   updateWorkspacePolicy: (slug: string, input: WorkspacePolicyPatchInput) => request<WorkspacePolicyResponse & { updated: boolean }>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  }, { admin: true }),
+  getWorkspaceTimeline: (slug: string, limit = 100) => request<WorkspaceTimelineResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/timeline${buildQuery({ limit })}`, undefined, { admin: true }),
+  getWorkspaceDigest: (slug: string, params?: { days?: number }) => request<WorkspaceDigestResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/digest${buildQuery({ days: params?.days })}`, undefined, { admin: true }),
+  deliverWorkspaceDigest: (slug: string, input?: { days?: number; email?: string | null }) => request<{ ok: boolean; email: string; deliveredAt: string }>(`/admin/workspaces/${encodeURIComponent(slug)}/digest/deliver`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   heartbeat: (beamId: string) => request<DirectoryAgent>(`/agents/${encodeURIComponent(beamId)}/heartbeat`, { method: 'POST' }),
   registerAgent: (input: RegisterAgentInput) => request<DirectoryAgent>('/agents/register', {

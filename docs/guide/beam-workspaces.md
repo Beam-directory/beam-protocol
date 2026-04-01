@@ -28,7 +28,7 @@ The workspace foundation now adds these records to the directory:
 - `workspace_policies`
   - the policy document for external initiation and approval rules
 
-The current operator-facing surface now covers workspace creation, identity bindings, overview metrics, thread timelines, and policy previews.
+The current operator-facing surface now covers workspace creation, identity bindings, lifecycle state, partner channels, thread composition, timeline history, digest delivery, and policy previews.
 
 ## Why Beam Needs This
 
@@ -44,7 +44,7 @@ Beam Workspaces close that gap.
 
 ## Current Admin API
 
-The first routes are all admin-authenticated:
+The first routes are all admin-authenticated and now include the controls required for partner channels, timelines, digests, and digest delivery.
 
 - `GET /admin/workspaces`
 - `POST /admin/workspaces`
@@ -58,6 +58,12 @@ The first routes are all admin-authenticated:
 - `POST /admin/workspaces/:slug/threads`
 - `GET /admin/workspaces/:slug/policy`
 - `PATCH /admin/workspaces/:slug/policy`
+- `GET /admin/workspaces/:slug/partner-channels`
+- `POST /admin/workspaces/:slug/partner-channels`
+- `PATCH /admin/workspaces/:slug/partner-channels/:id`
+- `GET /admin/workspaces/:slug/timeline`
+- `GET /admin/workspaces/:slug/digest`
+- `POST /admin/workspaces/:slug/digest/deliver`
 
 ### Create a workspace
 
@@ -141,6 +147,49 @@ The first routes are all admin-authenticated:
 }
 ```
 
+### Create a blocked handoff draft
+
+Blocked handoff drafts are valid without a `linkedIntentNonce`. This is the control-plane representation of "the operator has staged the outbound motion, but policy or approval is still stopping it."
+
+```json
+{
+  "kind": "handoff",
+  "title": "Quote approval draft",
+  "summary": "Blocked until the named approver confirms the partner route.",
+  "owner": "ops@example.com",
+  "status": "blocked",
+  "workflowType": "quote.approval",
+  "participants": [
+    {
+      "principalId": "ops-bot@beam.directory",
+      "principalType": "agent",
+      "beamId": "ops-bot@beam.directory",
+      "workspaceBindingId": 12,
+      "role": "owner"
+    },
+    {
+      "principalId": "finance@northwind.beam.directory",
+      "principalType": "partner",
+      "beamId": "finance@northwind.beam.directory",
+      "workspaceBindingId": 13,
+      "role": "participant"
+    }
+  ]
+}
+```
+
+### Create a partner channel
+
+```json
+{
+  "partnerBeamId": "finance@northwind.beam.directory",
+  "label": "Northwind Finance",
+  "owner": "ops@example.com",
+  "status": "trial",
+  "notes": "Primary finance route for invoice approvals."
+}
+```
+
 ### Patch a workspace policy
 
 ```json
@@ -170,6 +219,23 @@ The first routes are all admin-authenticated:
 }
 ```
 
+### Deliver a workspace digest
+
+```json
+{
+  "days": 7,
+  "email": "ops@example.com"
+}
+```
+
+The digest summarizes:
+
+- blocked external motion
+- stale or unowned identities
+- degraded or blocked partner channels
+- blocked or ownerless threads
+- recent timeline entries that explain what changed
+
 ## Design Boundary
 
 Beam Workspaces are intentionally narrower than products like OpenAgents Workspace.
@@ -189,8 +255,11 @@ That is why Workspaces start as a control-plane surface first.
 
 The dashboard now surfaces:
 
-1. workspace overview metrics for stale identities, manual review, and blocked outbound motion
-2. internal and external workspace threads on one page, with direct trace links for handoff threads
-3. policy previews showing which bindings can initiate external motion and which workflows require approvals
+1. workspace overview metrics for stale identities, manual review, blocked outbound motion, and the digest queue with overdue action items
+2. internal and external workspace threads on one page, covering blocked handoff drafts, linked handoff threads with trace links, and policy-driven workflows
+3. partner channel health plus partner-channel ownership controls that can trial, unblock, or escalate a partner relationship
+4. identity lifecycle cards showing `lastSeenAgeHours`, ownership state, and controls for pausing or toggling outbound permission
+5. the timeline drawer that collapses partner, policy, identity, thread, and digest events so the operator sees a unified audit trail
+6. the digest delivery panel that bottles action items, escalations, and summary stats and can deliver markdown to the operator mailbox
 
-This keeps Beam Workspace focused on identity ownership, policy, and cross-company control instead of drifting into a generic collaboration product.
+This keeps Beam Workspace focused on identity ownership, policy, partner health, and cross-company control instead of drifting into a generic collaboration product.

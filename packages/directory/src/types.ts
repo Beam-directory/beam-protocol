@@ -166,11 +166,14 @@ export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingStatus = 'active' | 'paused'
 export type WorkspacePartnerChannelStatus = 'active' | 'trial' | 'blocked'
+export type WorkspacePartnerChannelHealth = 'healthy' | 'watch' | 'critical'
 export type WorkspaceThreadKind = 'internal' | 'handoff'
 export type WorkspaceThreadStatus = 'open' | 'blocked' | 'closed'
 export type WorkspaceThreadParticipantRole = 'owner' | 'participant' | 'observer' | 'approver'
 export type WorkspacePolicyDefaultExternalInitiation = 'deny' | 'binding'
 export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
+export type WorkspaceIdentityLifecycleStatus = 'healthy' | 'stale' | 'paused' | 'missing' | 'revoked' | 'unowned'
+export type WorkspaceTimelineEventKind = 'workspace' | 'policy' | 'identity' | 'partner_channel' | 'thread' | 'digest'
 
 export interface WorkspaceRow {
   id: number

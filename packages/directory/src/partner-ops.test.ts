@@ -79,6 +79,10 @@ function registerProofAgents(db: ReturnType<typeof createDatabase>) {
   })
 }
 
+function minutesAgoIso(minutesAgo: number): string {
+  return new Date(Date.now() - minutesAgo * 60_000).toISOString()
+}
+
 function seedFailedIntent(
   db: ReturnType<typeof createDatabase>,
   nonce: string,
@@ -215,7 +219,7 @@ test('partner health and alerts attribute incidents back to the affected partner
     const created = await createHostedBetaRequest(app, 'buyer@example.com', 'Northwind Systems')
 
     for (let index = 0; index < 10; index += 1) {
-      seedFailedIntent(db, `partner-proof-${index}`, `2026-03-31T09:${String(index).padStart(2, '0')}:00.000Z`)
+      seedFailedIntent(db, `partner-proof-${index}`, minutesAgoIso(30 + index))
     }
 
     const patchResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
@@ -230,7 +234,7 @@ test('partner health and alerts attribute incidents back to the affected partner
         nextAction: 'Escalate the failing partner approval route before go-live.',
         lastContactAt: '2026-03-30T08:30:00.000Z',
         reminderAt: '2026-03-31T08:00:00.000Z',
-        proofIntentNonce: 'partner-proof-9',
+        proofIntentNonce: 'partner-proof-0',
       }),
     }))
     assert.equal(patchResponse.status, 200)

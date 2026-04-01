@@ -1,5 +1,16 @@
 # Changelog
 
+## v1.1.0 (draft)
+
+### Workspace Control Plane
+- expose workspace partner channels with health states and partner-channel ownership controls
+- show identity lifecycle status, ownership state, and outbound permission toggles in the workspace roster
+- add the thread composer for internal prep work, blocked handoff drafts, and linked handoff threads with trace links
+- add timeline and digest endpoints plus digest delivery to the operator mailbox
+- make policy and approval actions executable from the dashboard-backed workspace surface
+- create workspace dry-run scripts and reports for buyer, operator digest, and operator incident scenarios
+- publish RC checklist and release notes before cutting the `v1.1.0` release
+
 ## v1.0.0 (2026-04-01)
 
 ### First Production Partner
