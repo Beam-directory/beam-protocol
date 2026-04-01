@@ -4,7 +4,7 @@ Beam CLI covers identity setup, lookup, search, natural-language messaging, stru
 
 ## Compatibility contract
 
-`beam-protocol-cli` 0.6 targets `beam/1`.
+`beam-protocol-cli` 1.1 targets `beam/1`.
 
 - CLI requests stay within the same protocol family as the directory and SDKs
 - new optional fields can appear in JSON output without a major version bump

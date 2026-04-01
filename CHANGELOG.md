@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.1.0 (draft)
+## v1.1.0 (2026-04-01)
 
 ### Workspace Control Plane
 - expose workspace partner channels with health states and partner-channel ownership controls
