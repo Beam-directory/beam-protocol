@@ -26,8 +26,11 @@ import type {
   TrustScoreRow,
   VerificationTier,
   WorkspaceIdentityBindingRow,
+  WorkspacePolicy,
   WorkspacePolicyRow,
   WorkspaceRow,
+  WorkspaceThreadParticipantRow,
+  WorkspaceThreadRow,
 } from './types.js'
 import { generateDIDDocument, generateDIDDocumentWithKeys, toBeamDID, type DIDDocument } from './did.js'
 import {
@@ -43,6 +46,7 @@ import {
   parsePublicEndpointShieldPolicy,
   type PublicEndpointShieldPolicy,
 } from './shield/policies.js'
+import { mergeWorkspacePolicy, parseWorkspacePolicy } from './workspace-policy.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 const PUBLIC_ENDPOINT_POLICY_KEY = 'public-endpoints'
@@ -256,6 +260,48 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_workspace_partner_channels_workspace
       ON workspace_partner_channels(workspace_id, status, partner_beam_id);
+
+    CREATE TABLE IF NOT EXISTS workspace_threads (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      workspace_id INTEGER NOT NULL,
+      kind TEXT NOT NULL CHECK(kind IN ('internal', 'handoff')),
+      title TEXT NOT NULL,
+      summary TEXT,
+      owner TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'blocked', 'closed')),
+      workflow_type TEXT,
+      linked_intent_nonce TEXT,
+      last_activity_at TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE,
+      FOREIGN KEY (linked_intent_nonce) REFERENCES intent_log(nonce) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_threads_workspace
+      ON workspace_threads(workspace_id, status, last_activity_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_threads_nonce
+      ON workspace_threads(linked_intent_nonce);
+
+    CREATE TABLE IF NOT EXISTS workspace_thread_participants (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      thread_id INTEGER NOT NULL,
+      principal_id TEXT NOT NULL,
+      principal_type TEXT NOT NULL CHECK(principal_type IN ('human', 'agent', 'service', 'partner')),
+      display_name TEXT,
+      beam_id TEXT,
+      workspace_binding_id INTEGER,
+      role TEXT NOT NULL DEFAULT 'participant' CHECK(role IN ('owner', 'participant', 'observer', 'approver')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (thread_id) REFERENCES workspace_threads(id) ON DELETE CASCADE,
+      FOREIGN KEY (workspace_binding_id) REFERENCES workspace_identity_bindings(id) ON DELETE SET NULL,
+      UNIQUE(thread_id, principal_id, principal_type, role)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_thread_participants_thread
+      ON workspace_thread_participants(thread_id, role, principal_type);
 
     CREATE TABLE IF NOT EXISTS workspace_policies (
       workspace_id INTEGER PRIMARY KEY,
@@ -1190,6 +1236,181 @@ export function updateWorkspaceIdentityBinding(
   )
 
   return getWorkspaceIdentityBindingById(db, input.id)
+}
+
+export function getWorkspaceThreadById(db: DB, id: number): WorkspaceThreadRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_threads
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspaceThreadRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspaceThreads(db: DB, workspaceId: number): WorkspaceThreadRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspace_threads
+    WHERE workspace_id = ?
+    ORDER BY datetime(last_activity_at) DESC, id DESC
+  `).all(workspaceId) as WorkspaceThreadRow[]
+}
+
+export function createWorkspaceThread(
+  db: DB,
+  input: {
+    workspaceId: number
+    kind: WorkspaceThreadRow['kind']
+    title: string
+    summary?: string | null
+    owner?: string | null
+    status?: WorkspaceThreadRow['status']
+    workflowType?: string | null
+    linkedIntentNonce?: string | null
+    lastActivityAt?: string
+  },
+): WorkspaceThreadRow {
+  const now = nowIso()
+  const result = db.prepare(`
+    INSERT INTO workspace_threads (
+      workspace_id,
+      kind,
+      title,
+      summary,
+      owner,
+      status,
+      workflow_type,
+      linked_intent_nonce,
+      last_activity_at,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.workspaceId,
+    input.kind,
+    input.title,
+    input.summary ?? null,
+    input.owner ?? null,
+    input.status ?? 'open',
+    input.workflowType ?? null,
+    input.linkedIntentNonce ?? null,
+    input.lastActivityAt ?? now,
+    now,
+    now,
+  )
+
+  const thread = getWorkspaceThreadById(db, Number(result.lastInsertRowid))
+  if (!thread) {
+    throw new Error('Workspace thread insert succeeded but row was not found')
+  }
+
+  return thread
+}
+
+export function listWorkspaceThreadParticipants(db: DB, threadId: number): WorkspaceThreadParticipantRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspace_thread_participants
+    WHERE thread_id = ?
+    ORDER BY
+      CASE role
+        WHEN 'owner' THEN 0
+        WHEN 'approver' THEN 1
+        WHEN 'participant' THEN 2
+        ELSE 3
+      END ASC,
+      COALESCE(display_name, principal_id) ASC,
+      id ASC
+  `).all(threadId) as WorkspaceThreadParticipantRow[]
+}
+
+export function createWorkspaceThreadParticipant(
+  db: DB,
+  input: {
+    threadId: number
+    principalId: string
+    principalType: WorkspaceThreadParticipantRow['principal_type']
+    displayName?: string | null
+    beamId?: string | null
+    workspaceBindingId?: number | null
+    role?: WorkspaceThreadParticipantRow['role']
+  },
+): WorkspaceThreadParticipantRow {
+  const now = nowIso()
+  const result = db.prepare(`
+    INSERT INTO workspace_thread_participants (
+      thread_id,
+      principal_id,
+      principal_type,
+      display_name,
+      beam_id,
+      workspace_binding_id,
+      role,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.threadId,
+    input.principalId,
+    input.principalType,
+    input.displayName ?? null,
+    input.beamId ?? null,
+    input.workspaceBindingId ?? null,
+    input.role ?? 'participant',
+    now,
+    now,
+  )
+
+  return db.prepare(`
+    SELECT *
+    FROM workspace_thread_participants
+    WHERE id = ?
+  `).get(Number(result.lastInsertRowid)) as WorkspaceThreadParticipantRow
+}
+
+export function getWorkspacePolicyDocument(
+  db: DB,
+  workspaceId: number,
+): { policy: WorkspacePolicy; updatedAt: string | null; updatedBy: string | null } {
+  const row = getWorkspacePolicy(db, workspaceId)
+  return {
+    policy: parseWorkspacePolicy(row?.policy_json),
+    updatedAt: row?.updated_at ?? null,
+    updatedBy: row?.updated_by ?? null,
+  }
+}
+
+export function updateWorkspacePolicyDocument(
+  db: DB,
+  workspaceId: number,
+  patch: Partial<WorkspacePolicy>,
+  updatedBy: string | null,
+): { policy: WorkspacePolicy; updatedAt: string; updatedBy: string | null } {
+  const current = getWorkspacePolicyDocument(db, workspaceId).policy
+  const merged = mergeWorkspacePolicy(current, patch)
+  const updatedAt = nowIso()
+
+  db.prepare(`
+    INSERT INTO workspace_policies (workspace_id, policy_json, updated_at, updated_by)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(workspace_id) DO UPDATE SET
+      policy_json = excluded.policy_json,
+      updated_at = excluded.updated_at,
+      updated_by = excluded.updated_by
+  `).run(
+    workspaceId,
+    JSON.stringify(merged),
+    updatedAt,
+    updatedBy,
+  )
+
+  return {
+    policy: merged,
+    updatedAt,
+    updatedBy,
+  }
 }
 
 export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Partial<AgentRow>> {

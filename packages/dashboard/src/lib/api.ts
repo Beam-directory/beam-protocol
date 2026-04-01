@@ -14,6 +14,12 @@ export type WorkspaceStatus = 'active' | 'paused' | 'archived'
 export type WorkspaceThreadScope = 'internal' | 'handoff'
 export type WorkspaceBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceBindingStatus = 'active' | 'paused'
+export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
+export type WorkspaceThreadKind = 'internal' | 'handoff'
+export type WorkspaceThreadStatus = 'open' | 'blocked' | 'closed'
+export type WorkspaceThreadParticipantRole = 'owner' | 'participant' | 'observer' | 'approver'
+export type WorkspacePolicyDefaultExternalInitiation = 'binding' | 'deny'
+export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -194,6 +200,128 @@ export interface WorkspaceOverviewResponse {
   blockedExternalMotion: WorkspaceOverviewAttentionItem[]
   recentExternalHandoffs: WorkspaceOverviewHandoff[]
 }
+
+export interface WorkspaceThreadTrace {
+  nonce: string
+  status: IntentLifecycleStatus
+  intentType: string
+  fromBeamId: string
+  toBeamId: string
+  requestedAt: string
+  completedAt: string | null
+  latencyMs: number | null
+  errorCode: string | null
+  href: string
+}
+
+export interface WorkspaceThread {
+  id: number
+  workspaceId: number
+  kind: WorkspaceThreadKind
+  title: string
+  summary: string | null
+  owner: string | null
+  status: WorkspaceThreadStatus
+  workflowType: string | null
+  linkedIntentNonce: string | null
+  lastActivityAt: string
+  createdAt: string
+  updatedAt: string
+  participantCount: number
+  trace: WorkspaceThreadTrace | null
+}
+
+export interface WorkspaceThreadParticipant {
+  id: number
+  threadId: number
+  principalId: string
+  principalType: WorkspacePrincipalType
+  displayName: string | null
+  beamId: string | null
+  workspaceBindingId: number | null
+  role: WorkspaceThreadParticipantRole
+  createdAt: string
+  updatedAt: string
+  identity: {
+    existsLocally: boolean
+    displayName: string | null
+    org: string | null
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+  } | null
+}
+
+export interface WorkspaceThreadsResponse {
+  workspace: WorkspaceRecord
+  threads: WorkspaceThread[]
+  total: number
+}
+
+export interface WorkspaceThreadDetailResponse {
+  workspace: WorkspaceRecord
+  thread: WorkspaceThread
+  participants: WorkspaceThreadParticipant[]
+}
+
+export interface WorkspacePolicyBindingRule {
+  beamId: string | null
+  bindingType: WorkspaceBindingType | null
+  policyProfile: string | null
+  externalInitiation: WorkspacePolicyRuleExternalInitiation
+  allowedPartners: string[]
+}
+
+export interface WorkspacePolicyWorkflowRule {
+  workflowType: string
+  requireApproval: boolean
+  allowedPartners: string[]
+  approvers: string[]
+}
+
+export interface WorkspacePolicyDocument {
+  version: 1
+  defaults: {
+    externalInitiation: WorkspacePolicyDefaultExternalInitiation
+    allowedPartners: string[]
+  }
+  bindingRules: WorkspacePolicyBindingRule[]
+  workflowRules: WorkspacePolicyWorkflowRule[]
+  metadata: {
+    notes: string | null
+  }
+}
+
+export interface WorkspacePolicyPreview {
+  beamId: string
+  bindingType: WorkspaceBindingType
+  policyProfile: string | null
+  externalInitiation: 'allow' | 'deny'
+  allowedPartners: string[]
+  approvalRequired: boolean
+  approvers: string[]
+  matchedBindingRules: number
+  matchedWorkflowRules: number
+  workflowType: string | null
+}
+
+export interface WorkspaceWorkflowPolicyPreview {
+  workflowType: string
+  bindings: WorkspacePolicyPreview[]
+}
+
+export interface WorkspacePolicyResponse {
+  workspace: WorkspaceRecord
+  policy: WorkspacePolicyDocument
+  updatedAt: string | null
+  updatedBy: string | null
+  previews: {
+    bindings: WorkspacePolicyPreview[]
+    workflows: WorkspaceWorkflowPolicyPreview[]
+  }
+}
+
+export type WorkspacePolicyPatchInput = Partial<WorkspacePolicyDocument>
 
 export interface BusHealth {
   status: string
@@ -1282,6 +1410,13 @@ export const directoryApi = {
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
+  listWorkspaceThreads: (slug: string) => request<WorkspaceThreadsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads`, undefined, { admin: true }),
+  getWorkspaceThread: (slug: string, id: number) => request<WorkspaceThreadDetailResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads/${id}`, undefined, { admin: true }),
+  getWorkspacePolicy: (slug: string) => request<WorkspacePolicyResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, undefined, { admin: true }),
+  updateWorkspacePolicy: (slug: string, input: WorkspacePolicyPatchInput) => request<WorkspacePolicyResponse & { updated: boolean }>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   heartbeat: (beamId: string) => request<DirectoryAgent>(`/agents/${encodeURIComponent(beamId)}/heartbeat`, { method: 'POST' }),
   registerAgent: (input: RegisterAgentInput) => request<DirectoryAgent>('/agents/register', {
     method: 'POST',

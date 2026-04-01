@@ -68,7 +68,7 @@ test('admins can create and inspect beam workspaces through the admin API', asyn
     assert.equal(createdBody.workspace.name, 'Acme Ops Workspace')
     assert.match(createdBody.workspace.description ?? '', /Control plane/i)
     assert.equal(createdBody.workspace.externalHandoffsEnabled, true)
-    assert.equal(createdBody.workspace.policyConfigured, true)
+    assert.equal(createdBody.workspace.policyConfigured, false)
     assert.equal(createdBody.workspace.summary.identities, 0)
     assert.equal(createdBody.workspace.summary.partnerChannels, 0)
 
@@ -418,6 +418,316 @@ test('workspace overview surfaces stale identities, blocked external motion, and
     assert.equal(overviewBody.recentExternalHandoffs[1]?.direction, 'inbound')
     assert.equal(overviewBody.recentExternalHandoffs[1]?.counterparty.beamId, 'seller-bot@outside.beam.directory')
     assert.equal(overviewBody.recentExternalHandoffs[1]?.counterparty.inWorkspace, false)
+  } finally {
+    db.close()
+  }
+})
+
+test('workspace threads model internal discussion and external handoffs in one timeline', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['triage', 'handoff'],
+      publicKey: 'MCowBQYDK2VwAyEAyG5JwL7aQh7o4V6o8cz+Rmj4S7LnhwF4r2bp7L1fR8Q=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Northwind Ops',
+        slug: 'northwind-ops',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    const localBindingResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex',
+        policyProfile: 'ops-default',
+        canInitiateExternal: true,
+      }),
+    }))
+    const localBinding = await localBindingResponse.json() as { binding: { id: number } }
+
+    const partnerBindingResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'finance@northwind.beam.directory',
+        bindingType: 'partner',
+        owner: 'northwind@example.com',
+        policyProfile: 'partner-finance',
+      }),
+    }))
+    const partnerBinding = await partnerBindingResponse.json() as { binding: { id: number } }
+
+    logIntentStart(db, {
+      v: '1',
+      nonce: 'nonce-thread-handoff',
+      from: 'ops-bot@beam.directory',
+      to: 'finance@northwind.beam.directory',
+      intent: 'quote.approval',
+      payload: { quoteId: 'Q-77' },
+      timestamp: '2026-03-31T10:00:00.000Z',
+      signature: 'sig-thread',
+    })
+    setIntentLifecycleStatus(db, { nonce: 'nonce-thread-handoff', status: 'validated' })
+    setIntentLifecycleStatus(db, { nonce: 'nonce-thread-handoff', status: 'dispatched' })
+    setIntentLifecycleStatus(db, { nonce: 'nonce-thread-handoff', status: 'delivered' })
+    finalizeIntentLog(db, {
+      nonce: 'nonce-thread-handoff',
+      fromBeamId: 'ops-bot@beam.directory',
+      toBeamId: 'finance@northwind.beam.directory',
+      status: 'acked',
+      latencyMs: 510,
+      resultJson: JSON.stringify({ approved: true }),
+    })
+
+    const internalThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/threads', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'internal',
+        title: 'Prepare approval handoff',
+        summary: 'Align buyer owner and evidence before external send.',
+        owner: 'ops@example.com',
+        participants: [
+          {
+            principalId: 'ops@example.com',
+            principalType: 'human',
+            displayName: 'Ops Owner',
+            role: 'owner',
+          },
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: localBinding.binding.id,
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(internalThreadResponse.status, 201)
+    const internalThreadBody = await internalThreadResponse.json() as { thread: { id: number; kind: string; trace: null } }
+    assert.equal(internalThreadBody.thread.kind, 'internal')
+    assert.equal(internalThreadBody.thread.trace, null)
+
+    const handoffThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/threads', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Quote approval handoff',
+        summary: 'External finance approval with async proof.',
+        owner: 'ops@example.com',
+        workflowType: 'quote.approval',
+        linkedIntentNonce: 'nonce-thread-handoff',
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: localBinding.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'finance@northwind.beam.directory',
+            principalType: 'partner',
+            beamId: 'finance@northwind.beam.directory',
+            workspaceBindingId: partnerBinding.binding.id,
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(handoffThreadResponse.status, 201)
+    const handoffThreadBody = await handoffThreadResponse.json() as {
+      thread: { id: number; kind: string; trace: { nonce: string; status: string; href: string } | null }
+      participants: Array<{ beamId: string | null }>
+    }
+    assert.equal(handoffThreadBody.thread.kind, 'handoff')
+    assert.equal(handoffThreadBody.thread.trace?.nonce, 'nonce-thread-handoff')
+    assert.equal(handoffThreadBody.thread.trace?.status, 'acked')
+    assert.equal(handoffThreadBody.thread.trace?.href, '/intents/nonce-thread-handoff')
+    assert.equal(handoffThreadBody.participants.length, 2)
+
+    const listResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/threads', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(listResponse.status, 200)
+    const listBody = await listResponse.json() as {
+      total: number
+      threads: Array<{ kind: string; linkedIntentNonce: string | null; participantCount: number }>
+    }
+    assert.equal(listBody.total, 2)
+    const listedHandoffThread = listBody.threads.find((entry) => entry.kind === 'handoff')
+    const listedInternalThread = listBody.threads.find((entry) => entry.kind === 'internal')
+    assert.equal(listedHandoffThread?.linkedIntentNonce, 'nonce-thread-handoff')
+    assert.equal(listedHandoffThread?.participantCount, 2)
+    assert.equal(listedInternalThread?.kind, 'internal')
+
+    const detailResponse = await app.request(new Request(`http://localhost/admin/workspaces/northwind-ops/threads/${handoffThreadBody.thread.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(detailResponse.status, 200)
+    const detailBody = await detailResponse.json() as {
+      thread: { kind: string; trace: { intentType: string; fromBeamId: string; toBeamId: string } | null }
+      participants: Array<{ principalType: string; role: string }>
+    }
+    assert.equal(detailBody.thread.kind, 'handoff')
+    assert.equal(detailBody.thread.trace?.intentType, 'quote.approval')
+    assert.equal(detailBody.thread.trace?.fromBeamId, 'ops-bot@beam.directory')
+    assert.equal(detailBody.thread.trace?.toBeamId, 'finance@northwind.beam.directory')
+    assert.deepEqual(detailBody.participants.map((entry) => entry.principalType).sort(), ['agent', 'partner'])
+  } finally {
+    db.close()
+  }
+})
+
+test('workspace policy routes expose normalized policy and enforcement-ready binding previews', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['handoff'],
+      publicKey: 'MCowBQYDK2VwAyEAw2QJY0YH7e1L2+2VQ1bH4TqL6wCnC8n9v8m8z4vPsxM=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Acme Finance',
+        slug: 'acme-finance',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces/acme-finance/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex',
+        policyProfile: 'finance-outbound',
+        canInitiateExternal: false,
+      }),
+    }))
+
+    const initialPolicyResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/policy', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(initialPolicyResponse.status, 200)
+    const initialPolicy = await initialPolicyResponse.json() as {
+      policy: {
+        defaults: { externalInitiation: string }
+        bindingRules: unknown[]
+        workflowRules: unknown[]
+      }
+      previews: {
+        bindings: Array<{ beamId: string; externalInitiation: string }>
+      }
+    }
+    assert.equal(initialPolicy.policy.defaults.externalInitiation, 'binding')
+    assert.equal(initialPolicy.policy.bindingRules.length, 0)
+    assert.equal(initialPolicy.previews.bindings[0]?.externalInitiation, 'deny')
+
+    const patchResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/policy', {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        defaults: {
+          externalInitiation: 'deny',
+          allowedPartners: ['*@northwind.beam.directory'],
+        },
+        bindingRules: [
+          {
+            policyProfile: 'finance-outbound',
+            externalInitiation: 'allow',
+            allowedPartners: ['finance@northwind.beam.directory'],
+          },
+        ],
+        workflowRules: [
+          {
+            workflowType: 'quote.approval',
+            requireApproval: true,
+            allowedPartners: ['finance@northwind.beam.directory'],
+            approvers: ['ops@example.com', 'approvals@example.com'],
+          },
+        ],
+        metadata: {
+          notes: 'Finance outbound handoffs need named approvers.',
+        },
+      }),
+    }))
+    assert.equal(patchResponse.status, 200)
+    const patchBody = await patchResponse.json() as {
+      updated: boolean
+      updatedBy: string | null
+      policy: {
+        defaults: { externalInitiation: string; allowedPartners: string[] }
+        bindingRules: Array<{ policyProfile: string | null; externalInitiation: string; allowedPartners: string[] }>
+        workflowRules: Array<{ workflowType: string; requireApproval: boolean; approvers: string[] }>
+        metadata: { notes: string | null }
+      }
+      previews: {
+        bindings: Array<{ beamId: string; externalInitiation: string; allowedPartners: string[] }>
+        workflows: Array<{
+          workflowType: string
+          bindings: Array<{ beamId: string; externalInitiation: string; approvalRequired: boolean; approvers: string[] }>
+        }>
+      }
+    }
+    assert.equal(patchBody.updated, true)
+    assert.equal(patchBody.updatedBy, 'ops@example.com')
+    assert.equal(patchBody.policy.defaults.externalInitiation, 'deny')
+    assert.deepEqual(patchBody.policy.defaults.allowedPartners, ['*@northwind.beam.directory'])
+    assert.equal(patchBody.policy.bindingRules[0]?.policyProfile, 'finance-outbound')
+    assert.equal(patchBody.policy.bindingRules[0]?.externalInitiation, 'allow')
+    assert.deepEqual(patchBody.policy.bindingRules[0]?.allowedPartners, ['finance@northwind.beam.directory'])
+    assert.equal(patchBody.policy.workflowRules[0]?.workflowType, 'quote.approval')
+    assert.equal(patchBody.policy.workflowRules[0]?.requireApproval, true)
+    assert.deepEqual(patchBody.policy.workflowRules[0]?.approvers, ['ops@example.com', 'approvals@example.com'])
+    assert.match(patchBody.policy.metadata.notes ?? '', /named approvers/i)
+    assert.equal(patchBody.previews.bindings[0]?.beamId, 'ops-bot@beam.directory')
+    assert.equal(patchBody.previews.bindings[0]?.externalInitiation, 'allow')
+    assert.deepEqual(patchBody.previews.bindings[0]?.allowedPartners, ['*@northwind.beam.directory', 'finance@northwind.beam.directory'])
+    assert.equal(patchBody.previews.workflows[0]?.workflowType, 'quote.approval')
+    assert.equal(patchBody.previews.workflows[0]?.bindings[0]?.approvalRequired, true)
+    assert.deepEqual(patchBody.previews.workflows[0]?.bindings[0]?.approvers, ['ops@example.com', 'approvals@example.com'])
   } finally {
     db.close()
   }

@@ -326,7 +326,7 @@ test('createDatabase migrates legacy waitlist tables before creating status inde
   }
 })
 
-test('createDatabase adds beam workspace foundation tables to legacy databases', () => {
+test('createDatabase adds beam workspace control-plane tables to legacy databases', () => {
   const { root, dbPath } = createTempDbPath()
   const legacyDb = new Database(dbPath)
 
@@ -369,7 +369,9 @@ test('createDatabase adds beam workspace foundation tables to legacy databases',
           'workspace_members',
           'workspace_identity_bindings',
           'workspace_partner_channels',
-          'workspace_policies'
+          'workspace_policies',
+          'workspace_threads',
+          'workspace_thread_participants'
         )
       ORDER BY name ASC
     `).all() as Array<{ name: string }>
@@ -381,6 +383,8 @@ test('createDatabase adds beam workspace foundation tables to legacy databases',
         'workspace_members',
         'workspace_partner_channels',
         'workspace_policies',
+        'workspace_thread_participants',
+        'workspace_threads',
         'workspaces',
       ],
     )
@@ -389,6 +393,14 @@ test('createDatabase adds beam workspace foundation tables to legacy databases',
     assert.ok(bindingColumns.some((column) => column.name === 'default_thread_scope'))
     assert.ok(bindingColumns.some((column) => column.name === 'can_initiate_external'))
     assert.ok(bindingColumns.some((column) => column.name === 'runtime_type'))
+
+    const threadColumns = db.prepare('PRAGMA table_info(workspace_threads)').all() as Array<{ name: string }>
+    assert.ok(threadColumns.some((column) => column.name === 'kind'))
+    assert.ok(threadColumns.some((column) => column.name === 'linked_intent_nonce'))
+
+    const participantColumns = db.prepare('PRAGMA table_info(workspace_thread_participants)').all() as Array<{ name: string }>
+    assert.ok(participantColumns.some((column) => column.name === 'principal_type'))
+    assert.ok(participantColumns.some((column) => column.name === 'workspace_binding_id'))
   } finally {
     db.close()
     rmSync(root, { force: true, recursive: true })

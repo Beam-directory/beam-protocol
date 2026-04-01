@@ -4,17 +4,24 @@ import { requireAdminRole } from '../admin-auth.js'
 import {
   createWorkspace,
   createWorkspaceIdentityBinding,
+  createWorkspaceThread,
+  createWorkspaceThreadParticipant,
   getAgent,
+  getIntentLogByNonce,
   getOrg,
   getWorkspaceBySlug,
   getWorkspaceIdentityBindingByBeamId,
   getWorkspaceIdentityBindingById,
-  getWorkspacePolicy,
+  getWorkspacePolicyDocument,
   getWorkspaceSummary,
+  getWorkspaceThreadById,
   listAgentKeys,
   listWorkspaceIdentityBindings,
+  listWorkspaceThreadParticipants,
+  listWorkspaceThreads,
   listWorkspaces,
   logAuditEvent,
+  updateWorkspacePolicyDocument,
   updateWorkspaceIdentityBinding,
 } from '../db.js'
 import type {
@@ -22,15 +29,27 @@ import type {
   WorkspaceIdentityBindingRow,
   WorkspaceIdentityBindingStatus,
   WorkspaceIdentityBindingType,
+  WorkspacePolicy,
+  WorkspacePrincipalType,
   WorkspaceRow,
+  WorkspaceThreadKind,
+  WorkspaceThreadParticipantRole,
   WorkspaceThreadScope,
+  WorkspaceThreadStatus,
+  WorkspaceThreadParticipantRow,
+  WorkspaceThreadRow,
 } from '../types.js'
 import { serializeAgentKeyState } from '../utils/serialize.js'
+import { evaluateWorkspacePolicy } from '../workspace-policy.js'
 
 const WORKSPACE_STATUS_SET = new Set<WorkspaceRow['status']>(['active', 'paused', 'archived'])
 const WORKSPACE_THREAD_SCOPE_SET = new Set<WorkspaceThreadScope>(['internal', 'handoff'])
 const WORKSPACE_BINDING_TYPE_SET = new Set<WorkspaceIdentityBindingType>(['agent', 'service', 'partner'])
 const WORKSPACE_BINDING_STATUS_SET = new Set<WorkspaceIdentityBindingStatus>(['active', 'paused'])
+const WORKSPACE_THREAD_KIND_SET = new Set<WorkspaceThreadKind>(['internal', 'handoff'])
+const WORKSPACE_THREAD_STATUS_SET = new Set<WorkspaceThreadStatus>(['open', 'blocked', 'closed'])
+const WORKSPACE_THREAD_PARTICIPANT_ROLE_SET = new Set<WorkspaceThreadParticipantRole>(['owner', 'participant', 'observer', 'approver'])
+const WORKSPACE_PRINCIPAL_TYPE_SET = new Set<WorkspacePrincipalType>(['human', 'agent', 'service', 'partner'])
 const WORKSPACE_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const WORKSPACE_OVERVIEW_STALE_AFTER_HOURS = 24
 const WORKSPACE_OVERVIEW_RECENT_HANDOFF_LIMIT = 8
@@ -124,6 +143,68 @@ type WorkspaceOverviewHandoff = {
   }
 }
 
+type SerializedWorkspaceThreadParticipant = {
+  id: number
+  threadId: number
+  principalId: string
+  principalType: WorkspacePrincipalType
+  displayName: string | null
+  beamId: string | null
+  workspaceBindingId: number | null
+  role: WorkspaceThreadParticipantRole
+  createdAt: string
+  updatedAt: string
+  identity: {
+    existsLocally: boolean
+    displayName: string | null
+    org: string | null
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+  } | null
+}
+
+type SerializedWorkspaceThread = {
+  id: number
+  workspaceId: number
+  kind: WorkspaceThreadKind
+  title: string
+  summary: string | null
+  owner: string | null
+  status: WorkspaceThreadStatus
+  workflowType: string | null
+  linkedIntentNonce: string | null
+  lastActivityAt: string
+  createdAt: string
+  updatedAt: string
+  participantCount: number
+  trace: {
+    nonce: string
+    status: IntentLogRow['status']
+    intentType: string
+    fromBeamId: string
+    toBeamId: string
+    requestedAt: string
+    completedAt: string | null
+    latencyMs: number | null
+    errorCode: string | null
+    href: string
+  } | null
+}
+
+type SerializedWorkspacePolicyPreview = {
+  beamId: string
+  bindingType: WorkspaceIdentityBindingType
+  policyProfile: string | null
+  externalInitiation: 'allow' | 'deny'
+  allowedPartners: string[]
+  approvalRequired: boolean
+  approvers: string[]
+  matchedBindingRules: number
+  matchedWorkflowRules: number
+  workflowType: string | null
+}
+
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
 }
@@ -172,6 +253,42 @@ function normalizeBindingStatus(value: unknown): WorkspaceIdentityBindingStatus 
 
   const normalized = value.trim().toLowerCase() as WorkspaceIdentityBindingStatus
   return WORKSPACE_BINDING_STATUS_SET.has(normalized) ? normalized : null
+}
+
+function normalizeThreadKind(value: unknown): WorkspaceThreadKind | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspaceThreadKind
+  return WORKSPACE_THREAD_KIND_SET.has(normalized) ? normalized : null
+}
+
+function normalizeThreadStatus(value: unknown): WorkspaceThreadStatus | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspaceThreadStatus
+  return WORKSPACE_THREAD_STATUS_SET.has(normalized) ? normalized : null
+}
+
+function normalizePrincipalType(value: unknown): WorkspacePrincipalType | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspacePrincipalType
+  return WORKSPACE_PRINCIPAL_TYPE_SET.has(normalized) ? normalized : null
+}
+
+function normalizeThreadParticipantRole(value: unknown): WorkspaceThreadParticipantRole | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspaceThreadParticipantRole
+  return WORKSPACE_THREAD_PARTICIPANT_ROLE_SET.has(normalized) ? normalized : null
 }
 
 function normalizeBoolean(value: unknown): boolean | null {
@@ -252,7 +369,7 @@ function getDisplayNameForBeamId(
 
 function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspace {
   const summary = getWorkspaceSummary(db, row.id)
-  const policy = getWorkspacePolicy(db, row.id)
+  const { policy } = getWorkspacePolicyDocument(db, row.id)
 
   return {
     id: row.id,
@@ -271,7 +388,7 @@ function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspac
       members: summary.memberCount,
       partnerChannels: summary.partnerChannelCount,
     },
-    policyConfigured: policy !== null,
+    policyConfigured: policy.bindingRules.length > 0 || policy.workflowRules.length > 0 || policy.defaults.allowedPartners.length > 0 || policy.defaults.externalInitiation !== 'binding' || Boolean(policy.metadata.notes),
   }
 }
 
@@ -315,6 +432,119 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
       lastSeen: null,
       capabilities: [],
       keyState,
+    },
+  }
+}
+
+function serializeWorkspaceThreadParticipant(
+  db: Database,
+  row: WorkspaceThreadParticipantRow,
+): SerializedWorkspaceThreadParticipant {
+  const identity = row.beam_id ? getAgent(db, row.beam_id) : null
+  return {
+    id: row.id,
+    threadId: row.thread_id,
+    principalId: row.principal_id,
+    principalType: row.principal_type,
+    displayName: row.display_name,
+    beamId: row.beam_id,
+    workspaceBindingId: row.workspace_binding_id,
+    role: row.role,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    identity: identity ? {
+      existsLocally: true,
+      displayName: identity.display_name,
+      org: identity.org,
+      verificationTier: identity.verification_tier,
+      trustScore: identity.trust_score,
+      lastSeen: identity.last_seen,
+    } : row.beam_id ? {
+      existsLocally: false,
+      displayName: row.display_name,
+      org: null,
+      verificationTier: null,
+      trustScore: null,
+      lastSeen: null,
+    } : null,
+  }
+}
+
+function serializeWorkspaceThread(
+  db: Database,
+  row: WorkspaceThreadRow,
+  participants: WorkspaceThreadParticipantRow[],
+): SerializedWorkspaceThread {
+  const intent = row.linked_intent_nonce ? getIntentLogByNonce(db, row.linked_intent_nonce) : null
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    kind: row.kind,
+    title: row.title,
+    summary: row.summary,
+    owner: row.owner,
+    status: row.status,
+    workflowType: row.workflow_type,
+    linkedIntentNonce: row.linked_intent_nonce,
+    lastActivityAt: row.last_activity_at,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    participantCount: participants.length,
+    trace: intent ? {
+      nonce: intent.nonce,
+      status: intent.status,
+      intentType: intent.intent_type,
+      fromBeamId: intent.from_beam_id,
+      toBeamId: intent.to_beam_id,
+      requestedAt: intent.requested_at,
+      completedAt: intent.completed_at,
+      latencyMs: intent.round_trip_latency_ms,
+      errorCode: intent.error_code,
+      href: `/intents/${encodeURIComponent(intent.nonce)}`,
+    } : null,
+  }
+}
+
+function buildWorkspacePolicyPreview(
+  policy: WorkspacePolicy,
+  binding: WorkspaceIdentityBindingRow,
+  workflowType: string | null = null,
+): SerializedWorkspacePolicyPreview {
+  const evaluation = evaluateWorkspacePolicy(policy, binding, {
+    workflowType,
+  })
+
+  return {
+    beamId: evaluation.beamId,
+    bindingType: evaluation.bindingType,
+    policyProfile: evaluation.policyProfile,
+    externalInitiation: evaluation.externalInitiation,
+    allowedPartners: evaluation.allowedPartners,
+    approvalRequired: evaluation.approvalRequired,
+    approvers: evaluation.approvers,
+    matchedBindingRules: evaluation.matchedBindingRules,
+    matchedWorkflowRules: evaluation.matchedWorkflowRules,
+    workflowType,
+  }
+}
+
+function buildWorkspacePolicyEnvelope(db: Database, workspace: WorkspaceRow) {
+  const bindings = listWorkspaceIdentityBindings(db, workspace.id)
+  const locals = bindings.filter(isLocalWorkspaceBinding)
+  const { policy, updatedAt, updatedBy } = getWorkspacePolicyDocument(db, workspace.id)
+  const workflows = [...new Set(policy.workflowRules.map((rule) => rule.workflowType))]
+
+  return {
+    workspace: serializeWorkspace(db, workspace),
+    policy,
+    updatedAt,
+    updatedBy,
+    previews: {
+      bindings: locals.map((binding) => buildWorkspacePolicyPreview(policy, binding)),
+      workflows: workflows.map((workflowType) => ({
+        workflowType,
+        bindings: locals.map((binding) => buildWorkspacePolicyPreview(policy, binding, workflowType)),
+      })),
     },
   }
 }
@@ -651,6 +881,270 @@ export function workspacesRouter(db: Database): Hono {
     return c.json({
       workspace: serializeWorkspace(db, workspace),
       ...buildWorkspaceOverview(db, workspace),
+    })
+  })
+
+  router.get('/:slug/threads', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const rows = listWorkspaceThreads(db, workspace.id)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      threads: rows.map((row) => serializeWorkspaceThread(db, row, listWorkspaceThreadParticipants(db, row.id))),
+      total: rows.length,
+    })
+  })
+
+  router.get('/:slug/threads/:id', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const threadId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(threadId) || threadId <= 0) {
+      return c.json({ error: 'Invalid thread id', errorCode: 'INVALID_THREAD_ID' }, 400)
+    }
+
+    const thread = getWorkspaceThreadById(db, threadId)
+    if (!thread || thread.workspace_id !== workspace.id) {
+      return c.json({ error: 'Workspace thread not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const participants = listWorkspaceThreadParticipants(db, thread.id)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      thread: serializeWorkspaceThread(db, thread, participants),
+      participants: participants.map((row) => serializeWorkspaceThreadParticipant(db, row)),
+    })
+  })
+
+  router.post('/:slug/threads', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const kind = normalizeThreadKind(raw.kind)
+    if (!kind) {
+      return c.json({ error: 'Invalid thread kind', errorCode: 'INVALID_THREAD_KIND' }, 400)
+    }
+
+    const title = normalizeOptionalString(raw.title)
+    if (!title) {
+      return c.json({ error: 'title is required', errorCode: 'INVALID_THREAD_TITLE' }, 400)
+    }
+
+    const summary = normalizeOptionalString(raw.summary)
+    const owner = normalizeOptionalString(raw.owner)
+    const status = 'status' in raw ? normalizeThreadStatus(raw.status) : 'open'
+    if ('status' in raw && !status) {
+      return c.json({ error: 'Invalid thread status', errorCode: 'INVALID_THREAD_STATUS' }, 400)
+    }
+
+    const workflowType = normalizeOptionalString(raw.workflowType)
+    const linkedIntentNonce = normalizeOptionalString(raw.linkedIntentNonce)
+    if (kind === 'handoff' && !linkedIntentNonce) {
+      return c.json({ error: 'linkedIntentNonce is required for handoff threads', errorCode: 'MISSING_THREAD_NONCE' }, 400)
+    }
+    if (kind === 'internal' && linkedIntentNonce) {
+      return c.json({ error: 'Internal threads cannot link directly to a Beam trace', errorCode: 'INTERNAL_THREAD_CANNOT_LINK_TRACE' }, 400)
+    }
+
+    const linkedIntent = linkedIntentNonce ? getIntentLogByNonce(db, linkedIntentNonce) : null
+    if (linkedIntentNonce && !linkedIntent) {
+      return c.json({ error: 'linkedIntentNonce was not found', errorCode: 'INTENT_NOT_FOUND' }, 404)
+    }
+
+    const rawParticipants = Array.isArray(raw.participants) ? raw.participants : []
+    const participantInputs = rawParticipants.map((entry, index) => {
+      if (!entry || typeof entry !== 'object' || Array.isArray(entry)) {
+        throw new Error(`participants[${index}] must be an object`)
+      }
+
+      const participant = entry as Record<string, unknown>
+      const principalId = normalizeOptionalString(participant.principalId)
+      if (!principalId) {
+        throw new Error(`participants[${index}].principalId is required`)
+      }
+
+      const principalType = normalizePrincipalType(participant.principalType)
+      if (!principalType) {
+        throw new Error(`participants[${index}].principalType is invalid`)
+      }
+
+      const role = 'role' in participant ? normalizeThreadParticipantRole(participant.role) : 'participant'
+      if ('role' in participant && !role) {
+        throw new Error(`participants[${index}].role is invalid`)
+      }
+
+      const bindingId = participant.workspaceBindingId == null ? null : Number.parseInt(String(participant.workspaceBindingId), 10)
+      if (participant.workspaceBindingId != null && (!Number.isFinite(bindingId) || (bindingId ?? 0) <= 0)) {
+        throw new Error(`participants[${index}].workspaceBindingId is invalid`)
+      }
+
+      const binding = bindingId ? getWorkspaceIdentityBindingById(db, bindingId) : null
+      if (binding && binding.workspace_id !== workspace.id) {
+        throw new Error(`participants[${index}].workspaceBindingId does not belong to this workspace`)
+      }
+
+      const beamId = normalizeOptionalString(participant.beamId) ?? binding?.beam_id ?? null
+      const displayName = normalizeOptionalString(participant.displayName)
+
+      return {
+        principalId,
+        principalType,
+        role: role ?? 'participant',
+        workspaceBindingId: binding?.id ?? null,
+        beamId,
+        displayName,
+      }
+    })
+
+    let thread: WorkspaceThreadRow
+    try {
+      thread = createWorkspaceThread(db, {
+        workspaceId: workspace.id,
+        kind,
+        title,
+        summary,
+        owner,
+        status: status ?? 'open',
+        workflowType,
+        linkedIntentNonce,
+        lastActivityAt: linkedIntent?.requested_at,
+      })
+
+      for (const participant of participantInputs) {
+        createWorkspaceThreadParticipant(db, {
+          threadId: thread.id,
+          principalId: participant.principalId,
+          principalType: participant.principalType,
+          displayName: participant.displayName,
+          beamId: participant.beamId,
+          workspaceBindingId: participant.workspaceBindingId,
+          role: participant.role,
+        })
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Failed to create workspace thread'
+      if (message.includes('participants[')) {
+        return c.json({ error: message, errorCode: 'INVALID_THREAD_PARTICIPANT' }, 400)
+      }
+
+      console.error('Workspace thread create error:', err)
+      return c.json({ error: 'Failed to create workspace thread', errorCode: 'DB_ERROR' }, 500)
+    }
+
+    const participants = listWorkspaceThreadParticipants(db, thread.id)
+    logAuditEvent(db, {
+      action: 'admin.workspace_thread.created',
+      actor: auth.session.email,
+      target: `${workspace.slug}:${thread.id}`,
+      details: {
+        role: auth.session.role,
+        kind: thread.kind,
+        workflowType: thread.workflow_type,
+        linkedIntentNonce: thread.linked_intent_nonce,
+        participants: participants.length,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      thread: serializeWorkspaceThread(db, thread, participants),
+      participants: participants.map((row) => serializeWorkspaceThreadParticipant(db, row)),
+    }, 201)
+  })
+
+  router.get('/:slug/policy', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json(buildWorkspacePolicyEnvelope(db, workspace))
+  })
+
+  router.patch('/:slug/policy', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const patch = body as Partial<WorkspacePolicy>
+    const result = updateWorkspacePolicyDocument(db, workspace.id, patch, auth.session.email)
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_policy.updated',
+      actor: auth.session.email,
+      target: workspace.slug,
+      details: {
+        role: auth.session.role,
+        defaultExternalInitiation: result.policy.defaults.externalInitiation,
+        bindingRules: result.policy.bindingRules.length,
+        workflowRules: result.policy.workflowRules.length,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ...buildWorkspacePolicyEnvelope(db, workspace),
+      updated: true,
     })
   })
 
