@@ -223,6 +223,20 @@ function parseAgentNameFromSessionKey(sessionKey) {
   return match?.[1] ?? 'openclaw'
 }
 
+function parseSubagentIdFromSessionKey(sessionKey) {
+  if (typeof sessionKey !== 'string') {
+    return null
+  }
+
+  const nestedMatch = sessionKey.match(/:subagent:([^:]+)$/u)
+  if (nestedMatch?.[1]) {
+    return nestedMatch[1]
+  }
+
+  const firstMatch = sessionKey.match(/subagent:([^:]+)/u)
+  return firstMatch?.[1] ?? null
+}
+
 function normalizeSubagentDescriptors(runsPayload) {
   const runs = Object.values(runsPayload?.runs ?? {})
   const cutoff = Number.isFinite(subagentDays) && subagentDays > 0
@@ -233,7 +247,7 @@ function normalizeSubagentDescriptors(runsPayload) {
   return runs
     .map((run) => {
       const childSessionKey = typeof run.childSessionKey === 'string' ? run.childSessionKey : null
-      const subagentId = childSessionKey?.split('subagent:')[1] ?? null
+      const subagentId = parseSubagentIdFromSessionKey(childSessionKey)
       if (!subagentId) {
         return null
       }

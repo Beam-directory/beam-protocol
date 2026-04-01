@@ -78,6 +78,7 @@ That command will:
 3. run the local quickstart smoke test
 4. import OpenClaw agents into `openclaw-local`
 5. generate missing Beam identities automatically
+6. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
 
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:
 
@@ -105,6 +106,18 @@ To remove it later:
 
 ```bash
 npm run workspace:openclaw-live:uninstall
+```
+
+If you only want the direct OpenClaw hook that syncs new subagents at spawn time, use:
+
+```bash
+npm run workspace:openclaw-spawn-hook:install
+```
+
+To remove that hook again:
+
+```bash
+npm run workspace:openclaw-spawn-hook:uninstall
 ```
 
 If you only want the import step against an already running stack, use:

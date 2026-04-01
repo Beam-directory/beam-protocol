@@ -10,6 +10,7 @@ const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
 const watchMode = process.argv.includes('--watch')
 const daemonMode = process.argv.includes('--daemon')
+const skipSpawnHookInstall = process.argv.includes('--skip-spawn-hook-install')
 const nodePath = process.execPath
 const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
   ? '/opt/homebrew/bin/docker'
@@ -85,9 +86,17 @@ async function main() {
   logStep('importing persistent OpenClaw agents, workspace agents, and recent subagents')
   run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing'])
 
+  if (!skipSpawnHookInstall) {
+    logStep('installing the direct OpenClaw spawn hook')
+    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-spawn-hook.mjs')])
+  }
+
   console.log('')
   console.log('Beam OpenClaw local setup finished.')
   console.log('Open the printed login link and then the openclaw-local workspace in the dashboard.')
+  if (!skipSpawnHookInstall) {
+    console.log('Fresh OpenClaw subagents will now sync into Beam directly at spawn time.')
+  }
 }
 
 main().catch((error) => {
