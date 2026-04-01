@@ -199,6 +199,24 @@ export interface WorkspacePartnerChannel {
     trustScore: number | null
     lastSeen: string | null
   }
+  workspaceRoute: {
+    workspaceId: number
+    workspaceSlug: string
+    workspaceName: string
+    bindingId: number
+    bindingType: WorkspaceBindingType
+    bindingStatus: WorkspaceBindingStatus
+    displayName: string | null
+    runtimeType: string | null
+    runtime: {
+      mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
+      connector: string | null
+      label: string | null
+      connected: boolean
+      httpEndpoint: string | null
+      deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
+    }
+  } | null
   trace: {
     nonce: string
     status: IntentLifecycleStatus

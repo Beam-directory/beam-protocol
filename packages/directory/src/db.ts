@@ -1149,6 +1149,39 @@ export function listWorkspaceIdentityBindings(db: DB, workspaceId: number): Work
   `).all(workspaceId) as WorkspaceIdentityBindingRow[]
 }
 
+export function listWorkspaceIdentityBindingsByBeamId(
+  db: DB,
+  beamId: string,
+  options?: {
+    excludeWorkspaceId?: number
+  },
+): WorkspaceIdentityBindingRow[] {
+  const clauses = ['beam_id = ?']
+  const params: Array<number | string> = [beamId]
+
+  if (options?.excludeWorkspaceId != null) {
+    clauses.push('workspace_id != ?')
+    params.push(options.excludeWorkspaceId)
+  }
+
+  return db.prepare(`
+    SELECT *
+    FROM workspace_identity_bindings
+    WHERE ${clauses.join(' AND ')}
+    ORDER BY
+      CASE status
+        WHEN 'active' THEN 0
+        ELSE 1
+      END ASC,
+      CASE binding_type
+        WHEN 'partner' THEN 1
+        ELSE 0
+      END ASC,
+      workspace_id ASC,
+      id ASC
+  `).all(...params) as WorkspaceIdentityBindingRow[]
+}
+
 export function getWorkspacePartnerChannelById(db: DB, id: number): WorkspacePartnerChannelRow | null {
   const row = db.prepare(`
     SELECT *

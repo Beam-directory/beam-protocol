@@ -11,6 +11,7 @@ import {
   getAgent,
   getIntentLogByNonce,
   getOrg,
+  getWorkspaceById,
   getWorkspaceBySlug,
   getWorkspaceIdentityBindingByBeamId,
   getWorkspaceIdentityBindingById,
@@ -21,6 +22,7 @@ import {
   getWorkspaceThreadById,
   listAgentKeys,
   listWorkspaceIdentityBindings,
+  listWorkspaceIdentityBindingsByBeamId,
   listWorkspacePartnerChannels,
   listWorkspaceThreadParticipants,
   listWorkspaceThreads,
@@ -162,6 +164,17 @@ type SerializedWorkspacePartnerChannel = {
     trustScore: number | null
     lastSeen: string | null
   }
+  workspaceRoute: {
+    workspaceId: number
+    workspaceSlug: string
+    workspaceName: string
+    bindingId: number
+    bindingType: WorkspaceIdentityBindingType
+    bindingStatus: WorkspaceIdentityBindingStatus
+    displayName: string | null
+    runtimeType: string | null
+    runtime: SerializedWorkspaceIdentityBinding['runtime']
+  } | null
   trace: {
     nonce: string
     status: IntentLogRow['status']
@@ -838,6 +851,42 @@ function classifyWorkspacePartnerChannelHealth(
   return 'healthy'
 }
 
+function resolveWorkspacePartnerRoute(
+  db: Database,
+  row: WorkspacePartnerChannelRow,
+): SerializedWorkspacePartnerChannel['workspaceRoute'] {
+  const routeBinding = listWorkspaceIdentityBindingsByBeamId(db, row.partner_beam_id, {
+    excludeWorkspaceId: row.workspace_id,
+  }).find((binding) => binding.binding_type !== 'partner')
+
+  if (!routeBinding) {
+    return null
+  }
+
+  const routeWorkspace = getWorkspaceById(db, routeBinding.workspace_id)
+  if (!routeWorkspace) {
+    return null
+  }
+
+  const routeIdentity = getAgent(db, routeBinding.beam_id)
+  const runtime = parseRuntimeMetadata(routeBinding.binding_type, routeBinding.runtime_type)
+
+  return {
+    workspaceId: routeWorkspace.id,
+    workspaceSlug: routeWorkspace.slug,
+    workspaceName: routeWorkspace.name,
+    bindingId: routeBinding.id,
+    bindingType: routeBinding.binding_type,
+    bindingStatus: routeBinding.status,
+    displayName: routeIdentity?.display_name ?? null,
+    runtimeType: routeBinding.runtime_type,
+    runtime: {
+      ...runtime,
+      connected: routeBinding.binding_type !== 'partner' && isAgentConnected(routeBinding.beam_id),
+    },
+  }
+}
+
 function serializeWorkspacePartnerChannel(
   db: Database,
   row: WorkspacePartnerChannelRow,
@@ -847,6 +896,7 @@ function serializeWorkspacePartnerChannel(
   const stats = countWorkspacePartnerTraffic(db, localBeamIds, row.partner_beam_id)
   const healthStatus = classifyWorkspacePartnerChannelHealth(row, stats)
   const trace = row.last_intent_nonce ? getIntentLogByNonce(db, row.last_intent_nonce) : null
+  const workspaceRoute = resolveWorkspacePartnerRoute(db, row)
 
   return {
     id: row.id,
@@ -871,6 +921,7 @@ function serializeWorkspacePartnerChannel(
       trustScore: partner?.trust_score ?? null,
       lastSeen: partner?.last_seen ?? null,
     },
+    workspaceRoute,
     trace: trace ? {
       nonce: trace.nonce,
       status: trace.status,
