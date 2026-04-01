@@ -742,7 +742,11 @@ export async function relayIntentFromHttp(
   db: Database,
   frame: IntentFrame,
   timeoutMs = Number(process.env.RELAY_TIMEOUT_MS || 120_000),
-  options: { sourceDirectory?: string; hopCount?: number } = {}
+  options: {
+    sourceDirectory?: string
+    hopCount?: number
+    trustedControlPlane?: boolean
+  } = {},
 ): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)
   const sourceDirectory = options.sourceDirectory ?? getLocalDirectoryUrl()
@@ -760,7 +764,9 @@ export async function relayIntentFromHttp(
   }
 
   try {
-    enforceSecurityChecks(db, prepared, senderPublicKey)
+    enforceSecurityChecks(db, prepared, senderPublicKey, {
+      skipSignatureVerification: options.trustedControlPlane === true,
+    })
     recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
   } catch (err) {
     recordShieldDecision(db, prepared, {

@@ -182,10 +182,31 @@ function renderAttentionMeta(item: WorkspaceOverviewAttentionItem): string {
 }
 
 function renderBindingRuntime(binding: WorkspaceIdentityBinding): string {
-  if (binding.runtime.label) {
-    return binding.runtime.connector ? `${binding.runtime.connector} · ${binding.runtime.label}` : binding.runtime.label
+  const label = binding.runtime.label
+    ? (binding.runtime.connector ? `${binding.runtime.connector} · ${binding.runtime.label}` : binding.runtime.label)
+    : binding.runtime.mode
+
+  if (binding.runtime.deliveryMode) {
+    return `${label} · ${binding.runtime.deliveryMode}`
   }
-  return binding.runtime.mode
+
+  return label
+}
+
+function renderBindingTransport(binding: WorkspaceIdentityBinding): string {
+  if (binding.runtime.connected && binding.runtime.httpEndpoint) {
+    return 'WebSocket live · HTTP endpoint configured'
+  }
+  if (binding.runtime.connected) {
+    return 'WebSocket live'
+  }
+  if (binding.runtime.httpEndpoint) {
+    return 'HTTP endpoint configured'
+  }
+  if (binding.bindingType === 'partner') {
+    return 'Partner-side delivery managed externally'
+  }
+  return 'No live transport currently visible'
 }
 
 function renderChannelMeta(channel: WorkspacePartnerChannel): string {
@@ -240,6 +261,8 @@ export default function WorkspacesPage() {
     kind: 'internal' as WorkspaceThreadKind,
     title: '',
     summary: '',
+    message: '',
+    language: 'en',
     owner: '',
     workflowType: '',
     localBindingId: '',
@@ -525,8 +548,7 @@ export default function WorkspacesPage() {
     }, `${channel.label || channel.partnerBeamId} moved to ${status}.`)
   }
 
-  async function handleThreadComposerSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
+  async function handleThreadComposerSubmit(mode: 'create' | 'dispatch') {
     if (!selectedWorkspace || !threadForm.title.trim()) return
 
     const localBinding = localBindings.find((binding) => binding.id === Number.parseInt(threadForm.localBindingId, 10))
@@ -572,23 +594,51 @@ export default function WorkspacesPage() {
       })
     }
 
-    await runAction('thread-composer', async () => {
+    const linkedIntentNonce = threadForm.linkedIntentNonce.trim()
+    const shouldDispatch = mode === 'dispatch' && threadForm.kind === 'handoff' && linkedIntentNonce.length === 0
+    const dispatchMessage = threadForm.message.trim() || threadForm.summary.trim() || threadForm.title.trim()
+    let createdThreadId: number | null = null
+
+    try {
+      setActionBusy(shouldDispatch ? 'thread-composer-dispatch' : 'thread-composer-create')
+      setNotice(null)
+      setError(null)
+
       const response = await directoryApi.createWorkspaceThread(selectedWorkspace.slug, {
         kind: threadForm.kind,
         title: threadForm.title.trim(),
         summary: threadForm.summary.trim() || null,
         owner: threadForm.owner.trim() || null,
         workflowType: threadForm.workflowType.trim() || null,
-        linkedIntentNonce: threadForm.linkedIntentNonce.trim() || null,
-        status: threadForm.kind === 'handoff' && !threadForm.linkedIntentNonce.trim() ? 'blocked' : 'open',
+        linkedIntentNonce: linkedIntentNonce || null,
+        status: threadForm.kind === 'handoff' && !linkedIntentNonce ? 'blocked' : 'open',
         participants,
       })
 
+      createdThreadId = response.thread.id
+      let activeThreadId = response.thread.id
+      let noticeMessage = 'Workspace thread created.'
+      if (shouldDispatch) {
+        const dispatchResponse = await directoryApi.dispatchWorkspaceThread(selectedWorkspace.slug, response.thread.id, {
+          message: dispatchMessage,
+          language: threadForm.language.trim() || null,
+        })
+        activeThreadId = dispatchResponse.thread.id
+        noticeMessage = dispatchResponse.dispatch.success
+          ? 'Workspace handoff dispatched through Beam.'
+          : `Workspace handoff dispatched with a failed Beam response${dispatchResponse.dispatch.errorCode ? ` (${dispatchResponse.dispatch.errorCode})` : ''}.`
+      } else if (mode === 'dispatch' && linkedIntentNonce) {
+        noticeMessage = 'Workspace thread linked to an existing Beam trace.'
+      }
+
       await loadWorkspaceSurface(selectedWorkspace.slug)
+      await loadThreadDetail(selectedWorkspace.slug, activeThreadId)
       setThreadForm({
         kind: 'internal',
         title: '',
         summary: '',
+        message: '',
+        language: 'en',
         owner: '',
         workflowType: '',
         localBindingId: '',
@@ -598,9 +648,48 @@ export default function WorkspacesPage() {
 
       const next = new URLSearchParams(searchParams)
       next.set('workspace', selectedWorkspace.slug)
-      next.set('thread', String(response.thread.id))
+      next.set('thread', String(activeThreadId))
       setSearchParams(next, { replace: true })
-    }, 'Workspace thread created.')
+      setNotice(noticeMessage)
+    } catch (err) {
+      if (createdThreadId) {
+        try {
+          await loadWorkspaceSurface(selectedWorkspace.slug)
+          await loadThreadDetail(selectedWorkspace.slug, createdThreadId)
+        } catch {
+          // Ignore secondary refresh errors and surface the original failure below.
+        }
+      }
+      setError(err instanceof ApiError ? err.message : 'Workspace thread action failed')
+    } finally {
+      setActionBusy(null)
+    }
+  }
+
+  async function handleThreadDispatch(thread: WorkspaceThread) {
+    if (!selectedWorkspace) return
+
+    try {
+      setActionBusy(`thread-dispatch-${thread.id}`)
+      setNotice(null)
+      setError(null)
+
+      const response = await directoryApi.dispatchWorkspaceThread(selectedWorkspace.slug, thread.id, {
+        message: thread.summary || thread.title,
+        language: 'en',
+      })
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+      await loadThreadDetail(selectedWorkspace.slug, thread.id)
+      setNotice(
+        response.dispatch.success
+          ? 'Workspace handoff dispatched through Beam.'
+          : `Workspace handoff dispatched with a failed Beam response${response.dispatch.errorCode ? ` (${response.dispatch.errorCode})` : ''}.`,
+      )
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Workspace handoff dispatch failed')
+    } finally {
+      setActionBusy(null)
+    }
   }
 
   async function handleDeliverDigest() {
@@ -807,6 +896,8 @@ export default function WorkspacesPage() {
                         <div>{renderBindingRuntime(binding)}</div>
                         <div>{binding.identity.lastSeen ? `Last seen ${formatRelativeTime(binding.identity.lastSeen)}` : 'No heartbeat recorded'}</div>
                         <div>{binding.canInitiateExternal ? 'Can initiate external' : 'Manual review required'}</div>
+                        <div>{renderBindingTransport(binding)}</div>
+                        <div>{binding.identity.capabilities.length > 0 ? `${binding.identity.capabilities.length} capabilities declared` : 'No capabilities declared'}</div>
                       </div>
 
                       {binding.notes ? (
@@ -959,20 +1050,26 @@ export default function WorkspacesPage() {
                 <div>
                   <div className="panel-title">Thread composer</div>
                   <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
-                    Draft internal coordination threads or blocked handoff threads before a runtime sends the real Beam message.
+                    Create internal coordination threads or dispatch a real cross-instance Beam handoff from the workspace control plane.
                   </p>
                 </div>
-                <StatusPill label={threadForm.kind === 'handoff' ? 'Handoff draft' : 'Internal thread'} tone={threadForm.kind === 'handoff' ? 'warning' : 'default'} />
+                <StatusPill label={threadForm.kind === 'handoff' ? 'Beam handoff' : 'Internal thread'} tone={threadForm.kind === 'handoff' ? 'warning' : 'default'} />
               </div>
 
-              <form className="mt-4 grid gap-3 md:grid-cols-2" onSubmit={(event) => { void handleThreadComposerSubmit(event) }}>
+              <form
+                className="mt-4 grid gap-3 md:grid-cols-2"
+                onSubmit={(event) => {
+                  event.preventDefault()
+                  void handleThreadComposerSubmit('create')
+                }}
+              >
                 <select className="input-field" value={threadForm.kind} onChange={(event) => setThreadForm((current) => ({ ...current, kind: event.target.value as WorkspaceThreadKind }))}>
                   <option value="internal">internal</option>
                   <option value="handoff">handoff</option>
                 </select>
                 <input className="input-field" placeholder="Owner email" value={threadForm.owner} onChange={(event) => setThreadForm((current) => ({ ...current, owner: event.target.value }))} />
                 <input className="input-field md:col-span-2" placeholder="Thread title" value={threadForm.title} onChange={(event) => setThreadForm((current) => ({ ...current, title: event.target.value }))} />
-                <textarea className="input-field md:col-span-2 min-h-24" placeholder="Summary or operator brief" value={threadForm.summary} onChange={(event) => setThreadForm((current) => ({ ...current, summary: event.target.value }))} />
+                <textarea className="input-field md:col-span-2 min-h-24" placeholder={threadForm.kind === 'handoff' ? 'Operator brief or traceable summary' : 'Summary or operator brief'} value={threadForm.summary} onChange={(event) => setThreadForm((current) => ({ ...current, summary: event.target.value }))} />
                 <select className="input-field" value={threadForm.localBindingId} onChange={(event) => setThreadForm((current) => ({ ...current, localBindingId: event.target.value }))}>
                   <option value="">Select local identity</option>
                   {localBindings.map((binding) => (
@@ -992,15 +1089,31 @@ export default function WorkspacesPage() {
                         </option>
                       ))}
                     </select>
+                    <input className="input-field" placeholder="Language hint (default en)" value={threadForm.language} onChange={(event) => setThreadForm((current) => ({ ...current, language: event.target.value }))} />
+                    <textarea className="input-field md:col-span-2 min-h-24" placeholder="Message to send over Beam (defaults to summary/title if blank)" value={threadForm.message} onChange={(event) => setThreadForm((current) => ({ ...current, message: event.target.value }))} />
                     <input className="input-field" placeholder="Linked intent nonce (optional if still blocked)" value={threadForm.linkedIntentNonce} onChange={(event) => setThreadForm((current) => ({ ...current, linkedIntentNonce: event.target.value }))} />
                   </>
                 ) : null}
                 <div className="md:col-span-2 flex flex-wrap gap-2">
-                  <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" type="submit" disabled={actionBusy === 'thread-composer'}>
-                    {actionBusy === 'thread-composer' ? 'Creating…' : 'Create thread'}
+                  <button className="rounded-xl bg-slate-900 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white" type="submit" disabled={actionBusy === 'thread-composer-create' || actionBusy === 'thread-composer-dispatch'}>
+                    {actionBusy === 'thread-composer-create' ? 'Creating…' : 'Create thread'}
                   </button>
+                  {threadForm.kind === 'handoff' ? (
+                    <button
+                      className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      type="button"
+                      disabled={actionBusy === 'thread-composer-create' || actionBusy === 'thread-composer-dispatch' || !threadForm.partnerChannelId || !threadForm.localBindingId}
+                      onClick={() => { void handleThreadComposerSubmit('dispatch') }}
+                    >
+                      {actionBusy === 'thread-composer-dispatch'
+                        ? 'Sending…'
+                        : threadForm.linkedIntentNonce.trim()
+                          ? 'Create and link'
+                          : 'Create and send'}
+                    </button>
+                  ) : null}
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Handoff drafts without a linked nonce are created as blocked threads until a runtime sends the real outbound message.
+                    Handoff threads can stay blocked for review, link to an existing nonce, or be sent directly from this workspace surface.
                   </div>
                 </div>
               </form>
@@ -1159,8 +1272,20 @@ export default function WorkspacesPage() {
                           </div>
                         </div>
                       ) : (
-                        <div className="mt-3 text-sm text-slate-500 dark:text-slate-400">
-                          This thread is still internal or blocked. Once a runtime sends the real outbound Beam handoff, attach the nonce here and the full trace will appear.
+                        <div className="mt-3 space-y-3">
+                          <div className="text-sm text-slate-500 dark:text-slate-400">
+                            This thread is still internal or blocked. You can now approve and send a blocked handoff directly from the workspace control plane; once Beam accepts it, the full trace appears here.
+                          </div>
+                          {threadDetail.thread.kind === 'handoff' && threadDetail.thread.status === 'blocked' ? (
+                            <button
+                              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                              type="button"
+                              disabled={actionBusy === `thread-dispatch-${threadDetail.thread.id}`}
+                              onClick={() => { void handleThreadDispatch(threadDetail.thread) }}
+                            >
+                              {actionBusy === `thread-dispatch-${threadDetail.thread.id}` ? 'Sending…' : 'Approve and send'}
+                            </button>
+                          ) : null}
                         </div>
                       )}
                     </div>

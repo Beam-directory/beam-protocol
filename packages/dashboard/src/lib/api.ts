@@ -148,6 +148,9 @@ export interface WorkspaceIdentityBinding {
     mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
     connector: string | null
     label: string | null
+    connected: boolean
+    httpEndpoint: string | null
+    deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
   }
   identity: {
     existsLocally: boolean
@@ -374,6 +377,22 @@ export interface WorkspaceThreadDetailResponse {
   workspace: WorkspaceRecord
   thread: WorkspaceThread
   participants: WorkspaceThreadParticipant[]
+}
+
+export interface WorkspaceThreadDispatchInput {
+  message?: string | null
+  language?: string | null
+}
+
+export interface WorkspaceThreadDispatchResponse extends WorkspaceThreadDetailResponse {
+  partnerChannel: WorkspacePartnerChannel | null
+  dispatch: {
+    nonce: string
+    success: boolean
+    error: string | null
+    errorCode: string | null
+    traceHref: string | null
+  }
 }
 
 export interface WorkspacePolicyBindingRule {
@@ -1767,6 +1786,10 @@ export const directoryApi = {
     body: JSON.stringify(input),
   }, { admin: true }),
   getWorkspaceThread: (slug: string, id: number) => request<WorkspaceThreadDetailResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads/${id}`, undefined, { admin: true }),
+  dispatchWorkspaceThread: (slug: string, id: number, input: WorkspaceThreadDispatchInput) => request<WorkspaceThreadDispatchResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/threads/${id}/dispatch`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   getWorkspacePolicy: (slug: string) => request<WorkspacePolicyResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, undefined, { admin: true }),
   updateWorkspacePolicy: (slug: string, input: WorkspacePolicyPatchInput) => request<WorkspacePolicyResponse & { updated: boolean }>(`/admin/workspaces/${encodeURIComponent(slug)}/policy`, {
     method: 'PATCH',

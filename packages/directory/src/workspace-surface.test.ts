@@ -155,6 +155,8 @@ test('workspace identity bindings can be created, listed, and updated through th
         runtime: {
           mode: string
           connector: string | null
+          connected: boolean
+          deliveryMode: string | null
         }
         lastSeenAgeHours: number | null
         identity: {
@@ -172,6 +174,8 @@ test('workspace identity bindings can be created, listed, and updated through th
     assert.equal(localBindingBody.binding.ownershipState, 'owned')
     assert.equal(localBindingBody.binding.runtime.mode, 'runtime-backed')
     assert.equal(localBindingBody.binding.runtime.connector, 'codex')
+    assert.equal(localBindingBody.binding.runtime.connected, false)
+    assert.equal(localBindingBody.binding.runtime.deliveryMode, 'unavailable')
     assert.equal(typeof localBindingBody.binding.lastSeenAgeHours, 'number')
     assert.equal(localBindingBody.binding.identity.existsLocally, true)
     assert.equal(localBindingBody.binding.identity.displayName, 'Ops Bot')
@@ -646,6 +650,187 @@ test('workspace threads model internal discussion and external handoffs in one t
     assert.equal(detailBody.thread.trace?.fromBeamId, 'ops-bot@beam.directory')
     assert.equal(detailBody.thread.trace?.toBeamId, 'finance@northwind.beam.directory')
     assert.deepEqual(detailBody.participants.map((entry) => entry.principalType).sort(), ['agent', 'partner'])
+  } finally {
+    db.close()
+  }
+})
+
+test('operators can approve and dispatch blocked workspace handoff threads through Beam', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['handoff'],
+      publicKey: 'MCowBQYDK2VwAyEA4Qw1l2rK2LwH5FNN+1mQ2kD2mP1eJ0C8n9rPq4xS2fI=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Acme Dispatch Workspace',
+        slug: 'acme-dispatch',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    const localBindingResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex:operator',
+        policyProfile: 'ops-default',
+        canInitiateExternal: true,
+      }),
+    }))
+    const localBinding = await localBindingResponse.json() as { binding: { id: number } }
+
+    const policyResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch/policy', {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        workflowRules: [{
+          workflowType: 'partner.review',
+          requireApproval: true,
+          allowedPartners: ['echo@beam.directory'],
+          approvers: ['ops@example.com'],
+        }],
+      }),
+    }))
+    assert.equal(policyResponse.status, 200)
+
+    const channelResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch/partner-channels', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        partnerBeamId: 'echo@beam.directory',
+        label: 'Beam Echo',
+        owner: 'ops@example.com',
+        status: 'active',
+      }),
+    }))
+    assert.equal(channelResponse.status, 201)
+
+    const createThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch/threads', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Send cross-instance approval ping',
+        summary: 'Please confirm the approval lane and respond with the next action.',
+        owner: 'ops@example.com',
+        workflowType: 'partner.review',
+        status: 'blocked',
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: localBinding.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'echo@beam.directory',
+            principalType: 'partner',
+            beamId: 'echo@beam.directory',
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(createThreadResponse.status, 201)
+    const createdThread = await createThreadResponse.json() as { thread: { id: number } }
+
+    const dispatchResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-dispatch/threads/${createdThread.thread.id}/dispatch`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        message: 'Show me how this cross-instance Beam handoff works.',
+        language: 'en',
+      }),
+    }))
+    assert.equal(dispatchResponse.status, 200)
+
+    const dispatchBody = await dispatchResponse.json() as {
+      thread: {
+        status: string
+        linkedIntentNonce: string | null
+        trace: {
+          intentType: string
+          toBeamId: string
+          status: string
+        } | null
+      }
+      partnerChannel: {
+        lastIntentNonce: string | null
+        trace: { nonce: string } | null
+      } | null
+      dispatch: {
+        nonce: string
+        success: boolean
+        traceHref: string | null
+      }
+    }
+    assert.equal(dispatchBody.dispatch.success, true)
+    assert.equal(typeof dispatchBody.dispatch.nonce, 'string')
+    assert.equal(dispatchBody.thread.status, 'open')
+    assert.equal(dispatchBody.thread.linkedIntentNonce, dispatchBody.dispatch.nonce)
+    assert.equal(dispatchBody.thread.trace?.intentType, 'conversation.message')
+    assert.equal(dispatchBody.thread.trace?.toBeamId, 'echo@beam.directory')
+    assert.equal(dispatchBody.thread.trace?.status, 'acked')
+    assert.equal(dispatchBody.partnerChannel?.lastIntentNonce, dispatchBody.dispatch.nonce)
+    assert.equal(dispatchBody.partnerChannel?.trace?.nonce, dispatchBody.dispatch.nonce)
+
+    const detailResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-dispatch/threads/${createdThread.thread.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(detailResponse.status, 200)
+    const detailBody = await detailResponse.json() as {
+      thread: {
+        linkedIntentNonce: string | null
+        trace: { nonce: string | null } | null
+      }
+    }
+    assert.equal(detailBody.thread.linkedIntentNonce, dispatchBody.dispatch.nonce)
+    assert.equal(detailBody.thread.trace?.nonce, dispatchBody.dispatch.nonce)
+
+    const timelineResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch/timeline', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(timelineResponse.status, 200)
+    const timelineBody = await timelineResponse.json() as {
+      entries: Array<{
+        action: string
+        traceHref: string | null
+      }>
+    }
+    const dispatchEntry = timelineBody.entries.find((entry) => entry.action === 'admin.workspace_thread.dispatched')
+    assert.equal(dispatchEntry?.traceHref, `/intents/${dispatchBody.dispatch.nonce}`)
   } finally {
     db.close()
   }
