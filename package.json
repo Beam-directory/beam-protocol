@@ -28,6 +28,7 @@
     "workspace:buyer-dry-run": "node scripts/workspace/buyer-dry-run.mjs",
     "workspace:digest": "node scripts/workspace/operator-digest.mjs",
     "workspace:operator-dry-run": "node scripts/workspace/operator-dry-run.mjs",
+    "workspace:sync-demo": "node scripts/workspace/sync-demo.mjs",
     "dev:directory": "npm run dev --workspace=packages/directory",
     "typecheck": "npm run typecheck:workspaces",
     "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus"

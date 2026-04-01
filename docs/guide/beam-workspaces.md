@@ -32,6 +32,35 @@ The current operator-facing surface now covers workspace creation, identity bind
 It also supports direct operator dispatch: a blocked handoff thread can now be approved and sent as a real Beam message from the workspace surface, without waiting for a separate runtime UI.
 Partner channels now also resolve back into the local control plane when the target Beam ID belongs to another Beam-managed workspace identity. That gives operators a real cross-workspace route instead of a raw external address.
 
+## Fast local sync demo
+
+If the quickstart stack is already running, you can create a real cross-workspace handoff with one command:
+
+```bash
+npm run workspace:sync-demo
+```
+
+The command prints:
+
+- a dashboard magic-link login URL
+- the source workspace URL
+- the target workspace URL
+- the trace URL
+- the shared Beam nonce
+
+The default local flow creates:
+
+- `acme-sync-demo` as the sending workspace
+- `northwind-sync-demo` as the receiving workspace
+- `procurement@acme.beam.directory` as the local sender
+- `echo@beam.directory` as the routed target identity
+
+The result should be:
+
+1. the source workspace shows a dispatched handoff thread
+2. the target workspace shows the mirrored inbound handoff thread automatically
+3. both pages point at the same Beam trace nonce
+
 ## Why Beam Needs This
 
 Beam already has strong external handoff mechanics: identity, signatures, traces, retries, audit, and operator visibility.
