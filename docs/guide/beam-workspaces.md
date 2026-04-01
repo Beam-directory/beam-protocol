@@ -85,11 +85,27 @@ If you also want Beam to keep picking up newly spawned OpenClaw subagents while 
 npm run workspace:openclaw-live
 ```
 
-That keeps a foreground watcher alive and re-syncs the Beam workspace whenever:
+That keeps a foreground live-sync process alive and re-syncs the Beam workspace whenever:
 
 - a new persistent agent folder appears
 - a workspace agent changes
 - `~/.openclaw/subagents/runs.json` gets a new subagent run
+
+It is event-driven now. Beam watches the authoritative OpenClaw files directly instead of polling on a fixed interval.
+
+If you want that live sync installed as a background macOS login service, run:
+
+```bash
+npm run workspace:openclaw-live:install
+```
+
+That installs a LaunchAgent which keeps the OpenClaw-to-Beam live sync running across logins.
+
+To remove it later:
+
+```bash
+npm run workspace:openclaw-live:uninstall
+```
 
 If you only want the import step against an already running stack, use:
 

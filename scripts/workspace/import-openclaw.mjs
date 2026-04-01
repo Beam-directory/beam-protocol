@@ -19,7 +19,7 @@ const subagentRunsPath = optionalFlag('--subagent-runs', path.join(os.homedir(),
 const subagentDays = Number.parseInt(optionalFlag('--subagent-days', '30'), 10)
 const subagentLimit = Number.parseInt(optionalFlag('--subagent-limit', '25'), 10)
 const watchMode = process.argv.includes('--watch')
-const watchIntervalMs = Number.parseInt(optionalFlag('--watch-interval-ms', '5000'), 10)
+const watchDebounceMs = Number.parseInt(optionalFlag('--watch-debounce-ms', '750'), 10)
 const registerMissing = process.argv.includes('--register-missing')
 const includeSubagents = !process.argv.includes('--no-subagents')
 
@@ -100,6 +100,10 @@ function sleep(ms) {
   return new Promise((resolve) => {
     setTimeout(resolve, ms)
   })
+}
+
+function formatErrorMessage(error) {
+  return error instanceof Error ? error.message : String(error)
 }
 
 async function requestJsonAllow(url, init, allowedStatuses = []) {
@@ -442,112 +446,123 @@ function buildGeneratedIdentity(identityKey, agentName) {
   }
 }
 
-async function runImportCycle() {
+async function runImportCycle(existingSession = null, allowRefresh = true) {
   const [baseIdentities, generatedIdentities] = await Promise.all([
     readJsonFile(identitiesPath, {}),
     readJsonFile(generatedIdentitiesPath, {}),
   ])
 
   const { descriptors, counts } = await listOpenClawDescriptors()
-  const { token, magicUrl } = await createAdminToken()
+  const session = existingSession ?? await createAdminToken()
+  const { token, magicUrl } = session
   const adminHeaders = createAdminHeaders(token)
-  await ensureWorkspace(adminHeaders)
-
-  const generatedUpdates = { ...generatedIdentities }
-  const imported = []
-  const registered = []
-  const missing = []
-  let originalPolicy = null
-
   try {
-    if (registerMissing) {
-      originalPolicy = await getPublicEndpointPolicy(adminHeaders)
-      const trustedIps = [...new Set([...(originalPolicy.trustedIps ?? []), '127.0.0.1', '::1', 'unknown'])]
-      await patchPublicEndpointPolicy(adminHeaders, {
-        trustedIps,
-        registrationPerMinute: Math.max(originalPolicy.registrationPerMinute ?? 10, descriptors.length + 10),
-      })
-    }
+    await ensureWorkspace(adminHeaders)
 
-    for (const descriptor of descriptors) {
-      const markdown = descriptor.rootDir
-        ? await readAgentMarkdown(descriptor.rootDir, descriptor.agentName)
-        : ''
-      const displayName = descriptor.displayName ?? extractDisplayName(descriptor.agentName, markdown)
-      const role = descriptor.role ?? extractRole(markdown)
-      let identity = generatedUpdates[descriptor.identityKey]
-        ?? baseIdentities[descriptor.identityKey]
-        ?? generatedUpdates[descriptor.agentName]
-        ?? baseIdentities[descriptor.agentName]
-        ?? null
+    const generatedUpdates = { ...generatedIdentities }
+    const imported = []
+    const registered = []
+    const missing = []
+    let originalPolicy = null
 
-      if (!identity && registerMissing) {
-        identity = buildGeneratedIdentity(descriptor.identityKey, descriptor.agentName)
-        generatedUpdates[descriptor.identityKey] = identity
+    try {
+      if (registerMissing) {
+        originalPolicy = await getPublicEndpointPolicy(adminHeaders)
+        const trustedIps = [...new Set([...(originalPolicy.trustedIps ?? []), '127.0.0.1', '::1', 'unknown'])]
+        await patchPublicEndpointPolicy(adminHeaders, {
+          trustedIps,
+          registrationPerMinute: Math.max(originalPolicy.registrationPerMinute ?? 10, descriptors.length + 10),
+        })
       }
 
-      if (!identity) {
-        missing.push({
-          agentName: descriptor.agentName,
-          displayName,
+      for (const descriptor of descriptors) {
+        const markdown = descriptor.rootDir
+          ? await readAgentMarkdown(descriptor.rootDir, descriptor.agentName)
+          : ''
+        const displayName = descriptor.displayName ?? extractDisplayName(descriptor.agentName, markdown)
+        const role = descriptor.role ?? extractRole(markdown)
+        let identity = generatedUpdates[descriptor.identityKey]
+          ?? baseIdentities[descriptor.identityKey]
+          ?? generatedUpdates[descriptor.agentName]
+          ?? baseIdentities[descriptor.agentName]
+          ?? null
+
+        if (!identity && registerMissing) {
+          identity = buildGeneratedIdentity(descriptor.identityKey, descriptor.agentName)
+          generatedUpdates[descriptor.identityKey] = identity
+        }
+
+        if (!identity) {
+          missing.push({
+            agentName: descriptor.agentName,
+            displayName,
+            role,
+          })
+          continue
+        }
+
+        const description = role
+          ? `Imported OpenClaw agent. ${role}`
+          : 'Imported OpenClaw agent.'
+        const registration = await ensureDirectoryAgent(identity, displayName, description)
+        if (registration.apiKey) {
+          generatedUpdates[descriptor.identityKey] = {
+            ...identity,
+            agentName: descriptor.agentName,
+            identityKey: descriptor.identityKey,
+            directoryUrl,
+            apiKey: registration.apiKey,
+          }
+        }
+
+        const binding = await ensureBinding(adminHeaders, {
+          ...identity,
+          beamId: registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId,
+        }, {
+          ...descriptor,
           role,
         })
-        continue
-      }
 
-      const description = role
-        ? `Imported OpenClaw agent. ${role}`
-        : 'Imported OpenClaw agent.'
-      const registration = await ensureDirectoryAgent(identity, displayName, description)
-      if (registration.apiKey) {
-        generatedUpdates[descriptor.identityKey] = {
-          ...identity,
+        imported.push({
           agentName: descriptor.agentName,
-          identityKey: descriptor.identityKey,
-          directoryUrl,
-          apiKey: registration.apiKey,
+          displayName,
+          beamId: binding.beamId ?? identity.beamId,
+          bindingId: binding.id,
+        })
+
+        if (registration.registeredNow) {
+          registered.push({
+            agentName: descriptor.agentName,
+            beamId: binding.beamId ?? identity.beamId,
+          })
         }
       }
-
-      const binding = await ensureBinding(adminHeaders, {
-        ...identity,
-        beamId: registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId,
-      }, {
-        ...descriptor,
-        role,
-      })
-
-      imported.push({
-        agentName: descriptor.agentName,
-        displayName,
-        beamId: binding.beamId ?? identity.beamId,
-        bindingId: binding.id,
-      })
-
-      if (registration.registeredNow) {
-        registered.push({
-          agentName: descriptor.agentName,
-          beamId: binding.beamId ?? identity.beamId,
-        })
+    } finally {
+      if (originalPolicy) {
+        await patchPublicEndpointPolicy(adminHeaders, originalPolicy)
       }
     }
-  } finally {
-    if (originalPolicy) {
-      await patchPublicEndpointPolicy(adminHeaders, originalPolicy)
+
+    await mkdir(path.dirname(generatedIdentitiesPath), { recursive: true })
+    await writeFile(generatedIdentitiesPath, `${JSON.stringify(generatedUpdates, null, 2)}\n`, 'utf8')
+    await writeFile(mergedIdentitiesPath, `${JSON.stringify({ ...baseIdentities, ...generatedUpdates }, null, 2)}\n`, 'utf8')
+
+    return {
+      session,
+      magicUrl,
+      descriptors,
+      counts,
+      imported,
+      registered,
+      missing,
     }
-  }
-
-  await mkdir(path.dirname(generatedIdentitiesPath), { recursive: true })
-  await writeFile(generatedIdentitiesPath, `${JSON.stringify(generatedUpdates, null, 2)}\n`, 'utf8')
-  await writeFile(mergedIdentitiesPath, `${JSON.stringify({ ...baseIdentities, ...generatedUpdates }, null, 2)}\n`, 'utf8')
-
-  return {
-    magicUrl,
-    descriptors,
-    counts,
-    imported,
-    registered,
-    missing,
+  } catch (error) {
+    const message = formatErrorMessage(error)
+    const looksLikeAuthFailure = message.includes(' 401:') || message.includes(' 403:')
+    if (allowRefresh && existingSession && looksLikeAuthFailure) {
+      return runImportCycle(await createAdminToken(), false)
+    }
+    throw error
   }
 }
 
@@ -613,28 +628,86 @@ async function main() {
   }
 
   console.log(`Beam OpenClaw watch mode active for workspace "${workspaceSlug}".`)
-  console.log(`Watching every ${watchIntervalMs}ms for new OpenClaw agents or subagent runs.`)
+  console.log(`Watching OpenClaw state files for new agents or subagent runs.`)
 
   let lastFingerprint = ''
-  while (true) {
+  let activeSession = null
+  let syncTimer = null
+  let syncRunning = false
+  let syncQueued = false
+
+  const triggerSync = (reason) => {
+    if (syncTimer) {
+      clearTimeout(syncTimer)
+    }
+    syncTimer = setTimeout(() => {
+      syncTimer = null
+      void runSync(reason)
+    }, watchDebounceMs)
+  }
+
+  const runSync = async (reason) => {
+    if (syncRunning) {
+      syncQueued = true
+      return
+    }
+
     const currentFingerprint = sourceFingerprint()
-    if (currentFingerprint !== lastFingerprint) {
-      try {
-        if (lastFingerprint !== '') {
-          console.log('')
-          console.log('[watch] change detected, syncing Beam workspace roster...')
-        }
-        printCycleSummary(await runImportCycle())
-        lastFingerprint = sourceFingerprint()
+    if (currentFingerprint === lastFingerprint && reason !== 'startup') {
+      return
+    }
+
+    syncRunning = true
+    try {
+      if (lastFingerprint !== '') {
         console.log('')
-        console.log('[watch] waiting for the next OpenClaw change...')
-      } catch (error) {
-        console.error(error instanceof Error ? error.message : error)
-        console.log('[watch] sync failed; keeping watcher alive and retrying on the next poll.')
+        console.log(`[watch] change detected (${reason}), syncing Beam workspace roster...`)
+      }
+      const summary = await runImportCycle(activeSession)
+      activeSession = summary.session
+      lastFingerprint = sourceFingerprint()
+      printCycleSummary(summary)
+      console.log('')
+      console.log('[watch] waiting for the next OpenClaw change...')
+    } catch (error) {
+      console.error(formatErrorMessage(error))
+      console.log('[watch] sync failed; keeping watcher alive and retrying on the next change.')
+    } finally {
+      syncRunning = false
+      if (syncQueued) {
+        syncQueued = false
+        triggerSync('queued-change')
       }
     }
-    await sleep(watchIntervalMs)
   }
+
+  const watchTargets = [
+    { path: agentsDir, kind: 'directory' },
+    { path: workspaceAgentsDir, kind: 'directory' },
+    { path: path.dirname(subagentRunsPath), kind: 'file-parent', file: path.basename(subagentRunsPath) },
+    { path: path.dirname(identitiesPath), kind: 'file-parent', file: path.basename(identitiesPath) },
+    { path: path.dirname(generatedIdentitiesPath), kind: 'file-parent', file: path.basename(generatedIdentitiesPath) },
+  ].filter((target) => fs.existsSync(target.path))
+
+  const watchers = watchTargets.map((target) => fs.watch(target.path, (_eventType, filename) => {
+    if (target.kind === 'file-parent' && filename && filename !== target.file) {
+      return
+    }
+    triggerSync(target.kind === 'file-parent' ? target.file : path.basename(target.path))
+  }))
+
+  const shutdown = () => {
+    for (const watcher of watchers) {
+      watcher.close()
+    }
+    process.exit(0)
+  }
+
+  process.on('SIGINT', shutdown)
+  process.on('SIGTERM', shutdown)
+
+  await runSync('startup')
+  await new Promise(() => {})
 }
 
 main().catch((error) => {

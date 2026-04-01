@@ -9,6 +9,13 @@ const composeFile = path.join(repoRoot, 'ops/quickstart/compose.yaml')
 const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
 const watchMode = process.argv.includes('--watch')
+const daemonMode = process.argv.includes('--daemon')
+const nodePath = process.execPath
+const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
+  ? '/opt/homebrew/bin/docker'
+  : fs.existsSync('/usr/local/bin/docker')
+    ? '/usr/local/bin/docker'
+    : 'docker'
 
 function logStep(message) {
   console.log(`[openclaw-setup] ${message}`)
@@ -55,19 +62,23 @@ async function ensureLocalStack() {
   }
 
   logStep('starting the local Beam quickstart stack with docker compose')
-  run('docker', ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
+  run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
 }
 
 async function main() {
   await ensureQuickstartEnv()
   await ensureLocalStack()
 
-  logStep('running the hosted quickstart smoke')
-  run('node', [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
+  if (!daemonMode) {
+    logStep('running the hosted quickstart smoke')
+    run(nodePath, [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
+  }
 
   if (watchMode) {
-    logStep('starting live OpenClaw sync for agents, workspace agents, and subagents')
-    run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing', '--watch'])
+    logStep(daemonMode
+      ? 'starting daemon OpenClaw sync for agents, workspace agents, and subagents'
+      : 'starting live OpenClaw sync for agents, workspace agents, and subagents')
+    run(nodePath, [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing', '--watch'])
     return
   }
 
