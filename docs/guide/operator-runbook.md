@@ -9,6 +9,9 @@ Use it together with:
 - [Production Partner Onboarding Pack](/guide/design-partner-onboarding) for buyer expectations, evaluation prep, and follow-up templates
 - [Production Go-Live Checklist](/guide/production-go-live-checklist) for explicit launch blockers and rollout readiness
 - [Operator Observability](/guide/operator-observability) for dashboards, exports, and retention controls
+- [Operator Digest](/guide/operator-digest) for the recurring owner / follow-up rhythm
+- [Production Recovery Drills](/guide/production-recovery-drills) for the backup, restore, and parity path
+- [Production Fire Drill](/guide/production-fire-drill) for the scripted incident rehearsal
 - [Intent Lifecycle](/guide/intent-lifecycle) for status semantics
 
 ## Operator Inbox First

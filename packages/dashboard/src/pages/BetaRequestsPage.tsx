@@ -252,6 +252,22 @@ export default function BetaRequestsPage() {
     }
   }
 
+  async function exportProofPack(format: 'json' | 'markdown') {
+    if (!detailRequest) {
+      return
+    }
+
+    try {
+      setNotice(null)
+      const download = await directoryApi.downloadProofPack(detailRequest.id, format)
+      downloadBlob(download.blob, download.filename)
+      setNotice(`Exported proof pack as ${format === 'markdown' ? 'Markdown' : 'JSON'}.`)
+      setError(null)
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : 'Failed to export proof pack')
+    }
+  }
+
   async function copyProofMarkdown(summary: BetaRequestProofSummary) {
     try {
       await navigator.clipboard.writeText(summary.markdown)
@@ -558,6 +574,14 @@ export default function BetaRequestsPage() {
                   <button className="btn-secondary" onClick={() => void copyProofMarkdown(proofSummary)} type="button">
                     <Copy size={16} />
                     <span>Copy summary</span>
+                  </button>
+                  <button className="btn-secondary" onClick={() => void exportProofPack('markdown')} type="button">
+                    <Download size={16} />
+                    <span>Export proof pack (MD)</span>
+                  </button>
+                  <button className="btn-secondary" onClick={() => void exportProofPack('json')} type="button">
+                    <Download size={16} />
+                    <span>Export proof pack (JSON)</span>
                   </button>
                   <Link className="btn-secondary" to={proofSummary.operatorVisibility.traceHref}>
                     <span>Open trace</span>

@@ -1,5 +1,24 @@
 # Changelog
 
+## v1.0.0 (draft)
+
+### First Production Partner
+- formalize one production-grade cross-company workflow with a shared workflow contract, onboarding pack, and go-live checklist
+- keep Beam `1.0.0` narrow around one boring external workflow instead of widening the protocol or product scope
+
+### Partner Operations
+- add partner health, SLA-risk, incident attribution, and operator shortcuts for the first production partner motion
+- add recurring operator digest and reminder delivery so follow-through is procedural instead of memory-driven
+- add a redaction-safe proof pack export from live evidence for external sharing
+
+### Recovery and Release Control
+- add backup/restore and environment-parity drills with repo-visible reports
+- add a repeatable production fire drill and final buyer/operator/production-partner dry runs
+- publish an explicit `1.0.0` RC checklist, release notes draft, and go/no-go gates before the final cut
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.0.0` remains on `beam/1`.
+
 ## v0.9.0 (2026-03-31)
 
 ### Design-Partner Motion

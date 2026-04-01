@@ -16,6 +16,7 @@ const NAV_ITEMS = [
   { path: '/alerts', label: 'Alerts', icon: Shield },
   { path: '/inbox', label: 'Inbox', icon: BellDot },
   { path: '/beta-requests', label: 'Beta Requests', icon: FileText },
+  { path: '/partner-ops', label: 'Partner Ops', icon: TriangleAlert },
   { path: '/workspaces', label: 'Workspaces', icon: Building2 },
   { path: '/dead-letter', label: 'Dead Letters', icon: Inbox },
   { path: '/register', label: 'Register', icon: UserPlus },

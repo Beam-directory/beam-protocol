@@ -32,6 +32,7 @@ export default function AlertCard({
 }) {
   const visibleLinks = alert.links.slice(0, compact ? 2 : 3)
   const visibleSamples = alert.sampleTraces.slice(0, compact ? 1 : 3)
+  const relatedPartnerRequests = alert.relatedPartnerRequests?.slice(0, compact ? 1 : 3) ?? []
   const primaryTrace = visibleSamples[0]
 
   return (
@@ -98,7 +99,30 @@ export default function AlertCard({
         </div>
       ) : null}
 
-      {visibleLinks.length > 0 || alert.notificationId || primaryTrace ? (
+      {relatedPartnerRequests.length > 0 ? (
+        <div className="mt-4">
+          <div className="text-[11px] uppercase tracking-[0.12em] text-slate-500 dark:text-slate-400">Affected partner records</div>
+          <div className="mt-2 space-y-2">
+            {relatedPartnerRequests.map((request) => (
+              <div key={`${alert.id}-partner-${request.id}`} className="rounded-xl border border-slate-200 px-3 py-3 dark:border-slate-800">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Link className="text-sm font-medium text-orange-600 hover:text-orange-700 dark:text-orange-300" to={request.href}>
+                    {request.company ?? `Request #${request.id}`}
+                  </Link>
+                  <StatusPill label={request.stage} tone={request.stage === 'closed' ? 'success' : 'warning'} />
+                </div>
+                {!compact ? (
+                  <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                    {request.workflowType ?? 'workflow not set'}
+                  </div>
+                ) : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {visibleLinks.length > 0 || alert.notificationId || primaryTrace || relatedPartnerRequests.length > 0 ? (
         <div className="mt-4 flex flex-wrap gap-2">
           {alert.notificationId ? (
             <Link
@@ -114,6 +138,14 @@ export default function AlertCard({
               to={`/intents/${encodeURIComponent(primaryTrace.nonce)}?alert=${encodeURIComponent(alert.id)}`}
             >
               Open primary trace
+            </Link>
+          ) : null}
+          {relatedPartnerRequests[0] ? (
+            <Link
+              className="rounded-full border border-orange-200 px-3 py-1.5 text-sm text-orange-700 transition hover:border-orange-300 hover:bg-orange-50 dark:border-orange-500/30 dark:text-orange-300 dark:hover:bg-orange-500/10"
+              to={relatedPartnerRequests[0].href}
+            >
+              Open partner record
             </Link>
           ) : null}
           {visibleLinks.map((link) => (

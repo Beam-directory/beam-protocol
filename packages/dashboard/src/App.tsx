@@ -15,6 +15,7 @@ import IntentsPage from './pages/IntentsPage'
 import LoginPage from './pages/LoginPage'
 import OperatorInboxPage from './pages/OperatorInboxPage'
 import OverviewPage from './pages/OverviewPage'
+import PartnerOpsPage from './pages/PartnerOpsPage'
 import RegisterPage from './pages/RegisterPage'
 import SettingsPage from './pages/SettingsPage'
 import TraceDetailPage from './pages/TraceDetailPage'
@@ -61,6 +62,7 @@ export default function App() {
             <Route path="alerts" element={<AlertsPage />} />
             <Route path="inbox" element={<OperatorInboxPage />} />
             <Route path="beta-requests" element={<BetaRequestsPage />} />
+            <Route path="partner-ops" element={<PartnerOpsPage />} />
             <Route path="workspaces" element={<WorkspacesPage />} />
             <Route path="dead-letter" element={<DeadLetterPage />} />
             <Route path="register" element={<RegisterPage />} />
