@@ -11,7 +11,7 @@ The goal is not to clone a generic chat workspace. The goal is to give operators
 
 ## The First Data Model
 
-The first workspace foundation adds these records to the directory:
+The workspace foundation now adds these records to the directory:
 
 - `workspaces`
   - named control-plane containers for a team or company workflow
@@ -21,10 +21,14 @@ The first workspace foundation adds these records to the directory:
   - Beam identities that are active inside the workspace roster
 - `workspace_partner_channels`
   - explicit partner relationships reserved for later routing and health surfaces
+- `workspace_threads`
+  - internal-only preparation threads and external handoff threads on one operator timeline
+- `workspace_thread_participants`
+  - humans, agents, services, and partner identities attached to a workspace thread
 - `workspace_policies`
-  - the future policy document for external initiation and approval rules
+  - the policy document for external initiation and approval rules
 
-In the first slice, the operator-facing API focuses on workspaces and identity bindings. Partner channels, overview surfaces, and policy enforcement are reserved for the next milestone issues.
+The current operator-facing surface now covers workspace creation, identity bindings, overview metrics, thread timelines, and policy previews.
 
 ## Why Beam Needs This
 
@@ -45,9 +49,15 @@ The first routes are all admin-authenticated:
 - `GET /admin/workspaces`
 - `POST /admin/workspaces`
 - `GET /admin/workspaces/:slug`
+- `GET /admin/workspaces/:slug/overview`
 - `GET /admin/workspaces/:slug/identities`
 - `POST /admin/workspaces/:slug/identities`
 - `PATCH /admin/workspaces/:slug/identities/:id`
+- `GET /admin/workspaces/:slug/threads`
+- `GET /admin/workspaces/:slug/threads/:id`
+- `POST /admin/workspaces/:slug/threads`
+- `GET /admin/workspaces/:slug/policy`
+- `PATCH /admin/workspaces/:slug/policy`
 
 ### Create a workspace
 
@@ -76,6 +86,90 @@ The first routes are all admin-authenticated:
 }
 ```
 
+### Create an internal workspace thread
+
+```json
+{
+  "kind": "internal",
+  "title": "Prepare approval handoff",
+  "summary": "Align buyer owner and evidence before external send.",
+  "owner": "ops@example.com",
+  "participants": [
+    {
+      "principalId": "ops@example.com",
+      "principalType": "human",
+      "displayName": "Ops Owner",
+      "role": "owner"
+    },
+    {
+      "principalId": "ops-bot@beam.directory",
+      "principalType": "agent",
+      "beamId": "ops-bot@beam.directory",
+      "workspaceBindingId": 12,
+      "role": "participant"
+    }
+  ]
+}
+```
+
+### Create a linked handoff thread
+
+```json
+{
+  "kind": "handoff",
+  "title": "Quote approval handoff",
+  "summary": "External finance approval with async proof.",
+  "owner": "ops@example.com",
+  "workflowType": "quote.approval",
+  "linkedIntentNonce": "nonce-thread-handoff",
+  "participants": [
+    {
+      "principalId": "ops-bot@beam.directory",
+      "principalType": "agent",
+      "beamId": "ops-bot@beam.directory",
+      "workspaceBindingId": 12,
+      "role": "owner"
+    },
+    {
+      "principalId": "finance@northwind.beam.directory",
+      "principalType": "partner",
+      "beamId": "finance@northwind.beam.directory",
+      "workspaceBindingId": 13,
+      "role": "participant"
+    }
+  ]
+}
+```
+
+### Patch a workspace policy
+
+```json
+{
+  "defaults": {
+    "externalInitiation": "deny",
+    "allowedPartners": ["*@northwind.beam.directory"]
+  },
+  "bindingRules": [
+    {
+      "policyProfile": "finance-outbound",
+      "externalInitiation": "allow",
+      "allowedPartners": ["finance@northwind.beam.directory"]
+    }
+  ],
+  "workflowRules": [
+    {
+      "workflowType": "quote.approval",
+      "requireApproval": true,
+      "allowedPartners": ["finance@northwind.beam.directory"],
+      "approvers": ["ops@example.com", "approvals@example.com"]
+    }
+  ],
+  "metadata": {
+    "notes": "Finance outbound handoffs need named approvers."
+  }
+}
+```
+
 ## Design Boundary
 
 Beam Workspaces are intentionally narrower than products like OpenAgents Workspace.
@@ -91,11 +185,12 @@ The differentiator is:
 
 That is why Workspaces start as a control-plane surface first.
 
-## What Comes Next
+## Current Operator View
 
-The next issues in the workspace milestone add:
+The dashboard now surfaces:
 
-1. richer identity binding and roster behavior
-2. a workspace overview API and dashboard page
-3. internal vs external thread modeling
-4. policy engine v1 for external initiation and approval requirements
+1. workspace overview metrics for stale identities, manual review, and blocked outbound motion
+2. internal and external workspace threads on one page, with direct trace links for handoff threads
+3. policy previews showing which bindings can initiate external motion and which workflows require approvals
+
+This keeps Beam Workspace focused on identity ownership, policy, and cross-company control instead of drifting into a generic collaboration product.

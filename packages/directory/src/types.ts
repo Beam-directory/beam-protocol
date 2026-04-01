@@ -166,6 +166,11 @@ export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingStatus = 'active' | 'paused'
 export type WorkspacePartnerChannelStatus = 'active' | 'trial' | 'blocked'
+export type WorkspaceThreadKind = 'internal' | 'handoff'
+export type WorkspaceThreadStatus = 'open' | 'blocked' | 'closed'
+export type WorkspaceThreadParticipantRole = 'owner' | 'participant' | 'observer' | 'approver'
+export type WorkspacePolicyDefaultExternalInitiation = 'deny' | 'binding'
+export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 
 export interface WorkspaceRow {
   id: number
@@ -221,11 +226,69 @@ export interface WorkspacePartnerChannelRow {
   updated_at: string
 }
 
+export interface WorkspaceThreadRow {
+  id: number
+  workspace_id: number
+  kind: WorkspaceThreadKind
+  title: string
+  summary: string | null
+  owner: string | null
+  status: WorkspaceThreadStatus
+  workflow_type: string | null
+  linked_intent_nonce: string | null
+  last_activity_at: string
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceThreadParticipantRow {
+  id: number
+  thread_id: number
+  principal_id: string
+  principal_type: WorkspacePrincipalType
+  display_name: string | null
+  beam_id: string | null
+  workspace_binding_id: number | null
+  role: WorkspaceThreadParticipantRole
+  created_at: string
+  updated_at: string
+}
+
 export interface WorkspacePolicyRow {
   workspace_id: number
   policy_json: string
   updated_at: string
   updated_by: string | null
+}
+
+export interface WorkspacePolicyBindingRule {
+  beamId: string | null
+  bindingType: WorkspaceIdentityBindingType | null
+  policyProfile: string | null
+  externalInitiation: WorkspacePolicyRuleExternalInitiation
+  allowedPartners: string[]
+}
+
+export interface WorkspacePolicyWorkflowRule {
+  workflowType: string
+  requireApproval: boolean
+  allowedPartners: string[]
+  approvers: string[]
+}
+
+export interface WorkspacePolicyMetadata {
+  notes: string | null
+}
+
+export interface WorkspacePolicy {
+  version: 1
+  defaults: {
+    externalInitiation: WorkspacePolicyDefaultExternalInitiation
+    allowedPartners: string[]
+  }
+  bindingRules: WorkspacePolicyBindingRule[]
+  workflowRules: WorkspacePolicyWorkflowRule[]
+  metadata: WorkspacePolicyMetadata
 }
 
 export type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
