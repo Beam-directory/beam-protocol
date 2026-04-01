@@ -1449,6 +1449,51 @@ export function createWorkspaceThread(
   return thread
 }
 
+export function updateWorkspaceThread(
+  db: DB,
+  input: {
+    id: number
+    title?: string | null
+    summary?: string | null
+    owner?: string | null
+    status?: WorkspaceThreadRow['status']
+    workflowType?: string | null
+    linkedIntentNonce?: string | null
+    lastActivityAt?: string
+  },
+): WorkspaceThreadRow | null {
+  const existing = getWorkspaceThreadById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  const updatedAt = nowIso()
+  db.prepare(`
+    UPDATE workspace_threads
+    SET title = ?,
+        summary = ?,
+        owner = ?,
+        status = ?,
+        workflow_type = ?,
+        linked_intent_nonce = ?,
+        last_activity_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.title ?? existing.title,
+    input.summary === undefined ? existing.summary : input.summary,
+    input.owner === undefined ? existing.owner : input.owner,
+    input.status ?? existing.status,
+    input.workflowType === undefined ? existing.workflow_type : input.workflowType,
+    input.linkedIntentNonce === undefined ? existing.linked_intent_nonce : input.linkedIntentNonce,
+    input.lastActivityAt ?? existing.last_activity_at,
+    updatedAt,
+    input.id,
+  )
+
+  return getWorkspaceThreadById(db, input.id)
+}
+
 export function listWorkspaceThreadParticipants(db: DB, threadId: number): WorkspaceThreadParticipantRow[] {
   return db.prepare(`
     SELECT *

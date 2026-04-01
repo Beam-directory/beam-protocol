@@ -29,6 +29,7 @@ The workspace foundation now adds these records to the directory:
   - the policy document for external initiation and approval rules
 
 The current operator-facing surface now covers workspace creation, identity bindings, lifecycle state, partner channels, thread composition, timeline history, digest delivery, and policy previews.
+It also supports direct operator dispatch: a blocked handoff thread can now be approved and sent as a real Beam message from the workspace surface, without waiting for a separate runtime UI.
 
 ## Why Beam Needs This
 
@@ -56,6 +57,7 @@ The first routes are all admin-authenticated and now include the controls requir
 - `GET /admin/workspaces/:slug/threads`
 - `GET /admin/workspaces/:slug/threads/:id`
 - `POST /admin/workspaces/:slug/threads`
+- `POST /admin/workspaces/:slug/threads/:id/dispatch`
 - `GET /admin/workspaces/:slug/policy`
 - `PATCH /admin/workspaces/:slug/policy`
 - `GET /admin/workspaces/:slug/partner-channels`
@@ -178,6 +180,19 @@ Blocked handoff drafts are valid without a `linkedIntentNonce`. This is the cont
 }
 ```
 
+### Dispatch a blocked handoff thread through Beam
+
+This is the approval-path action. The workspace thread remains the operator record, but Beam generates the real cross-instance trace and links it back to the thread.
+
+```json
+{
+  "message": "Please confirm whether this approval lane is ready for the next purchase review.",
+  "language": "en"
+}
+```
+
+The dispatch route currently sends a real `conversation.message` Beam intent with workspace, thread, partner-channel, and approval context attached under `payload.context`.
+
 ### Create a partner channel
 
 ```json
@@ -256,8 +271,9 @@ That is why Workspaces start as a control-plane surface first.
 The dashboard now surfaces:
 
 1. workspace overview metrics for stale identities, manual review, blocked outbound motion, and the digest queue with overdue action items
-2. internal and external workspace threads on one page, covering blocked handoff drafts, linked handoff threads with trace links, and policy-driven workflows
+2. internal and external workspace threads on one page, covering blocked handoff drafts, direct `approve and send` actions, linked handoff threads with trace links, and policy-driven workflows
 3. partner channel health plus partner-channel ownership controls that can trial, unblock, or escalate a partner relationship
+4. runtime-backed identity visibility that now distinguishes live WebSocket presence, HTTP endpoints, and effective delivery mode for each local binding
 4. identity lifecycle cards showing `lastSeenAgeHours`, ownership state, and controls for pausing or toggling outbound permission
 5. the timeline drawer that collapses partner, policy, identity, thread, and digest events so the operator sees a unified audit trail
 6. the digest delivery panel that bottles action items, escalations, and summary stats and can deliver markdown to the operator mailbox

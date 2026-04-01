@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
@@ -25,12 +26,14 @@ import {
   listWorkspaceThreads,
   listWorkspaces,
   logAuditEvent,
+  updateWorkspaceThread,
   updateWorkspacePartnerChannel,
   updateWorkspacePolicyDocument,
   updateWorkspaceIdentityBinding,
 } from '../db.js'
 import type {
   AuditLogRow,
+  IntentFrame,
   IntentLogRow,
   WorkspaceIdentityBindingRow,
   WorkspaceIdentityBindingStatus,
@@ -52,6 +55,7 @@ import type {
 } from '../types.js'
 import { serializeAgentKeyState } from '../utils/serialize.js'
 import { evaluateWorkspacePolicy } from '../workspace-policy.js'
+import { RelayError, isAgentConnected, relayIntentFromHttp } from '../websocket.js'
 import { sendOperatorDigestEmail } from '../email.js'
 
 const WORKSPACE_STATUS_SET = new Set<WorkspaceRow['status']>(['active', 'paused', 'archived'])
@@ -112,6 +116,9 @@ type SerializedWorkspaceIdentityBinding = {
     mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
     connector: string | null
     label: string | null
+    connected: boolean
+    httpEndpoint: string | null
+    deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
   }
   identity: {
     existsLocally: boolean
@@ -471,6 +478,9 @@ function parseRuntimeMetadata(
       mode: 'partner',
       connector: null,
       label: runtimeType,
+      connected: false,
+      httpEndpoint: null,
+      deliveryMode: null,
     }
   }
 
@@ -480,6 +490,9 @@ function parseRuntimeMetadata(
       mode: 'service',
       connector: connector ?? null,
       label: rest.join(' · ') || runtimeType,
+      connected: false,
+      httpEndpoint: null,
+      deliveryMode: null,
     }
   }
 
@@ -489,6 +502,9 @@ function parseRuntimeMetadata(
       mode: 'runtime-backed',
       connector: connector ?? null,
       label: rest.join(' · ') || runtimeType,
+      connected: false,
+      httpEndpoint: null,
+      deliveryMode: null,
     }
   }
 
@@ -496,6 +512,9 @@ function parseRuntimeMetadata(
     mode: 'manual',
     connector: null,
     label: null,
+    connected: false,
+    httpEndpoint: null,
+    deliveryMode: null,
   }
 }
 
@@ -597,6 +616,8 @@ function summarizeWorkspaceAuditAction(action: string, details: Record<string, u
       return 'Workspace identity binding updated.'
     case 'admin.workspace_thread.created':
       return 'Workspace thread created.'
+    case 'admin.workspace_thread.dispatched':
+      return 'Workspace handoff dispatched.'
     case 'admin.workspace_partner_channel.created':
       return 'Partner channel added.'
     case 'admin.workspace_partner_channel.updated':
@@ -641,6 +662,17 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
   const keyState = agent ? serializeAgentKeyState(listAgentKeys(db, row.beam_id)) : null
   const lastSeenAgeHours = hoursSince(agent?.last_seen ?? null)
   const runtime = parseRuntimeMetadata(row.binding_type, row.runtime_type)
+  const connected = agent ? isAgentConnected(agent.beam_id) : false
+  const httpEndpoint = agent?.http_endpoint ?? null
+  const deliveryMode = agent
+    ? connected && httpEndpoint
+      ? 'hybrid'
+      : connected
+        ? 'websocket'
+        : httpEndpoint
+          ? 'http'
+          : 'unavailable'
+    : null
   const lifecycleStatus = classifyWorkspaceIdentityLifecycle(row, {
     existsLocally: Boolean(agent),
     lastSeenAgeHours,
@@ -665,7 +697,12 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     lastSeenAgeHours,
     ownershipState: row.owner ? 'owned' : 'unowned',
     lifecycleStatus,
-    runtime,
+    runtime: {
+      ...runtime,
+      connected,
+      httpEndpoint,
+      deliveryMode,
+    },
     identity: agent ? {
       existsLocally: true,
       beamId: agent.beam_id,
@@ -1836,6 +1873,269 @@ export function workspacesRouter(db: Database): Hono {
       thread: serializeWorkspaceThread(db, thread, participants),
       participants: participants.map((row) => serializeWorkspaceThreadParticipant(db, row)),
     }, 201)
+  })
+
+  router.post('/:slug/threads/:id/dispatch', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const threadId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(threadId) || threadId <= 0) {
+      return c.json({ error: 'Invalid thread id', errorCode: 'INVALID_THREAD_ID' }, 400)
+    }
+
+    const thread = getWorkspaceThreadById(db, threadId)
+    if (!thread || thread.workspace_id !== workspace.id) {
+      return c.json({ error: 'Workspace thread not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    if (thread.kind !== 'handoff') {
+      return c.json({ error: 'Only handoff threads can dispatch Beam messages', errorCode: 'THREAD_NOT_HANDOFF' }, 400)
+    }
+
+    if (thread.linked_intent_nonce) {
+      return c.json({ error: 'This handoff thread is already linked to a Beam trace', errorCode: 'THREAD_ALREADY_LINKED' }, 409)
+    }
+
+    if (thread.status === 'closed') {
+      return c.json({ error: 'Closed workspace threads cannot dispatch handoffs', errorCode: 'THREAD_CLOSED' }, 409)
+    }
+
+    if (workspace.external_handoffs_enabled !== 1) {
+      return c.json({ error: 'Workspace external handoffs are disabled', errorCode: 'WORKSPACE_EXTERNAL_DISABLED' }, 409)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      body = {}
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const participants = listWorkspaceThreadParticipants(db, thread.id)
+    const senderParticipant = participants.find((participant) => (
+      participant.workspace_binding_id != null
+      && participant.principal_type !== 'partner'
+      && typeof participant.beam_id === 'string'
+      && participant.beam_id.length > 0
+    ))
+    if (!senderParticipant?.workspace_binding_id || !senderParticipant.beam_id) {
+      return c.json({ error: 'Thread is missing a local workspace identity to send the handoff', errorCode: 'THREAD_MISSING_SENDER' }, 409)
+    }
+
+    const senderBinding = getWorkspaceIdentityBindingById(db, senderParticipant.workspace_binding_id)
+    if (!senderBinding || senderBinding.workspace_id !== workspace.id || senderBinding.binding_type === 'partner') {
+      return c.json({ error: 'Thread sender binding is invalid for this workspace', errorCode: 'INVALID_SENDER_BINDING' }, 409)
+    }
+
+    if (senderBinding.status !== 'active') {
+      return c.json({ error: 'Thread sender binding is paused', errorCode: 'SENDER_BINDING_PAUSED' }, 409)
+    }
+
+    const partnerParticipant = participants.find((participant) => (
+      participant.principal_type === 'partner'
+      && typeof participant.beam_id === 'string'
+      && participant.beam_id.length > 0
+    ))
+    if (!partnerParticipant?.beam_id) {
+      return c.json({ error: 'Thread is missing a partner participant', errorCode: 'THREAD_MISSING_PARTNER' }, 409)
+    }
+
+    const partnerChannel = getWorkspacePartnerChannelByBeamId(db, workspace.id, partnerParticipant.beam_id)
+    if (!partnerChannel) {
+      return c.json({ error: 'Partner participant is not attached to an active workspace partner channel', errorCode: 'PARTNER_CHANNEL_NOT_FOUND' }, 409)
+    }
+
+    if (partnerChannel.status === 'blocked') {
+      return c.json({ error: 'Partner channel is blocked', errorCode: 'PARTNER_CHANNEL_BLOCKED' }, 409)
+    }
+
+    const { policy } = getWorkspacePolicyDocument(db, workspace.id)
+    const policyPreview = evaluateWorkspacePolicy(policy, senderBinding, {
+      workflowType: thread.workflow_type,
+      partnerBeamId: partnerChannel.partner_beam_id,
+    })
+    if (policyPreview.externalInitiation !== 'allow') {
+      return c.json({ error: 'Workspace policy denied this external handoff', errorCode: 'WORKSPACE_POLICY_DENIED' }, 403)
+    }
+
+    const fallbackMessage = thread.summary?.trim() || thread.title.trim()
+    const message = normalizeOptionalString(raw.message) ?? fallbackMessage
+    if (!message) {
+      return c.json({ error: 'A message is required to dispatch a handoff thread', errorCode: 'MISSING_HANDOFF_MESSAGE' }, 400)
+    }
+
+    const language = normalizeOptionalString(raw.language)
+    const nonce = randomUUID()
+    const timestamp = new Date().toISOString()
+    const frame: IntentFrame = {
+      v: '1',
+      nonce,
+      timestamp,
+      from: senderBinding.beam_id,
+      to: partnerChannel.partner_beam_id,
+      intent: 'conversation.message',
+      payload: {
+        message,
+        ...(language ? { language } : {}),
+        context: {
+          workspace: {
+            id: workspace.id,
+            slug: workspace.slug,
+            name: workspace.name,
+          },
+          thread: {
+            id: thread.id,
+            title: thread.title,
+            summary: thread.summary,
+            workflowType: thread.workflow_type,
+            owner: thread.owner,
+          },
+          approval: {
+            action: 'workspace_thread_dispatch',
+            approvedBy: auth.session.email,
+            approvalRequired: policyPreview.approvalRequired,
+            approvers: policyPreview.approvers,
+          },
+          partnerChannel: {
+            id: partnerChannel.id,
+            label: partnerChannel.label,
+            status: partnerChannel.status,
+          },
+          participants: participants
+            .filter((participant) => participant.beam_id)
+            .map((participant) => ({
+              beamId: participant.beam_id,
+              role: participant.role,
+              principalType: participant.principal_type,
+            })),
+        },
+      },
+    }
+
+    const finalizeDispatch = (result: {
+      nonce: string
+      success: boolean
+      error: string | null
+      errorCode: string | null
+    }) => {
+      const now = new Date().toISOString()
+      const updatedThread = updateWorkspaceThread(db, {
+        id: thread.id,
+        status: 'open',
+        linkedIntentNonce: result.nonce,
+        lastActivityAt: now,
+      })
+      const updatedChannel = updateWorkspacePartnerChannel(db, {
+        id: partnerChannel.id,
+        label: partnerChannel.label,
+        owner: partnerChannel.owner,
+        status: partnerChannel.status,
+        notes: partnerChannel.notes,
+        lastIntentNonce: result.nonce,
+        ...(result.success
+          ? { lastSuccessAt: now }
+          : { lastFailureAt: now }),
+      })
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_thread.dispatched',
+        actor: auth.session.email,
+        target: `${workspace.slug}:${thread.id}`,
+        details: {
+          role: auth.session.role,
+          linkedIntentNonce: result.nonce,
+          workflowType: thread.workflow_type,
+          intentType: 'conversation.message',
+          fromBeamId: senderBinding.beam_id,
+          toBeamId: partnerChannel.partner_beam_id,
+          partnerChannelId: partnerChannel.id,
+          approvalRequired: policyPreview.approvalRequired,
+          approvers: policyPreview.approvers,
+          success: result.success,
+          errorCode: result.errorCode,
+        },
+      })
+
+      const currentThread = updatedThread ?? thread
+      const currentParticipants = listWorkspaceThreadParticipants(db, thread.id)
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        workspace: serializeWorkspace(db, workspace),
+        thread: serializeWorkspaceThread(db, currentThread, currentParticipants),
+        participants: currentParticipants.map((row) => serializeWorkspaceThreadParticipant(db, row)),
+        partnerChannel: updatedChannel
+          ? serializeWorkspacePartnerChannel(
+            db,
+            updatedChannel,
+            listWorkspaceIdentityBindings(db, workspace.id)
+              .filter((binding) => binding.binding_type !== 'partner')
+              .map((binding) => binding.beam_id),
+          )
+          : null,
+        dispatch: {
+          nonce: result.nonce,
+          success: result.success,
+          error: result.error,
+          errorCode: result.errorCode,
+          traceHref: `/intents/${encodeURIComponent(result.nonce)}`,
+        },
+      })
+    }
+
+    try {
+      const result = await relayIntentFromHttp(db, frame, 60_000, {
+        trustedControlPlane: true,
+      })
+
+      return finalizeDispatch({
+        nonce,
+        success: result.success,
+        error: result.error ?? null,
+        errorCode: result.errorCode ?? null,
+      })
+    } catch (err) {
+      const loggedIntent = getIntentLogByNonce(db, nonce)
+      if (loggedIntent) {
+        return finalizeDispatch({
+          nonce,
+          success: loggedIntent.status === 'acked',
+          error: err instanceof Error ? err.message : 'Beam handoff dispatch failed',
+          errorCode: err instanceof RelayError ? err.code : loggedIntent.error_code,
+        })
+      }
+
+      if (err instanceof RelayError) {
+        const status = err.code === 'OFFLINE'
+          ? 503
+          : err.code === 'TIMEOUT'
+            ? 504
+            : err.code === 'FORBIDDEN'
+              ? 403
+              : err.code === 'BAD_REQUEST'
+                ? 400
+                : err.code === 'RATE_LIMITED'
+                  ? 429
+                  : 502
+        return c.json({ error: err.message, errorCode: err.code }, status)
+      }
+
+      console.error('Workspace thread dispatch error:', err)
+      return c.json({ error: 'Failed to dispatch workspace handoff thread', errorCode: 'DISPATCH_FAILED' }, 500)
+    }
   })
 
   router.get('/:slug/policy', (c) => {
