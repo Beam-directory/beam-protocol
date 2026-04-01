@@ -28,6 +28,7 @@
     "workspace:buyer-dry-run": "node scripts/workspace/buyer-dry-run.mjs",
     "workspace:digest": "node scripts/workspace/operator-digest.mjs",
     "workspace:import-openclaw": "node scripts/workspace/import-openclaw.mjs",
+    "workspace:openclaw-live": "node scripts/workspace/openclaw-setup.mjs --watch",
     "workspace:openclaw-setup": "node scripts/workspace/openclaw-setup.mjs",
     "workspace:operator-dry-run": "node scripts/workspace/operator-dry-run.mjs",
     "workspace:sync-demo": "node scripts/workspace/sync-demo.mjs",

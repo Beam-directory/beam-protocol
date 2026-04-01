@@ -8,6 +8,7 @@ const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const composeFile = path.join(repoRoot, 'ops/quickstart/compose.yaml')
 const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
+const watchMode = process.argv.includes('--watch')
 
 function logStep(message) {
   console.log(`[openclaw-setup] ${message}`)
@@ -63,6 +64,12 @@ async function main() {
 
   logStep('running the hosted quickstart smoke')
   run('node', [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
+
+  if (watchMode) {
+    logStep('starting live OpenClaw sync for agents, workspace agents, and subagents')
+    run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing', '--watch'])
+    return
+  }
 
   logStep('importing persistent OpenClaw agents, workspace agents, and recent subagents')
   run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing'])

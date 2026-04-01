@@ -18,6 +18,8 @@ const mergedIdentitiesPath = optionalFlag('--merged-identities', path.join(os.ho
 const subagentRunsPath = optionalFlag('--subagent-runs', path.join(os.homedir(), '.openclaw/subagents/runs.json'))
 const subagentDays = Number.parseInt(optionalFlag('--subagent-days', '30'), 10)
 const subagentLimit = Number.parseInt(optionalFlag('--subagent-limit', '25'), 10)
+const watchMode = process.argv.includes('--watch')
+const watchIntervalMs = Number.parseInt(optionalFlag('--watch-interval-ms', '5000'), 10)
 const registerMissing = process.argv.includes('--register-missing')
 const includeSubagents = !process.argv.includes('--no-subagents')
 
@@ -64,6 +66,42 @@ async function readJsonFile(filePath, fallback) {
   }
 }
 
+function fileMtimeMs(filePath) {
+  try {
+    return fs.statSync(filePath).mtimeMs
+  } catch {
+    return 0
+  }
+}
+
+function directoryFingerprint(rootDir) {
+  if (!fs.existsSync(rootDir)) {
+    return ''
+  }
+
+  return fs.readdirSync(rootDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `${entry.name}:${fileMtimeMs(path.join(rootDir, entry.name))}`)
+    .sort((left, right) => left.localeCompare(right))
+    .join('|')
+}
+
+function sourceFingerprint() {
+  return JSON.stringify({
+    agentsDir: directoryFingerprint(agentsDir),
+    workspaceAgentsDir: directoryFingerprint(workspaceAgentsDir),
+    identitiesPath: fileMtimeMs(identitiesPath),
+    generatedIdentitiesPath: fileMtimeMs(generatedIdentitiesPath),
+    subagentRunsPath: fileMtimeMs(subagentRunsPath),
+  })
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms)
+  })
+}
+
 async function requestJsonAllow(url, init, allowedStatuses = []) {
   const response = await fetch(url, init)
   const text = await response.text()
@@ -82,25 +120,37 @@ async function requestJsonAllow(url, init, allowedStatuses = []) {
 }
 
 async function createAdminToken() {
-  const challenge = await requestJson(`${directoryUrl}/admin/auth/magic-link`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Origin: dashboardUrl,
-    },
-    body: JSON.stringify({ email: adminEmail }),
-  })
+  for (let attempt = 1; attempt <= 5; attempt += 1) {
+    const challenge = await requestJsonAllow(`${directoryUrl}/admin/auth/magic-link`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Origin: dashboardUrl,
+      },
+      body: JSON.stringify({ email: adminEmail }),
+    }, [429])
 
-  const verify = await requestJson(`${directoryUrl}/admin/auth/verify`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ token: challenge.token }),
-  })
+    if (challenge.status === 429) {
+      if (attempt === 5) {
+        throw new Error(`Admin auth is still rate limited after ${attempt} attempts.`)
+      }
+      await sleep(attempt * 1500)
+      continue
+    }
 
-  return {
-    token: verify.token,
-    magicUrl: challenge.url,
+    const verify = await requestJson(`${directoryUrl}/admin/auth/verify`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token: challenge.payload.token }),
+    })
+
+    return {
+      token: verify.token,
+      magicUrl: challenge.payload.url,
+    }
   }
+
+  throw new Error('Unable to create an admin session token.')
 }
 
 function listAgentDirectories(rootDir, source) {
@@ -392,7 +442,7 @@ function buildGeneratedIdentity(identityKey, agentName) {
   }
 }
 
-async function main() {
+async function runImportCycle() {
   const [baseIdentities, generatedIdentities] = await Promise.all([
     readJsonFile(identitiesPath, {}),
     readJsonFile(generatedIdentitiesPath, {}),
@@ -491,6 +541,26 @@ async function main() {
   await writeFile(generatedIdentitiesPath, `${JSON.stringify(generatedUpdates, null, 2)}\n`, 'utf8')
   await writeFile(mergedIdentitiesPath, `${JSON.stringify({ ...baseIdentities, ...generatedUpdates }, null, 2)}\n`, 'utf8')
 
+  return {
+    magicUrl,
+    descriptors,
+    counts,
+    imported,
+    registered,
+    missing,
+  }
+}
+
+function printCycleSummary(summary) {
+  const {
+    magicUrl,
+    descriptors,
+    counts,
+    imported,
+    registered,
+    missing,
+  } = summary
+
   console.log('')
   console.log('Beam OpenClaw import finished.')
   console.log('')
@@ -534,6 +604,37 @@ async function main() {
   console.log('To let OpenClaw send with the imported local identities, point the sender to:')
   console.log(`BEAM_IDENTITIES=${mergedIdentitiesPath}`)
   console.log(`BEAM_DIRECTORY_URL=${directoryUrl}`)
+}
+
+async function main() {
+  if (!watchMode) {
+    printCycleSummary(await runImportCycle())
+    return
+  }
+
+  console.log(`Beam OpenClaw watch mode active for workspace "${workspaceSlug}".`)
+  console.log(`Watching every ${watchIntervalMs}ms for new OpenClaw agents or subagent runs.`)
+
+  let lastFingerprint = ''
+  while (true) {
+    const currentFingerprint = sourceFingerprint()
+    if (currentFingerprint !== lastFingerprint) {
+      try {
+        if (lastFingerprint !== '') {
+          console.log('')
+          console.log('[watch] change detected, syncing Beam workspace roster...')
+        }
+        printCycleSummary(await runImportCycle())
+        lastFingerprint = sourceFingerprint()
+        console.log('')
+        console.log('[watch] waiting for the next OpenClaw change...')
+      } catch (error) {
+        console.error(error instanceof Error ? error.message : error)
+        console.log('[watch] sync failed; keeping watcher alive and retrying on the next poll.')
+      }
+    }
+    await sleep(watchIntervalMs)
+  }
 }
 
 main().catch((error) => {

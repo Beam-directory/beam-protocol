@@ -79,6 +79,18 @@ That command will:
 4. import OpenClaw agents into `openclaw-local`
 5. generate missing Beam identities automatically
 
+If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:
+
+```bash
+npm run workspace:openclaw-live
+```
+
+That keeps a foreground watcher alive and re-syncs the Beam workspace whenever:
+
+- a new persistent agent folder appears
+- a workspace agent changes
+- `~/.openclaw/subagents/runs.json` gets a new subagent run
+
 If you only want the import step against an already running stack, use:
 
 ```bash
