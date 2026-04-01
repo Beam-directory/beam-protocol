@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.0.0 (draft)
+## v1.0.0 (2026-04-01)
 
 ### First Production Partner
 - formalize one production-grade cross-company workflow with a shared workflow contract, onboarding pack, and go-live checklist

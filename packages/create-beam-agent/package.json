@@ -1,6 +1,6 @@
 {
   "name": "create-beam-agent",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "description": "Scaffold a Beam-connected agent project",
   "type": "module",
   "bin": {
