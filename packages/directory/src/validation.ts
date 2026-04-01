@@ -5,20 +5,26 @@ import AjvImport, { type ValidateFunction } from 'ajv'
 
 export const BEAM_ID_RE = /^[a-z0-9_-]+@(?:[a-z0-9_-]+\.)?beam\.directory$/
 
-interface CatalogParamRule {
+export interface IntentCatalogParamRule {
   type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'integer'
   enum?: unknown[]
   required?: boolean
+  description?: string
+  default?: unknown
+  maxLength?: number
 }
 
-interface CatalogIntent {
+export interface IntentCatalogIntent {
   id: string
-  payload?: Record<string, CatalogParamRule>
-  params?: Record<string, CatalogParamRule>
+  description?: string
+  payload?: Record<string, IntentCatalogParamRule>
+  params?: Record<string, IntentCatalogParamRule>
+  response?: Record<string, IntentCatalogParamRule>
+  [key: string]: unknown
 }
 
-interface CatalogFile {
-  intents?: CatalogIntent[]
+export interface IntentCatalogFile {
+  intents?: IntentCatalogIntent[]
 }
 
 interface ValidationResult {
@@ -38,11 +44,11 @@ const AjvCtor = AjvImport as unknown as {
 const ajv = new AjvCtor({ allErrors: true, strict: false })
 const validators = new Map<string, ValidateFunction>()
 
-function loadCatalog(): CatalogIntent[] {
+function loadCatalog(): IntentCatalogIntent[] {
   for (const catalogPath of catalogPaths) {
     try {
       const raw = readFileSync(catalogPath, 'utf8')
-      const parsed = JSON.parse(raw) as CatalogFile
+      const parsed = JSON.parse(raw) as IntentCatalogFile
       const intents = Array.isArray(parsed.intents) ? parsed.intents : []
       if (intents.length > 0) {
         return intents
@@ -54,7 +60,13 @@ function loadCatalog(): CatalogIntent[] {
   return []
 }
 
-function buildIntentSchema(intent: CatalogIntent): Record<string, unknown> {
+export function loadIntentCatalogDocument(): IntentCatalogFile {
+  return {
+    intents: loadCatalog(),
+  }
+}
+
+function buildIntentSchema(intent: IntentCatalogIntent): Record<string, unknown> {
   const rules = intent.payload ?? intent.params ?? {}
   const properties: Record<string, Record<string, unknown>> = {}
   const required: string[] = []

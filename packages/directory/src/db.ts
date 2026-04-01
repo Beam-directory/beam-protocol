@@ -271,6 +271,8 @@ function initSchema(db: DB): void {
       owner TEXT,
       status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'blocked', 'closed')),
       workflow_type TEXT,
+      draft_intent_type TEXT,
+      draft_payload_json TEXT,
       linked_intent_nonce TEXT,
       last_activity_at TEXT NOT NULL,
       created_at TEXT NOT NULL,
@@ -721,6 +723,8 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
+  ensureColumn(db, 'workspace_threads', 'draft_intent_type', 'TEXT')
+  ensureColumn(db, 'workspace_threads', 'draft_payload_json', 'TEXT')
 
   db.prepare(`
     UPDATE agents
@@ -1408,6 +1412,8 @@ export function createWorkspaceThread(
     owner?: string | null
     status?: WorkspaceThreadRow['status']
     workflowType?: string | null
+    draftIntentType?: string | null
+    draftPayloadJson?: string | null
     linkedIntentNonce?: string | null
     lastActivityAt?: string
   },
@@ -1422,11 +1428,13 @@ export function createWorkspaceThread(
       owner,
       status,
       workflow_type,
+      draft_intent_type,
+      draft_payload_json,
       linked_intent_nonce,
       last_activity_at,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.workspaceId,
     input.kind,
@@ -1435,6 +1443,8 @@ export function createWorkspaceThread(
     input.owner ?? null,
     input.status ?? 'open',
     input.workflowType ?? null,
+    input.draftIntentType ?? null,
+    input.draftPayloadJson ?? null,
     input.linkedIntentNonce ?? null,
     input.lastActivityAt ?? now,
     now,
@@ -1458,6 +1468,8 @@ export function updateWorkspaceThread(
     owner?: string | null
     status?: WorkspaceThreadRow['status']
     workflowType?: string | null
+    draftIntentType?: string | null
+    draftPayloadJson?: string | null
     linkedIntentNonce?: string | null
     lastActivityAt?: string
   },
@@ -1475,6 +1487,8 @@ export function updateWorkspaceThread(
         owner = ?,
         status = ?,
         workflow_type = ?,
+        draft_intent_type = ?,
+        draft_payload_json = ?,
         linked_intent_nonce = ?,
         last_activity_at = ?,
         updated_at = ?
@@ -1485,6 +1499,8 @@ export function updateWorkspaceThread(
     input.owner === undefined ? existing.owner : input.owner,
     input.status ?? existing.status,
     input.workflowType === undefined ? existing.workflow_type : input.workflowType,
+    input.draftIntentType === undefined ? existing.draft_intent_type : input.draftIntentType,
+    input.draftPayloadJson === undefined ? existing.draft_payload_json : input.draftPayloadJson,
     input.linkedIntentNonce === undefined ? existing.linked_intent_nonce : input.linkedIntentNonce,
     input.lastActivityAt ?? existing.last_activity_at,
     updatedAt,

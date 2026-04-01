@@ -396,6 +396,8 @@ test('createDatabase adds beam workspace control-plane tables to legacy database
 
     const threadColumns = db.prepare('PRAGMA table_info(workspace_threads)').all() as Array<{ name: string }>
     assert.ok(threadColumns.some((column) => column.name === 'kind'))
+    assert.ok(threadColumns.some((column) => column.name === 'draft_intent_type'))
+    assert.ok(threadColumns.some((column) => column.name === 'draft_payload_json'))
     assert.ok(threadColumns.some((column) => column.name === 'linked_intent_nonce'))
 
     const participantColumns = db.prepare('PRAGMA table_info(workspace_thread_participants)').all() as Array<{ name: string }>

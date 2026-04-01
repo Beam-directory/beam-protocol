@@ -4,6 +4,7 @@ import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Ob
 import {
   ApiError,
   directoryApi,
+  type IntentCatalogItem,
   type IntentLifecycleStatus,
   type WorkspaceBindingStatus,
   type WorkspaceDigestActionItem,
@@ -27,6 +28,16 @@ import {
   type WorkspaceTimelineEventKind,
 } from '../lib/api'
 import { formatDateTime, formatLatency, formatNumber, formatRelativeTime } from '../lib/utils'
+
+const FALLBACK_CONVERSATION_INTENT: IntentCatalogItem = {
+  id: 'conversation.message',
+  description: 'Natural language message with optional language and context.',
+  params: {
+    message: { type: 'string', required: true },
+    language: { type: 'string', default: 'en' },
+    context: { type: 'object' },
+  },
+}
 
 function workspaceStatusTone(status: WorkspaceStatus): 'default' | 'success' | 'warning' {
   switch (status) {
@@ -168,6 +179,72 @@ function summarizeList(values: string[], fallback: string): string {
   return values.length > 0 ? values.join(', ') : fallback
 }
 
+function getIntentRules(intent: IntentCatalogItem | null): Record<string, NonNullable<IntentCatalogItem['params']>[string]> {
+  if (!intent) {
+    return {}
+  }
+
+  return (intent.params ?? intent.payload ?? {}) as Record<string, NonNullable<IntentCatalogItem['params']>[string]>
+}
+
+function buildIntentPayloadTemplate(intent: IntentCatalogItem | null): string {
+  const rules = getIntentRules(intent)
+  const payload: Record<string, unknown> = {}
+
+  for (const [key, rule] of Object.entries(rules)) {
+    if (rule.default !== undefined) {
+      payload[key] = rule.default
+      continue
+    }
+
+    switch (rule.type) {
+      case 'integer':
+      case 'number':
+        payload[key] = rule.required ? 1 : 0
+        break
+      case 'boolean':
+        payload[key] = rule.required ? true : false
+        break
+      case 'array':
+        payload[key] = []
+        break
+      case 'object':
+        payload[key] = {}
+        break
+      default:
+        payload[key] = ''
+        break
+    }
+  }
+
+  if (intent?.id === 'conversation.message') {
+    payload.message = typeof payload.message === 'string' ? payload.message : ''
+    payload.language = typeof payload.language === 'string' && payload.language.length > 0 ? payload.language : 'en'
+  }
+
+  return JSON.stringify(payload, null, 2)
+}
+
+function parseJsonObjectInput(value: string, label: string): Record<string, unknown> | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(trimmed) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      throw new Error(`${label} must be a JSON object.`)
+    }
+    return parsed as Record<string, unknown>
+  } catch (err) {
+    if (err instanceof Error && err.message.includes(label)) {
+      throw err
+    }
+    throw new Error(`${label} must be valid JSON.`)
+  }
+}
+
 function renderAttentionMeta(item: WorkspaceOverviewAttentionItem): string {
   const parts = [
     item.binding.owner ? `Owner ${item.binding.owner}` : 'No owner',
@@ -236,6 +313,7 @@ export default function WorkspacesPage() {
   const [policy, setPolicy] = useState<WorkspacePolicyResponse | null>(null)
   const [timeline, setTimeline] = useState<WorkspaceTimelineEntry[]>([])
   const [digest, setDigest] = useState<WorkspaceDigestResponse | null>(null)
+  const [intentCatalog, setIntentCatalog] = useState<IntentCatalogItem[]>([FALLBACK_CONVERSATION_INTENT])
   const [loading, setLoading] = useState(true)
   const [surfaceLoading, setSurfaceLoading] = useState(false)
   const [threadDetailLoading, setThreadDetailLoading] = useState(false)
@@ -261,10 +339,10 @@ export default function WorkspacesPage() {
     kind: 'internal' as WorkspaceThreadKind,
     title: '',
     summary: '',
-    message: '',
-    language: 'en',
     owner: '',
     workflowType: '',
+    draftIntentType: FALLBACK_CONVERSATION_INTENT.id,
+    draftPayloadJson: buildIntentPayloadTemplate(FALLBACK_CONVERSATION_INTENT),
     localBindingId: '',
     partnerChannelId: '',
     linkedIntentNonce: '',
@@ -290,10 +368,26 @@ export default function WorkspacesPage() {
     () => bindings.filter((binding) => binding.bindingType !== 'partner'),
     [bindings],
   )
+  const defaultHandoffIntentId = useMemo(
+    () => intentCatalog.find((entry) => entry.id === 'conversation.message')?.id ?? intentCatalog[0]?.id ?? FALLBACK_CONVERSATION_INTENT.id,
+    [intentCatalog],
+  )
+  const selectedIntent = useMemo(
+    () => intentCatalog.find((entry) => entry.id === threadForm.draftIntentType)
+      ?? intentCatalog.find((entry) => entry.id === defaultHandoffIntentId)
+      ?? FALLBACK_CONVERSATION_INTENT,
+    [defaultHandoffIntentId, intentCatalog, threadForm.draftIntentType],
+  )
 
   async function loadWorkspaces() {
     const response = await directoryApi.listWorkspaces()
     setWorkspaces(response.workspaces)
+  }
+
+  async function loadIntentCatalog() {
+    const response = await directoryApi.getIntentCatalog()
+    const intents = response.intents.length > 0 ? response.intents : [FALLBACK_CONVERSATION_INTENT]
+    setIntentCatalog(intents)
   }
 
   async function loadWorkspaceSurface(slug: string) {
@@ -370,6 +464,35 @@ export default function WorkspacesPage() {
   useEffect(() => {
     void refreshAll()
   }, [])
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        await loadIntentCatalog()
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Failed to load intent catalog')
+      }
+    })()
+  }, [])
+
+  useEffect(() => {
+    if (threadForm.kind !== 'handoff') {
+      return
+    }
+
+    if (threadForm.draftIntentType && intentCatalog.some((entry) => entry.id === threadForm.draftIntentType)) {
+      return
+    }
+
+    const nextIntent = intentCatalog.find((entry) => entry.id === defaultHandoffIntentId)
+      ?? intentCatalog[0]
+      ?? FALLBACK_CONVERSATION_INTENT
+    setThreadForm((current) => ({
+      ...current,
+      draftIntentType: nextIntent.id,
+      draftPayloadJson: buildIntentPayloadTemplate(nextIntent),
+    }))
+  }, [defaultHandoffIntentId, intentCatalog, threadForm.draftIntentType, threadForm.kind])
 
   useEffect(() => {
     if (!selectedWorkspace) {
@@ -595,9 +718,26 @@ export default function WorkspacesPage() {
     }
 
     const linkedIntentNonce = threadForm.linkedIntentNonce.trim()
+    const shouldPersistDraft = threadForm.kind === 'handoff' && linkedIntentNonce.length === 0
     const shouldDispatch = mode === 'dispatch' && threadForm.kind === 'handoff' && linkedIntentNonce.length === 0
-    const dispatchMessage = threadForm.message.trim() || threadForm.summary.trim() || threadForm.title.trim()
     let createdThreadId: number | null = null
+
+    let draftIntentType: string | null = null
+    let draftPayload: Record<string, unknown> | null = null
+    if (shouldPersistDraft) {
+      draftIntentType = threadForm.draftIntentType.trim() || defaultHandoffIntentId
+      try {
+        draftPayload = parseJsonObjectInput(threadForm.draftPayloadJson, 'Intent payload')
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Intent payload must be valid JSON.')
+        return
+      }
+
+      if (!draftPayload) {
+        setError('Intent payload is required for a blocked or directly dispatched handoff.')
+        return
+      }
+    }
 
     try {
       setActionBusy(shouldDispatch ? 'thread-composer-dispatch' : 'thread-composer-create')
@@ -610,6 +750,8 @@ export default function WorkspacesPage() {
         summary: threadForm.summary.trim() || null,
         owner: threadForm.owner.trim() || null,
         workflowType: threadForm.workflowType.trim() || null,
+        draftIntentType: shouldPersistDraft ? draftIntentType : null,
+        draftPayload: shouldPersistDraft ? draftPayload : null,
         linkedIntentNonce: linkedIntentNonce || null,
         status: threadForm.kind === 'handoff' && !linkedIntentNonce ? 'blocked' : 'open',
         participants,
@@ -620,8 +762,8 @@ export default function WorkspacesPage() {
       let noticeMessage = 'Workspace thread created.'
       if (shouldDispatch) {
         const dispatchResponse = await directoryApi.dispatchWorkspaceThread(selectedWorkspace.slug, response.thread.id, {
-          message: dispatchMessage,
-          language: threadForm.language.trim() || null,
+          intentType: draftIntentType,
+          payload: draftPayload,
         })
         activeThreadId = dispatchResponse.thread.id
         noticeMessage = dispatchResponse.dispatch.success
@@ -637,10 +779,10 @@ export default function WorkspacesPage() {
         kind: 'internal',
         title: '',
         summary: '',
-        message: '',
-        language: 'en',
         owner: '',
         workflowType: '',
+        draftIntentType: defaultHandoffIntentId,
+        draftPayloadJson: buildIntentPayloadTemplate(intentCatalog.find((entry) => entry.id === defaultHandoffIntentId) ?? FALLBACK_CONVERSATION_INTENT),
         localBindingId: '',
         partnerChannelId: '',
         linkedIntentNonce: '',
@@ -675,8 +817,6 @@ export default function WorkspacesPage() {
       setError(null)
 
       const response = await directoryApi.dispatchWorkspaceThread(selectedWorkspace.slug, thread.id, {
-        message: thread.summary || thread.title,
-        language: 'en',
       })
       await loadWorkspaceSurface(selectedWorkspace.slug)
       await loadThreadDetail(selectedWorkspace.slug, thread.id)
@@ -1063,7 +1203,23 @@ export default function WorkspacesPage() {
                   void handleThreadComposerSubmit('create')
                 }}
               >
-                <select className="input-field" value={threadForm.kind} onChange={(event) => setThreadForm((current) => ({ ...current, kind: event.target.value as WorkspaceThreadKind }))}>
+                <select
+                  className="input-field"
+                  value={threadForm.kind}
+                  onChange={(event) => {
+                    const nextKind = event.target.value as WorkspaceThreadKind
+                    setThreadForm((current) => ({
+                      ...current,
+                      kind: nextKind,
+                      ...(nextKind === 'handoff'
+                        ? {
+                            draftIntentType: current.draftIntentType || defaultHandoffIntentId,
+                            draftPayloadJson: current.draftPayloadJson || buildIntentPayloadTemplate(selectedIntent),
+                          }
+                        : {}),
+                    }))
+                  }}
+                >
                   <option value="internal">internal</option>
                   <option value="handoff">handoff</option>
                 </select>
@@ -1089,8 +1245,37 @@ export default function WorkspacesPage() {
                         </option>
                       ))}
                     </select>
-                    <input className="input-field" placeholder="Language hint (default en)" value={threadForm.language} onChange={(event) => setThreadForm((current) => ({ ...current, language: event.target.value }))} />
-                    <textarea className="input-field md:col-span-2 min-h-24" placeholder="Message to send over Beam (defaults to summary/title if blank)" value={threadForm.message} onChange={(event) => setThreadForm((current) => ({ ...current, message: event.target.value }))} />
+                    <select
+                      className="input-field"
+                      value={threadForm.draftIntentType}
+                      onChange={(event) => {
+                        const nextIntent = intentCatalog.find((entry) => entry.id === event.target.value) ?? FALLBACK_CONVERSATION_INTENT
+                        setThreadForm((current) => ({
+                          ...current,
+                          draftIntentType: nextIntent.id,
+                          draftPayloadJson: buildIntentPayloadTemplate(nextIntent),
+                        }))
+                      }}
+                    >
+                      {intentCatalog.map((intent) => (
+                        <option key={intent.id} value={intent.id}>
+                          {intent.id}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="md:col-span-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                      <div className="font-medium text-slate-900 dark:text-slate-100">{selectedIntent.id}</div>
+                      <div className="mt-1">{selectedIntent.description || 'No catalog description is available for this intent yet.'}</div>
+                      <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                        Fields: {Object.keys(getIntentRules(selectedIntent)).length > 0 ? Object.keys(getIntentRules(selectedIntent)).join(', ') : 'No schema fields declared'}
+                      </div>
+                    </div>
+                    <textarea
+                      className="input-field md:col-span-2 min-h-48 font-mono text-xs"
+                      placeholder="Structured JSON payload"
+                      value={threadForm.draftPayloadJson}
+                      onChange={(event) => setThreadForm((current) => ({ ...current, draftPayloadJson: event.target.value }))}
+                    />
                     <input className="input-field" placeholder="Linked intent nonce (optional if still blocked)" value={threadForm.linkedIntentNonce} onChange={(event) => setThreadForm((current) => ({ ...current, linkedIntentNonce: event.target.value }))} />
                   </>
                 ) : null}
@@ -1113,7 +1298,7 @@ export default function WorkspacesPage() {
                     </button>
                   ) : null}
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Handoff threads can stay blocked for review, link to an existing nonce, or be sent directly from this workspace surface.
+                    Handoff threads can stay blocked for review, link to an existing nonce, or send a catalog-backed Beam intent directly from this workspace surface.
                   </div>
                 </div>
               </form>
@@ -1156,6 +1341,7 @@ export default function WorkspacesPage() {
                         <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
                           <div>{thread.workflowType ? `Workflow ${thread.workflowType}` : 'Internal coordination'}</div>
                           <div>{thread.owner ? `Owner ${thread.owner}` : 'No owner assigned'}</div>
+                          <div>{thread.draftIntentType ? `Draft intent ${thread.draftIntentType}` : thread.trace ? `Trace intent ${thread.trace.intentType}` : 'No Beam draft yet'}</div>
                           <div>{formatNumber(thread.participantCount)} participants</div>
                           <div>Last active {formatRelativeTime(thread.lastActivityAt)}</div>
                         </div>
@@ -1208,8 +1394,21 @@ export default function WorkspacesPage() {
                           <div className="text-xs uppercase tracking-wide text-slate-400">Last activity</div>
                           <div>{formatRelativeTime(threadDetail.thread.lastActivityAt)}</div>
                         </div>
+                        <div>
+                          <div className="text-xs uppercase tracking-wide text-slate-400">Draft intent</div>
+                          <div>{threadDetail.thread.draftIntentType || 'No draft intent stored'}</div>
+                        </div>
                       </div>
                     </div>
+
+                    {threadDetail.thread.draftPayload ? (
+                      <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Draft payload</div>
+                        <pre className="mt-3 overflow-x-auto rounded-2xl bg-slate-950/95 p-4 text-xs leading-6 text-slate-100">
+                          {JSON.stringify(threadDetail.thread.draftPayload, null, 2)}
+                        </pre>
+                      </div>
+                    ) : null}
 
                     <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                       <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Participants</div>
@@ -1274,7 +1473,7 @@ export default function WorkspacesPage() {
                       ) : (
                         <div className="mt-3 space-y-3">
                           <div className="text-sm text-slate-500 dark:text-slate-400">
-                            This thread is still internal or blocked. You can now approve and send a blocked handoff directly from the workspace control plane; once Beam accepts it, the full trace appears here.
+                            This thread is still internal or blocked. You can now approve and send a blocked handoff directly from the workspace control plane with its stored draft intent and payload; once Beam accepts it, the full trace appears here.
                           </div>
                           {threadDetail.thread.kind === 'handoff' && threadDetail.thread.status === 'blocked' ? (
                             <button

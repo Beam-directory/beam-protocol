@@ -338,6 +338,8 @@ export interface WorkspaceThread {
   owner: string | null
   status: WorkspaceThreadStatus
   workflowType: string | null
+  draftIntentType: string | null
+  draftPayload: Record<string, unknown> | null
   linkedIntentNonce: string | null
   lastActivityAt: string
   createdAt: string
@@ -380,6 +382,8 @@ export interface WorkspaceThreadDetailResponse {
 }
 
 export interface WorkspaceThreadDispatchInput {
+  intentType?: string | null
+  payload?: Record<string, unknown> | null
   message?: string | null
   language?: string | null
 }
@@ -388,6 +392,7 @@ export interface WorkspaceThreadDispatchResponse extends WorkspaceThreadDetailRe
   partnerChannel: WorkspacePartnerChannel | null
   dispatch: {
     nonce: string
+    intentType: string
     success: boolean
     error: string | null
     errorCode: string | null
@@ -498,6 +503,8 @@ export interface WorkspaceThreadCreateInput {
   owner?: string | null
   status?: WorkspaceThreadStatus
   workflowType?: string | null
+  draftIntentType?: string | null
+  draftPayload?: Record<string, unknown> | null
   linkedIntentNonce?: string | null
   participants?: WorkspaceThreadParticipantInput[]
 }
@@ -942,9 +949,25 @@ export interface OrgDetailsResponse {
 }
 
 export interface IntentCatalogItem {
-  type: string
+  id: string
   description?: string
-  payloadSchema?: Record<string, unknown>
+  params?: Record<string, {
+    type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'integer'
+    enum?: unknown[]
+    required?: boolean
+    description?: string
+    default?: unknown
+    maxLength?: number
+  }>
+  payload?: Record<string, {
+    type?: 'string' | 'number' | 'boolean' | 'object' | 'array' | 'integer'
+    enum?: unknown[]
+    required?: boolean
+    description?: string
+    default?: unknown
+    maxLength?: number
+  }>
+  response?: Record<string, unknown>
 }
 
 export interface IntentCatalogResponse {

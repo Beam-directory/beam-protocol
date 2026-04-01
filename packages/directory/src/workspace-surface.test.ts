@@ -743,6 +743,12 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
         owner: 'ops@example.com',
         workflowType: 'partner.review',
         status: 'blocked',
+        draftIntentType: 'task.delegate',
+        draftPayload: {
+          task: 'Confirm the approval lane and return the next operator action.',
+          context: 'Workspace-triggered cross-instance approval dispatch.',
+          priority: 'high',
+        },
         participants: [
           {
             principalId: 'ops-bot@beam.directory',
@@ -769,16 +775,14 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
         ...createAdminHeaders(db, 'ops@example.com', 'operator'),
         'content-type': 'application/json',
       },
-      body: JSON.stringify({
-        message: 'Show me how this cross-instance Beam handoff works.',
-        language: 'en',
-      }),
+      body: JSON.stringify({}),
     }))
     assert.equal(dispatchResponse.status, 200)
 
     const dispatchBody = await dispatchResponse.json() as {
       thread: {
         status: string
+        draftIntentType: string | null
         linkedIntentNonce: string | null
         trace: {
           intentType: string
@@ -792,6 +796,7 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
       } | null
       dispatch: {
         nonce: string
+        intentType: string
         success: boolean
         traceHref: string | null
       }
@@ -800,7 +805,9 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
     assert.equal(typeof dispatchBody.dispatch.nonce, 'string')
     assert.equal(dispatchBody.thread.status, 'open')
     assert.equal(dispatchBody.thread.linkedIntentNonce, dispatchBody.dispatch.nonce)
-    assert.equal(dispatchBody.thread.trace?.intentType, 'conversation.message')
+    assert.equal(dispatchBody.dispatch.intentType, 'task.delegate')
+    assert.equal(dispatchBody.thread.draftIntentType, 'task.delegate')
+    assert.equal(dispatchBody.thread.trace?.intentType, 'task.delegate')
     assert.equal(dispatchBody.thread.trace?.toBeamId, 'echo@beam.directory')
     assert.equal(dispatchBody.thread.trace?.status, 'acked')
     assert.equal(dispatchBody.partnerChannel?.lastIntentNonce, dispatchBody.dispatch.nonce)
@@ -812,10 +819,14 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
     assert.equal(detailResponse.status, 200)
     const detailBody = await detailResponse.json() as {
       thread: {
+        draftIntentType: string | null
+        draftPayload: Record<string, unknown> | null
         linkedIntentNonce: string | null
         trace: { nonce: string | null } | null
       }
     }
+    assert.equal(detailBody.thread.draftIntentType, 'task.delegate')
+    assert.equal(detailBody.thread.draftPayload?.['task'], 'Confirm the approval lane and return the next operator action.')
     assert.equal(detailBody.thread.linkedIntentNonce, dispatchBody.dispatch.nonce)
     assert.equal(detailBody.thread.trace?.nonce, dispatchBody.dispatch.nonce)
 
