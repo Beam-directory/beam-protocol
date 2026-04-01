@@ -1,9 +1,15 @@
 import { generateKeyPairSync } from 'node:crypto'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { optionalFlag, requestJson } from '../production/shared.mjs'
+import {
+  loadOpenClawIdentityState,
+  persistOpenClawIdentityState,
+  readJsonFile,
+} from './openclaw-secret-store.mjs'
+import { ensureLocalOpenClawAcls, ensureLocalOpenClawRelayTargets, ensureLocalOpenClawShield } from './openclaw-local-trust.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', 'http://localhost:43100')
 const dashboardUrl = optionalFlag('--dashboard-url', 'http://localhost:43173')
@@ -51,18 +57,6 @@ function createIdentityPublicKey() {
   return {
     publicKeyBase64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     privateKeyBase64: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
-  }
-}
-
-async function readJsonFile(filePath, fallback) {
-  try {
-    const text = await readFile(filePath, 'utf8')
-    return JSON.parse(text)
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return fallback
-    }
-    throw error
   }
 }
 
@@ -378,6 +372,13 @@ async function ensureDirectoryAgent(identity, displayName, description) {
   }
 }
 
+async function reissueLocalCredential(adminHeaders, bindingId) {
+  return requestJson(`${directoryUrl}/admin/workspaces/${workspaceSlug}/identities/${bindingId}/reissue-local-credential`, {
+    method: 'POST',
+    headers: adminHeaders,
+  })
+}
+
 function buildBindingNotes(descriptor) {
   if (descriptor.source === 'subagent-run') {
     const segments = [
@@ -461,10 +462,15 @@ function buildGeneratedIdentity(identityKey, agentName) {
 }
 
 async function runImportCycle(existingSession = null, allowRefresh = true) {
-  const [baseIdentities, generatedIdentities] = await Promise.all([
-    readJsonFile(identitiesPath, {}),
-    readJsonFile(generatedIdentitiesPath, {}),
-  ])
+  const {
+    baseIdentities,
+    generatedIdentities,
+    secretStorage: initialSecretStorage,
+  } = await loadOpenClawIdentityState({
+    identitiesPath,
+    generatedIdentitiesPath,
+    mergedIdentitiesPath,
+  })
 
   const { descriptors, counts } = await listOpenClawDescriptors()
   const session = existingSession ?? await createAdminToken()
@@ -487,6 +493,7 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
           trustedIps,
           registrationPerMinute: Math.max(originalPolicy.registrationPerMinute ?? 10, descriptors.length + 10),
         })
+        await ensureLocalOpenClawRelayTargets(directoryUrl, adminHeaders)
       }
 
       for (const descriptor of descriptors) {
@@ -529,6 +536,8 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
           }
         }
 
+        await ensureLocalOpenClawShield(directoryUrl, adminHeaders, registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId)
+
         const binding = await ensureBinding(adminHeaders, {
           ...identity,
           beamId: registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId,
@@ -536,6 +545,26 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
           ...descriptor,
           role,
         })
+
+        const activeIdentity = generatedUpdates[descriptor.identityKey]
+          ?? baseIdentities[descriptor.identityKey]
+          ?? generatedUpdates[descriptor.agentName]
+          ?? baseIdentities[descriptor.agentName]
+          ?? identity
+
+        if (!activeIdentity.privateKeyBase64 || !activeIdentity.apiKey) {
+          const reissued = await reissueLocalCredential(adminHeaders, binding.id)
+          generatedUpdates[descriptor.identityKey] = {
+            ...activeIdentity,
+            agentName: descriptor.agentName,
+            identityKey: descriptor.identityKey,
+            beamId: reissued.credential.beamId,
+            directoryUrl: reissued.credential.directoryUrl ?? directoryUrl,
+            publicKeyBase64: reissued.credential.publicKey,
+            privateKeyBase64: reissued.credential.privateKey,
+            apiKey: reissued.credential.apiKey,
+          }
+        }
 
         imported.push({
           agentName: descriptor.agentName,
@@ -551,15 +580,20 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
           })
         }
       }
+
+      await ensureLocalOpenClawAcls(directoryUrl, adminHeaders, imported.map((entry) => entry.beamId))
     } finally {
       if (originalPolicy) {
         await patchPublicEndpointPolicy(adminHeaders, originalPolicy)
       }
     }
 
-    await mkdir(path.dirname(generatedIdentitiesPath), { recursive: true })
-    await writeFile(generatedIdentitiesPath, `${JSON.stringify(generatedUpdates, null, 2)}\n`, 'utf8')
-    await writeFile(mergedIdentitiesPath, `${JSON.stringify({ ...baseIdentities, ...generatedUpdates }, null, 2)}\n`, 'utf8')
+    const persisted = await persistOpenClawIdentityState({
+      baseIdentities,
+      generatedIdentities: generatedUpdates,
+      generatedIdentitiesPath,
+      mergedIdentitiesPath,
+    })
 
     return {
       session,
@@ -569,6 +603,7 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
       imported,
       registered,
       missing,
+      secretStorage: persisted.secretStorage ?? initialSecretStorage,
     }
   } catch (error) {
     const message = formatErrorMessage(error)
@@ -588,6 +623,7 @@ function printCycleSummary(summary) {
     imported,
     registered,
     missing,
+    secretStorage,
   } = summary
 
   console.log('')
@@ -602,6 +638,7 @@ function printCycleSummary(summary) {
   console.log(`Imported:         ${imported.length}`)
   console.log(`Registered new:   ${registered.length}`)
   console.log(`Missing identity: ${missing.length}`)
+  console.log(`Secret storage:   ${secretStorage}`)
   console.log(`Generated file:   ${generatedIdentitiesPath}`)
   console.log(`Merged file:      ${mergedIdentitiesPath}`)
   console.log('')

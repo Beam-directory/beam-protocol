@@ -1,9 +1,16 @@
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir } from 'node:fs/promises'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { generateKeyPairSync } from 'node:crypto'
 import { optionalFlag, requestJson } from '../production/shared.mjs'
+import {
+  loadOpenClawAdminSession,
+  loadOpenClawIdentityState,
+  persistOpenClawIdentityState,
+  storeOpenClawAdminSession,
+} from './openclaw-secret-store.mjs'
+import { ensureLocalOpenClawAcls, ensureLocalOpenClawRelayTargets, ensureLocalOpenClawShield } from './openclaw-local-trust.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', process.env.BEAM_DIRECTORY_URL || 'http://localhost:43100')
 const dashboardUrl = optionalFlag('--dashboard-url', process.env.BEAM_DASHBOARD_URL || 'http://localhost:43173')
@@ -49,18 +56,6 @@ function createIdentityPublicKey() {
   return {
     publicKeyBase64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     privateKeyBase64: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
-  }
-}
-
-async function readJsonFile(filePath, fallback) {
-  try {
-    const text = await readFile(filePath, 'utf8')
-    return JSON.parse(text)
-  } catch (error) {
-    if (error && typeof error === 'object' && 'code' in error && error.code === 'ENOENT') {
-      return fallback
-    }
-    throw error
   }
 }
 
@@ -126,8 +121,7 @@ async function createAdminToken() {
       createdAt: Date.now(),
     }
 
-    await mkdir(path.dirname(sessionCachePath), { recursive: true })
-    await writeFile(sessionCachePath, `${JSON.stringify(session, null, 2)}\n`, 'utf8')
+    await storeOpenClawAdminSession(sessionCachePath, session)
     return session
   }
 
@@ -135,7 +129,7 @@ async function createAdminToken() {
 }
 
 async function loadCachedSession() {
-  const session = await readJsonFile(sessionCachePath, null)
+  const session = await loadOpenClawAdminSession(sessionCachePath)
   if (!session || typeof session.token !== 'string') {
     return null
   }
@@ -283,6 +277,13 @@ async function ensureDirectoryAgent(identity, displayName, description) {
   }
 }
 
+async function reissueLocalCredential(adminHeaders, bindingId) {
+  return requestJson(`${directoryUrl}/admin/workspaces/${workspaceSlug}/identities/${bindingId}/reissue-local-credential`, {
+    method: 'POST',
+    headers: adminHeaders,
+  })
+}
+
 function buildBindingNotes(descriptor) {
   const segments = [
     `Synced directly from OpenClaw subagent spawn ${descriptor.runId}.`,
@@ -342,12 +343,27 @@ async function ensureBinding(adminHeaders, identity, descriptor) {
   return created.binding
 }
 
+async function listWorkspaceBeamIds(adminHeaders) {
+  const list = await requestJson(`${directoryUrl}/admin/workspaces/${workspaceSlug}/identities`, {
+    headers: { Authorization: adminHeaders.Authorization },
+  })
+
+  return Array.isArray(list.bindings)
+    ? list.bindings
+      .map((entry) => entry.beamId)
+      .filter((value) => typeof value === 'string' && value.length > 0)
+    : []
+}
+
 async function performSync(session = null, allowRefresh = true) {
   const descriptor = buildDescriptor()
-  const [baseIdentities, generatedIdentities] = await Promise.all([
-    readJsonFile(identitiesPath, {}),
-    readJsonFile(generatedIdentitiesPath, {}),
-  ])
+  const identityState = await loadOpenClawIdentityState({
+    identitiesPath,
+    generatedIdentitiesPath,
+    mergedIdentitiesPath,
+  })
+  const baseIdentities = identityState.baseIdentities
+  const generatedIdentities = identityState.generatedIdentities
 
   const activeSession = session ?? await loadCachedSession() ?? await createAdminToken()
   const adminHeaders = createAdminHeaders(activeSession.token)
@@ -376,6 +392,7 @@ async function performSync(session = null, allowRefresh = true) {
         trustedIps,
         registrationPerMinute: Math.max(originalPolicy.registrationPerMinute ?? 10, 20),
       })
+      await ensureLocalOpenClawRelayTargets(directoryUrl, adminHeaders)
 
       const description = descriptor.role
         ? `Imported OpenClaw agent. ${descriptor.role}`
@@ -391,14 +408,42 @@ async function performSync(session = null, allowRefresh = true) {
         }
       }
 
+      await ensureLocalOpenClawShield(directoryUrl, adminHeaders, registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId)
+
       const binding = await ensureBinding(adminHeaders, {
         ...identity,
         beamId: registration.agent.beamId ?? registration.agent.beam_id ?? identity.beamId,
       }, descriptor)
 
-      await mkdir(path.dirname(generatedIdentitiesPath), { recursive: true })
-      await writeFile(generatedIdentitiesPath, `${JSON.stringify(generatedUpdates, null, 2)}\n`, 'utf8')
-      await writeFile(mergedIdentitiesPath, `${JSON.stringify({ ...baseIdentities, ...generatedUpdates }, null, 2)}\n`, 'utf8')
+      const activeIdentity = generatedUpdates[descriptor.identityKey]
+        ?? baseIdentities[descriptor.identityKey]
+        ?? generatedUpdates[descriptor.agentName]
+        ?? baseIdentities[descriptor.agentName]
+        ?? identity
+
+      if (!activeIdentity.privateKeyBase64 || !activeIdentity.apiKey) {
+        const reissued = await reissueLocalCredential(adminHeaders, binding.id)
+        generatedUpdates[descriptor.identityKey] = {
+          ...activeIdentity,
+          agentName: descriptor.agentName,
+          identityKey: descriptor.identityKey,
+          beamId: reissued.credential.beamId,
+          directoryUrl: reissued.credential.directoryUrl ?? directoryUrl,
+          publicKeyBase64: reissued.credential.publicKey,
+          privateKeyBase64: reissued.credential.privateKey,
+          apiKey: reissued.credential.apiKey,
+        }
+      }
+
+      const workspaceBeamIds = await listWorkspaceBeamIds(adminHeaders)
+      await ensureLocalOpenClawAcls(directoryUrl, adminHeaders, workspaceBeamIds)
+
+      await persistOpenClawIdentityState({
+        baseIdentities,
+        generatedIdentities: generatedUpdates,
+        generatedIdentitiesPath,
+        mergedIdentitiesPath,
+      })
 
       await writeLog(`Synced ${descriptor.agentName} -> ${binding.beamId ?? identity.beamId} for run ${descriptor.runId}`)
       return

@@ -8,9 +8,12 @@ const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const composeFile = path.join(repoRoot, 'ops/quickstart/compose.yaml')
 const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
+const launchAgentPlistPath = path.join(process.env.HOME ?? '', 'Library/LaunchAgents/com.beam.openclaw-live.plist')
 const watchMode = process.argv.includes('--watch')
 const daemonMode = process.argv.includes('--daemon')
+const rebuildStack = process.argv.includes('--rebuild')
 const skipSpawnHookInstall = process.argv.includes('--skip-spawn-hook-install')
+const skipBeamSendInstall = process.argv.includes('--skip-beam-send-install')
 const nodePath = process.execPath
 const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
   ? '/opt/homebrew/bin/docker'
@@ -51,6 +54,12 @@ async function isHealthy(url) {
 }
 
 async function ensureLocalStack() {
+  if (rebuildStack) {
+    logStep('rebuilding the local Beam quickstart stack with docker compose')
+    run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
+    return
+  }
+
   const [directoryOk, dashboardOk, demoOk] = await Promise.all([
     isHealthy('http://127.0.0.1:43100/health'),
     isHealthy('http://127.0.0.1:43173/'),
@@ -86,9 +95,19 @@ async function main() {
   logStep('importing persistent OpenClaw agents, workspace agents, and recent subagents')
   run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing'])
 
+  if (!daemonMode && !skipBeamSendInstall) {
+    logStep('installing the managed OpenClaw Beam send shim')
+    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-beam-send-shim.mjs')])
+  }
+
   if (!skipSpawnHookInstall) {
     logStep('installing the direct OpenClaw spawn hook')
     run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-spawn-hook.mjs')])
+  }
+
+  if (!daemonMode && fs.existsSync(launchAgentPlistPath)) {
+    logStep('refreshing the installed OpenClaw live sync agent')
+    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-live-agent.mjs')])
   }
 
   console.log('')
