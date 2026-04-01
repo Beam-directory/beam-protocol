@@ -72,6 +72,21 @@ The shortest local install path is:
 npm run workspace:openclaw-setup
 ```
 
+If you want the shortest human-friendly health check after setup, run:
+
+```bash
+npm run workspace:openclaw-status
+```
+
+That prints:
+
+- a fresh dashboard login link
+- the `openclaw-local` workspace URL
+- whether the Beam receiver is really live
+- how many OpenClaw identities were imported
+- which routes are currently live over Beam
+- the next copy-paste command to send a local proof
+
 That command will:
 
 1. create `ops/quickstart/.env` if needed
@@ -200,7 +215,7 @@ With the receiver installed, imported OpenClaw agents can also receive Beam mess
 ```bash
 node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
   --agent archivar \
-  --to jarvis@openclaw.beam.directory \
+  --to jarvis@coppen.beam.directory \
   --intent conversation.message \
   --payload '{"message":"Antworte exakt nur mit: BEAM_INBOUND_OK"}' \
   --timeout 90

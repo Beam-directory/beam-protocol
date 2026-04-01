@@ -40,6 +40,7 @@
     "workspace:openclaw-spawn-hook:install": "node scripts/workspace/install-openclaw-spawn-hook.mjs",
     "workspace:openclaw-spawn-hook:uninstall": "node scripts/workspace/install-openclaw-spawn-hook.mjs --uninstall",
     "workspace:openclaw-setup": "node scripts/workspace/openclaw-setup.mjs",
+    "workspace:openclaw-status": "node scripts/workspace/openclaw-status.mjs",
     "workspace:operator-dry-run": "node scripts/workspace/operator-dry-run.mjs",
     "workspace:sync-demo": "node scripts/workspace/sync-demo.mjs",
     "dev:directory": "npm run dev --workspace=packages/directory",

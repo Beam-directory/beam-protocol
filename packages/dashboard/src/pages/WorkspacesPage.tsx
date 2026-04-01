@@ -287,6 +287,16 @@ function renderAttentionMeta(item: WorkspaceOverviewAttentionItem): string {
 }
 
 function renderBindingRuntime(binding: WorkspaceIdentityBinding): string {
+  if ((binding.runtime.connector ?? '').startsWith('openclaw')) {
+    const sourceLabel = binding.runtime.connector === 'openclaw-workspace'
+      ? 'OpenClaw workspace agent'
+      : 'OpenClaw agent'
+    const runtimeLabel = binding.runtime.label || binding.beamId
+    return binding.runtime.deliveryMode
+      ? `${sourceLabel} · ${runtimeLabel} · ${binding.runtime.deliveryMode}`
+      : `${sourceLabel} · ${runtimeLabel}`
+  }
+
   const label = binding.runtime.label
     ? (binding.runtime.connector ? `${binding.runtime.connector} · ${binding.runtime.label}` : binding.runtime.label)
     : binding.runtime.mode
@@ -299,6 +309,19 @@ function renderBindingRuntime(binding: WorkspaceIdentityBinding): string {
 }
 
 function renderBindingTransport(binding: WorkspaceIdentityBinding): string {
+  if ((binding.runtime.connector ?? '').startsWith('openclaw')) {
+    if (binding.runtime.connected && binding.runtime.httpEndpoint) {
+      return 'Beam receiver live · HTTP fallback configured'
+    }
+    if (binding.runtime.connected) {
+      return 'Beam receiver live'
+    }
+    if (binding.runtime.httpEndpoint) {
+      return 'HTTP fallback configured'
+    }
+    return 'Imported into Beam, but no live OpenClaw receiver is connected'
+  }
+
   if (binding.runtime.connected && binding.runtime.httpEndpoint) {
     return 'WebSocket live · HTTP endpoint configured'
   }
@@ -442,6 +465,14 @@ export default function WorkspacesPage() {
   const localBindings = useMemo(
     () => bindings.filter((binding) => binding.bindingType !== 'partner'),
     [bindings],
+  )
+  const openClawBindings = useMemo(
+    () => bindings.filter((binding) => (binding.runtime.connector ?? '').startsWith('openclaw')),
+    [bindings],
+  )
+  const openClawLiveBindings = useMemo(
+    () => openClawBindings.filter((binding) => binding.runtime.connected),
+    [openClawBindings],
   )
   const defaultHandoffIntentId = useMemo(
     () => intentCatalog.find((entry) => entry.id === 'conversation.message')?.id ?? intentCatalog[0]?.id ?? FALLBACK_CONVERSATION_INTENT.id,
@@ -1160,9 +1191,11 @@ export default function WorkspacesPage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
                 <MetricCard label="Local identities" value={!overview ? '—' : formatNumber(overview.summary.localIdentities)} />
                 <MetricCard label="Partner identities" value={!overview ? '—' : formatNumber(overview.summary.partnerIdentities)} />
+                <MetricCard label="OpenClaw identities" value={formatNumber(openClawBindings.length)} tone={openClawBindings.length > 0 ? 'success' : 'default'} />
+                <MetricCard label="Beam receiver live" value={formatNumber(openClawLiveBindings.length)} tone={openClawLiveBindings.length > 0 ? 'success' : 'warning'} hint={openClawBindings.length > 0 ? `${formatNumber(openClawBindings.length)} imported` : 'No OpenClaw bindings yet'} />
                 <MetricCard label="Workspace members" value={formatNumber(selectedWorkspace.summary.members)} />
                 <MetricCard label="Updated" value={formatRelativeTime(selectedWorkspace.updatedAt)} hint={formatDateTime(selectedWorkspace.updatedAt)} />
               </div>

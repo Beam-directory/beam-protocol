@@ -385,6 +385,12 @@ function buildBindingNotes(descriptor) {
     return segments.join(' ')
   }
 
+  if (descriptor.source === 'gateway-agent') {
+    return descriptor.role
+      ? `Imported from OpenClaw gateway discovery ${descriptor.agentName}. Role: ${descriptor.role}.`
+      : `Imported from OpenClaw gateway discovery ${descriptor.agentName}.`
+  }
+
   if (descriptor.source === 'workspace-agent') {
     return descriptor.role
       ? `Imported from OpenClaw workspace agent folder ${descriptor.agentName}. Role: ${descriptor.role}.`
