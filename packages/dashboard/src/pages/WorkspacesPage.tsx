@@ -828,6 +828,9 @@ export default function WorkspacesPage() {
         noticeMessage = dispatchResponse.dispatch.success
           ? 'Workspace handoff dispatched through Beam.'
           : `Workspace handoff dispatched with a failed Beam response${dispatchResponse.dispatch.errorCode ? ` (${dispatchResponse.dispatch.errorCode})` : ''}.`
+        if (dispatchResponse.workspaceSync) {
+          noticeMessage += ` Synced to ${dispatchResponse.workspaceSync.workspaceName}.`
+        }
       } else if (mode === 'dispatch' && linkedIntentNonce) {
         noticeMessage = 'Workspace thread linked to an existing Beam trace.'
       }
@@ -884,6 +887,10 @@ export default function WorkspacesPage() {
           ? 'Workspace handoff dispatched through Beam.'
           : `Workspace handoff dispatched with a failed Beam response${response.dispatch.errorCode ? ` (${response.dispatch.errorCode})` : ''}.`,
       )
+      if (response.workspaceSync) {
+        const syncedWorkspaceName = response.workspaceSync.workspaceName
+        setNotice((current) => `${current ?? 'Workspace handoff dispatched through Beam.'} Synced to ${syncedWorkspaceName}.`)
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Workspace handoff dispatch failed')
     } finally {

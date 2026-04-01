@@ -416,6 +416,16 @@ export interface WorkspaceThreadDispatchResponse extends WorkspaceThreadDetailRe
     errorCode: string | null
     traceHref: string | null
   }
+  workspaceSync: {
+    workspaceId: number
+    workspaceSlug: string
+    workspaceName: string
+    threadId: number
+    threadHref: string
+    bindingId: number
+    beamId: string
+    disposition: 'created' | 'updated'
+  } | null
 }
 
 export interface WorkspacePolicyBindingRule {

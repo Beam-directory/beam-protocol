@@ -20,6 +20,7 @@ import {
   getWorkspacePolicyDocument,
   getWorkspaceSummary,
   getWorkspaceThreadById,
+  getWorkspaceThreadByLinkedIntentNonce,
   listAgentKeys,
   listWorkspaceIdentityBindings,
   listWorkspaceIdentityBindingsByBeamId,
@@ -185,6 +186,17 @@ type SerializedWorkspacePartnerChannel = {
     href: string
   } | null
 }
+
+type SerializedWorkspaceThreadSync = {
+  workspaceId: number
+  workspaceSlug: string
+  workspaceName: string
+  threadId: number
+  threadHref: string
+  bindingId: number
+  beamId: string
+  disposition: 'created' | 'updated'
+} | null
 
 type WorkspaceTimelineEntry = {
   id: number
@@ -663,6 +675,8 @@ function summarizeWorkspaceAuditAction(action: string, details: Record<string, u
       return 'Workspace thread created.'
     case 'admin.workspace_thread.dispatched':
       return 'Workspace handoff dispatched.'
+    case 'admin.workspace_thread.synced':
+      return 'Inbound workspace handoff synced.'
     case 'admin.workspace_partner_channel.created':
       return 'Partner channel added.'
     case 'admin.workspace_partner_channel.updated':
@@ -1193,6 +1207,125 @@ function serializeWorkspaceThread(
       errorCode: intent.error_code,
       href: `/intents/${encodeURIComponent(intent.nonce)}`,
     } : null,
+  }
+}
+
+function syncRoutedWorkspaceThread(
+  db: Database,
+  input: {
+    actor: string
+    actorRole: 'admin' | 'operator' | 'viewer'
+    sourceWorkspace: WorkspaceRow
+    sourceThread: WorkspaceThreadRow
+    sourceSenderBinding: WorkspaceIdentityBindingRow
+    partnerChannel: WorkspacePartnerChannelRow
+    linkedIntentNonce: string
+    intentType: string
+    draftPayload: Record<string, unknown>
+  },
+): SerializedWorkspaceThreadSync {
+  const targetRoute = resolveWorkspacePartnerRoute(db, input.partnerChannel)
+  if (!targetRoute) {
+    return null
+  }
+
+  const targetWorkspace = getWorkspaceById(db, targetRoute.workspaceId)
+  if (!targetWorkspace) {
+    return null
+  }
+
+  const targetBinding = getWorkspaceIdentityBindingById(db, targetRoute.bindingId)
+  if (!targetBinding || targetBinding.workspace_id !== targetWorkspace.id || targetBinding.binding_type === 'partner') {
+    return null
+  }
+
+  const existingThread = getWorkspaceThreadByLinkedIntentNonce(db, targetWorkspace.id, input.linkedIntentNonce)
+  const now = new Date().toISOString()
+  const targetOwner = targetBinding.owner ?? null
+  const syncedSummary = input.sourceThread.summary?.trim() || `Inbound handoff from ${input.sourceWorkspace.name}.`
+
+  const syncedThread = existingThread
+    ? updateWorkspaceThread(db, {
+        id: existingThread.id,
+        title: input.sourceThread.title,
+        summary: syncedSummary,
+        owner: targetOwner,
+        status: 'open',
+        workflowType: input.sourceThread.workflow_type,
+        draftIntentType: input.intentType,
+        draftPayloadJson: JSON.stringify(input.draftPayload),
+        linkedIntentNonce: input.linkedIntentNonce,
+        lastActivityAt: now,
+      })
+    : createWorkspaceThread(db, {
+        workspaceId: targetWorkspace.id,
+        kind: 'handoff',
+        title: input.sourceThread.title,
+        summary: syncedSummary,
+        owner: targetOwner,
+        status: 'open',
+        workflowType: input.sourceThread.workflow_type,
+        draftIntentType: input.intentType,
+        draftPayloadJson: JSON.stringify(input.draftPayload),
+        linkedIntentNonce: input.linkedIntentNonce,
+        lastActivityAt: now,
+      })
+
+  if (!syncedThread) {
+    return null
+  }
+
+  if (!existingThread) {
+    const sourceIdentity = getAgent(db, input.sourceSenderBinding.beam_id)
+    const targetIdentity = getAgent(db, targetBinding.beam_id)
+
+    createWorkspaceThreadParticipant(db, {
+      threadId: syncedThread.id,
+      principalId: targetBinding.beam_id,
+      principalType: targetBinding.binding_type === 'service' ? 'service' : 'agent',
+      displayName: targetIdentity?.display_name ?? targetBinding.beam_id,
+      beamId: targetBinding.beam_id,
+      workspaceBindingId: targetBinding.id,
+      role: targetOwner ? 'owner' : 'participant',
+    })
+
+    createWorkspaceThreadParticipant(db, {
+      threadId: syncedThread.id,
+      principalId: input.sourceSenderBinding.beam_id,
+      principalType: 'partner',
+      displayName: sourceIdentity?.display_name ?? input.sourceWorkspace.name,
+      beamId: input.sourceSenderBinding.beam_id,
+      role: 'participant',
+    })
+  }
+
+  logAuditEvent(db, {
+    action: 'admin.workspace_thread.synced',
+    actor: input.actor,
+    target: `${targetWorkspace.slug}:${syncedThread.id}`,
+    details: {
+      role: input.actorRole,
+      linkedIntentNonce: input.linkedIntentNonce,
+      intentType: input.intentType,
+      workflowType: input.sourceThread.workflow_type,
+      sourceWorkspaceSlug: input.sourceWorkspace.slug,
+      sourceWorkspaceName: input.sourceWorkspace.name,
+      sourceThreadId: input.sourceThread.id,
+      fromBeamId: input.sourceSenderBinding.beam_id,
+      toBeamId: input.partnerChannel.partner_beam_id,
+      disposition: existingThread ? 'updated' : 'created',
+    },
+  })
+
+  return {
+    workspaceId: targetWorkspace.id,
+    workspaceSlug: targetWorkspace.slug,
+    workspaceName: targetWorkspace.name,
+    threadId: syncedThread.id,
+    threadHref: `/workspaces?workspace=${encodeURIComponent(targetWorkspace.slug)}&thread=${encodeURIComponent(String(syncedThread.id))}`,
+    bindingId: targetBinding.id,
+    beamId: targetBinding.beam_id,
+    disposition: existingThread ? 'updated' : 'created',
   }
 }
 
@@ -2231,6 +2364,23 @@ export function workspacesRouter(db: Database): Hono {
           : { lastFailureAt: now }),
       })
 
+      let workspaceSync: SerializedWorkspaceThreadSync = null
+      try {
+        workspaceSync = syncRoutedWorkspaceThread(db, {
+          actor: auth.session.email,
+          actorRole: auth.session.role,
+          sourceWorkspace: workspace,
+          sourceThread: thread,
+          sourceSenderBinding: senderBinding,
+          partnerChannel,
+          linkedIntentNonce: result.nonce,
+          intentType: effectiveIntentType,
+          draftPayload,
+        })
+      } catch (err) {
+        console.error('Workspace route sync error:', err)
+      }
+
       logAuditEvent(db, {
         action: 'admin.workspace_thread.dispatched',
         actor: auth.session.email,
@@ -2247,6 +2397,8 @@ export function workspacesRouter(db: Database): Hono {
           approvers: policyPreview.approvers,
           success: result.success,
           errorCode: result.errorCode,
+          workspaceSyncSlug: workspaceSync?.workspaceSlug ?? null,
+          workspaceSyncThreadId: workspaceSync?.threadId ?? null,
         },
       })
 
@@ -2275,12 +2427,15 @@ export function workspacesRouter(db: Database): Hono {
           errorCode: result.errorCode,
           traceHref: `/intents/${encodeURIComponent(result.nonce)}`,
         },
+        workspaceSync,
       })
     }
 
     try {
+      const workspaceRoute = resolveWorkspacePartnerRoute(db, partnerChannel)
       const result = await relayIntentFromHttp(db, frame, 60_000, {
         trustedControlPlane: true,
+        skipLocalAclCheck: workspaceRoute != null,
       })
 
       return finalizeDispatch({

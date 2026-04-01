@@ -216,6 +216,9 @@ The dispatch route now sends the selected Beam intent, persists the draft on the
 - under `payload.context.beam` for `conversation.message`
 - under `payload.beamContext` for all other intents
 
+If the selected partner channel resolves to another local Beam-managed workspace identity, dispatch also mirrors the handoff into that target workspace as an inbound thread. The dispatch response then includes a `workspaceSync` block with the target workspace slug and thread id.
+That local routed handoff runs under workspace policy, so operators do not need to duplicate the same trust edge again as a separate low-level intent ACL between the two local identities.
+
 ### Create a partner channel
 
 ```json
