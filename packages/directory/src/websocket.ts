@@ -746,6 +746,7 @@ export async function relayIntentFromHttp(
     sourceDirectory?: string
     hopCount?: number
     trustedControlPlane?: boolean
+    skipLocalAclCheck?: boolean
   } = {},
 ): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)
@@ -766,6 +767,7 @@ export async function relayIntentFromHttp(
   try {
     enforceSecurityChecks(db, prepared, senderPublicKey, {
       skipSignatureVerification: options.trustedControlPlane === true,
+      skipLocalAclCheck: options.skipLocalAclCheck === true,
     })
     recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
   } catch (err) {
@@ -1435,7 +1437,7 @@ function enforceSecurityChecks(
   db: Database,
   frame: IntentFrame,
   senderPublicKey: string,
-  options: { skipSignatureVerification?: boolean } = {},
+  options: { skipSignatureVerification?: boolean; skipLocalAclCheck?: boolean } = {},
 ): void {
   if (!checkAgentRateLimit(frame.from, getRateLimitPerMinute())) {
     throw new RelayError('RATE_LIMITED', `Rate limit exceeded for ${frame.from}`)
@@ -1446,7 +1448,7 @@ function enforceSecurityChecks(
   }
 
   const localTarget = getAgent(db, frame.to)
-  if (localTarget && !isIntentAllowed(db, {
+  if (localTarget && !options.skipLocalAclCheck && !isIntentAllowed(db, {
     targetBeamId: frame.to,
     intentType: frame.intent,
     fromBeamId: frame.from,

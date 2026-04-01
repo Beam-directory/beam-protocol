@@ -847,6 +847,217 @@ test('operators can approve and dispatch blocked workspace handoff threads throu
   }
 })
 
+test('dispatching through a routed partner channel syncs an inbound thread into the target workspace', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['handoff'],
+      publicKey: 'MCowBQYDK2VwAyEA5vDJ0M7W0h6lJ6uQ0P+GlVj9s4m1kzJ3aPj4v5n2u7o=',
+      personal: true,
+    })
+    registerAgent(db, {
+      beamId: 'echo@beam.directory',
+      displayName: 'Beam Echo',
+      capabilities: ['conversation.message'],
+      publicKey: 'MCowBQYDK2VwAyEAwq0kQ4gJ9J5fWfT3vA7l0v3mQ9Jw1d1lR2z6b8x7lQk=',
+      personal: false,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Acme Dispatch Workspace',
+        slug: 'acme-dispatch-sync',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Northwind Runtime',
+        slug: 'northwind-runtime-sync',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    const localBindingResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch-sync/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex:operator',
+        policyProfile: 'ops-default',
+        canInitiateExternal: true,
+      }),
+    }))
+    const localBinding = await localBindingResponse.json() as { binding: { id: number } }
+
+    const targetBindingResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-runtime-sync/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'echo@beam.directory',
+        bindingType: 'service',
+        owner: 'northwind@example.com',
+        runtimeType: 'builtin:echo',
+        canInitiateExternal: true,
+      }),
+    }))
+    const targetBinding = await targetBindingResponse.json() as { binding: { id: number } }
+
+    const policyResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch-sync/policy', {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        workflowRules: [{
+          workflowType: 'partner.review',
+          requireApproval: true,
+          allowedPartners: ['echo@beam.directory'],
+          approvers: ['ops@example.com'],
+        }],
+      }),
+    }))
+    assert.equal(policyResponse.status, 200)
+
+    const channelResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch-sync/partner-channels', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        partnerBeamId: 'echo@beam.directory',
+        label: 'Northwind Echo',
+        owner: 'ops@example.com',
+        status: 'active',
+      }),
+    }))
+    assert.equal(channelResponse.status, 201)
+
+    const createThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-dispatch-sync/threads', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Sync this handoff into the routed workspace',
+        summary: 'The target workspace should receive an inbound mirrored thread.',
+        owner: 'ops@example.com',
+        workflowType: 'partner.review',
+        status: 'blocked',
+        draftIntentType: 'conversation.message',
+        draftPayload: {
+          message: 'Please confirm the inbound thread sync path.',
+          language: 'en',
+        },
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: localBinding.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'echo@beam.directory',
+            principalType: 'partner',
+            beamId: 'echo@beam.directory',
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(createThreadResponse.status, 201)
+    const createdThread = await createThreadResponse.json() as { thread: { id: number } }
+
+    const dispatchResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-dispatch-sync/threads/${createdThread.thread.id}/dispatch`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    }))
+    assert.equal(dispatchResponse.status, 200)
+
+    const dispatchBody = await dispatchResponse.json() as {
+      dispatch: {
+        nonce: string
+        success: boolean
+      }
+      workspaceSync: {
+        workspaceSlug: string
+        workspaceName: string
+        threadId: number
+        disposition: string
+      } | null
+    }
+    assert.equal(dispatchBody.dispatch.success, true)
+    assert.equal(dispatchBody.workspaceSync?.workspaceSlug, 'northwind-runtime-sync')
+    assert.equal(dispatchBody.workspaceSync?.workspaceName, 'Northwind Runtime')
+    assert.equal(dispatchBody.workspaceSync?.disposition, 'created')
+
+    const targetThreadResponse = await app.request(new Request(`http://localhost/admin/workspaces/northwind-runtime-sync/threads/${dispatchBody.workspaceSync?.threadId}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(targetThreadResponse.status, 200)
+    const targetThreadBody = await targetThreadResponse.json() as {
+      thread: {
+        kind: string
+        linkedIntentNonce: string | null
+        draftIntentType: string | null
+        owner: string | null
+      }
+      participants: Array<{
+        beamId: string | null
+        workspaceBindingId: number | null
+        principalType: string
+      }>
+    }
+    assert.equal(targetThreadBody.thread.kind, 'handoff')
+    assert.equal(targetThreadBody.thread.linkedIntentNonce, dispatchBody.dispatch.nonce)
+    assert.equal(targetThreadBody.thread.draftIntentType, 'conversation.message')
+    assert.equal(targetThreadBody.thread.owner, 'northwind@example.com')
+    assert.ok(targetThreadBody.participants.some((participant) => participant.beamId === 'ops-bot@beam.directory' && participant.principalType === 'partner'))
+    assert.ok(targetThreadBody.participants.some((participant) => participant.beamId === 'echo@beam.directory' && participant.workspaceBindingId === targetBinding.binding.id))
+
+    const targetTimelineResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-runtime-sync/timeline?limit=20', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(targetTimelineResponse.status, 200)
+    const targetTimelineBody = await targetTimelineResponse.json() as {
+      entries: Array<{
+        action: string
+        traceHref: string | null
+      }>
+    }
+    const syncEntry = targetTimelineBody.entries.find((entry) => entry.action === 'admin.workspace_thread.synced')
+    assert.equal(syncEntry?.traceHref, `/intents/${dispatchBody.dispatch.nonce}`)
+  } finally {
+    db.close()
+  }
+})
+
 test('workspace partner channels, timeline, and digest expose operator-ready control-plane state', async () => {
   const db = createDatabase(':memory:')
 

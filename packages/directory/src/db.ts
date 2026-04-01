@@ -1426,6 +1426,22 @@ export function getWorkspaceThreadById(db: DB, id: number): WorkspaceThreadRow |
   return row ?? null
 }
 
+export function getWorkspaceThreadByLinkedIntentNonce(
+  db: DB,
+  workspaceId: number,
+  linkedIntentNonce: string,
+): WorkspaceThreadRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_threads
+    WHERE workspace_id = ? AND linked_intent_nonce = ?
+    ORDER BY id ASC
+    LIMIT 1
+  `).get(workspaceId, linkedIntentNonce) as WorkspaceThreadRow | undefined
+
+  return row ?? null
+}
+
 export function listWorkspaceThreads(db: DB, workspaceId: number): WorkspaceThreadRow[] {
   return db.prepare(`
     SELECT *
