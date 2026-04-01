@@ -89,6 +89,31 @@ async function sendWithResend(message: {
   }
 }
 
+async function sendEmailMessage(
+  message: {
+    from?: string
+    to: string
+    subject: string
+    text: string
+    html: string
+  },
+  disabledWarning: string,
+): Promise<boolean> {
+  if (getSmtpConfig().host) {
+    const transporter = await createTransport()
+    await transporter.sendMail(message)
+    return true
+  }
+
+  if (process.env['RESEND_API_KEY']) {
+    await sendWithResend(message)
+    return true
+  }
+
+  console.warn(disabledWarning)
+  return false
+}
+
 export async function sendAgentVerificationEmail(input: {
   email: string
   beamId: string
@@ -105,19 +130,10 @@ export async function sendAgentVerificationEmail(input: {
     html: `<p>Verify your Beam Directory email for <strong>${input.beamId}</strong>.</p><p><a href="${verificationUrl.toString()}">Verify email</a></p>`,
   }
 
-  if (getSmtpConfig().host) {
-    const transporter = await createTransport()
-    await transporter.sendMail(message)
-    return true
-  }
-
-  if (process.env['RESEND_API_KEY']) {
-    await sendWithResend(message)
-    return true
-  }
-
-  console.warn('Email verification disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery')
-  return false
+  return sendEmailMessage(
+    message,
+    'Email verification disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+  )
 }
 
 export async function sendAdminMagicLinkEmail(input: {
@@ -133,17 +149,32 @@ export async function sendAdminMagicLinkEmail(input: {
     html: `<p>Use this Beam admin sign-in link to continue as <strong>${input.role}</strong>.</p><p><a href="${input.url}">Sign in to Beam Dashboard</a></p>`,
   }
 
-  if (getSmtpConfig().host) {
-    const transporter = await createTransport()
-    await transporter.sendMail(message)
-    return true
-  }
+  return sendEmailMessage(
+    message,
+    'Admin email delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+  )
+}
 
-  if (process.env['RESEND_API_KEY']) {
-    await sendWithResend(message)
-    return true
-  }
+export async function sendOperatorDigestEmail(input: {
+  email: string
+  subject: string
+  markdown: string
+}): Promise<boolean> {
+  const html = input.markdown
+    .split('\n')
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => `<p>${line.replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;')}</p>`)
+    .join('')
 
-  console.warn('Admin email delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery')
-  return false
+  return sendEmailMessage(
+    {
+      from: getSmtpConfig().from ?? undefined,
+      to: input.email,
+      subject: input.subject,
+      text: input.markdown,
+      html,
+    },
+    'Operator digest delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+  )
 }

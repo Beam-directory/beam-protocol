@@ -10,6 +10,7 @@ export type BetaRequestAttention = 'unowned' | 'stale' | 'follow_up_due'
 export type BetaRequestExportFormat = 'json' | 'csv'
 export type OperatorNotificationStatus = 'new' | 'acknowledged' | 'acted'
 export type OperatorNotificationSource = 'beta_request' | 'critical_alert'
+export type PartnerHealthStatus = 'healthy' | 'watch' | 'critical'
 export type WorkspaceStatus = 'active' | 'paused' | 'archived'
 export type WorkspaceThreadScope = 'internal' | 'handoff'
 export type WorkspaceBindingType = 'agent' | 'service' | 'partner'
@@ -447,6 +448,7 @@ export interface AlertItem {
   severityReason: string
   links: AlertLink[]
   sampleTraces: AlertTraceSample[]
+  relatedPartnerRequests?: AlertRelatedPartnerRequest[]
   notificationId?: number | null
   notificationStatus?: OperatorNotificationStatus | null
   notificationOwner?: string | null
@@ -467,6 +469,14 @@ export interface AlertTraceSample {
   requestedAt: string
   status: IntentLifecycleStatus
   errorCode: string | null
+}
+
+export interface AlertRelatedPartnerRequest {
+  id: number
+  company: string | null
+  workflowType: string | null
+  stage: string
+  href: string
 }
 
 export interface OverviewTimelinePoint {
@@ -896,6 +906,174 @@ export interface BetaRequestProofSummary {
     traceHref: string
     signalHref: string | null
     requestHref: string
+  }
+}
+
+export interface BetaRequestProofPack {
+  generatedAt: string
+  audience: 'external'
+  request: {
+    id: number
+    company: string | null
+    workflowType: string | null
+    workflowSummary: string | null
+    currentStage: BetaRequestStatus
+  }
+  proof: {
+    headline: string
+    summary: string
+    recommendation: string
+    proofIntentNonce: string
+    intentType: string
+    deliveryStatus: string
+    latencyMs: number | null
+    traceStages: string[]
+    sender: BetaRequestProofSummaryParty
+    recipient: BetaRequestProofSummaryParty
+  }
+  evidence: {
+    releaseUrl: string
+    statusUrl: string
+    traceReference: string
+    requestReference: string
+  }
+  redaction: {
+    excludedFields: string[]
+    notes: string[]
+  }
+  markdown: string
+}
+
+export interface PartnerHealthRequest {
+  id: number
+  email: string
+  company: string | null
+  workflowType: string | null
+  workflowTypeLabel: string
+  stage: BetaRequestStatus
+  owner: string | null
+  nextAction: string | null
+  lastContactAt: string | null
+  nextMeetingAt: string | null
+  reminderAt: string | null
+  proofIntentNonce: string | null
+  stageAgeHours: number
+  stageAgeLabel: string
+  stale: boolean
+  staleReason: string | null
+  followUpDue: boolean
+  followUpReason: string | null
+  attentionFlags: BetaRequestAttention[]
+  notificationId: number | null
+  notificationStatus: OperatorNotificationStatus | null
+  latestIntentStatus: string | null
+  latestLatencyMs: number | null
+  latencyBreach: boolean
+  deadLetter: boolean
+  incidentCount: number
+  breachCount: number
+  alertCount: number
+  healthStatus: PartnerHealthStatus
+  links: {
+    requestHref: string
+    traceHref: string | null
+    inboxHref: string | null
+    alertHref: string | null
+  }
+}
+
+export interface PartnerHealthIncident {
+  id: string
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  company: string | null
+  workflowType: string | null
+  owner: string | null
+  requestId: number
+  requestHref: string
+  traceHref: string | null
+  alertHref: string | null
+  deadLetter: boolean
+  followUpDue: boolean
+}
+
+export interface PartnerHealthWorkflowSummary {
+  workflowType: string
+  label: string
+  requests: number
+  healthy: number
+  watch: number
+  critical: number
+  followUpDue: number
+  deadLetters: number
+  averageLatencyMs: number | null
+}
+
+export interface PartnerHealthOwnerSummary {
+  owner: string | null
+  requests: number
+  critical: number
+  watch: number
+  healthy: number
+  followUpDue: number
+  nextMeetingScheduled: number
+}
+
+export interface PartnerDigestActionItem {
+  requestId: number
+  company: string | null
+  email: string
+  workflowType: string | null
+  stage: BetaRequestStatus
+  owner: string | null
+  nextAction: string | null
+  lastContactAt: string | null
+  nextMeetingAt: string | null
+  reminderAt: string | null
+  proofIntentNonce: string | null
+  reason: string
+  href: string
+}
+
+export interface PartnerDigestResponse {
+  generatedAt: string
+  windowDays: number
+  ownerFilter: string | null
+  summary: {
+    totalThreads: number
+    ownedThreads: number
+    dueNow: number
+    upcomingMeetings: number
+    meetingsThisWeek: number
+    unownedThreads: number
+  }
+  actionItems: PartnerDigestActionItem[]
+  markdown: string
+}
+
+export interface PartnerHealthResponse {
+  generatedAt: string
+  windowDays: number
+  alertWindowHours: number
+  slaLatencyMs: number
+  summary: {
+    activeRequests: number
+    healthy: number
+    watch: number
+    critical: number
+    latencyBreaches: number
+    deadLetters: number
+    openIncidents: number
+    followUpDue: number
+  }
+  requests: PartnerHealthRequest[]
+  workflows: PartnerHealthWorkflowSummary[]
+  owners: PartnerHealthOwnerSummary[]
+  incidents: PartnerHealthIncident[]
+  digestPreview: {
+    summary: PartnerDigestResponse['summary']
+    markdown: string
   }
 }
 
@@ -1453,6 +1631,28 @@ export const directoryApi = {
     limit: params?.limit,
   })}`, undefined, { admin: true }),
   getBetaRequest: (id: number) => request<BetaRequestDetailResponse>(`/admin/beta-requests/${id}`, undefined, { admin: true }),
+  getPartnerHealth: (params?: {
+    days?: number
+    hours?: number
+  }) => request<PartnerHealthResponse>(`/admin/partner-health${buildQuery({
+    days: params?.days,
+    hours: params?.hours,
+  })}`, undefined, { admin: true }),
+  getPartnerDigest: (params?: {
+    days?: number
+    owner?: string
+  }) => request<PartnerDigestResponse>(`/admin/partner-digest${buildQuery({
+    days: params?.days,
+    owner: params?.owner,
+  })}`, undefined, { admin: true }),
+  deliverPartnerDigest: (input?: {
+    days?: number
+    owner?: string | null
+    email?: string | null
+  }) => request<{ ok: boolean; email: string; deliveredAt: string }>('/admin/partner-digest/deliver', {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
   updateBetaRequest: (id: number, input: BetaRequestUpdateInput) => request<BetaRequestUpdateResponse>(`/admin/beta-requests/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -1482,6 +1682,28 @@ export const directoryApi = {
     return {
       blob: await response.blob(),
       filename: getFilenameFromResponse(response, 'beta-requests', format),
+    }
+  },
+  getProofPack: (id: number) => request<BetaRequestProofPack>(`/admin/beta-requests/${id}/proof-pack`, undefined, { admin: true }),
+  downloadProofPack: async (id: number, format: 'json' | 'markdown'): Promise<ExportDownload> => {
+    const response = await requestRaw(`/admin/beta-requests/${id}/proof-pack${buildQuery({ format })}`, undefined, { admin: true })
+    return {
+      blob: await response.blob(),
+      filename: getFilenameFromResponse(response, `proof-pack-${id}`, format === 'markdown' ? 'json' : 'json').replace(/\.json$/u, format === 'markdown' ? '.md' : '.json'),
+    }
+  },
+  downloadPartnerDigest: async (params?: {
+    days?: number
+    owner?: string
+  }): Promise<ExportDownload> => {
+    const response = await requestRaw(`/admin/partner-digest${buildQuery({
+      format: 'markdown',
+      days: params?.days,
+      owner: params?.owner,
+    })}`, undefined, { admin: true })
+    return {
+      blob: await response.blob(),
+      filename: getFilenameFromResponse(response, 'partner-digest', 'json').replace(/\.json$/u, '.md'),
     }
   },
   listOperatorNotifications: (params?: {

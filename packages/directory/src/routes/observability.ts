@@ -54,6 +54,14 @@ type AlertTraceSample = {
   errorCode: string | null
 }
 
+type AlertRelatedPartnerRequest = {
+  id: number
+  company: string | null
+  workflowType: string | null
+  stage: string
+  href: string
+}
+
 export type AlertItem = {
   id: string
   severity: AlertSeverity
@@ -69,6 +77,7 @@ export type AlertItem = {
   severityReason: string
   links: AlertLink[]
   sampleTraces: AlertTraceSample[]
+  relatedPartnerRequests?: AlertRelatedPartnerRequest[]
   notificationId?: number | null
   notificationStatus?: OperatorNotificationStatus | null
   notificationOwner?: string | null
@@ -1341,6 +1350,51 @@ function criticalAlertNotificationSourceKey(alertId: string): string {
   return `critical-alert:${alertId}`
 }
 
+function attachRelatedPartnerRequests(db: Database, alerts: AlertItem[]): AlertItem[] {
+  const nonces = Array.from(new Set(alerts.flatMap((alert) => alert.sampleTraces.map((sample) => sample.nonce))))
+  if (nonces.length === 0) {
+    return alerts
+  }
+
+  const placeholders = nonces.map(() => '?').join(', ')
+  const rows = db.prepare(`
+    SELECT id, company, workflow_type, status, proof_intent_nonce
+    FROM waitlist
+    WHERE proof_intent_nonce IN (${placeholders})
+  `).all(...nonces) as Array<{
+    id: number
+    company: string | null
+    workflow_type: string | null
+    status: string | null
+    proof_intent_nonce: string
+  }>
+
+  const byNonce = new Map<string, AlertRelatedPartnerRequest[]>()
+  for (const row of rows) {
+    const existing = byNonce.get(row.proof_intent_nonce) ?? []
+    existing.push({
+      id: row.id,
+      company: row.company,
+      workflowType: row.workflow_type,
+      stage: row.status ?? 'new',
+      href: `/beta-requests?id=${row.id}`,
+    })
+    byNonce.set(row.proof_intent_nonce, existing)
+  }
+
+  return alerts.map((alert) => {
+    const related = Array.from(
+      new Map(
+        alert.sampleTraces.flatMap((sample) => (byNonce.get(sample.nonce) ?? []).map((request) => [request.id, request] as const)),
+      ).values(),
+    ).slice(0, 3)
+
+    return related.length > 0
+      ? { ...alert, relatedPartnerRequests: related }
+      : alert
+  })
+}
+
 function getAlertNextAction(alert: AlertItem): string {
   switch (alert.id) {
     case 'network-error-rate':
@@ -1392,7 +1446,7 @@ export function buildAlertsWithNotificationState(db: Database, windowHours: numb
     ).map((entry) => [entry.source_key, entry]),
   )
 
-  return alerts.map((alert) => {
+  const withNotifications = alerts.map((alert) => {
     const notification = notifications.get(criticalAlertNotificationSourceKey(alert.id))
     return notification
       ? {
@@ -1404,6 +1458,8 @@ export function buildAlertsWithNotificationState(db: Database, windowHours: numb
       }
       : alert
   })
+
+  return attachRelatedPartnerRequests(db, withNotifications)
 }
 
 function createSyntheticTrace(intent: IntentLogRow): Array<ReturnType<typeof serializeTraceEvent>> {

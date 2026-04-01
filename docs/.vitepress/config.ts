@@ -39,6 +39,9 @@ export default defineConfig({
         { text: 'Restart Recovery', link: '/guide/restart-recovery' },
         { text: 'Operator Observability', link: '/guide/operator-observability' },
         { text: 'Operator Runbook', link: '/guide/operator-runbook' },
+        { text: 'Operator Digest', link: '/guide/operator-digest' },
+        { text: 'Production Recovery Drills', link: '/guide/production-recovery-drills' },
+        { text: 'Production Fire Drill', link: '/guide/production-fire-drill' },
         { text: 'Consumer IDs', link: '/guide/consumer-ids' },
         { text: 'Core Concepts', link: '/guide/concepts' },
         { text: 'Self-Hosting', link: '/guide/self-hosting' }

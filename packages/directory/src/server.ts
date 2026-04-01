@@ -18,7 +18,7 @@ import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { orgsRouter } from './routes/orgs.js'
-import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter } from './routes/observability.js'
+import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter, type AlertItem } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { verificationRouter } from './routes/verify.js'
@@ -62,11 +62,16 @@ import {
 import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
+import { sendOperatorDigestEmail } from './email.js'
 import type { AgentRow, AuditLogRow, IntentFrame, IntentTraceEventRow, OperatorNotificationRow } from './types.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
 const serverStartedAt = Date.now()
+
+function nowMinusDays(days: number): string {
+  return new Date(Date.now() - Math.max(0, days) * 24 * 60 * 60 * 1000).toISOString()
+}
 
 type WaitlistSignupInput = {
   email: string
@@ -98,6 +103,7 @@ type BetaRequestActivityKind =
   | 'reminder'
   | 'notification'
 type BetaRequestActivityTone = 'default' | 'success' | 'warning'
+type PartnerHealthStatus = 'healthy' | 'watch' | 'critical'
 type FunnelEventCategory = 'page_view' | 'cta_click' | 'request' | 'demo_milestone'
 type FunnelPageKey =
   | 'landing'
@@ -175,6 +181,91 @@ type WaitlistRow = {
   stage_entered_at: string | null
   created_at: string
   updated_at: string
+}
+
+type PartnerHealthRow = ReturnType<typeof serializeBetaRequest> & {
+  workflowTypeLabel: string
+  healthStatus: PartnerHealthStatus
+  latestIntentStatus: string | null
+  latestLatencyMs: number | null
+  latencyBreach: boolean
+  deadLetter: boolean
+  incidentCount: number
+  breachCount: number
+  alertCount: number
+  links: {
+    requestHref: string
+    traceHref: string | null
+    inboxHref: string | null
+    alertHref: string | null
+  }
+}
+
+type PartnerHealthIncident = {
+  id: string
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  company: string | null
+  workflowType: string | null
+  owner: string | null
+  requestId: number
+  requestHref: string
+  traceHref: string | null
+  alertHref: string | null
+  deadLetter: boolean
+  followUpDue: boolean
+}
+
+type PartnerDigestActionItem = {
+  requestId: number
+  company: string | null
+  email: string
+  workflowType: string | null
+  stage: BetaRequestStatus
+  owner: string | null
+  nextAction: string | null
+  lastContactAt: string | null
+  nextMeetingAt: string | null
+  reminderAt: string | null
+  proofIntentNonce: string | null
+  reason: string
+  href: string
+}
+
+type BetaRequestProofPack = {
+  generatedAt: string
+  audience: 'external'
+  request: {
+    id: number
+    company: string | null
+    workflowType: string | null
+    workflowSummary: string | null
+    currentStage: BetaRequestStatus
+  }
+  proof: {
+    headline: string
+    summary: string
+    recommendation: string
+    proofIntentNonce: string
+    intentType: string
+    deliveryStatus: string
+    latencyMs: number | null
+    traceStages: string[]
+    sender: BetaRequestProofSummaryParty
+    recipient: BetaRequestProofSummaryParty
+  }
+  evidence: {
+    releaseUrl: string
+    statusUrl: string
+    traceReference: string
+    requestReference: string
+  }
+  redaction: {
+    excludedFields: string[]
+    notes: string[]
+  }
+  markdown: string
 }
 
 type BetaRequestActivityEntry = {
@@ -291,6 +382,9 @@ const BETA_REQUEST_STALE_HOURS: Record<BetaRequestStatus, number | null> = {
   active: 96,
   closed: null,
 }
+const PARTNER_SLA_LATENCY_MS = 5_000
+const PARTNER_DIGEST_DEFAULT_DAYS = 7
+const PARTNER_HEALTH_DEFAULT_DAYS = 30
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
@@ -2200,6 +2294,440 @@ function summarizePartnerMotion(rows: WaitlistRow[]) {
   }
 }
 
+function formatWorkflowTypeLabel(value: string | null | undefined): string {
+  if (!value) {
+    return 'Unspecified workflow'
+  }
+
+  return value.replace(/^hosted-beta-/, '').replaceAll('-', ' ')
+}
+
+function getPartnerAlertHref(alerts: AlertItem[]): string | null {
+  for (const alert of alerts) {
+    for (const link of alert.links) {
+      if (link.href) {
+        return link.href
+      }
+    }
+  }
+
+  return null
+}
+
+function buildPartnerDigestPayload(
+  db: Database,
+  days = PARTNER_DIGEST_DEFAULT_DAYS,
+  ownerFilter?: string | null,
+) {
+  const rows = listPartnerAnalyticsRows(db, nowMinusDays(days))
+  const notifications = getBetaRequestNotifications(db, rows)
+  const filteredRows = rows.filter((row) => {
+    const stage = normalizeBetaRequestStatus(row.status) ?? 'new'
+    if (ownerFilter && (row.owner ?? '').toLowerCase() !== ownerFilter.trim().toLowerCase()) {
+      return false
+    }
+
+    return stage !== 'closed' || Boolean(row.next_action || row.next_meeting_at || row.reminder_at || row.proof_intent_nonce)
+  })
+
+  const actionItems = filteredRows
+    .map((row) => {
+      const attention = getBetaRequestAttention(row)
+      const serialized = serializeBetaRequest(row, notifications.get(betaRequestNotificationSourceKey(row.id)))
+      const upcomingMeetingTime = row.next_meeting_at ? Date.parse(row.next_meeting_at) : Number.NaN
+      const meetingSoon = !Number.isNaN(upcomingMeetingTime) && upcomingMeetingTime <= (Date.now() + (7 * 24 * 60 * 60 * 1000))
+      const reason = attention.followUpDue
+        ? (attention.followUpReason ?? 'A partner follow-up is due now.')
+        : meetingSoon
+          ? 'An upcoming partner meeting needs preparation and a clear next action.'
+          : attention.stale
+            ? (attention.staleReason ?? 'This partner thread is aging in its current stage.')
+            : serialized.nextAction ?? getBetaRequestNextStep(serialized.stage)
+      const urgencyScore =
+        Number(attention.followUpDue) * 10_000
+        + Number(attention.stale) * 5_000
+        + Number(meetingSoon) * 1_000
+        + Number(serialized.stage === 'active') * 500
+        + Math.round(serialized.stageAgeHours)
+
+      return {
+        requestId: row.id,
+        company: row.company,
+        email: row.email,
+        workflowType: row.workflow_type,
+        stage: serialized.stage,
+        owner: row.owner,
+        nextAction: serialized.nextAction,
+        lastContactAt: row.last_contact_at,
+        nextMeetingAt: row.next_meeting_at,
+        reminderAt: row.reminder_at,
+        proofIntentNonce: row.proof_intent_nonce,
+        reason,
+        href: `/beta-requests?id=${row.id}`,
+        urgencyScore,
+      }
+    })
+    .sort((left, right) => right.urgencyScore - left.urgencyScore || right.requestId - left.requestId)
+
+  const dueNow = actionItems.filter((entry) => {
+    const reminderTime = entry.reminderAt ? Date.parse(entry.reminderAt) : Number.NaN
+    return !Number.isNaN(reminderTime) && reminderTime <= Date.now()
+  }).length
+  const upcomingMeetings = actionItems.filter((entry) => entry.nextMeetingAt).length
+  const thisWeekMeetings = actionItems.filter((entry) => {
+    const meetingTime = entry.nextMeetingAt ? Date.parse(entry.nextMeetingAt) : Number.NaN
+    return !Number.isNaN(meetingTime) && meetingTime <= (Date.now() + (7 * 24 * 60 * 60 * 1000))
+  }).length
+  const ownedRequests = actionItems.filter((entry) => Boolean(entry.owner)).length
+  const markdown = [
+    '# Beam partner operator digest',
+    '',
+    `Generated: ${new Date().toISOString()}`,
+    `Window: last ${days} day${days === 1 ? '' : 's'}`,
+    ownerFilter ? `Owner filter: ${ownerFilter}` : 'Owner filter: all operators',
+    '',
+    '## Summary',
+    `- Active partner threads: ${actionItems.length}`,
+    `- Owned partner threads: ${ownedRequests}`,
+    `- Follow-up due now: ${dueNow}`,
+    `- Meetings scheduled this week: ${thisWeekMeetings}`,
+    '',
+    '## Action queue',
+    ...(actionItems.length === 0
+      ? ['- No partner follow-up items were found in this window.']
+      : actionItems.slice(0, 12).map((entry, index) => (
+        `${index + 1}. ${entry.company ?? entry.email} · ${formatWorkflowTypeLabel(entry.workflowType)} · ${entry.stage}\n` +
+        `   Owner: ${entry.owner ?? 'unassigned'}\n` +
+        `   Last contact: ${entry.lastContactAt ?? 'not recorded'}\n` +
+        `   Next meeting: ${entry.nextMeetingAt ?? 'not scheduled'}\n` +
+        `   Next action: ${entry.nextAction ?? 'not recorded'}\n` +
+        `   Reason: ${entry.reason}\n` +
+        `   Request: ${toDashboardUrl(entry.href)}`
+      ))),
+  ].join('\n')
+
+  return {
+    generatedAt: new Date().toISOString(),
+    windowDays: days,
+    ownerFilter: ownerFilter ?? null,
+    summary: {
+      totalThreads: actionItems.length,
+      ownedThreads: ownedRequests,
+      dueNow,
+      upcomingMeetings,
+      meetingsThisWeek: thisWeekMeetings,
+      unownedThreads: actionItems.length - ownedRequests,
+    },
+    actionItems: actionItems.slice(0, 20).map(({ urgencyScore: _urgencyScore, ...entry }) => entry),
+    markdown,
+  }
+}
+
+function buildPartnerHealthPayload(
+  db: Database,
+  options?: {
+    days?: number
+    hours?: number
+  },
+) {
+  const windowDays = Math.max(1, options?.days ?? PARTNER_HEALTH_DEFAULT_DAYS)
+  const alertWindowHours = Math.max(1, options?.hours ?? 24)
+  const rows = listPartnerAnalyticsRows(db, nowMinusDays(windowDays))
+  const notifications = getBetaRequestNotifications(db, rows)
+  const alerts = buildAlertsWithNotificationState(db, alertWindowHours)
+  const alertsByNonce = new Map<string, AlertItem[]>()
+
+  for (const alert of alerts) {
+    for (const sample of alert.sampleTraces) {
+      const existing = alertsByNonce.get(sample.nonce) ?? []
+      existing.push(alert)
+      alertsByNonce.set(sample.nonce, existing)
+    }
+  }
+
+  const requests = rows
+    .map((row) => {
+      const notification = notifications.get(betaRequestNotificationSourceKey(row.id))
+      const serialized = serializeBetaRequest(row, notification)
+      const intent = row.proof_intent_nonce ? getIntentLogByNonce(db, row.proof_intent_nonce) : null
+      const linkedAlerts = row.proof_intent_nonce ? (alertsByNonce.get(row.proof_intent_nonce) ?? []) : []
+      const deadLetter = intent?.status === 'dead_letter'
+      const failed = intent?.status === 'failed'
+      const latencyMs = intent?.round_trip_latency_ms ?? null
+      const latencyBreach = latencyMs != null && latencyMs > PARTNER_SLA_LATENCY_MS
+      const breachCount = Number(latencyBreach) + Number(serialized.followUpDue) + Number(serialized.stale)
+      const incidentCount = linkedAlerts.length + Number(deadLetter) + Number(failed) + Number(serialized.followUpDue)
+      const criticalAlertCount = linkedAlerts.filter((alert) => alert.severity === 'critical').length
+      const warningAlertCount = linkedAlerts.filter((alert) => alert.severity === 'warning').length
+
+      let healthStatus: PartnerHealthStatus = 'healthy'
+      if (deadLetter || failed || criticalAlertCount > 0 || (serialized.followUpDue && serialized.stage === 'active')) {
+        healthStatus = 'critical'
+      } else if (latencyBreach || warningAlertCount > 0 || serialized.stale || serialized.followUpDue || serialized.attentionFlags.length > 0) {
+        healthStatus = 'watch'
+      }
+
+      return {
+        ...serialized,
+        workflowTypeLabel: formatWorkflowTypeLabel(serialized.workflowType),
+        healthStatus,
+        latestIntentStatus: intent?.status ?? null,
+        latestLatencyMs: latencyMs,
+        latencyBreach,
+        deadLetter,
+        incidentCount,
+        breachCount,
+        alertCount: linkedAlerts.length,
+        links: {
+          requestHref: `/beta-requests?id=${row.id}`,
+          traceHref: row.proof_intent_nonce ? `/intents/${encodeURIComponent(row.proof_intent_nonce)}` : null,
+          inboxHref: notification?.id ? `/inbox?id=${notification.id}` : null,
+          alertHref: getPartnerAlertHref(linkedAlerts),
+        },
+      } satisfies PartnerHealthRow
+    })
+    .filter((row) => row.stage !== 'closed' || row.incidentCount > 0 || row.proofIntentNonce)
+    .sort((left, right) => {
+      const score = (row: PartnerHealthRow) => (
+        (row.healthStatus === 'critical' ? 100_000 : row.healthStatus === 'watch' ? 10_000 : 0)
+        + row.incidentCount * 1_000
+        + row.breachCount * 500
+        + Math.round(row.stageAgeHours)
+      )
+      return score(right) - score(left) || right.id - left.id
+    })
+
+  const workflows = Array.from(requests.reduce((map, row) => {
+    const key = row.workflowType ?? 'unknown'
+    const existing = map.get(key) ?? {
+      workflowType: key,
+      label: row.workflowTypeLabel,
+      requests: 0,
+      healthy: 0,
+      watch: 0,
+      critical: 0,
+      followUpDue: 0,
+      deadLetters: 0,
+      averageLatencyMs: null as number | null,
+      latencySamples: 0,
+    }
+    existing.requests += 1
+    existing.healthy += Number(row.healthStatus === 'healthy')
+    existing.watch += Number(row.healthStatus === 'watch')
+    existing.critical += Number(row.healthStatus === 'critical')
+    existing.followUpDue += Number(row.followUpDue)
+    existing.deadLetters += Number(row.deadLetter)
+    if (row.latestLatencyMs != null) {
+      existing.averageLatencyMs = (existing.averageLatencyMs ?? 0) + row.latestLatencyMs
+      existing.latencySamples += 1
+    }
+    map.set(key, existing)
+    return map
+  }, new Map<string, {
+    workflowType: string
+    label: string
+    requests: number
+    healthy: number
+    watch: number
+    critical: number
+    followUpDue: number
+    deadLetters: number
+    averageLatencyMs: number | null
+    latencySamples: number
+  }>()).values())
+    .map((entry) => ({
+      workflowType: entry.workflowType,
+      label: entry.label,
+      requests: entry.requests,
+      healthy: entry.healthy,
+      watch: entry.watch,
+      critical: entry.critical,
+      followUpDue: entry.followUpDue,
+      deadLetters: entry.deadLetters,
+      averageLatencyMs: entry.latencySamples > 0 && entry.averageLatencyMs != null
+        ? Number((entry.averageLatencyMs / entry.latencySamples).toFixed(1))
+        : null,
+    }))
+    .sort((left, right) => right.critical - left.critical || right.watch - left.watch || right.requests - left.requests)
+
+  const owners = Array.from(requests.reduce((map, row) => {
+    const key = row.owner ?? 'unassigned'
+    const existing = map.get(key) ?? {
+      owner: row.owner,
+      requests: 0,
+      critical: 0,
+      watch: 0,
+      healthy: 0,
+      followUpDue: 0,
+      nextMeetingScheduled: 0,
+    }
+    existing.requests += 1
+    existing.critical += Number(row.healthStatus === 'critical')
+    existing.watch += Number(row.healthStatus === 'watch')
+    existing.healthy += Number(row.healthStatus === 'healthy')
+    existing.followUpDue += Number(row.followUpDue)
+    existing.nextMeetingScheduled += Number(Boolean(row.nextMeetingAt))
+    map.set(key, existing)
+    return map
+  }, new Map<string, {
+    owner: string | null
+    requests: number
+    critical: number
+    watch: number
+    healthy: number
+    followUpDue: number
+    nextMeetingScheduled: number
+  }>()).values())
+    .sort((left, right) => right.critical - left.critical || right.followUpDue - left.followUpDue || right.requests - left.requests)
+
+  const incidents = requests
+    .filter((row) => row.healthStatus !== 'healthy')
+    .slice(0, 20)
+    .map((row) => ({
+      id: `request-${row.id}`,
+      severity: row.healthStatus === 'critical' ? 'critical' : 'warning',
+      title: row.deadLetter
+        ? 'Partner workflow hit a dead letter'
+        : row.latencyBreach
+          ? 'Partner workflow breached the latency target'
+          : row.followUpDue
+            ? 'Partner workflow needs follow-up'
+            : 'Partner workflow needs operator review',
+      detail: row.followUpReason
+        ?? row.staleReason
+        ?? (row.deadLetter ? 'The most recent linked proof trace ended in dead letter.' : null)
+        ?? (row.latencyBreach ? `The latest linked proof trace took ${row.latestLatencyMs}ms, above the ${PARTNER_SLA_LATENCY_MS}ms target.` : null)
+        ?? row.nextAction
+        ?? 'Review the partner request and record the next operational step.',
+      company: row.company,
+      workflowType: row.workflowType,
+      owner: row.owner,
+      requestId: row.id,
+      requestHref: row.links.requestHref,
+      traceHref: row.links.traceHref,
+      alertHref: row.links.alertHref,
+      deadLetter: row.deadLetter,
+      followUpDue: row.followUpDue,
+    } satisfies PartnerHealthIncident))
+
+  const digestPreview = buildPartnerDigestPayload(db, PARTNER_DIGEST_DEFAULT_DAYS)
+
+  return {
+    generatedAt: new Date().toISOString(),
+    windowDays,
+    alertWindowHours,
+    slaLatencyMs: PARTNER_SLA_LATENCY_MS,
+    summary: {
+      activeRequests: requests.length,
+      healthy: requests.filter((row) => row.healthStatus === 'healthy').length,
+      watch: requests.filter((row) => row.healthStatus === 'watch').length,
+      critical: requests.filter((row) => row.healthStatus === 'critical').length,
+      latencyBreaches: requests.filter((row) => row.latencyBreach).length,
+      deadLetters: requests.filter((row) => row.deadLetter).length,
+      openIncidents: incidents.length,
+      followUpDue: requests.filter((row) => row.followUpDue).length,
+    },
+    requests,
+    workflows,
+    owners,
+    incidents,
+    digestPreview: {
+      summary: digestPreview.summary,
+      markdown: digestPreview.markdown,
+    },
+  }
+}
+
+function buildBetaRequestProofPackMarkdown(pack: BetaRequestProofPack): string {
+  return [
+    '# Beam partner proof pack',
+    '',
+    `Generated: ${pack.generatedAt}`,
+    '',
+    `## Workflow`,
+    `- Company: ${pack.request.company ?? 'Unknown partner'}`,
+    `- Workflow type: ${formatWorkflowTypeLabel(pack.request.workflowType)}`,
+    `- Current stage: ${pack.request.currentStage}`,
+    `- Workflow summary: ${pack.request.workflowSummary ?? 'No workflow summary provided.'}`,
+    '',
+    '## Delivery proof',
+    `- Headline: ${pack.proof.headline}`,
+    `- Intent: ${pack.proof.intentType}`,
+    `- Delivery status: ${pack.proof.deliveryStatus}`,
+    `- Latency: ${pack.proof.latencyMs == null ? 'n/a' : `${pack.proof.latencyMs}ms`}`,
+    `- Trace stages: ${pack.proof.traceStages.join(' -> ')}`,
+    `- Trace reference: ${pack.proof.proofIntentNonce}`,
+    '',
+    '## Identity proof',
+    `- Sender: ${formatProofPartyLabel(pack.proof.sender)} · ${pack.proof.sender.verificationTier} · trust ${formatTrustScoreLabel(pack.proof.sender.trustScore)}`,
+    `- Recipient: ${formatProofPartyLabel(pack.proof.recipient)} · ${pack.proof.recipient.verificationTier} · trust ${formatTrustScoreLabel(pack.proof.recipient.trustScore)}`,
+    '',
+    '## Recommendation',
+    pack.proof.recommendation,
+    '',
+    '## Evidence references',
+    `- Trace nonce: ${pack.evidence.traceReference}`,
+    `- Request reference: ${pack.evidence.requestReference}`,
+    `- Release truth: ${pack.evidence.releaseUrl}`,
+    `- Public status: ${pack.evidence.statusUrl}`,
+    '',
+    '## Redaction notes',
+    ...pack.redaction.excludedFields.map((entry) => `- Excluded: ${entry}`),
+    ...pack.redaction.notes.map((entry) => `- Note: ${entry}`),
+  ].join('\n')
+}
+
+function buildBetaRequestProofPack(row: WaitlistRow, summary: BetaRequestProofSummary): BetaRequestProofPack {
+  const pack: BetaRequestProofPack = {
+    generatedAt: new Date().toISOString(),
+    audience: 'external',
+    request: {
+      id: row.id,
+      company: row.company,
+      workflowType: row.workflow_type,
+      workflowSummary: row.workflow_summary,
+      currentStage: normalizeBetaRequestStatus(row.status) ?? 'new',
+    },
+    proof: {
+      headline: summary.headline,
+      summary: summary.summary,
+      recommendation: getBetaRequestProofRecommendation({
+        ...row,
+        next_action: null,
+      }),
+      proofIntentNonce: summary.proofIntentNonce,
+      intentType: summary.delivery.intentType,
+      deliveryStatus: summary.delivery.status,
+      latencyMs: summary.delivery.latencyMs,
+      traceStages: summary.delivery.stages,
+      sender: summary.identity.sender,
+      recipient: summary.identity.recipient,
+    },
+    evidence: {
+      releaseUrl: 'https://api.beam.directory/release',
+      statusUrl: 'https://beam.directory/status.html',
+      traceReference: summary.proofIntentNonce,
+      requestReference: `beta-request:${row.id}`,
+    },
+    redaction: {
+      excludedFields: [
+        'request email',
+        'operator owner',
+        'operator notes',
+        'operator signal state',
+        'internal inbox and trace URLs',
+      ],
+      notes: [
+        'This export is designed for external recap and commercial next-step conversations.',
+        'Operator-only state remains available in the Beam dashboard, not in this artifact.',
+      ],
+    },
+    markdown: '',
+  }
+  pack.markdown = buildBetaRequestProofPackMarkdown(pack)
+  return pack
+}
+
 function getWaitlistEntries(db: Database): { available: boolean; waitlist: Array<{ email: string; company: string | null; signupDate: string | null; status: string | null; owner: string | null }>; total: number } {
   if (!tableExists(db, 'waitlist')) {
     return { available: false, waitlist: [], total: 0 }
@@ -3071,6 +3599,172 @@ export function createApp(db: Database): Hono {
     } catch (err) {
       console.error('Admin beta request update error:', err)
       return c.json({ error: 'Failed to update beta request', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/beta-requests/:id/proof-pack', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const id = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(id) || id <= 0) {
+      return c.json({ error: 'Invalid beta request id', errorCode: 'INVALID_BETA_REQUEST_ID' }, 400)
+    }
+
+    const format = (c.req.query('format') ?? 'json').trim().toLowerCase()
+    if (format !== 'json' && format !== 'markdown') {
+      return c.json({ error: 'format must be json or markdown', errorCode: 'INVALID_EXPORT_FORMAT' }, 400)
+    }
+
+    try {
+      const row = getBetaRequestById(db, id)
+      if (!row) {
+        return c.json({ error: 'Beta request not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(row.id))
+      const activity = buildBetaRequestActivityTimeline(db, row, notification)
+      const proofSummary = buildBetaRequestProofSummary(db, row, notification, activity)
+      if (!proofSummary) {
+        return c.json({ error: 'No proof summary is available for this request yet', errorCode: 'PROOF_PACK_UNAVAILABLE' }, 409)
+      }
+
+      const pack = buildBetaRequestProofPack(row, proofSummary)
+      const timestamp = new Date().toISOString().replaceAll(':', '-')
+
+      logAuditEvent(db, {
+        action: 'admin.beta_request.proof_pack.exported',
+        actor: auth.session.email,
+        target: String(id),
+        details: {
+          role: auth.session.role,
+          format,
+          proofIntentNonce: proofSummary.proofIntentNonce,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      if (format === 'markdown') {
+        c.header('Content-Type', 'text/markdown; charset=utf-8')
+        c.header('Content-Disposition', `attachment; filename="beam-proof-pack-${id}-${timestamp}.md"`)
+        return c.body(pack.markdown)
+      }
+
+      c.header('Content-Type', 'application/json; charset=utf-8')
+      c.header('Content-Disposition', `attachment; filename="beam-proof-pack-${id}-${timestamp}.json"`)
+      return c.body(JSON.stringify(pack, null, 2))
+    } catch (err) {
+      console.error('Admin beta request proof pack error:', err)
+      return c.json({ error: 'Failed to build proof pack', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/partner-health', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const days = Math.max(1, Number.parseInt(c.req.query('days') ?? String(PARTNER_HEALTH_DEFAULT_DAYS), 10) || PARTNER_HEALTH_DEFAULT_DAYS)
+    const hours = Math.max(1, Number.parseInt(c.req.query('hours') ?? '24', 10) || 24)
+
+    try {
+      c.header('Cache-Control', 'no-store')
+      return c.json(buildPartnerHealthPayload(db, { days, hours }))
+    } catch (err) {
+      console.error('Admin partner health error:', err)
+      return c.json({ error: 'Failed to build partner health payload', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.get('/admin/partner-digest', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const days = Math.max(1, Number.parseInt(c.req.query('days') ?? String(PARTNER_DIGEST_DEFAULT_DAYS), 10) || PARTNER_DIGEST_DEFAULT_DAYS)
+    const owner = normalizeOptionalString(c.req.query('owner'))
+    const format = (c.req.query('format') ?? 'json').trim().toLowerCase()
+    if (format !== 'json' && format !== 'markdown') {
+      return c.json({ error: 'format must be json or markdown', errorCode: 'INVALID_EXPORT_FORMAT' }, 400)
+    }
+
+    try {
+      const digest = buildPartnerDigestPayload(db, days, owner)
+      c.header('Cache-Control', 'no-store')
+
+      if (format === 'markdown') {
+        const timestamp = new Date().toISOString().replaceAll(':', '-')
+        c.header('Content-Type', 'text/markdown; charset=utf-8')
+        c.header('Content-Disposition', `attachment; filename="beam-partner-digest-${timestamp}.md"`)
+        return c.body(digest.markdown)
+      }
+
+      return c.json(digest)
+    } catch (err) {
+      console.error('Admin partner digest error:', err)
+      return c.json({ error: 'Failed to build partner digest', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  app.post('/admin/partner-digest/deliver', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const days = Math.max(1, Number.parseInt(String(body.days ?? PARTNER_DIGEST_DEFAULT_DAYS), 10) || PARTNER_DIGEST_DEFAULT_DAYS)
+    const requestedEmail = normalizeOptionalString(body.email)
+    const owner = normalizeOptionalString(body.owner)
+    const targetEmail = requestedEmail ?? auth.session.email
+
+    if (requestedEmail && auth.session.role !== 'admin' && requestedEmail !== auth.session.email) {
+      return c.json({ error: 'Only admins can deliver digests to a different mailbox', errorCode: 'FORBIDDEN' }, 403)
+    }
+
+    try {
+      const digest = buildPartnerDigestPayload(db, days, owner)
+      const delivered = await sendOperatorDigestEmail({
+        email: targetEmail,
+        subject: `Beam partner digest · ${new Date().toISOString().slice(0, 10)}`,
+        markdown: digest.markdown,
+      })
+
+      if (!delivered) {
+        return c.json({ error: 'Operator email delivery is not configured', errorCode: 'EMAIL_DELIVERY_UNAVAILABLE' }, 503)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.partner_digest.delivered',
+        actor: auth.session.email,
+        target: targetEmail,
+        details: {
+          role: auth.session.role,
+          days,
+          owner,
+          deliveredTo: targetEmail,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        email: targetEmail,
+        deliveredAt: new Date().toISOString(),
+      })
+    } catch (err) {
+      console.error('Admin partner digest delivery error:', err)
+      return c.json({ error: 'Failed to deliver partner digest', errorCode: 'EMAIL_DELIVERY_FAILED' }, 500)
     }
   })
 
