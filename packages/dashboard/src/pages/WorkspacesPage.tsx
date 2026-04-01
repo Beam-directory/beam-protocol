@@ -288,10 +288,49 @@ function renderBindingTransport(binding: WorkspaceIdentityBinding): string {
 
 function renderChannelMeta(channel: WorkspacePartnerChannel): string {
   return [
+    channel.workspaceRoute ? `Routes to ${channel.workspaceRoute.workspaceName}` : 'External lane',
     channel.owner ? `Owner ${channel.owner}` : 'No owner',
     channel.lastSuccessAt ? `Last success ${formatRelativeTime(channel.lastSuccessAt)}` : 'No successful handoff yet',
     channel.lastFailureAt ? `Last failure ${formatRelativeTime(channel.lastFailureAt)}` : 'No recent failures',
   ].join(' · ')
+}
+
+function renderPartnerChannelOptionLabel(channel: WorkspacePartnerChannel): string {
+  if (channel.workspaceRoute) {
+    return `${channel.workspaceRoute.workspaceName} · ${displayName(channel.workspaceRoute.displayName, channel.partnerBeamId)}`
+  }
+
+  return channel.label || channel.partnerBeamId
+}
+
+function sortPartnerChannelsForComposer(channels: WorkspacePartnerChannel[]): WorkspacePartnerChannel[] {
+  return [...channels].sort((left, right) => {
+    const leftRoute = left.workspaceRoute ? 0 : 1
+    const rightRoute = right.workspaceRoute ? 0 : 1
+    if (leftRoute !== rightRoute) {
+      return leftRoute - rightRoute
+    }
+
+    const statusOrder = (value: WorkspacePartnerChannelStatus) => {
+      switch (value) {
+        case 'active':
+          return 0
+        case 'trial':
+          return 1
+        case 'blocked':
+          return 2
+        default:
+          return 3
+      }
+    }
+
+    const statusDelta = statusOrder(left.status) - statusOrder(right.status)
+    if (statusDelta !== 0) {
+      return statusDelta
+    }
+
+    return renderPartnerChannelOptionLabel(left).localeCompare(renderPartnerChannelOptionLabel(right))
+  })
 }
 
 function buildPolicyDefaultsState(policy: WorkspacePolicyResponse | null) {
@@ -378,6 +417,26 @@ export default function WorkspacesPage() {
       ?? FALLBACK_CONVERSATION_INTENT,
     [defaultHandoffIntentId, intentCatalog, threadForm.draftIntentType],
   )
+  const availableHandoffChannels = useMemo(
+    () => sortPartnerChannelsForComposer(channels),
+    [channels],
+  )
+  const selectedPartnerChannel = useMemo(
+    () => channels.find((channel) => channel.id === Number.parseInt(threadForm.partnerChannelId, 10)) ?? null,
+    [channels, threadForm.partnerChannelId],
+  )
+  const threadDetailWorkspaceRoute = useMemo(() => {
+    if (!threadDetail) {
+      return null
+    }
+
+    const partnerBeamId = threadDetail.participants.find((participant) => participant.principalType === 'partner')?.beamId
+    if (!partnerBeamId) {
+      return null
+    }
+
+    return channels.find((channel) => channel.partnerBeamId === partnerBeamId)?.workspaceRoute ?? null
+  }, [channels, threadDetail])
 
   async function loadWorkspaces() {
     const response = await directoryApi.listWorkspaces()
@@ -1137,6 +1196,20 @@ export default function WorkspacesPage() {
                         <div>{formatNumber(channel.stats.recentFailures)} recent failures</div>
                       </div>
 
+                      {channel.workspaceRoute ? (
+                        <div className="mt-3 rounded-2xl border border-orange-200 bg-orange-50/70 px-4 py-3 text-sm text-slate-700 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-slate-200">
+                          <div className="font-medium text-slate-900 dark:text-slate-100">Local workspace route</div>
+                          <div className="mt-1">
+                            {channel.workspaceRoute.workspaceName} · {displayName(channel.workspaceRoute.displayName, channel.partnerBeamId)}
+                          </div>
+                          <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">
+                            {channel.workspaceRoute.runtime.label || channel.workspaceRoute.runtime.mode}
+                            {channel.workspaceRoute.runtime.deliveryMode ? ` · ${channel.workspaceRoute.runtime.deliveryMode}` : ''}
+                            {channel.workspaceRoute.bindingStatus !== 'active' ? ` · binding ${channel.workspaceRoute.bindingStatus}` : ''}
+                          </div>
+                        </div>
+                      ) : null}
+
                       {channel.notes ? (
                         <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{channel.notes}</div>
                       ) : null}
@@ -1174,6 +1247,11 @@ export default function WorkspacesPage() {
                         {channel.trace ? (
                           <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-orange-600 transition hover:bg-slate-100 dark:border-slate-800 dark:text-orange-300 dark:hover:bg-slate-800" to={channel.trace.href}>
                             Open last trace
+                          </Link>
+                        ) : null}
+                        {channel.workspaceRoute ? (
+                          <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-orange-600 transition hover:bg-slate-100 dark:border-slate-800 dark:text-orange-300 dark:hover:bg-slate-800" to={`/workspaces?workspace=${encodeURIComponent(channel.workspaceRoute.workspaceSlug)}`}>
+                            Open target workspace
                           </Link>
                         ) : null}
                       </div>
@@ -1239,9 +1317,10 @@ export default function WorkspacesPage() {
                   <>
                     <select className="input-field" value={threadForm.partnerChannelId} onChange={(event) => setThreadForm((current) => ({ ...current, partnerChannelId: event.target.value }))}>
                       <option value="">Select partner channel</option>
-                      {channels.map((channel) => (
+                      {availableHandoffChannels.map((channel) => (
                         <option key={channel.id} value={channel.id}>
-                          {channel.label || channel.partnerBeamId}
+                          {renderPartnerChannelOptionLabel(channel)}
+                          {channel.status !== 'active' ? ` (${channel.status})` : ''}
                         </option>
                       ))}
                     </select>
@@ -1263,6 +1342,34 @@ export default function WorkspacesPage() {
                         </option>
                       ))}
                     </select>
+                    {selectedPartnerChannel ? (
+                      <div className="md:col-span-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+                        <div className="font-medium text-slate-900 dark:text-slate-100">
+                          {selectedPartnerChannel.workspaceRoute ? 'Cross-workspace target' : 'External partner target'}
+                        </div>
+                        <div className="mt-1">
+                          {selectedPartnerChannel.workspaceRoute
+                            ? `${selectedPartnerChannel.workspaceRoute.workspaceName} · ${displayName(selectedPartnerChannel.workspaceRoute.displayName, selectedPartnerChannel.partnerBeamId)}`
+                            : `${selectedPartnerChannel.label || displayName(selectedPartnerChannel.partner.displayName, selectedPartnerChannel.partnerBeamId)} · ${selectedPartnerChannel.partnerBeamId}`}
+                        </div>
+                        <div className="mt-2 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-3">
+                          <div>Channel {selectedPartnerChannel.status}</div>
+                          <div>Health {selectedPartnerChannel.healthStatus}</div>
+                          <div>
+                            {selectedPartnerChannel.workspaceRoute
+                              ? `${selectedPartnerChannel.workspaceRoute.runtime.label || selectedPartnerChannel.workspaceRoute.runtime.mode} · ${selectedPartnerChannel.workspaceRoute.runtime.deliveryMode || 'manual'}`
+                              : 'Partner-side runtime managed externally'}
+                          </div>
+                        </div>
+                        {selectedPartnerChannel.workspaceRoute ? (
+                          <div className="mt-3">
+                            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/workspaces?workspace=${encodeURIComponent(selectedPartnerChannel.workspaceRoute.workspaceSlug)}`}>
+                              Open target workspace
+                            </Link>
+                          </div>
+                        ) : null}
+                      </div>
+                    ) : null}
                     <div className="md:col-span-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
                       <div className="font-medium text-slate-900 dark:text-slate-100">{selectedIntent.id}</div>
                       <div className="mt-1">{selectedIntent.description || 'No catalog description is available for this intent yet.'}</div>
@@ -1287,7 +1394,13 @@ export default function WorkspacesPage() {
                     <button
                       className="rounded-xl border border-slate-200 px-4 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
                       type="button"
-                      disabled={actionBusy === 'thread-composer-create' || actionBusy === 'thread-composer-dispatch' || !threadForm.partnerChannelId || !threadForm.localBindingId}
+                      disabled={
+                        actionBusy === 'thread-composer-create'
+                        || actionBusy === 'thread-composer-dispatch'
+                        || !threadForm.partnerChannelId
+                        || !threadForm.localBindingId
+                        || selectedPartnerChannel?.status === 'blocked'
+                      }
                       onClick={() => { void handleThreadComposerSubmit('dispatch') }}
                     >
                       {actionBusy === 'thread-composer-dispatch'
@@ -1298,7 +1411,7 @@ export default function WorkspacesPage() {
                     </button>
                   ) : null}
                   <div className="text-xs text-slate-500 dark:text-slate-400">
-                    Handoff threads can stay blocked for review, link to an existing nonce, or send a catalog-backed Beam intent directly from this workspace surface.
+                    Handoff threads can stay blocked for review, link to an existing nonce, or send a catalog-backed Beam intent directly from this workspace surface. Cross-workspace routes now resolve local target workspaces when a partner channel points at another Beam-controlled identity.
                   </div>
                 </div>
               </form>
@@ -1398,6 +1511,12 @@ export default function WorkspacesPage() {
                           <div className="text-xs uppercase tracking-wide text-slate-400">Draft intent</div>
                           <div>{threadDetail.thread.draftIntentType || 'No draft intent stored'}</div>
                         </div>
+                        {threadDetailWorkspaceRoute ? (
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Target workspace</div>
+                            <div>{threadDetailWorkspaceRoute.workspaceName}</div>
+                          </div>
+                        ) : null}
                       </div>
                     </div>
 

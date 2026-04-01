@@ -859,6 +859,13 @@ test('workspace partner channels, timeline, and digest expose operator-ready con
       publicKey: 'MCowBQYDK2VwAyEAw2QJY0YH7e1L2+2VQ1bH4TqL6wCnC8n9v8m8z4vPsxM=',
       personal: true,
     })
+    registerAgent(db, {
+      beamId: 'finance@northwind.beam.directory',
+      displayName: 'Northwind Finance Bot',
+      capabilities: ['invoice.review'],
+      publicKey: 'MCowBQYDK2VwAyEA3n3d9X0+uB4bSv9C0L+QW6T8wdkM3Vn2QJw1bE8W2dQ=',
+      personal: false,
+    })
 
     const app = createApp(db)
     const adminHeaders = {
@@ -873,6 +880,28 @@ test('workspace partner channels, timeline, and digest expose operator-ready con
         name: 'Acme Finance',
         slug: 'acme-finance',
         externalHandoffsEnabled: true,
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Northwind Runtime',
+        slug: 'northwind-runtime',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces/northwind-runtime/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'finance@northwind.beam.directory',
+        bindingType: 'agent',
+        owner: 'northwind@example.com',
+        runtimeType: 'codex:finance',
+        canInitiateExternal: true,
       }),
     }))
 
@@ -969,11 +998,21 @@ test('workspace partner channels, timeline, and digest expose operator-ready con
       channels: Array<{
         status: string
         healthStatus: string
+        workspaceRoute: {
+          workspaceSlug: string
+          workspaceName: string
+          runtime: {
+            mode: string
+          }
+        } | null
       }>
     }
     assert.equal(channelsListBody.total, 1)
     assert.equal(channelsListBody.channels[0]?.status, 'blocked')
     assert.equal(channelsListBody.channels[0]?.healthStatus, 'critical')
+    assert.equal(channelsListBody.channels[0]?.workspaceRoute?.workspaceSlug, 'northwind-runtime')
+    assert.equal(channelsListBody.channels[0]?.workspaceRoute?.workspaceName, 'Northwind Runtime')
+    assert.equal(channelsListBody.channels[0]?.workspaceRoute?.runtime.mode, 'runtime-backed')
 
     const timelineResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/timeline?limit=20', {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),

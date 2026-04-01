@@ -30,6 +30,7 @@ The workspace foundation now adds these records to the directory:
 
 The current operator-facing surface now covers workspace creation, identity bindings, lifecycle state, partner channels, thread composition, timeline history, digest delivery, and policy previews.
 It also supports direct operator dispatch: a blocked handoff thread can now be approved and sent as a real Beam message from the workspace surface, without waiting for a separate runtime UI.
+Partner channels now also resolve back into the local control plane when the target Beam ID belongs to another Beam-managed workspace identity. That gives operators a real cross-workspace route instead of a raw external address.
 
 ## Why Beam Needs This
 
@@ -226,6 +227,8 @@ The dispatch route now sends the selected Beam intent, persists the draft on the
   "notes": "Primary finance route for invoice approvals."
 }
 ```
+
+When you fetch partner channels, each channel may now include a `workspaceRoute` block. This appears when the target `partnerBeamId` is also bound as a non-partner identity inside another Beam workspace. The dashboard uses that to surface "routes into workspace X" instead of showing only a bare Beam ID.
 
 ### Patch a workspace policy
 
