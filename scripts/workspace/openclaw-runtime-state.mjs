@@ -61,6 +61,26 @@ export function parseSubagentIdFromSessionKey(sessionKey) {
   return firstMatch?.[1] ?? null
 }
 
+export function openClawRouteKeyForDescriptor(descriptor) {
+  if (!descriptor || typeof descriptor !== 'object') {
+    return null
+  }
+
+  if (descriptor.source === 'subagent-run') {
+    return descriptor.childSessionKey || `subagent:${descriptor.runId || descriptor.identityKey || descriptor.agentName || 'unknown'}`
+  }
+
+  if (descriptor.source === 'workspace-agent') {
+    return `workspace:${descriptor.agentName}`
+  }
+
+  if (descriptor.source === 'gateway-agent') {
+    return `gateway:${descriptor.agentName}`
+  }
+
+  return `agent:${descriptor.agentName}`
+}
+
 export function resolveRuntimePaths(overrides = {}) {
   const home = os.homedir()
   return {

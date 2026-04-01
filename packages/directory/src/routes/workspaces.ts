@@ -23,6 +23,7 @@ import {
   getWorkspaceThreadById,
   getWorkspaceThreadByLinkedIntentNonce,
   listAgentKeys,
+  listOpenClawResolvedRoutesByBeamId,
   listWorkspaceIdentityBindings,
   listWorkspaceIdentityBindingsByBeamId,
   listWorkspacePartnerChannels,
@@ -44,6 +45,9 @@ import type {
   WorkspaceIdentityBindingStatus,
   WorkspaceIdentityBindingType,
   WorkspaceIdentityLifecycleStatus,
+  OpenClawHostHealth,
+  OpenClawRouteRuntimeState,
+  OpenClawRouteSource,
   WorkspacePartnerChannelHealth,
   WorkspacePartnerChannelRow,
   WorkspacePartnerChannelStatus,
@@ -120,6 +124,11 @@ type SerializedWorkspaceIdentityBinding = {
   lastSeenAgeHours: number | null
   ownershipState: 'owned' | 'unowned'
   lifecycleStatus: WorkspaceIdentityLifecycleStatus
+  hostId: number | null
+  hostLabel: string | null
+  hostHealth: OpenClawHostHealth | 'conflict' | null
+  routeSource: OpenClawRouteSource | null
+  runtimeSessionState: OpenClawRouteRuntimeState | null
   runtime: {
     mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
     connector: string | null
@@ -659,6 +668,63 @@ function parseRuntimeMetadata(
   }
 }
 
+function resolveWorkspaceHostRouteMetadata(
+  db: Database,
+  beamId: string,
+): {
+  hostId: number | null
+  hostLabel: string | null
+  hostHealth: OpenClawHostHealth | 'conflict' | null
+  routeSource: OpenClawRouteSource | null
+  runtimeSessionState: OpenClawRouteRuntimeState | null
+  connectionMode: SerializedWorkspaceIdentityBinding['runtime']['deliveryMode']
+  httpEndpoint: string | null
+  connected: boolean
+} {
+  const routes = listOpenClawResolvedRoutesByBeamId(db, beamId)
+  if (routes.length === 0) {
+    return {
+      hostId: null,
+      hostLabel: null,
+      hostHealth: null,
+      routeSource: null,
+      runtimeSessionState: null,
+      connectionMode: null,
+      httpEndpoint: null,
+      connected: false,
+    }
+  }
+
+  const conflict = routes.some((route) => route.runtime_session_state === 'conflict')
+  const preferredRoute = routes.find((route) => route.runtime_session_state !== 'ended') ?? routes[0]
+  const deliveryMode = preferredRoute.connection_mode ?? null
+  const connected = preferredRoute.runtime_session_state === 'live'
+
+  if (conflict) {
+    return {
+      hostId: null,
+      hostLabel: `${routes.length} hosts`,
+      hostHealth: 'conflict',
+      routeSource: preferredRoute.route_source,
+      runtimeSessionState: 'conflict',
+      connectionMode: deliveryMode,
+      httpEndpoint: preferredRoute.http_endpoint,
+      connected: false,
+    }
+  }
+
+  return {
+    hostId: preferredRoute.host_id,
+    hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+    hostHealth: preferredRoute.host_health_status,
+    routeSource: preferredRoute.route_source,
+    runtimeSessionState: preferredRoute.runtime_session_state,
+    connectionMode: deliveryMode,
+    httpEndpoint: preferredRoute.http_endpoint,
+    connected,
+  }
+}
+
 function classifyWorkspaceIdentityLifecycle(
   binding: WorkspaceIdentityBindingRow,
   options: {
@@ -811,8 +877,13 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     : null
   const lastSeenAgeHours = hoursSince(agent?.last_seen ?? null)
   const runtime = parseRuntimeMetadata(row.binding_type, row.runtime_type)
-  const connected = agent ? isAgentConnected(agent.beam_id) : false
-  const httpEndpoint = agent?.http_endpoint ?? null
+  const hostRoute = resolveWorkspaceHostRouteMetadata(db, row.beam_id)
+  const connected = hostRoute.routeSource
+    ? hostRoute.connected
+    : agent
+      ? isAgentConnected(agent.beam_id)
+      : false
+  const httpEndpoint = hostRoute.httpEndpoint ?? agent?.http_endpoint ?? null
   const deliveryMode = agent
     ? connected && httpEndpoint
       ? 'hybrid'
@@ -821,7 +892,7 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
         : httpEndpoint
           ? 'http'
           : 'unavailable'
-    : null
+    : hostRoute.connectionMode
   const lifecycleStatus = classifyWorkspaceIdentityLifecycle(row, {
     existsLocally: Boolean(agent),
     lastSeenAgeHours,
@@ -849,6 +920,11 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     lastSeenAgeHours,
     ownershipState: row.owner ? 'owned' : 'unowned',
     lifecycleStatus,
+    hostId: hostRoute.hostId,
+    hostLabel: hostRoute.hostLabel,
+    hostHealth: hostRoute.hostHealth,
+    routeSource: hostRoute.routeSource,
+    runtimeSessionState: hostRoute.runtimeSessionState,
     runtime: {
       ...runtime,
       connected,

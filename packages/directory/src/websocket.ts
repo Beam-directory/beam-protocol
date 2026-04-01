@@ -9,6 +9,7 @@ import {
   getIntentLogByNonce,
   getLatestIntentTraceEvent,
   hasActiveDelegation,
+  listOpenClawResolvedRoutesByBeamId,
   listInFlightIntentLogs,
   logIntentStart,
   reconcileIntentLog,
@@ -124,6 +125,73 @@ function parseTraceDetails(trace: IntentTraceEventRow | null): Record<string, un
   } catch {
     return null
   }
+}
+
+function getOpenClawDeliveryBlock(
+  db: Database,
+  beamId: string,
+): {
+  relayCode: RelayError['code']
+  errorCode: string
+  message: string
+  details: Record<string, unknown>
+} | null {
+  const routes = listOpenClawResolvedRoutesByBeamId(db, beamId)
+  if (routes.length === 0) {
+    return null
+  }
+
+  const conflictRoutes = routes.filter((route) => route.runtime_session_state === 'conflict')
+  if (conflictRoutes.length > 0) {
+    return {
+      relayCode: 'FORBIDDEN',
+      errorCode: 'HOST_ROUTE_CONFLICT',
+      message: `Agent ${beamId} is claimed by multiple OpenClaw hosts`,
+      details: {
+        hostIds: conflictRoutes.map((route) => route.host_id),
+        hostLabels: conflictRoutes.map((route) => route.host_label ?? route.hostname),
+      },
+    }
+  }
+
+  const preferredRoute = routes.find((route) => route.runtime_session_state !== 'ended') ?? routes[0]
+  if (preferredRoute.runtime_session_state === 'revoked' || preferredRoute.host_status === 'revoked' || preferredRoute.host_health_status === 'revoked') {
+    return {
+      relayCode: 'FORBIDDEN',
+      errorCode: 'HOST_REVOKED',
+      message: `Agent ${beamId} belongs to a revoked OpenClaw host`,
+      details: {
+        hostId: preferredRoute.host_id,
+        hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+      },
+    }
+  }
+
+  if (preferredRoute.runtime_session_state === 'stale' || preferredRoute.host_health_status === 'stale') {
+    return {
+      relayCode: 'OFFLINE',
+      errorCode: 'HOST_STALE',
+      message: `Agent ${beamId} belongs to a stale OpenClaw host`,
+      details: {
+        hostId: preferredRoute.host_id,
+        hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+      },
+    }
+  }
+
+  if (preferredRoute.runtime_session_state === 'ended') {
+    return {
+      relayCode: 'OFFLINE',
+      errorCode: 'ROUTE_ENDED',
+      message: `Agent ${beamId} no longer has an active OpenClaw route`,
+      details: {
+        hostId: preferredRoute.host_id,
+        hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+      },
+    }
+  }
+
+  return null
 }
 
 function resolveRecoveryTimeoutMs(
@@ -843,11 +911,35 @@ export async function relayIntentFromHttp(
   }
 
   if (localRecipient.http_endpoint) {
+    const routeBlock = getOpenClawDeliveryBlock(db, prepared.to)
+    if (routeBlock) {
+      finalizeFailedIntent(db, prepared, {
+        error: routeBlock.message,
+        errorCode: routeBlock.errorCode,
+        latencyMs: null,
+        transport: 'ws',
+        details: routeBlock.details,
+      })
+      throw new RelayError(routeBlock.relayCode, routeBlock.message)
+    }
+
     const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint)
     if (directResult) {
       updateLastSeen(db, prepared.from)
       return directResult
     }
+  }
+
+  const routeBlock = getOpenClawDeliveryBlock(db, prepared.to)
+  if (routeBlock) {
+    finalizeFailedIntent(db, prepared, {
+      error: routeBlock.message,
+      errorCode: routeBlock.errorCode,
+      latencyMs: null,
+      transport: 'ws',
+      details: routeBlock.details,
+    })
+    throw new RelayError(routeBlock.relayCode, routeBlock.message)
   }
 
   const recipientSession = connections.get(prepared.to)
@@ -1098,12 +1190,54 @@ async function handleIntent(
   }
 
   if (localRecipient.http_endpoint) {
+    const routeBlock = getOpenClawDeliveryBlock(db, prepared.to)
+    if (routeBlock) {
+      finalizeFailedIntent(db, prepared, {
+        error: routeBlock.message,
+        errorCode: routeBlock.errorCode,
+        latencyMs: null,
+        transport: 'ws',
+        details: {
+          ...routeBlock.details,
+          actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+        },
+      })
+      sendJson(senderWs, {
+        type: 'error',
+        nonce: prepared.nonce,
+        errorCode: routeBlock.errorCode,
+        message: routeBlock.message,
+      })
+      return
+    }
+
     const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint)
     if (directResult) {
       updateLastSeen(db, senderBeamId)
       sendJson(senderWs, { type: 'result', frame: directResult })
       return
     }
+  }
+
+  const routeBlock = getOpenClawDeliveryBlock(db, prepared.to)
+  if (routeBlock) {
+    finalizeFailedIntent(db, prepared, {
+      error: routeBlock.message,
+      errorCode: routeBlock.errorCode,
+      latencyMs: null,
+      transport: 'ws',
+      details: {
+        ...routeBlock.details,
+        actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+      },
+    })
+    sendJson(senderWs, {
+      type: 'error',
+      nonce: prepared.nonce,
+      errorCode: routeBlock.errorCode,
+      message: routeBlock.message,
+    })
+    return
   }
 
   const recipientSession = connections.get(prepared.to)

@@ -5,7 +5,9 @@ import { spawnSync } from 'node:child_process'
 const keychainDisabled = process.env.BEAM_OPENCLAW_KEYCHAIN === '0'
 const generatedIdentityService = 'com.beam.openclaw.generated-identity'
 const adminSessionService = 'com.beam.openclaw.admin-session'
+const hostConnectorService = 'com.beam.openclaw.host-connector'
 const adminSessionAccount = 'default'
+const hostConnectorAccount = 'default'
 
 let keychainAvailableCache = null
 
@@ -261,5 +263,61 @@ export async function storeOpenClawAdminSession(sessionCachePath, session) {
   }
 
   await writePrivateJson(sessionCachePath, session)
+  return 'file'
+}
+
+export async function loadOpenClawHostConnectorState(statePath) {
+  const metadata = await readJsonFile(statePath, null)
+  const secretRaw = readKeychainSecret(hostConnectorService, hostConnectorAccount)
+  let secretPayload = null
+  if (secretRaw) {
+    try {
+      secretPayload = JSON.parse(secretRaw)
+    } catch {
+      secretPayload = null
+    }
+  }
+
+  if (!metadata && !secretPayload) {
+    return null
+  }
+
+  const resolved = {
+    ...(metadata && typeof metadata === 'object' ? metadata : {}),
+    ...(secretPayload && typeof secretPayload === 'object' ? secretPayload : {}),
+  }
+
+  return resolved
+}
+
+export async function storeOpenClawHostConnectorState(statePath, state) {
+  const {
+    credential,
+    enrollmentToken,
+    ...metadata
+  } = state ?? {}
+
+  if (hasKeychainSupport()) {
+    const stored = writeKeychainSecret(hostConnectorService, hostConnectorAccount, JSON.stringify({
+      credential: credential ?? null,
+      enrollmentToken: enrollmentToken ?? null,
+    }))
+    if (stored) {
+      await writePrivateJson(statePath, {
+        ...metadata,
+        credentialStorage: 'keychain',
+        credentialUpdatedAt: new Date().toISOString(),
+      })
+      return 'keychain'
+    }
+  }
+
+  await writePrivateJson(statePath, {
+    ...metadata,
+    credential: credential ?? null,
+    enrollmentToken: enrollmentToken ?? null,
+    credentialStorage: 'file',
+    credentialUpdatedAt: new Date().toISOString(),
+  })
   return 'file'
 }

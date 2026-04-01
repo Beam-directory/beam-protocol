@@ -5,6 +5,7 @@ import { setTimeout as sleep } from 'node:timers/promises'
 import { optionalFlag } from '../production/shared.mjs'
 import {
   loadOpenClawRuntimeState,
+  openClawRouteKeyForDescriptor,
   resolveRuntimePaths,
   runtimeSourceFingerprint,
   slugify,
@@ -25,6 +26,7 @@ const runtimePaths = resolveRuntimePaths({
   mergedIdentitiesPath: optionalFlag('--merged-identities'),
   subagentRunsPath: optionalFlag('--subagent-runs'),
 })
+const hostCredential = process.env.BEAM_OPENCLAW_HOST_CREDENTIAL || ''
 
 function log(message) {
   console.log(`[openclaw-receiver] ${message}`)
@@ -117,6 +119,44 @@ function buildWsUrl(beamId, apiKey) {
     .replace(/^http:\/\//u, 'ws://')
     .replace(/^https:\/\//u, 'wss://')
     .replace(/\/$/u, '') + `/ws?${params.toString()}`
+}
+
+async function postRouteEvent(route, reportedState) {
+  if (!hostCredential) {
+    return
+  }
+
+  try {
+    await fetch(`${directoryUrl}/openclaw/hosts/route-events`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${hostCredential}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        events: [{
+          beamId: route.beamId,
+          routeKey: openClawRouteKeyForDescriptor(route),
+          routeSource: route.source,
+          reportedState,
+          runtimeType: route.runtimeType ?? null,
+          label: route.displayName ?? route.label ?? route.agentName,
+          workspaceSlug,
+          sessionKey: route.childSessionKey ?? null,
+          connectionMode: 'websocket',
+          httpEndpoint: null,
+          metadata: {
+            identityKey: route.identityKey,
+            agentName: route.agentName,
+            controllerAgent: route.controllerAgent ?? null,
+            runId: route.runId ?? null,
+          },
+        }],
+      }),
+    })
+  } catch (error) {
+    log(`route event failed for ${route.beamId}: ${error instanceof Error ? error.message : String(error)}`)
+  }
 }
 
 function createRouteSignature(route) {
@@ -350,13 +390,16 @@ class RouteConnection {
     const ws = await openWebSocket(wsUrl)
     this.ws = ws
 
-    ws.onopen = () => {}
+    ws.onopen = () => {
+      void postRouteEvent(this.route, 'live')
+    }
     ws.onmessage = (event) => {
       void this.handleMessage(typeof event.data === 'string' ? event.data : event.data.toString())
     }
     ws.onclose = () => {
       this.connected = false
       this.ws = null
+      void postRouteEvent(this.route, this.stopped ? 'ended' : 'idle')
       if (!this.stopped) {
         log(`connection closed for ${this.route.beamId}; retrying`)
         this.scheduleReconnect()

@@ -20,6 +20,7 @@ import { orgsRouter } from './routes/orgs.js'
 import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter, type AlertItem } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
+import { openClawAdminRouter, openClawPublicRouter } from './routes/openclaw-hosts.js'
 import { verificationRouter } from './routes/verify.js'
 import { workspacesRouter } from './routes/workspaces.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
@@ -3967,6 +3968,8 @@ export function createApp(db: Database): Hono {
   })
 
   app.route('/admin/workspaces', workspacesRouter(db))
+  app.route('/admin/openclaw', openClawAdminRouter(db))
+  app.route('/openclaw/hosts', openClawPublicRouter(db))
 
   // List all agents with connection status (before sub-router to avoid conflict)
   app.get('/directory/agents', (c) => {

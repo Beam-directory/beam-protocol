@@ -174,6 +174,12 @@ export type WorkspacePolicyDefaultExternalInitiation = 'deny' | 'binding'
 export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 export type WorkspaceIdentityLifecycleStatus = 'healthy' | 'stale' | 'paused' | 'missing' | 'revoked' | 'unowned'
 export type WorkspaceTimelineEventKind = 'workspace' | 'policy' | 'identity' | 'partner_channel' | 'thread' | 'digest'
+export type OpenClawHostStatus = 'pending' | 'active' | 'revoked'
+export type OpenClawHostHealth = 'pending' | 'healthy' | 'watch' | 'stale' | 'revoked'
+export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
+export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
+export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
+export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
 
 export interface WorkspaceRow {
   id: number
@@ -257,6 +263,89 @@ export interface WorkspaceThreadParticipantRow {
   role: WorkspaceThreadParticipantRole
   created_at: string
   updated_at: string
+}
+
+export interface OpenClawHostRow {
+  id: number
+  host_key: string
+  enrollment_request_id: number | null
+  label: string | null
+  hostname: string
+  os: string
+  connector_version: string
+  beam_directory_url: string
+  workspace_slug: string | null
+  status: OpenClawHostStatus
+  health_status: OpenClawHostHealth
+  route_count: number
+  credential_hash: string | null
+  approved_at: string | null
+  approved_by: string | null
+  revoked_at: string | null
+  revocation_reason: string | null
+  last_heartbeat_at: string | null
+  last_inventory_at: string | null
+  last_route_event_at: string | null
+  metadata_json: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawHostEnrollmentRequestRow {
+  id: number
+  request_key: string
+  label: string | null
+  workspace_slug: string | null
+  notes: string | null
+  status: OpenClawHostEnrollmentStatus
+  claimed_host_id: number | null
+  claimed_at: string | null
+  approved_at: string | null
+  approved_by: string | null
+  revoked_at: string | null
+  expires_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawHostRouteRow {
+  id: number
+  host_id: number
+  beam_id: string
+  workspace_slug: string | null
+  route_source: OpenClawRouteSource
+  route_key: string
+  runtime_type: string | null
+  label: string | null
+  connection_mode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
+  http_endpoint: string | null
+  session_key: string | null
+  reported_state: OpenClawRouteReportedState
+  runtime_session_state: OpenClawRouteRuntimeState
+  metadata_json: string | null
+  last_seen_at: string | null
+  ended_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawResolvedRouteRow extends OpenClawHostRouteRow {
+  host_label: string | null
+  hostname: string
+  host_status: OpenClawHostStatus
+  host_health_status: OpenClawHostHealth
+  host_workspace_slug: string | null
+  host_last_heartbeat_at: string | null
+}
+
+export interface OpenClawHostHeartbeatRow {
+  id: number
+  host_id: number
+  route_count: number
+  connector_version: string
+  health_status: OpenClawHostHealth
+  details_json: string | null
+  heartbeat_at: string
 }
 
 export interface WorkspacePolicyRow {
