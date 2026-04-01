@@ -31,6 +31,7 @@ The workspace foundation now adds these records to the directory:
 The current operator-facing surface now covers workspace creation, identity bindings, lifecycle state, partner channels, thread composition, timeline history, digest delivery, and policy previews.
 It also supports direct operator dispatch: a blocked handoff thread can now be approved and sent as a real Beam message from the workspace surface, without waiting for a separate runtime UI.
 Partner channels now also resolve back into the local control plane when the target Beam ID belongs to another Beam-managed workspace identity. That gives operators a real cross-workspace route instead of a raw external address.
+Each local identity card now also exposes the explicit Beam DID, key history, a one-time local credential reissue flow, and a per-agent partner-control override. That makes it practical to bind imported OpenClaw agents, hand them a Beam identity bundle, and keep partner policy close to the specific agent that is allowed to speak externally.
 
 ## Fast local sync demo
 
@@ -186,6 +187,8 @@ The first routes are all admin-authenticated and now include the controls requir
 - `GET /admin/workspaces/:slug/identities`
 - `POST /admin/workspaces/:slug/identities`
 - `PATCH /admin/workspaces/:slug/identities/:id`
+- `PATCH /admin/workspaces/:slug/identities/:id/policy`
+- `POST /admin/workspaces/:slug/identities/:id/reissue-local-credential`
 - `GET /admin/workspaces/:slug/threads`
 - `GET /admin/workspaces/:slug/threads/:id`
 - `POST /admin/workspaces/:slug/threads`
@@ -223,6 +226,42 @@ The first routes are all admin-authenticated and now include the controls requir
   "defaultThreadScope": "internal",
   "canInitiateExternal": true,
   "notes": "Primary internal operator agent."
+}
+```
+
+### Reissue a one-time local credential bundle
+
+Use this when a local runtime or imported OpenClaw agent needs a fresh Beam identity file, API key, and signing keypair.
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer <admin-session-token>" \
+  http://localhost:43100/admin/workspaces/openclaw-local/identities/12/reissue-local-credential
+```
+
+The response includes:
+
+- `beamId`
+- `did`
+- `apiKey`
+- `publicKey`
+- `privateKey`
+- `directoryUrl`
+- URLs for DID resolution, agent detail, and key history
+
+This bundle is returned only at issuance time, so copy or download it immediately from the dashboard.
+
+### Add a per-agent partner override
+
+Use this when one workspace identity should have a tighter or looser outbound policy than the workspace default.
+
+```json
+{
+  "externalInitiation": "allow",
+  "allowedPartners": [
+    "finance@northwind.beam.directory",
+    "*@partner.beam.directory"
+  ]
 }
 ```
 

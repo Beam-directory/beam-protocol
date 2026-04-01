@@ -155,6 +155,12 @@ export interface WorkspaceIdentityBinding {
   identity: {
     existsLocally: boolean
     beamId: string
+    did: {
+      id: string
+      resolutionUrl: string
+      agentUrl: string
+      keysUrl: string
+    }
     displayName: string | null
     org: string | null
     personal: boolean
@@ -162,7 +168,40 @@ export interface WorkspaceIdentityBinding {
     trustScore: number | null
     lastSeen: string | null
     capabilities: string[]
-    keyState: object | null
+    keyState: {
+      active: {
+        id: number
+        beamId: string
+        publicKey: string
+        createdAt: number
+        revokedAt: number | null
+        status: 'active' | 'revoked'
+      } | null
+      revoked: Array<{
+        id: number
+        beamId: string
+        publicKey: string
+        createdAt: number
+        revokedAt: number | null
+        status: 'active' | 'revoked'
+      }>
+      keys: Array<{
+        id: number
+        beamId: string
+        publicKey: string
+        createdAt: number
+        revokedAt: number | null
+        status: 'active' | 'revoked'
+      }>
+      total: number
+    } | null
+  }
+  workspacePolicy: {
+    effective: WorkspacePolicyPreview
+    bindingRule: {
+      externalInitiation: WorkspacePolicyRuleExternalInitiation
+      allowedPartners: string[]
+    } | null
   }
 }
 
@@ -495,6 +534,49 @@ export interface WorkspaceIdentityPatchInput {
   canInitiateExternal?: boolean
   status?: WorkspaceBindingStatus
   notes?: string | null
+}
+
+export interface WorkspaceIdentityPolicyPatchInput {
+  externalInitiation?: WorkspacePolicyRuleExternalInitiation
+  allowedPartners?: string[]
+}
+
+export interface WorkspaceIdentityPolicyResponse {
+  workspace: WorkspaceRecord
+  updatedAt: string | null
+  updatedBy: string | null
+  rule: {
+    beamId: string | null
+    bindingType: WorkspaceBindingType | null
+    policyProfile: string | null
+    externalInitiation: WorkspacePolicyRuleExternalInitiation
+    allowedPartners: string[]
+  } | null
+  preview: WorkspacePolicyPreview
+  binding: WorkspaceIdentityBinding
+}
+
+export interface WorkspaceIdentityCredentialBundle {
+  format: 'beam-local-identity/v1'
+  beamId: string
+  did: string
+  displayName: string | null
+  workspaceSlug: string
+  directoryUrl: string
+  generatedAt: string
+  publicKey: string
+  privateKey: string
+  apiKey: string
+  urls: {
+    didResolution: string
+    agent: string
+    keys: string
+  }
+}
+
+export interface WorkspaceIdentityReissueResponse {
+  binding: WorkspaceIdentityBinding
+  credential: WorkspaceIdentityCredentialBundle
 }
 
 export interface WorkspacePartnerChannelCreateInput {
@@ -1821,6 +1903,13 @@ export const directoryApi = {
   updateWorkspaceIdentity: (slug: string, id: number, input: WorkspaceIdentityPatchInput) => request<{ binding: WorkspaceIdentityBinding }>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  }, { admin: true }),
+  updateWorkspaceIdentityPolicy: (slug: string, id: number, input: WorkspaceIdentityPolicyPatchInput) => request<WorkspaceIdentityPolicyResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}/policy`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  reissueWorkspaceIdentityCredential: (slug: string, id: number) => request<WorkspaceIdentityReissueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}/reissue-local-credential`, {
+    method: 'POST',
   }, { admin: true }),
   listWorkspacePartnerChannels: (slug: string) => request<WorkspacePartnerChannelsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, undefined, { admin: true }),
   createWorkspacePartnerChannel: (slug: string, input: WorkspacePartnerChannelCreateInput) => request<{ channel: WorkspacePartnerChannel }>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, {
