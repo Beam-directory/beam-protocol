@@ -9,11 +9,13 @@ const composeFile = path.join(repoRoot, 'ops/quickstart/compose.yaml')
 const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
 const launchAgentPlistPath = path.join(process.env.HOME ?? '', 'Library/LaunchAgents/com.beam.openclaw-live.plist')
+const receiverLaunchAgentPlistPath = path.join(process.env.HOME ?? '', 'Library/LaunchAgents/com.beam.openclaw-receiver.plist')
 const watchMode = process.argv.includes('--watch')
 const daemonMode = process.argv.includes('--daemon')
 const rebuildStack = process.argv.includes('--rebuild')
 const skipSpawnHookInstall = process.argv.includes('--skip-spawn-hook-install')
 const skipBeamSendInstall = process.argv.includes('--skip-beam-send-install')
+const skipReceiverInstall = process.argv.includes('--skip-receiver-install')
 const nodePath = process.execPath
 const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
   ? '/opt/homebrew/bin/docker'
@@ -100,6 +102,11 @@ async function main() {
     run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-beam-send-shim.mjs')])
   }
 
+  if (!daemonMode && !skipReceiverInstall) {
+    logStep('installing the OpenClaw inbound Beam receiver')
+    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-receiver-agent.mjs')])
+  }
+
   if (!skipSpawnHookInstall) {
     logStep('installing the direct OpenClaw spawn hook')
     run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-spawn-hook.mjs')])
@@ -110,11 +117,18 @@ async function main() {
     run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-live-agent.mjs')])
   }
 
+  if (!daemonMode && skipReceiverInstall && fs.existsSync(receiverLaunchAgentPlistPath)) {
+    logStep('receiver launch agent already installed; leaving it untouched')
+  }
+
   console.log('')
   console.log('Beam OpenClaw local setup finished.')
   console.log('Open the printed login link and then the openclaw-local workspace in the dashboard.')
   if (!skipSpawnHookInstall) {
     console.log('Fresh OpenClaw subagents will now sync into Beam directly at spawn time.')
+  }
+  if (!skipReceiverInstall) {
+    console.log('Inbound Beam messages will now route directly into running OpenClaw agents.')
   }
 }
 

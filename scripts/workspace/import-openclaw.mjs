@@ -10,6 +10,7 @@ import {
   readJsonFile,
 } from './openclaw-secret-store.mjs'
 import { ensureLocalOpenClawAcls, ensureLocalOpenClawRelayTargets, ensureLocalOpenClawShield } from './openclaw-local-trust.mjs'
+import { listOpenClawRuntimeDescriptors } from './openclaw-runtime-state.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', 'http://localhost:43100')
 const dashboardUrl = optionalFlag('--dashboard-url', 'http://localhost:43173')
@@ -283,27 +284,17 @@ function normalizeSubagentDescriptors(runsPayload) {
 }
 
 async function listOpenClawDescriptors() {
-  const persistentAgents = listAgentDirectories(agentsDir, 'agent-folder')
-  const workspaceAgents = listAgentDirectories(workspaceAgentsDir, 'workspace-agent')
-  const subagents = includeSubagents
-    ? normalizeSubagentDescriptors(await readJsonFile(subagentRunsPath, { version: 0, runs: {} }))
-    : []
+  const { descriptors, counts } = await listOpenClawRuntimeDescriptors({
+    agentsDir,
+    workspaceAgentsDir,
+    subagentRunsPath,
+    subagentDays,
+    subagentLimit,
+    includeSubagents,
+    includeEndedSubagents: includeSubagents,
+  })
 
-  const descriptors = new Map()
-  for (const descriptor of [...persistentAgents, ...workspaceAgents, ...subagents]) {
-    if (!descriptors.has(descriptor.identityKey)) {
-      descriptors.set(descriptor.identityKey, descriptor)
-    }
-  }
-
-  return {
-    descriptors: [...descriptors.values()],
-    counts: {
-      persistentAgents: persistentAgents.length,
-      workspaceAgents: workspaceAgents.length,
-      subagents: subagents.length,
-    },
-  }
+  return { descriptors, counts }
 }
 
 async function ensureWorkspace(adminHeaders) {
@@ -634,6 +625,9 @@ function printCycleSummary(summary) {
   console.log(`Discovered:       ${descriptors.length}`)
   console.log(`- persistent:     ${counts.persistentAgents}`)
   console.log(`- workspace:      ${counts.workspaceAgents}`)
+  if (typeof counts.gatewayAgents === 'number') {
+    console.log(`- gateway:        ${counts.gatewayAgents}`)
+  }
   console.log(`- subagents:      ${counts.subagents}`)
   console.log(`Imported:         ${imported.length}`)
   console.log(`Registered new:   ${registered.length}`)
