@@ -57,6 +57,7 @@ import { serializeAgentKeyState } from '../utils/serialize.js'
 import { evaluateWorkspacePolicy } from '../workspace-policy.js'
 import { RelayError, isAgentConnected, relayIntentFromHttp } from '../websocket.js'
 import { sendOperatorDigestEmail } from '../email.js'
+import { validateIntentPayload } from '../validation.js'
 
 const WORKSPACE_STATUS_SET = new Set<WorkspaceRow['status']>(['active', 'paused', 'archived'])
 const WORKSPACE_THREAD_SCOPE_SET = new Set<WorkspaceThreadScope>(['internal', 'handoff'])
@@ -266,6 +267,8 @@ type SerializedWorkspaceThread = {
   owner: string | null
   status: WorkspaceThreadStatus
   workflowType: string | null
+  draftIntentType: string | null
+  draftPayload: Record<string, unknown> | null
   linkedIntentNonce: string | null
   lastActivityAt: string
   createdAt: string
@@ -300,6 +303,35 @@ type SerializedWorkspacePolicyPreview = {
 
 function normalizeOptionalString(value: unknown): string | null {
   return typeof value === 'string' && value.trim().length > 0 ? value.trim() : null
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function normalizeOptionalObject(value: unknown, fieldName: string): Record<string, unknown> | null {
+  if (value == null) {
+    return null
+  }
+
+  if (!isRecord(value)) {
+    throw new Error(`${fieldName} must be an object`)
+  }
+
+  return value
+}
+
+function parseJsonObject(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(value) as unknown
+    return isRecord(parsed) ? parsed : null
+  } catch {
+    return null
+  }
 }
 
 function slugify(value: string): string {
@@ -1091,6 +1123,8 @@ function serializeWorkspaceThread(
     owner: row.owner,
     status: row.status,
     workflowType: row.workflow_type,
+    draftIntentType: row.draft_intent_type,
+    draftPayload: parseJsonObject(row.draft_payload_json),
     linkedIntentNonce: row.linked_intent_nonce,
     lastActivityAt: row.last_activity_at,
     createdAt: row.created_at,
@@ -1761,6 +1795,16 @@ export function workspacesRouter(db: Database): Hono {
     }
 
     const workflowType = normalizeOptionalString(raw.workflowType)
+    const draftIntentType = normalizeOptionalString(raw.draftIntentType)
+    let draftPayload: Record<string, unknown> | null = null
+    try {
+      draftPayload = normalizeOptionalObject(raw.draftPayload, 'draftPayload')
+    } catch (err) {
+      return c.json({
+        error: err instanceof Error ? err.message : 'draftPayload must be an object',
+        errorCode: 'INVALID_DRAFT_PAYLOAD',
+      }, 400)
+    }
     const linkedIntentNonce = normalizeOptionalString(raw.linkedIntentNonce)
     if (kind === 'handoff' && !linkedIntentNonce && (status ?? 'open') !== 'blocked') {
       return c.json({ error: 'linkedIntentNonce is required for non-blocked handoff threads', errorCode: 'MISSING_THREAD_NONCE' }, 400)
@@ -1768,10 +1812,34 @@ export function workspacesRouter(db: Database): Hono {
     if (kind === 'internal' && linkedIntentNonce) {
       return c.json({ error: 'Internal threads cannot link directly to a Beam trace', errorCode: 'INTERNAL_THREAD_CANNOT_LINK_TRACE' }, 400)
     }
+    if (kind === 'internal' && (draftIntentType || draftPayload)) {
+      return c.json({ error: 'Internal threads cannot carry Beam intent drafts', errorCode: 'INTERNAL_THREAD_CANNOT_DRAFT_INTENT' }, 400)
+    }
+    if (draftPayload && !draftIntentType) {
+      return c.json({ error: 'draftIntentType is required when draftPayload is provided', errorCode: 'MISSING_DRAFT_INTENT_TYPE' }, 400)
+    }
+    if (kind === 'handoff' && !linkedIntentNonce && draftIntentType && !draftPayload) {
+      return c.json({ error: 'draftPayload is required when draftIntentType is provided for a blocked handoff thread', errorCode: 'MISSING_DRAFT_PAYLOAD' }, 400)
+    }
 
     const linkedIntent = linkedIntentNonce ? getIntentLogByNonce(db, linkedIntentNonce) : null
     if (linkedIntentNonce && !linkedIntent) {
       return c.json({ error: 'linkedIntentNonce was not found', errorCode: 'INTENT_NOT_FOUND' }, 404)
+    }
+    if (linkedIntent && draftIntentType && linkedIntent.intent_type !== draftIntentType) {
+      return c.json({
+        error: `draftIntentType ${draftIntentType} does not match linked trace intent ${linkedIntent.intent_type}`,
+        errorCode: 'DRAFT_INTENT_TRACE_MISMATCH',
+      }, 400)
+    }
+    if (draftIntentType && draftPayload) {
+      const payloadValidation = validateIntentPayload(draftIntentType, draftPayload)
+      if (!payloadValidation.valid) {
+        return c.json({
+          error: payloadValidation.error ?? 'Invalid draft payload',
+          errorCode: 'INVALID_DRAFT_PAYLOAD',
+        }, 400)
+      }
     }
 
     const rawParticipants = Array.isArray(raw.participants) ? raw.participants : []
@@ -1829,6 +1897,8 @@ export function workspacesRouter(db: Database): Hono {
         owner,
         status: status ?? 'open',
         workflowType,
+        draftIntentType,
+        draftPayloadJson: draftPayload ? JSON.stringify(draftPayload) : null,
         linkedIntentNonce,
         lastActivityAt: linkedIntent?.requested_at,
       })
@@ -1863,6 +1933,7 @@ export function workspacesRouter(db: Database): Hono {
         role: auth.session.role,
         kind: thread.kind,
         workflowType: thread.workflow_type,
+        draftIntentType: thread.draft_intent_type,
         linkedIntentNonce: thread.linked_intent_nonce,
         participants: participants.length,
       },
@@ -1972,12 +2043,104 @@ export function workspacesRouter(db: Database): Hono {
     }
 
     const fallbackMessage = thread.summary?.trim() || thread.title.trim()
-    const message = normalizeOptionalString(raw.message) ?? fallbackMessage
-    if (!message) {
-      return c.json({ error: 'A message is required to dispatch a handoff thread', errorCode: 'MISSING_HANDOFF_MESSAGE' }, 400)
+    const requestedIntentType = normalizeOptionalString(raw.intentType)
+    const effectiveIntentType = requestedIntentType ?? thread.draft_intent_type ?? 'conversation.message'
+    let requestedPayload: Record<string, unknown> | null = null
+    try {
+      requestedPayload = normalizeOptionalObject(raw.payload, 'payload')
+    } catch (err) {
+      return c.json({
+        error: err instanceof Error ? err.message : 'payload must be an object',
+        errorCode: 'INVALID_DISPATCH_PAYLOAD',
+      }, 400)
+    }
+    const storedDraftPayload = requestedIntentType && requestedIntentType !== thread.draft_intent_type
+      ? null
+      : parseJsonObject(thread.draft_payload_json)
+    const message = normalizeOptionalString(raw.message)
+    const language = normalizeOptionalString(raw.language)
+    let draftPayload = requestedPayload ?? storedDraftPayload
+    if (!draftPayload && effectiveIntentType === 'conversation.message') {
+      const conversationPayload = isRecord(storedDraftPayload) ? storedDraftPayload : {}
+      const resolvedMessage = message
+        ?? normalizeOptionalString(conversationPayload.message)
+        ?? fallbackMessage
+      if (!resolvedMessage) {
+        return c.json({ error: 'A message is required to dispatch a conversation.message handoff', errorCode: 'MISSING_HANDOFF_MESSAGE' }, 400)
+      }
+      draftPayload = {
+        ...conversationPayload,
+        message: resolvedMessage,
+        ...(language
+          ? { language }
+          : normalizeOptionalString(conversationPayload.language)
+            ? { language: normalizeOptionalString(conversationPayload.language) }
+            : {}),
+      }
     }
 
-    const language = normalizeOptionalString(raw.language)
+    if (!draftPayload) {
+      return c.json({
+        error: `A payload is required to dispatch intent ${effectiveIntentType}`,
+        errorCode: 'MISSING_DISPATCH_PAYLOAD',
+      }, 400)
+    }
+
+    const workspaceContext = {
+      workspace: {
+        id: workspace.id,
+        slug: workspace.slug,
+        name: workspace.name,
+      },
+      thread: {
+        id: thread.id,
+        title: thread.title,
+        summary: thread.summary,
+        workflowType: thread.workflow_type,
+        owner: thread.owner,
+      },
+      approval: {
+        action: 'workspace_thread_dispatch',
+        approvedBy: auth.session.email,
+        approvalRequired: policyPreview.approvalRequired,
+        approvers: policyPreview.approvers,
+      },
+      partnerChannel: {
+        id: partnerChannel.id,
+        label: partnerChannel.label,
+        status: partnerChannel.status,
+      },
+      participants: participants
+        .filter((participant) => participant.beam_id)
+        .map((participant) => ({
+          beamId: participant.beam_id,
+          role: participant.role,
+          principalType: participant.principal_type,
+        })),
+    }
+    const payload = effectiveIntentType === 'conversation.message'
+      ? {
+          ...draftPayload,
+          context: {
+            ...(isRecord(draftPayload.context) ? draftPayload.context : {}),
+            beam: workspaceContext,
+          },
+        }
+      : {
+          ...draftPayload,
+          beamContext: {
+            ...(isRecord(draftPayload.beamContext) ? draftPayload.beamContext : {}),
+            ...workspaceContext,
+          },
+        }
+    const payloadValidation = validateIntentPayload(effectiveIntentType, payload)
+    if (!payloadValidation.valid) {
+      return c.json({
+        error: payloadValidation.error ?? 'Invalid payload',
+        errorCode: 'INVALID_DISPATCH_PAYLOAD',
+      }, 400)
+    }
+
     const nonce = randomUUID()
     const timestamp = new Date().toISOString()
     const frame: IntentFrame = {
@@ -1986,43 +2149,8 @@ export function workspacesRouter(db: Database): Hono {
       timestamp,
       from: senderBinding.beam_id,
       to: partnerChannel.partner_beam_id,
-      intent: 'conversation.message',
-      payload: {
-        message,
-        ...(language ? { language } : {}),
-        context: {
-          workspace: {
-            id: workspace.id,
-            slug: workspace.slug,
-            name: workspace.name,
-          },
-          thread: {
-            id: thread.id,
-            title: thread.title,
-            summary: thread.summary,
-            workflowType: thread.workflow_type,
-            owner: thread.owner,
-          },
-          approval: {
-            action: 'workspace_thread_dispatch',
-            approvedBy: auth.session.email,
-            approvalRequired: policyPreview.approvalRequired,
-            approvers: policyPreview.approvers,
-          },
-          partnerChannel: {
-            id: partnerChannel.id,
-            label: partnerChannel.label,
-            status: partnerChannel.status,
-          },
-          participants: participants
-            .filter((participant) => participant.beam_id)
-            .map((participant) => ({
-              beamId: participant.beam_id,
-              role: participant.role,
-              principalType: participant.principal_type,
-            })),
-        },
-      },
+      intent: effectiveIntentType,
+      payload,
     }
 
     const finalizeDispatch = (result: {
@@ -2035,6 +2163,8 @@ export function workspacesRouter(db: Database): Hono {
       const updatedThread = updateWorkspaceThread(db, {
         id: thread.id,
         status: 'open',
+        draftIntentType: effectiveIntentType,
+        draftPayloadJson: JSON.stringify(draftPayload),
         linkedIntentNonce: result.nonce,
         lastActivityAt: now,
       })
@@ -2058,7 +2188,7 @@ export function workspacesRouter(db: Database): Hono {
           role: auth.session.role,
           linkedIntentNonce: result.nonce,
           workflowType: thread.workflow_type,
-          intentType: 'conversation.message',
+          intentType: effectiveIntentType,
           fromBeamId: senderBinding.beam_id,
           toBeamId: partnerChannel.partner_beam_id,
           partnerChannelId: partnerChannel.id,
@@ -2088,6 +2218,7 @@ export function workspacesRouter(db: Database): Hono {
           : null,
         dispatch: {
           nonce: result.nonce,
+          intentType: effectiveIntentType,
           success: result.success,
           error: result.error,
           errorCode: result.errorCode,

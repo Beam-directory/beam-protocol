@@ -238,6 +238,8 @@ export interface WorkspaceThreadRow {
   owner: string | null
   status: WorkspaceThreadStatus
   workflow_type: string | null
+  draft_intent_type: string | null
+  draft_payload_json: string | null
   linked_intent_nonce: string | null
   last_activity_at: string
   created_at: string

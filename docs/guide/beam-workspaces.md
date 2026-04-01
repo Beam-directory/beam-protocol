@@ -152,6 +152,7 @@ The first routes are all admin-authenticated and now include the controls requir
 ### Create a blocked handoff draft
 
 Blocked handoff drafts are valid without a `linkedIntentNonce`. This is the control-plane representation of "the operator has staged the outbound motion, but policy or approval is still stopping it."
+The draft now carries both the target Beam intent and the structured payload that should be sent once the operator approves the motion.
 
 ```json
 {
@@ -161,6 +162,12 @@ Blocked handoff drafts are valid without a `linkedIntentNonce`. This is the cont
   "owner": "ops@example.com",
   "status": "blocked",
   "workflowType": "quote.approval",
+  "draftIntentType": "task.delegate",
+  "draftPayload": {
+    "task": "Confirm the approval lane and return the next operator action.",
+    "context": "Workspace-triggered cross-instance approval dispatch.",
+    "priority": "high"
+  },
   "participants": [
     {
       "principalId": "ops-bot@beam.directory",
@@ -184,14 +191,29 @@ Blocked handoff drafts are valid without a `linkedIntentNonce`. This is the cont
 
 This is the approval-path action. The workspace thread remains the operator record, but Beam generates the real cross-instance trace and links it back to the thread.
 
+If the thread already stores a draft intent and draft payload, the dispatch body can be empty:
+
+```json
+{}
+```
+
+You can also override the stored draft and dispatch a specific intent explicitly:
+
 ```json
 {
-  "message": "Please confirm whether this approval lane is ready for the next purchase review.",
-  "language": "en"
+  "intentType": "quote.request",
+  "payload": {
+    "sku": "INV-APPROVAL",
+    "quantity": 1,
+    "shipTo": "Acme HQ"
+  }
 }
 ```
 
-The dispatch route currently sends a real `conversation.message` Beam intent with workspace, thread, partner-channel, and approval context attached under `payload.context`.
+The dispatch route now sends the selected Beam intent, persists the draft on the thread, and attaches workspace, thread, partner-channel, and approval context automatically:
+
+- under `payload.context.beam` for `conversation.message`
+- under `payload.beamContext` for all other intents
 
 ### Create a partner channel
 

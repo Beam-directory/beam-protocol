@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto'
-import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { Hono } from 'hono'
@@ -64,9 +63,9 @@ import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
 import { sendOperatorDigestEmail } from './email.js'
 import type { AgentRow, AuditLogRow, IntentFrame, IntentTraceEventRow, OperatorNotificationRow } from './types.js'
+import { loadIntentCatalogDocument } from './validation.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
-const catalogPath = resolve(__dirname, '../../../intents/catalog.yaml')
 const serverStartedAt = Date.now()
 
 function nowMinusDays(days: number): string {
@@ -1430,12 +1429,7 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
 }
 
 function loadIntentCatalog(): unknown {
-  try {
-    const raw = readFileSync(catalogPath, 'utf8')
-    return JSON.parse(raw)
-  } catch {
-    return { intents: [] }
-  }
+  return loadIntentCatalogDocument()
 }
 
 function hasFederationAuth(c: Context): boolean {
