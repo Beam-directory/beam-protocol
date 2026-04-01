@@ -61,6 +61,67 @@ The result should be:
 2. the target workspace shows the mirrored inbound handoff thread automatically
 3. both pages point at the same Beam trace nonce
 
+## Import local OpenClaw agents
+
+Beam can now scan the local OpenClaw installation on this Mac and bind persistent agents, workspace agents, and recent subagents into one Beam workspace roster.
+
+The shortest local install path is:
+
+```bash
+npm run workspace:openclaw-setup
+```
+
+That command will:
+
+1. create `ops/quickstart/.env` if needed
+2. start the local Beam quickstart stack if it is not already running
+3. run the local quickstart smoke test
+4. import OpenClaw agents into `openclaw-local`
+5. generate missing Beam identities automatically
+
+If you only want the import step against an already running stack, use:
+
+```bash
+npm run workspace:import-openclaw
+```
+
+This importer reads:
+
+- `~/.openclaw/agents/*`
+- `~/.openclaw/workspace/agents/*`
+- `~/.openclaw/subagents/runs.json`
+- `~/.openclaw/workspace/secrets/beam-identities.json`
+
+It then:
+
+1. creates or reuses the workspace `openclaw-local`
+2. binds every discovered agent that already has a Beam identity
+3. imports recent subagent runs into the same control-plane view
+4. writes a generated override file plus a merged identity file for local use
+
+If you also want local Beam identities for agents that do not have one yet, run:
+
+```bash
+npm run workspace:import-openclaw -- --register-missing
+```
+
+That second mode generates local Beam identities for the missing OpenClaw agents, registers them against the selected directory, and writes the results into:
+
+- `~/.openclaw/workspace/secrets/beam-identities.generated.json`
+- `~/.openclaw/workspace/secrets/beam-identities.merged.json`
+
+The merged file is the easiest local runtime handoff path:
+
+```bash
+export BEAM_IDENTITIES="$HOME/.openclaw/workspace/secrets/beam-identities.merged.json"
+export BEAM_DIRECTORY_URL="http://localhost:43100"
+node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
+  --agent clara \
+  --to fischer@coppen.beam.directory \
+  --intent conversation.message \
+  --payload '{"message":"Ping from the local Beam workspace import."}'
+```
+
 ## Why Beam Needs This
 
 Beam already has strong external handoff mechanics: identity, signatures, traces, retries, audit, and operator visibility.
