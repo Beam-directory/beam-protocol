@@ -80,9 +80,11 @@ That command will:
 4. import OpenClaw agents into `openclaw-local`
 5. generate missing Beam identities automatically
 6. install a managed `beam-send.js` shim so OpenClaw uses the merged Beam identity file automatically
-7. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
+7. install the inbound Beam receiver so imported agents can receive Beam intents directly
+8. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
 
 The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.
+It also installs the local OpenClaw receiver service, which keeps Beam WebSocket connections open for imported identities and forwards incoming intents into the matching OpenClaw runtime session.
 
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:
 
@@ -116,6 +118,19 @@ To remove it later:
 
 ```bash
 npm run workspace:openclaw-live:uninstall
+```
+
+If you want to run the inbound Beam receiver in the foreground for debugging, use:
+
+```bash
+npm run workspace:openclaw-receiver
+```
+
+To install or remove the receiver background service explicitly:
+
+```bash
+npm run workspace:openclaw-receiver:install
+npm run workspace:openclaw-receiver:uninstall
 ```
 
 If you only want the direct OpenClaw hook that syncs new subagents at spawn time, use:
@@ -179,6 +194,19 @@ node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
   --intent conversation.message \
   --payload '{"message":"Ping from the local Beam workspace import."}'
 ```
+
+With the receiver installed, imported OpenClaw agents can also receive Beam messages directly. A simple local proof is:
+
+```bash
+node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
+  --agent archivar \
+  --to jarvis@openclaw.beam.directory \
+  --intent conversation.message \
+  --payload '{"message":"Antworte exakt nur mit: BEAM_INBOUND_OK"}' \
+  --timeout 90
+```
+
+The result should come back through Beam as a real OpenClaw-generated reply instead of the built-in echo service.
 
 ## Why Beam Needs This
 
