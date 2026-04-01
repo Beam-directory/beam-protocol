@@ -4,6 +4,7 @@ import { requireAdminRole } from '../admin-auth.js'
 import {
   createWorkspace,
   createWorkspaceIdentityBinding,
+  createWorkspacePartnerChannel,
   createWorkspaceThread,
   createWorkspaceThreadParticipant,
   getAgent,
@@ -12,26 +13,36 @@ import {
   getWorkspaceBySlug,
   getWorkspaceIdentityBindingByBeamId,
   getWorkspaceIdentityBindingById,
+  getWorkspacePartnerChannelByBeamId,
+  getWorkspacePartnerChannelById,
   getWorkspacePolicyDocument,
   getWorkspaceSummary,
   getWorkspaceThreadById,
   listAgentKeys,
   listWorkspaceIdentityBindings,
+  listWorkspacePartnerChannels,
   listWorkspaceThreadParticipants,
   listWorkspaceThreads,
   listWorkspaces,
   logAuditEvent,
+  updateWorkspacePartnerChannel,
   updateWorkspacePolicyDocument,
   updateWorkspaceIdentityBinding,
 } from '../db.js'
 import type {
+  AuditLogRow,
   IntentLogRow,
   WorkspaceIdentityBindingRow,
   WorkspaceIdentityBindingStatus,
   WorkspaceIdentityBindingType,
+  WorkspaceIdentityLifecycleStatus,
+  WorkspacePartnerChannelHealth,
+  WorkspacePartnerChannelRow,
+  WorkspacePartnerChannelStatus,
   WorkspacePolicy,
   WorkspacePrincipalType,
   WorkspaceRow,
+  WorkspaceTimelineEventKind,
   WorkspaceThreadKind,
   WorkspaceThreadParticipantRole,
   WorkspaceThreadScope,
@@ -41,6 +52,7 @@ import type {
 } from '../types.js'
 import { serializeAgentKeyState } from '../utils/serialize.js'
 import { evaluateWorkspacePolicy } from '../workspace-policy.js'
+import { sendOperatorDigestEmail } from '../email.js'
 
 const WORKSPACE_STATUS_SET = new Set<WorkspaceRow['status']>(['active', 'paused', 'archived'])
 const WORKSPACE_THREAD_SCOPE_SET = new Set<WorkspaceThreadScope>(['internal', 'handoff'])
@@ -50,10 +62,14 @@ const WORKSPACE_THREAD_KIND_SET = new Set<WorkspaceThreadKind>(['internal', 'han
 const WORKSPACE_THREAD_STATUS_SET = new Set<WorkspaceThreadStatus>(['open', 'blocked', 'closed'])
 const WORKSPACE_THREAD_PARTICIPANT_ROLE_SET = new Set<WorkspaceThreadParticipantRole>(['owner', 'participant', 'observer', 'approver'])
 const WORKSPACE_PRINCIPAL_TYPE_SET = new Set<WorkspacePrincipalType>(['human', 'agent', 'service', 'partner'])
+const WORKSPACE_PARTNER_CHANNEL_STATUS_SET = new Set<WorkspacePartnerChannelStatus>(['active', 'trial', 'blocked'])
 const WORKSPACE_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const WORKSPACE_OVERVIEW_STALE_AFTER_HOURS = 24
 const WORKSPACE_OVERVIEW_RECENT_HANDOFF_LIMIT = 8
 const WORKSPACE_OVERVIEW_INTENT_SCAN_LIMIT = 96
+const WORKSPACE_TIMELINE_LIMIT_DEFAULT = 100
+const WORKSPACE_TIMELINE_LIMIT_MAX = 250
+const WORKSPACE_DIGEST_DEFAULT_DAYS = 7
 
 type SerializedWorkspace = {
   id: number
@@ -89,6 +105,14 @@ type SerializedWorkspaceIdentityBinding = {
   notes: string | null
   createdAt: string
   updatedAt: string
+  lastSeenAgeHours: number | null
+  ownershipState: 'owned' | 'unowned'
+  lifecycleStatus: WorkspaceIdentityLifecycleStatus
+  runtime: {
+    mode: 'runtime-backed' | 'service' | 'partner' | 'manual'
+    connector: string | null
+    label: string | null
+  }
   identity: {
     existsLocally: boolean
     beamId: string
@@ -101,6 +125,68 @@ type SerializedWorkspaceIdentityBinding = {
     capabilities: string[]
     keyState: object | null
   }
+}
+
+type SerializedWorkspacePartnerChannel = {
+  id: number
+  workspaceId: number
+  partnerBeamId: string
+  label: string | null
+  owner: string | null
+  status: WorkspacePartnerChannelStatus
+  healthStatus: WorkspacePartnerChannelHealth
+  notes: string | null
+  lastSuccessAt: string | null
+  lastFailureAt: string | null
+  lastIntentNonce: string | null
+  createdAt: string
+  updatedAt: string
+  stats: {
+    recentSuccesses: number
+    recentFailures: number
+    totalObserved: number
+  }
+  partner: {
+    existsLocally: boolean
+    displayName: string | null
+    org: string | null
+    verificationTier: string | null
+    trustScore: number | null
+    lastSeen: string | null
+  }
+  trace: {
+    nonce: string
+    status: IntentLogRow['status']
+    intentType: string
+    requestedAt: string
+    completedAt: string | null
+    errorCode: string | null
+    href: string
+  } | null
+}
+
+type WorkspaceTimelineEntry = {
+  id: number
+  kind: WorkspaceTimelineEventKind
+  action: string
+  actor: string
+  target: string
+  timestamp: string
+  summary: string
+  details: Record<string, unknown> | null
+  href: string | null
+  traceHref: string | null
+}
+
+type WorkspaceDigestActionItem = {
+  id: string
+  category: 'approval' | 'identity' | 'partner_channel' | 'thread'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
 }
 
 type WorkspaceOverviewAttentionCode =
@@ -255,6 +341,15 @@ function normalizeBindingStatus(value: unknown): WorkspaceIdentityBindingStatus 
   return WORKSPACE_BINDING_STATUS_SET.has(normalized) ? normalized : null
 }
 
+function normalizePartnerChannelStatus(value: unknown): WorkspacePartnerChannelStatus | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspacePartnerChannelStatus
+  return WORKSPACE_PARTNER_CHANNEL_STATUS_SET.has(normalized) ? normalized : null
+}
+
 function normalizeThreadKind(value: unknown): WorkspaceThreadKind | null {
   if (typeof value !== 'string') {
     return null
@@ -367,6 +462,155 @@ function getDisplayNameForBeamId(
   return null
 }
 
+function parseRuntimeMetadata(
+  bindingType: WorkspaceIdentityBindingType,
+  runtimeType: string | null,
+): SerializedWorkspaceIdentityBinding['runtime'] {
+  if (bindingType === 'partner') {
+    return {
+      mode: 'partner',
+      connector: null,
+      label: runtimeType,
+    }
+  }
+
+  if (bindingType === 'service') {
+    const [connector, ...rest] = runtimeType?.split(':').map((entry) => entry.trim()).filter(Boolean) ?? []
+    return {
+      mode: 'service',
+      connector: connector ?? null,
+      label: rest.join(' · ') || runtimeType,
+    }
+  }
+
+  if (runtimeType) {
+    const [connector, ...rest] = runtimeType.split(':').map((entry) => entry.trim()).filter(Boolean)
+    return {
+      mode: 'runtime-backed',
+      connector: connector ?? null,
+      label: rest.join(' · ') || runtimeType,
+    }
+  }
+
+  return {
+    mode: 'manual',
+    connector: null,
+    label: null,
+  }
+}
+
+function classifyWorkspaceIdentityLifecycle(
+  binding: WorkspaceIdentityBindingRow,
+  options: {
+    existsLocally: boolean
+    lastSeenAgeHours: number | null
+    keyState: object | null
+    owner: string | null
+  },
+): WorkspaceIdentityLifecycleStatus {
+  if (!options.owner) {
+    return 'unowned'
+  }
+
+  if (binding.status !== 'active') {
+    return 'paused'
+  }
+
+  if (!options.existsLocally && binding.binding_type !== 'partner') {
+    return 'missing'
+  }
+
+  const keyState = options.keyState as {
+    active?: object | null
+    revoked?: object[]
+  } | null
+
+  if (options.existsLocally && keyState && !keyState.active && Array.isArray(keyState.revoked) && keyState.revoked.length > 0) {
+    return 'revoked'
+  }
+
+  if (options.lastSeenAgeHours !== null && options.lastSeenAgeHours >= WORKSPACE_OVERVIEW_STALE_AFTER_HOURS) {
+    return 'stale'
+  }
+
+  return 'healthy'
+}
+
+function timelineKindFromAction(action: string): WorkspaceTimelineEventKind {
+  if (action.startsWith('admin.workspace_policy')) {
+    return 'policy'
+  }
+  if (action.startsWith('admin.workspace_identity')) {
+    return 'identity'
+  }
+  if (action.startsWith('admin.workspace_partner_channel')) {
+    return 'partner_channel'
+  }
+  if (action.startsWith('admin.workspace_thread')) {
+    return 'thread'
+  }
+  if (action.startsWith('admin.workspace_digest')) {
+    return 'digest'
+  }
+  return 'workspace'
+}
+
+function parseAuditDetails(value: string | null): Record<string, unknown> | null {
+  if (!value) {
+    return null
+  }
+
+  try {
+    const parsed = JSON.parse(value) as Record<string, unknown>
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+  } catch {
+    return null
+  }
+}
+
+function extractTraceHref(details: Record<string, unknown> | null): string | null {
+  const nonceCandidates = [
+    details?.['linkedIntentNonce'],
+    details?.['lastIntentNonce'],
+    details?.['proofIntentNonce'],
+    details?.['nonce'],
+  ]
+
+  for (const value of nonceCandidates) {
+    if (typeof value === 'string' && value.trim().length > 0) {
+      return `/intents/${encodeURIComponent(value)}`
+    }
+  }
+
+  return null
+}
+
+function summarizeWorkspaceAuditAction(action: string, details: Record<string, unknown> | null): string {
+  switch (action) {
+    case 'admin.workspace.created':
+      return 'Workspace created.'
+    case 'admin.workspace_policy.updated':
+      return 'Workspace policy updated.'
+    case 'admin.workspace_identity.created':
+      return 'Workspace identity binding added.'
+    case 'admin.workspace_identity.updated':
+      return 'Workspace identity binding updated.'
+    case 'admin.workspace_thread.created':
+      return 'Workspace thread created.'
+    case 'admin.workspace_partner_channel.created':
+      return 'Partner channel added.'
+    case 'admin.workspace_partner_channel.updated':
+      return 'Partner channel updated.'
+    case 'admin.workspace_digest.delivered':
+      return 'Workspace digest delivered.'
+    default:
+      if (typeof details?.['workflowType'] === 'string') {
+        return `Workspace action for ${details['workflowType']}.`
+      }
+      return action
+    }
+}
+
 function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspace {
   const summary = getWorkspaceSummary(db, row.id)
   const { policy } = getWorkspacePolicyDocument(db, row.id)
@@ -395,6 +639,14 @@ function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspac
 function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityBindingRow): SerializedWorkspaceIdentityBinding {
   const agent = getAgent(db, row.beam_id)
   const keyState = agent ? serializeAgentKeyState(listAgentKeys(db, row.beam_id)) : null
+  const lastSeenAgeHours = hoursSince(agent?.last_seen ?? null)
+  const runtime = parseRuntimeMetadata(row.binding_type, row.runtime_type)
+  const lifecycleStatus = classifyWorkspaceIdentityLifecycle(row, {
+    existsLocally: Boolean(agent),
+    lastSeenAgeHours,
+    keyState,
+    owner: row.owner,
+  })
 
   return {
     id: row.id,
@@ -410,6 +662,10 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
     notes: row.notes,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    lastSeenAgeHours,
+    ownershipState: row.owner ? 'owned' : 'unowned',
+    lifecycleStatus,
+    runtime,
     identity: agent ? {
       existsLocally: true,
       beamId: agent.beam_id,
@@ -433,6 +689,319 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
       capabilities: [],
       keyState,
     },
+  }
+}
+
+function countWorkspacePartnerTraffic(
+  db: Database,
+  localBeamIds: string[],
+  partnerBeamId: string,
+): {
+  recentSuccesses: number
+  recentFailures: number
+  totalObserved: number
+} {
+  if (localBeamIds.length === 0) {
+    return {
+      recentSuccesses: 0,
+      recentFailures: 0,
+      totalObserved: 0,
+    }
+  }
+
+  const placeholders = localBeamIds.map(() => '?').join(', ')
+  const cutoff = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString()
+  const row = db.prepare(`
+    SELECT
+      COUNT(*) AS totalObserved,
+      SUM(CASE WHEN status = 'acked' AND requested_at >= ? THEN 1 ELSE 0 END) AS recentSuccesses,
+      SUM(CASE WHEN status IN ('failed', 'dead_letter') AND requested_at >= ? THEN 1 ELSE 0 END) AS recentFailures
+    FROM intent_log
+    WHERE (
+      (from_beam_id IN (${placeholders}) AND to_beam_id = ?)
+      OR
+      (to_beam_id IN (${placeholders}) AND from_beam_id = ?)
+    )
+  `).get(
+    cutoff,
+    cutoff,
+    ...localBeamIds,
+    partnerBeamId,
+    ...localBeamIds,
+    partnerBeamId,
+  ) as {
+    totalObserved: number | null
+    recentSuccesses: number | null
+    recentFailures: number | null
+  } | undefined
+
+  return {
+    recentSuccesses: row?.recentSuccesses ?? 0,
+    recentFailures: row?.recentFailures ?? 0,
+    totalObserved: row?.totalObserved ?? 0,
+  }
+}
+
+function classifyWorkspacePartnerChannelHealth(
+  row: WorkspacePartnerChannelRow,
+  stats: {
+    recentSuccesses: number
+    recentFailures: number
+    totalObserved: number
+  },
+): WorkspacePartnerChannelHealth {
+  if (row.status === 'blocked') {
+    return 'critical'
+  }
+
+  if (row.last_failure_at && (!row.last_success_at || row.last_failure_at > row.last_success_at)) {
+    return stats.recentFailures > 0 ? 'critical' : 'watch'
+  }
+
+  if (stats.recentFailures > 0) {
+    return 'watch'
+  }
+
+  if (row.status === 'trial' || stats.totalObserved === 0) {
+    return 'watch'
+  }
+
+  return 'healthy'
+}
+
+function serializeWorkspacePartnerChannel(
+  db: Database,
+  row: WorkspacePartnerChannelRow,
+  localBeamIds: string[],
+): SerializedWorkspacePartnerChannel {
+  const partner = getAgent(db, row.partner_beam_id)
+  const stats = countWorkspacePartnerTraffic(db, localBeamIds, row.partner_beam_id)
+  const healthStatus = classifyWorkspacePartnerChannelHealth(row, stats)
+  const trace = row.last_intent_nonce ? getIntentLogByNonce(db, row.last_intent_nonce) : null
+
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    partnerBeamId: row.partner_beam_id,
+    label: row.label,
+    owner: row.owner,
+    status: row.status,
+    healthStatus,
+    notes: row.notes,
+    lastSuccessAt: row.last_success_at,
+    lastFailureAt: row.last_failure_at,
+    lastIntentNonce: row.last_intent_nonce,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    stats,
+    partner: {
+      existsLocally: Boolean(partner),
+      displayName: partner?.display_name ?? null,
+      org: partner?.org ?? null,
+      verificationTier: partner?.verification_tier ?? null,
+      trustScore: partner?.trust_score ?? null,
+      lastSeen: partner?.last_seen ?? null,
+    },
+    trace: trace ? {
+      nonce: trace.nonce,
+      status: trace.status,
+      intentType: trace.intent_type,
+      requestedAt: trace.requested_at,
+      completedAt: trace.completed_at,
+      errorCode: trace.error_code,
+      href: `/intents/${encodeURIComponent(trace.nonce)}`,
+    } : null,
+  }
+}
+
+function listWorkspaceTimelineEntries(
+  db: Database,
+  workspace: WorkspaceRow,
+  limit = WORKSPACE_TIMELINE_LIMIT_DEFAULT,
+): WorkspaceTimelineEntry[] {
+  const boundedLimit = Math.max(1, Math.min(WORKSPACE_TIMELINE_LIMIT_MAX, Math.trunc(limit)))
+  const rows = db.prepare(`
+    SELECT *
+    FROM audit_log
+    WHERE target = ? OR target LIKE ?
+    ORDER BY timestamp DESC, id DESC
+    LIMIT ?
+  `).all(
+    workspace.slug,
+    `${workspace.slug}:%`,
+    boundedLimit,
+  ) as AuditLogRow[]
+
+  return rows.map((row) => {
+    const details = parseAuditDetails(row.details)
+    const kind = timelineKindFromAction(row.action)
+    const traceHref = extractTraceHref(details)
+    let href: string | null = `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`
+    if (kind === 'thread') {
+      const threadId = row.target.slice(`${workspace.slug}:`.length)
+      if (/^\d+$/.test(threadId)) {
+        href = `/workspaces?workspace=${encodeURIComponent(workspace.slug)}&thread=${encodeURIComponent(threadId)}`
+      }
+    }
+
+    return {
+      id: row.id,
+      kind,
+      action: row.action,
+      actor: row.actor,
+      target: row.target,
+      timestamp: row.timestamp,
+      summary: summarizeWorkspaceAuditAction(row.action, details),
+      details,
+      href,
+      traceHref,
+    }
+  })
+}
+
+function buildWorkspaceDigestPayload(db: Database, workspace: WorkspaceRow, days = WORKSPACE_DIGEST_DEFAULT_DAYS) {
+  const generatedAt = new Date().toISOString()
+  const overview = buildWorkspaceOverview(db, workspace)
+  const bindings = listWorkspaceIdentityBindings(db, workspace.id)
+  const localBeamIds = bindings
+    .filter((binding) => binding.binding_type !== 'partner')
+    .map((binding) => binding.beam_id)
+  const partnerChannels = listWorkspacePartnerChannels(db, workspace.id).map((row) => serializeWorkspacePartnerChannel(db, row, localBeamIds))
+  const threads = listWorkspaceThreads(db, workspace.id).map((row) => serializeWorkspaceThread(db, row, listWorkspaceThreadParticipants(db, row.id)))
+  const timeline = listWorkspaceTimelineEntries(db, workspace, 12)
+
+  const actionItems: WorkspaceDigestActionItem[] = []
+
+  for (const item of overview.blockedExternalMotion) {
+    actionItems.push({
+      id: `approval-${item.binding.id}-${item.reasonCode}`,
+      category: 'approval',
+      severity: item.reasonCode === 'workspace_handoffs_disabled' ? 'critical' : 'warning',
+      title: `${item.binding.beamId} cannot initiate external motion`,
+      detail: item.reason,
+      owner: item.binding.owner,
+      href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`,
+      nextAction: item.reasonCode === 'manual_review_required'
+        ? 'Approve external initiation or add a matching workflow rule.'
+        : 'Resume the binding or re-enable workspace external handoffs.',
+    })
+  }
+
+  for (const item of overview.staleBindings) {
+    actionItems.push({
+      id: `identity-${item.binding.id}-${item.reasonCode}`,
+      category: 'identity',
+      severity: item.reasonCode === 'identity_missing' ? 'critical' : 'warning',
+      title: `${item.binding.beamId} needs identity attention`,
+      detail: item.reason,
+      owner: item.binding.owner,
+      href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`,
+      nextAction: item.reasonCode === 'identity_missing'
+        ? 'Re-register the runtime or remove the stale binding.'
+        : 'Check the runtime heartbeat and confirm the owner is still current.',
+    })
+  }
+
+  for (const channel of partnerChannels) {
+    if (channel.healthStatus === 'healthy' && channel.owner) {
+      continue
+    }
+
+    actionItems.push({
+      id: `partner-${channel.id}`,
+      category: 'partner_channel',
+      severity: channel.healthStatus === 'critical' ? 'critical' : 'warning',
+      title: `${channel.label || channel.partnerBeamId} partner channel needs follow-up`,
+      detail: channel.status === 'blocked'
+        ? 'The channel is blocked and cannot be used for new partner-facing motion.'
+        : channel.owner
+          ? 'The channel is degraded or still in trial and should be reviewed before the next handoff.'
+          : 'The channel has no owner and should be assigned before the next external workflow.',
+      owner: channel.owner,
+      href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`,
+      nextAction: channel.status === 'blocked'
+        ? 'Confirm whether to reopen the partner channel or keep it blocked.'
+        : 'Assign an owner, review recent trace evidence, and confirm the partner allowlist.',
+    })
+  }
+
+  for (const thread of threads) {
+    if (thread.status === 'closed') {
+      continue
+    }
+    if (thread.status === 'blocked' || !thread.owner) {
+      actionItems.push({
+        id: `thread-${thread.id}`,
+        category: 'thread',
+        severity: thread.status === 'blocked' ? 'critical' : 'warning',
+        title: `${thread.title} needs operator follow-up`,
+        detail: thread.status === 'blocked'
+          ? 'This workspace thread is blocked and will not progress until an operator resolves it.'
+          : 'This workspace thread has no owner yet and risks getting dropped.',
+        owner: thread.owner,
+        href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}&thread=${thread.id}`,
+        nextAction: thread.status === 'blocked'
+          ? 'Review the linked policy or partner channel decision and unblock or close the thread.'
+          : 'Assign an owner and confirm the next operator action.',
+      })
+    }
+  }
+
+  const escalations = actionItems.filter((item) => item.severity === 'critical')
+
+  const markdownLines = [
+    `# Beam workspace digest · ${workspace.name}`,
+    '',
+    `Generated: ${generatedAt}`,
+    `Window: last ${days} day${days === 1 ? '' : 's'}`,
+    '',
+    '## Summary',
+    `- Active identities: ${overview.summary.activeIdentities}/${overview.summary.totalIdentities}`,
+    `- External-ready identities: ${overview.summary.externalReadyIdentities}`,
+    `- Stale identities: ${overview.summary.staleIdentities}`,
+    `- Pending approvals: ${overview.summary.pendingApprovals}`,
+    `- Blocked external motion: ${overview.summary.blockedExternalMotion}`,
+    `- Partner channels: ${partnerChannels.length}`,
+    `- Open threads: ${threads.filter((thread) => thread.status !== 'closed').length}`,
+    '',
+    '## Action Items',
+  ]
+
+  if (actionItems.length === 0) {
+    markdownLines.push('- No workspace action items right now.')
+  } else {
+    for (const item of actionItems) {
+      markdownLines.push(`- [${item.severity.toUpperCase()}] ${item.title}: ${item.detail} Next: ${item.nextAction}${item.owner ? ` Owner: ${item.owner}.` : ''}${item.href ? ` Surface: ${item.href}` : ''}`)
+    }
+  }
+
+  markdownLines.push('', '## Recent Timeline')
+
+  if (timeline.length === 0) {
+    markdownLines.push('- No workspace timeline entries yet.')
+  } else {
+    for (const entry of timeline) {
+      markdownLines.push(`- ${entry.timestamp} · ${entry.summary} (${entry.actor})`)
+    }
+  }
+
+  return {
+    workspace: serializeWorkspace(db, workspace),
+    generatedAt,
+    days,
+    summary: {
+      actionItems: actionItems.length,
+      escalations: escalations.length,
+      partnerChannels: partnerChannels.length,
+      openThreads: threads.filter((thread) => thread.status !== 'closed').length,
+      staleIdentities: overview.summary.staleIdentities,
+      blockedExternalMotion: overview.summary.blockedExternalMotion,
+    },
+    actionItems,
+    escalations,
+    partnerChannels,
+    timeline,
+    markdown: markdownLines.join('\n'),
   }
 }
 
@@ -884,6 +1453,186 @@ export function workspacesRouter(db: Database): Hono {
     })
   })
 
+  router.get('/:slug/partner-channels', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const localBeamIds = listWorkspaceIdentityBindings(db, workspace.id)
+      .filter((binding) => binding.binding_type !== 'partner')
+      .map((binding) => binding.beam_id)
+    const channels = listWorkspacePartnerChannels(db, workspace.id).map((row) => serializeWorkspacePartnerChannel(db, row, localBeamIds))
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      channels,
+      total: channels.length,
+    })
+  })
+
+  router.post('/:slug/partner-channels', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const partnerBeamId = normalizeOptionalString(raw.partnerBeamId)
+    if (!partnerBeamId) {
+      return c.json({ error: 'partnerBeamId is required', errorCode: 'INVALID_PARTNER_BEAM_ID' }, 400)
+    }
+
+    const status = 'status' in raw ? normalizePartnerChannelStatus(raw.status) : 'trial'
+    if ('status' in raw && !status) {
+      return c.json({ error: 'Invalid partner channel status', errorCode: 'INVALID_PARTNER_CHANNEL_STATUS' }, 400)
+    }
+
+    if (getWorkspacePartnerChannelByBeamId(db, workspace.id, partnerBeamId)) {
+      return c.json({ error: 'Workspace partner channel already exists', errorCode: 'WORKSPACE_PARTNER_CHANNEL_EXISTS' }, 409)
+    }
+
+    try {
+      const channel = createWorkspacePartnerChannel(db, {
+        workspaceId: workspace.id,
+        partnerBeamId,
+        label: normalizeOptionalString(raw.label),
+        owner: normalizeOptionalString(raw.owner),
+        status: status ?? 'trial',
+        notes: normalizeOptionalString(raw.notes),
+      })
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_partner_channel.created',
+        actor: auth.session.email,
+        target: `${workspace.slug}:${partnerBeamId}`,
+        details: {
+          role: auth.session.role,
+          owner: channel.owner,
+          status: channel.status,
+        },
+      })
+
+      const localBeamIds = listWorkspaceIdentityBindings(db, workspace.id)
+        .filter((binding) => binding.binding_type !== 'partner')
+        .map((binding) => binding.beam_id)
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        channel: serializeWorkspacePartnerChannel(db, channel, localBeamIds),
+      }, 201)
+    } catch (err) {
+      if (isUniqueConstraintError(err, 'workspace_partner_channels.workspace_id, workspace_partner_channels.partner_beam_id')) {
+        return c.json({ error: 'Workspace partner channel already exists', errorCode: 'WORKSPACE_PARTNER_CHANNEL_EXISTS' }, 409)
+      }
+
+      console.error('Workspace partner channel create error:', err)
+      return c.json({ error: 'Failed to create workspace partner channel', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.patch('/:slug/partner-channels/:id', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const channelId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(channelId) || channelId <= 0) {
+      return c.json({ error: 'Invalid partner channel id', errorCode: 'INVALID_PARTNER_CHANNEL_ID' }, 400)
+    }
+
+    const existing = getWorkspacePartnerChannelById(db, channelId)
+    if (!existing || existing.workspace_id !== workspace.id) {
+      return c.json({ error: 'Workspace partner channel not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const status = 'status' in raw ? normalizePartnerChannelStatus(raw.status) : existing.status
+    if ('status' in raw && !status) {
+      return c.json({ error: 'Invalid partner channel status', errorCode: 'INVALID_PARTNER_CHANNEL_STATUS' }, 400)
+    }
+
+    const lastIntentNonce = 'lastIntentNonce' in raw ? normalizeOptionalString(raw.lastIntentNonce) : existing.last_intent_nonce
+    if (lastIntentNonce && !getIntentLogByNonce(db, lastIntentNonce)) {
+      return c.json({ error: 'lastIntentNonce was not found', errorCode: 'INTENT_NOT_FOUND' }, 404)
+    }
+
+    const updated = updateWorkspacePartnerChannel(db, {
+      id: existing.id,
+      label: 'label' in raw ? normalizeOptionalString(raw.label) : existing.label,
+      owner: 'owner' in raw ? normalizeOptionalString(raw.owner) : existing.owner,
+      status: status ?? existing.status,
+      notes: 'notes' in raw ? normalizeOptionalString(raw.notes) : existing.notes,
+      lastSuccessAt: 'lastSuccessAt' in raw ? normalizeOptionalString(raw.lastSuccessAt) : undefined,
+      lastFailureAt: 'lastFailureAt' in raw ? normalizeOptionalString(raw.lastFailureAt) : undefined,
+      lastIntentNonce: 'lastIntentNonce' in raw ? lastIntentNonce : undefined,
+    })
+
+    if (!updated) {
+      return c.json({ error: 'Workspace partner channel not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_partner_channel.updated',
+      actor: auth.session.email,
+      target: `${workspace.slug}:${existing.partner_beam_id}`,
+      details: {
+        role: auth.session.role,
+        owner: updated.owner,
+        status: updated.status,
+        lastIntentNonce: updated.last_intent_nonce,
+      },
+    })
+
+    const localBeamIds = listWorkspaceIdentityBindings(db, workspace.id)
+      .filter((binding) => binding.binding_type !== 'partner')
+      .map((binding) => binding.beam_id)
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      channel: serializeWorkspacePartnerChannel(db, updated, localBeamIds),
+    })
+  })
+
   router.get('/:slug/threads', (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
@@ -976,8 +1725,8 @@ export function workspacesRouter(db: Database): Hono {
 
     const workflowType = normalizeOptionalString(raw.workflowType)
     const linkedIntentNonce = normalizeOptionalString(raw.linkedIntentNonce)
-    if (kind === 'handoff' && !linkedIntentNonce) {
-      return c.json({ error: 'linkedIntentNonce is required for handoff threads', errorCode: 'MISSING_THREAD_NONCE' }, 400)
+    if (kind === 'handoff' && !linkedIntentNonce && (status ?? 'open') !== 'blocked') {
+      return c.json({ error: 'linkedIntentNonce is required for non-blocked handoff threads', errorCode: 'MISSING_THREAD_NONCE' }, 400)
     }
     if (kind === 'internal' && linkedIntentNonce) {
       return c.json({ error: 'Internal threads cannot link directly to a Beam trace', errorCode: 'INTERNAL_THREAD_CANNOT_LINK_TRACE' }, 400)
@@ -1145,6 +1894,123 @@ export function workspacesRouter(db: Database): Hono {
     return c.json({
       ...buildWorkspacePolicyEnvelope(db, workspace),
       updated: true,
+    })
+  })
+
+  router.get('/:slug/timeline', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const limit = Math.max(
+      1,
+      Math.min(
+        WORKSPACE_TIMELINE_LIMIT_MAX,
+        Number.parseInt(c.req.query('limit') ?? String(WORKSPACE_TIMELINE_LIMIT_DEFAULT), 10) || WORKSPACE_TIMELINE_LIMIT_DEFAULT,
+      ),
+    )
+    const entries = listWorkspaceTimelineEntries(db, workspace, limit)
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, workspace),
+      entries,
+      total: entries.length,
+    })
+  })
+
+  router.get('/:slug/digest', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const days = Math.max(1, Number.parseInt(c.req.query('days') ?? String(WORKSPACE_DIGEST_DEFAULT_DAYS), 10) || WORKSPACE_DIGEST_DEFAULT_DAYS)
+    const format = (c.req.query('format') ?? 'json').trim().toLowerCase()
+    if (format !== 'json' && format !== 'markdown') {
+      return c.json({ error: 'format must be json or markdown', errorCode: 'INVALID_EXPORT_FORMAT' }, 400)
+    }
+
+    const digest = buildWorkspaceDigestPayload(db, workspace, days)
+    c.header('Cache-Control', 'no-store')
+
+    if (format === 'markdown') {
+      const timestamp = new Date().toISOString().replaceAll(':', '-')
+      c.header('Content-Type', 'text/markdown; charset=utf-8')
+      c.header('Content-Disposition', `attachment; filename="beam-workspace-digest-${workspace.slug}-${timestamp}.md"`)
+      return c.body(digest.markdown)
+    }
+
+    return c.json(digest)
+  })
+
+  router.post('/:slug/digest/deliver', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const days = Math.max(1, Number.parseInt(String(body.days ?? WORKSPACE_DIGEST_DEFAULT_DAYS), 10) || WORKSPACE_DIGEST_DEFAULT_DAYS)
+    const requestedEmail = normalizeOptionalString(body.email)
+    const targetEmail = requestedEmail ?? auth.session.email
+
+    if (requestedEmail && auth.session.role !== 'admin' && requestedEmail !== auth.session.email) {
+      return c.json({ error: 'Only admins can deliver digests to a different mailbox', errorCode: 'FORBIDDEN' }, 403)
+    }
+
+    const digest = buildWorkspaceDigestPayload(db, workspace, days)
+    const delivered = await sendOperatorDigestEmail({
+      email: targetEmail,
+      subject: `Beam workspace digest · ${workspace.name} · ${new Date().toISOString().slice(0, 10)}`,
+      markdown: digest.markdown,
+    })
+
+    if (!delivered) {
+      return c.json({ error: 'Operator email delivery is not configured', errorCode: 'EMAIL_DELIVERY_UNAVAILABLE' }, 503)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_digest.delivered',
+      actor: auth.session.email,
+      target: `${workspace.slug}:digest`,
+      details: {
+        role: auth.session.role,
+        workspace: workspace.slug,
+        days,
+        deliveredTo: targetEmail,
+        actionItems: digest.summary.actionItems,
+        escalations: digest.summary.escalations,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      email: targetEmail,
+      deliveredAt: new Date().toISOString(),
     })
   })
 

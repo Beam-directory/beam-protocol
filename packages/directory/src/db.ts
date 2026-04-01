@@ -26,6 +26,7 @@ import type {
   TrustScoreRow,
   VerificationTier,
   WorkspaceIdentityBindingRow,
+  WorkspacePartnerChannelRow,
   WorkspacePolicy,
   WorkspacePolicyRow,
   WorkspaceRow,
@@ -1142,6 +1143,145 @@ export function listWorkspaceIdentityBindings(db: DB, workspaceId: number): Work
       COALESCE(owner, '') ASC,
       beam_id ASC
   `).all(workspaceId) as WorkspaceIdentityBindingRow[]
+}
+
+export function getWorkspacePartnerChannelById(db: DB, id: number): WorkspacePartnerChannelRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_partner_channels
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspacePartnerChannelRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspacePartnerChannelByBeamId(
+  db: DB,
+  workspaceId: number,
+  partnerBeamId: string,
+): WorkspacePartnerChannelRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_partner_channels
+    WHERE workspace_id = ? AND partner_beam_id = ?
+    LIMIT 1
+  `).get(workspaceId, partnerBeamId) as WorkspacePartnerChannelRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspacePartnerChannels(db: DB, workspaceId: number): WorkspacePartnerChannelRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspace_partner_channels
+    WHERE workspace_id = ?
+    ORDER BY
+      CASE status
+        WHEN 'blocked' THEN 0
+        WHEN 'trial' THEN 1
+        ELSE 2
+      END ASC,
+      COALESCE(owner, '') ASC,
+      COALESCE(label, partner_beam_id) ASC,
+      id ASC
+  `).all(workspaceId) as WorkspacePartnerChannelRow[]
+}
+
+export function createWorkspacePartnerChannel(
+  db: DB,
+  input: {
+    workspaceId: number
+    partnerBeamId: string
+    label?: string | null
+    owner?: string | null
+    status?: WorkspacePartnerChannelRow['status']
+    notes?: string | null
+    lastSuccessAt?: string | null
+    lastFailureAt?: string | null
+    lastIntentNonce?: string | null
+  },
+): WorkspacePartnerChannelRow {
+  const now = nowIso()
+  const result = db.prepare(`
+    INSERT INTO workspace_partner_channels (
+      workspace_id,
+      partner_beam_id,
+      label,
+      owner,
+      status,
+      notes,
+      last_success_at,
+      last_failure_at,
+      last_intent_nonce,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.workspaceId,
+    input.partnerBeamId,
+    input.label ?? null,
+    input.owner ?? null,
+    input.status ?? 'trial',
+    input.notes ?? null,
+    input.lastSuccessAt ?? null,
+    input.lastFailureAt ?? null,
+    input.lastIntentNonce ?? null,
+    now,
+    now,
+  )
+
+  const channel = getWorkspacePartnerChannelById(db, Number(result.lastInsertRowid))
+  if (!channel) {
+    throw new Error('Workspace partner channel insert succeeded but row was not found')
+  }
+
+  return channel
+}
+
+export function updateWorkspacePartnerChannel(
+  db: DB,
+  input: {
+    id: number
+    label: string | null
+    owner: string | null
+    status: WorkspacePartnerChannelRow['status']
+    notes: string | null
+    lastSuccessAt?: string | null
+    lastFailureAt?: string | null
+    lastIntentNonce?: string | null
+  },
+): WorkspacePartnerChannelRow | null {
+  const existing = getWorkspacePartnerChannelById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  const updatedAt = nowIso()
+  db.prepare(`
+    UPDATE workspace_partner_channels
+    SET label = ?,
+        owner = ?,
+        status = ?,
+        notes = ?,
+        last_success_at = ?,
+        last_failure_at = ?,
+        last_intent_nonce = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.label,
+    input.owner,
+    input.status,
+    input.notes,
+    input.lastSuccessAt === undefined ? existing.last_success_at : input.lastSuccessAt,
+    input.lastFailureAt === undefined ? existing.last_failure_at : input.lastFailureAt,
+    input.lastIntentNonce === undefined ? existing.last_intent_nonce : input.lastIntentNonce,
+    updatedAt,
+    input.id,
+  )
+
+  return getWorkspacePartnerChannelById(db, input.id)
 }
 
 export function createWorkspaceIdentityBinding(

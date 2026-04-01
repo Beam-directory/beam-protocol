@@ -150,6 +150,13 @@ test('workspace identity bindings can be created, listed, and updated through th
         id: number
         owner: string | null
         canInitiateExternal: boolean
+        lifecycleStatus: string
+        ownershipState: string
+        runtime: {
+          mode: string
+          connector: string | null
+        }
+        lastSeenAgeHours: number | null
         identity: {
           existsLocally: boolean
           displayName: string | null
@@ -161,6 +168,11 @@ test('workspace identity bindings can be created, listed, and updated through th
     }
     assert.equal(localBindingBody.binding.owner, 'ops@example.com')
     assert.equal(localBindingBody.binding.canInitiateExternal, true)
+    assert.equal(localBindingBody.binding.lifecycleStatus, 'healthy')
+    assert.equal(localBindingBody.binding.ownershipState, 'owned')
+    assert.equal(localBindingBody.binding.runtime.mode, 'runtime-backed')
+    assert.equal(localBindingBody.binding.runtime.connector, 'codex')
+    assert.equal(typeof localBindingBody.binding.lastSeenAgeHours, 'number')
     assert.equal(localBindingBody.binding.identity.existsLocally, true)
     assert.equal(localBindingBody.binding.identity.displayName, 'Ops Bot')
     assert.equal(localBindingBody.binding.identity.keyState?.active?.beamId, 'ops-bot@beam.directory')
@@ -530,6 +542,43 @@ test('workspace threads model internal discussion and external handoffs in one t
     assert.equal(internalThreadBody.thread.kind, 'internal')
     assert.equal(internalThreadBody.thread.trace, null)
 
+    const blockedHandoffThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/threads', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Await partner approval route',
+        summary: 'Blocked until the runtime sends the real handoff.',
+        owner: 'ops@example.com',
+        workflowType: 'quote.approval',
+        status: 'blocked',
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: localBinding.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'finance@northwind.beam.directory',
+            principalType: 'partner',
+            beamId: 'finance@northwind.beam.directory',
+            workspaceBindingId: partnerBinding.binding.id,
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(blockedHandoffThreadResponse.status, 201)
+    const blockedHandoffThreadBody = await blockedHandoffThreadResponse.json() as {
+      thread: { kind: string; status: string; linkedIntentNonce: string | null; trace: null }
+    }
+    assert.equal(blockedHandoffThreadBody.thread.kind, 'handoff')
+    assert.equal(blockedHandoffThreadBody.thread.status, 'blocked')
+    assert.equal(blockedHandoffThreadBody.thread.linkedIntentNonce, null)
+    assert.equal(blockedHandoffThreadBody.thread.trace, null)
+
     const handoffThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/northwind-ops/threads', {
       method: 'POST',
       headers: adminHeaders,
@@ -577,8 +626,8 @@ test('workspace threads model internal discussion and external handoffs in one t
       total: number
       threads: Array<{ kind: string; linkedIntentNonce: string | null; participantCount: number }>
     }
-    assert.equal(listBody.total, 2)
-    const listedHandoffThread = listBody.threads.find((entry) => entry.kind === 'handoff')
+    assert.equal(listBody.total, 3)
+    const listedHandoffThread = listBody.threads.find((entry) => entry.kind === 'handoff' && entry.linkedIntentNonce === 'nonce-thread-handoff')
     const listedInternalThread = listBody.threads.find((entry) => entry.kind === 'internal')
     assert.equal(listedHandoffThread?.linkedIntentNonce, 'nonce-thread-handoff')
     assert.equal(listedHandoffThread?.participantCount, 2)
@@ -597,6 +646,182 @@ test('workspace threads model internal discussion and external handoffs in one t
     assert.equal(detailBody.thread.trace?.fromBeamId, 'ops-bot@beam.directory')
     assert.equal(detailBody.thread.trace?.toBeamId, 'finance@northwind.beam.directory')
     assert.deepEqual(detailBody.participants.map((entry) => entry.principalType).sort(), ['agent', 'partner'])
+  } finally {
+    db.close()
+  }
+})
+
+test('workspace partner channels, timeline, and digest expose operator-ready control-plane state', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['handoff'],
+      publicKey: 'MCowBQYDK2VwAyEAw2QJY0YH7e1L2+2VQ1bH4TqL6wCnC8n9v8m8z4vPsxM=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Acme Finance',
+        slug: 'acme-finance',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    const bindingResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex:operator',
+        policyProfile: 'finance-default',
+        canInitiateExternal: false,
+      }),
+    }))
+    const bindingBody = await bindingResponse.json() as { binding: { id: number } }
+
+    const channelResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/partner-channels', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        partnerBeamId: 'finance@northwind.beam.directory',
+        label: 'Northwind Finance',
+        owner: 'northwind@example.com',
+        status: 'trial',
+        notes: 'Trial until the first approval flow settles.',
+      }),
+    }))
+    assert.equal(channelResponse.status, 201)
+    const channelBody = await channelResponse.json() as {
+      channel: {
+        id: number
+        status: string
+        healthStatus: string
+      }
+    }
+    assert.equal(channelBody.channel.status, 'trial')
+    assert.equal(channelBody.channel.healthStatus, 'watch')
+
+    const channelPatchResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-finance/partner-channels/${channelBody.channel.id}`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        status: 'blocked',
+        notes: 'Blocked until manual approval policy is tightened.',
+      }),
+    }))
+    assert.equal(channelPatchResponse.status, 200)
+
+    const blockedThreadResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/threads', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Invoice approval needs operator review',
+        summary: 'Waiting for approval policy before the runtime sends outward.',
+        owner: 'ops@example.com',
+        status: 'blocked',
+        workflowType: 'invoice.review',
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: bindingBody.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'finance@northwind.beam.directory',
+            principalType: 'partner',
+            beamId: 'finance@northwind.beam.directory',
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+    assert.equal(blockedThreadResponse.status, 201)
+
+    const channelsListResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/partner-channels', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(channelsListResponse.status, 200)
+    const channelsListBody = await channelsListResponse.json() as {
+      total: number
+      channels: Array<{
+        status: string
+        healthStatus: string
+      }>
+    }
+    assert.equal(channelsListBody.total, 1)
+    assert.equal(channelsListBody.channels[0]?.status, 'blocked')
+    assert.equal(channelsListBody.channels[0]?.healthStatus, 'critical')
+
+    const timelineResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/timeline?limit=20', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(timelineResponse.status, 200)
+    const timelineBody = await timelineResponse.json() as {
+      total: number
+      entries: Array<{
+        kind: string
+        action: string
+      }>
+    }
+    assert.ok(timelineBody.total >= 4)
+    assert.ok(timelineBody.entries.some((entry) => entry.kind === 'partner_channel'))
+    assert.ok(timelineBody.entries.some((entry) => entry.kind === 'thread'))
+
+    const digestResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/digest', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(digestResponse.status, 200)
+    const digestBody = await digestResponse.json() as {
+      summary: {
+        actionItems: number
+        escalations: number
+      }
+      actionItems: Array<{
+        category: string
+      }>
+      markdown: string
+    }
+    assert.ok(digestBody.summary.actionItems >= 2)
+    assert.ok(digestBody.summary.escalations >= 1)
+    assert.ok(digestBody.actionItems.some((item) => item.category === 'partner_channel'))
+    assert.match(digestBody.markdown, /Beam workspace digest/i)
+
+    const digestDeliveryResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-finance/digest/deliver', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    }))
+    assert.equal(digestDeliveryResponse.status, 503)
   } finally {
     db.close()
   }
