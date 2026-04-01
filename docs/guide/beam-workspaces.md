@@ -79,7 +79,10 @@ That command will:
 3. run the local quickstart smoke test
 4. import OpenClaw agents into `openclaw-local`
 5. generate missing Beam identities automatically
-6. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
+6. install a managed `beam-send.js` shim so OpenClaw uses the merged Beam identity file automatically
+7. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
+
+The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.
 
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:
 
@@ -94,6 +97,12 @@ That keeps a foreground live-sync process alive and re-syncs the Beam workspace 
 - `~/.openclaw/subagents/runs.json` gets a new subagent run
 
 It is event-driven now. Beam watches the authoritative OpenClaw files directly instead of polling on a fixed interval.
+
+If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
+
+```bash
+npm run workspace:openclaw-refresh
+```
 
 If you want that live sync installed as a background macOS login service, run:
 
@@ -119,6 +128,13 @@ To remove that hook again:
 
 ```bash
 npm run workspace:openclaw-spawn-hook:uninstall
+```
+
+If you want to install or restore the managed OpenClaw sender explicitly, use:
+
+```bash
+npm run workspace:openclaw-beam-send:install
+npm run workspace:openclaw-beam-send:uninstall
 ```
 
 If you only want the import step against an already running stack, use:
@@ -152,11 +168,11 @@ That second mode generates local Beam identities for the missing OpenClaw agents
 - `~/.openclaw/workspace/secrets/beam-identities.generated.json`
 - `~/.openclaw/workspace/secrets/beam-identities.merged.json`
 
+On macOS, Beam stores generated private keys, API keys, and admin-session cache in Keychain when available. The generated identity file becomes metadata-only, while the merged runtime file is still materialized for local send/runtime compatibility with private `0600` permissions.
+
 The merged file is the easiest local runtime handoff path:
 
 ```bash
-export BEAM_IDENTITIES="$HOME/.openclaw/workspace/secrets/beam-identities.merged.json"
-export BEAM_DIRECTORY_URL="http://localhost:43100"
 node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
   --agent clara \
   --to fischer@coppen.beam.directory \

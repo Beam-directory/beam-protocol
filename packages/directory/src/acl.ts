@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { dirname, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import type { Database } from 'better-sqlite3'
+import { matchesBeamPattern } from './shield/policies.js'
 import type { IntentAclRow } from './types.js'
 
 interface CatalogIntent {
@@ -80,7 +81,11 @@ export function isIntentAllowed(db: Database, input: {
     return false
   }
 
-  return rows.some((row) => row.allowed_from === '*' || row.allowed_from === input.fromBeamId)
+  return rows.some((row) => (
+    row.allowed_from === '*'
+    || row.allowed_from === input.fromBeamId
+    || matchesBeamPattern(input.fromBeamId, [row.allowed_from])
+  ))
 }
 
 export function seedAclsFromCatalog(db: Database, org = 'demo'): void {
