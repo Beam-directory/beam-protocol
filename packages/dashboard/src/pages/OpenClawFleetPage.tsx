@@ -3,6 +3,7 @@ import { Link, useSearchParams } from 'react-router-dom'
 import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
 import {
   ApiError,
+  type OpenClawConflictDetailResponse,
   directoryApi,
   type OpenClawConflictGroup,
   type OpenClawFleetDigestResponse,
@@ -131,6 +132,10 @@ function digestSeverityTone(severity: 'warning' | 'critical'): 'warning' | 'crit
   return severity === 'critical' ? 'critical' : 'warning'
 }
 
+function conflictResolutionTone(state: OpenClawConflictDetailResponse['resolutionState']): 'warning' | 'success' {
+  return state === 'owner_selected' ? 'success' : 'warning'
+}
+
 function formatPercent(value: number | null): string {
   return value === null ? '—' : `${Math.round(value * 100)}%`
 }
@@ -176,6 +181,7 @@ export default function OpenClawFleetPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<OpenClawFleetOverviewResponse | null>(null)
   const [digest, setDigest] = useState<OpenClawFleetDigestResponse | null>(null)
+  const [conflictDetail, setConflictDetail] = useState<OpenClawConflictDetailResponse | null>(null)
   const [hostDetail, setHostDetail] = useState<OpenClawHostDetailResponse | null>(null)
   const [hostIdentities, setHostIdentities] = useState<OpenClawHostIdentitiesResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -215,6 +221,7 @@ export default function OpenClawFleetPage() {
     recoveryWindowStartsAt: '',
     recoveryWindowEndsAt: '',
   })
+  const [selectedConflictRouteId, setSelectedConflictRouteId] = useState<number | null>(null)
 
   const selectedHostId = useMemo(() => {
     const raw = searchParams.get('host')
@@ -223,9 +230,19 @@ export default function OpenClawFleetPage() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }, [searchParams])
 
+  const selectedConflictBeamId = useMemo(() => {
+    const raw = searchParams.get('conflict')
+    return raw ? raw.trim() || null : null
+  }, [searchParams])
+
   const selectedHost = useMemo(
     () => overview?.hosts.find((host) => host.id === selectedHostId) ?? overview?.hosts[0] ?? null,
     [overview, selectedHostId],
+  )
+
+  const selectedConflictRoute = useMemo(
+    () => conflictDetail?.routes.find((route) => route.id === selectedConflictRouteId) ?? null,
+    [conflictDetail, selectedConflictRouteId],
   )
 
   async function loadOverview() {
@@ -238,6 +255,11 @@ export default function OpenClawFleetPage() {
     setDigest(response)
   }
 
+  async function loadConflict(beamId: string) {
+    const response = await directoryApi.getOpenClawConflict(beamId)
+    setConflictDetail(response)
+  }
+
   async function loadHost(id: number) {
     const [detailResponse, identitiesResponse] = await Promise.all([
       directoryApi.getOpenClawHost(id),
@@ -247,14 +269,20 @@ export default function OpenClawFleetPage() {
     setHostIdentities(identitiesResponse)
   }
 
-  async function refreshAll(nextHostId?: number | null) {
+  async function refreshAll(nextHostId?: number | null, nextConflictBeamId?: string | null) {
     try {
       setLoading(true)
       setError(null)
       await Promise.all([loadOverview(), loadDigest()])
       const hostId = nextHostId ?? selectedHostId
+      const conflictBeamId = nextConflictBeamId ?? selectedConflictBeamId
       if (hostId) {
         await loadHost(hostId)
+      }
+      if (conflictBeamId) {
+        await loadConflict(conflictBeamId)
+      } else {
+        setConflictDetail(null)
       }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : 'Failed to load OpenClaw fleet')
@@ -298,6 +326,34 @@ export default function OpenClawFleetPage() {
       }
     })()
   }, [overview, searchParams, selectedHostId, setSearchParams])
+
+  useEffect(() => {
+    if (!selectedConflictBeamId) {
+      setConflictDetail(null)
+      setSelectedConflictRouteId(null)
+      return
+    }
+
+    void (async () => {
+      try {
+        setDetailLoading(true)
+        setError(null)
+        await loadConflict(selectedConflictBeamId)
+      } catch (err) {
+        setError(err instanceof ApiError ? err.message : 'Failed to load conflict detail')
+      } finally {
+        setDetailLoading(false)
+      }
+    })()
+  }, [selectedConflictBeamId])
+
+  useEffect(() => {
+    if (!conflictDetail) {
+      setSelectedConflictRouteId(null)
+      return
+    }
+    setSelectedConflictRouteId(conflictDetail.selectedOwnerRouteId ?? conflictDetail.recommendedRouteId ?? conflictDetail.routes[0]?.id ?? null)
+  }, [conflictDetail?.beamId, conflictDetail?.selectedOwnerRouteId, conflictDetail?.recommendedRouteId, conflictDetail?.routes.length])
 
   useEffect(() => {
     if (!selectedHost) {
@@ -413,9 +469,31 @@ export default function OpenClawFleetPage() {
       : `Revoked by operator on ${new Date().toISOString()}`
     await runAction(`revoke-${host.id}`, async () => {
       await directoryApi.revokeOpenClawHost(host.id, { reason })
-      await Promise.all([loadOverview(), loadDigest()])
-      await loadHost(host.id)
+      await refreshAll(host.id, selectedConflictBeamId)
     }, `Host ${hostTitle(host)} revoked.`)
+  }
+
+  function focusConflict(beamId: string) {
+    const nextParams = new URLSearchParams(searchParams)
+    nextParams.set('conflict', beamId)
+    setSearchParams(nextParams, { replace: true })
+  }
+
+  async function handleResolveConflict(options: {
+    beamId: string
+    preferredRouteId: number
+    disableCompetingRoutes?: boolean
+    note?: string | null
+  }) {
+    await runAction(`resolve-conflict-${options.beamId}`, async () => {
+      const response = await directoryApi.resolveOpenClawConflict(options.beamId, {
+        preferredRouteId: options.preferredRouteId,
+        disableCompetingRoutes: options.disableCompetingRoutes,
+        note: options.note,
+      })
+      setConflictDetail(response.conflict)
+      await refreshAll(selectedHostId, options.beamId)
+    }, `Conflict route owner updated for ${options.beamId}.`)
   }
 
   async function handlePreferRoute(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
@@ -423,7 +501,7 @@ export default function OpenClawFleetPage() {
       await directoryApi.preferOpenClawRoute(route.id, {
         note: `Preferred by operator for ${route.beamId}`,
       })
-      await refreshAll(selectedHostId)
+      await refreshAll(selectedHostId, selectedConflictBeamId)
     }, `Preferred route set for ${route.beamId}.`)
   }
 
@@ -432,7 +510,7 @@ export default function OpenClawFleetPage() {
       await directoryApi.disableOpenClawRoute(route.id, {
         note: `Disabled by operator for ${route.beamId}`,
       })
-      await refreshAll(selectedHostId)
+      await refreshAll(selectedHostId, selectedConflictBeamId)
     }, `Route disabled for ${route.beamId}.`)
   }
 
@@ -441,7 +519,7 @@ export default function OpenClawFleetPage() {
       await directoryApi.clearOpenClawRouteOwner(route.id, {
         note: `Ownership reset by operator for ${route.beamId}`,
       })
-      await refreshAll(selectedHostId)
+      await refreshAll(selectedHostId, selectedConflictBeamId)
     }, `Route ownership reset for ${route.beamId}.`)
   }
 
@@ -786,13 +864,26 @@ export default function OpenClawFleetPage() {
         <div className="mt-4 space-y-3">
           {overview && overview.conflicts.length > 0 ? (
             overview.conflicts.map((group) => (
-              <div key={group.beamId} className="rounded-2xl border border-red-200 bg-red-50/60 p-4 dark:border-red-500/30 dark:bg-red-500/10">
+              <div
+                key={group.beamId}
+                className={`rounded-2xl border p-4 ${selectedConflictBeamId === group.beamId ? 'border-orange-300 bg-orange-50/60 dark:border-orange-500/40 dark:bg-orange-500/10' : 'border-red-200 bg-red-50/60 dark:border-red-500/30 dark:bg-red-500/10'}`}
+              >
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <div className="text-sm font-medium text-red-700 dark:text-red-200">{group.beamId}</div>
                     <div className="text-xs text-red-600/80 dark:text-red-200/80">{conflictSummary(group)}</div>
+                    {group.recommendedReason ? (
+                      <div className="mt-1 text-[11px] text-red-600/80 dark:text-red-200/80">
+                        Recommended owner: route {group.recommendedRouteId ?? '—'} · {group.recommendedReason}
+                      </div>
+                    ) : null}
                   </div>
-                  <StatusPill label={`${group.routeCount} conflicting routes`} tone="critical" />
+                  <div className="flex flex-wrap gap-2">
+                    {group.selectedOwnerRouteId ? (
+                      <StatusPill label={`Owner ${group.selectedOwnerRouteId}`} tone="success" />
+                    ) : null}
+                    <StatusPill label={`${group.routeCount} conflicting routes`} tone="critical" />
+                  </div>
                 </div>
                 <div className="mt-3 grid gap-2 text-xs text-red-700/80 dark:text-red-200/80 md:grid-cols-2">
                   {group.routes.map((route) => (
@@ -803,6 +894,13 @@ export default function OpenClawFleetPage() {
                           route.workspaceSlug ? `Workspace ${route.workspaceSlug}` : 'No workspace',
                           routeSourceLabel(route.routeSource),
                         ].join(' · ')}
+                      </div>
+                      <div className="mt-1 text-[11px] opacity-80">
+                        {[
+                          route.hostHealth,
+                          route.lastSeenAt ? `Seen ${formatRelativeTime(route.lastSeenAt)}` : null,
+                          route.lastDeliveryStatus ? `Last ${route.lastDeliveryStatus}` : null,
+                        ].filter(Boolean).join(' · ')}
                       </div>
                       <div className="mt-2 flex flex-wrap gap-2">
                         <StatusPill label={route.ownerResolutionState} tone={ownerResolutionTone(route.ownerResolutionState)} />
@@ -830,14 +928,267 @@ export default function OpenClawFleetPage() {
                         >
                           {actionBusy === `clear-route-${route.routeId}` ? 'Resetting…' : 'Reset owner'}
                         </button>
+                        {route.lastDeliveryHref ? (
+                          <Link className="rounded-xl border border-red-200 px-3 py-2 text-[11px] font-medium text-red-700 transition hover:bg-red-100 dark:border-red-500/30 dark:text-red-100 dark:hover:bg-red-500/10" to={route.lastDeliveryHref}>
+                            Open trace
+                          </Link>
+                        ) : null}
                       </div>
                     </div>
                   ))}
+                </div>
+                <div className="mt-3 flex flex-wrap gap-3 text-xs">
+                  <button
+                    type="button"
+                    className="text-orange-600 hover:text-orange-700 dark:text-orange-300"
+                    onClick={() => focusConflict(group.beamId)}
+                  >
+                    Review conflict
+                  </button>
+                  <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/openclaw-fleet?conflict=${encodeURIComponent(group.beamId)}`}>
+                    Open remediation view
+                  </Link>
                 </div>
               </div>
             ))
           ) : (
             <EmptyPanel label="No duplicate identity conflicts are active." />
+          )}
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="panel-title">Conflict remediation</div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Guided route-owner resolution for one Beam identity, with a recommended owner, shadow-route cleanup, and audit history.
+            </p>
+          </div>
+          {conflictDetail ? (
+            <div className="flex flex-wrap gap-2">
+              <StatusPill label={conflictDetail.resolutionState} tone={conflictResolutionTone(conflictDetail.resolutionState)} />
+              <StatusPill label={`${conflictDetail.activeConflictRouteCount} active conflicts`} tone={conflictDetail.activeConflictRouteCount > 0 ? 'critical' : 'default'} />
+            </div>
+          ) : null}
+        </div>
+
+        <div className="mt-4 space-y-4">
+          {!selectedConflictBeamId ? (
+            <EmptyPanel label="Pick a duplicate conflict above to open the guided remediation flow." />
+          ) : detailLoading && !conflictDetail ? (
+            <EmptyPanel label="Loading conflict detail…" />
+          ) : !conflictDetail ? (
+            <EmptyPanel label="The selected conflict no longer exists." />
+          ) : (
+            <>
+              <div className="rounded-2xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-base font-medium text-slate-900 dark:text-slate-100">{conflictDetail.beamId}</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {`${formatNumber(conflictDetail.routeCount)} total route(s) · ${formatNumber(conflictDetail.activeConflictRouteCount)} active conflicting route(s)`}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {conflictDetail.selectedOwnerRouteId ? (
+                      <StatusPill label={`Owner route ${conflictDetail.selectedOwnerRouteId}`} tone="success" />
+                    ) : null}
+                    {conflictDetail.recommendedRouteId ? (
+                      <StatusPill label={`Recommended ${conflictDetail.recommendedRouteId}`} tone="warning" />
+                    ) : null}
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{conflictDetail.recommendedReason ? `Recommendation: ${conflictDetail.recommendedReason}` : 'No route recommendation available yet.'}</div>
+                  <div>{selectedConflictRoute ? `Selected route ${selectedConflictRoute.id}${selectedConflictRoute.hostLabel ? ` · ${selectedConflictRoute.hostLabel}` : ''}` : 'No route selected yet.'}</div>
+                </div>
+                <div className="mt-4 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={!selectedConflictRoute || actionBusy === `resolve-conflict-${conflictDetail.beamId}`}
+                    onClick={() => {
+                      if (!selectedConflictRoute) return
+                      void handleResolveConflict({
+                        beamId: conflictDetail.beamId,
+                        preferredRouteId: selectedConflictRoute.id,
+                        disableCompetingRoutes: false,
+                        note: `Guided remediation selected route ${selectedConflictRoute.id} for ${conflictDetail.beamId}.`,
+                      })
+                    }}
+                  >
+                    {actionBusy === `resolve-conflict-${conflictDetail.beamId}` ? 'Resolving…' : 'Prefer selected route'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={!selectedConflictRoute || actionBusy === `resolve-conflict-${conflictDetail.beamId}`}
+                    onClick={() => {
+                      if (!selectedConflictRoute) return
+                      void handleResolveConflict({
+                        beamId: conflictDetail.beamId,
+                        preferredRouteId: selectedConflictRoute.id,
+                        disableCompetingRoutes: true,
+                        note: `Guided remediation preferred route ${selectedConflictRoute.id} and disabled competing routes for ${conflictDetail.beamId}.`,
+                      })
+                    }}
+                  >
+                    {actionBusy === `resolve-conflict-${conflictDetail.beamId}` ? 'Resolving…' : 'Prefer and disable others'}
+                  </button>
+                  {conflictDetail.recommendedRouteId && conflictDetail.recommendedRouteId !== selectedConflictRouteId ? (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      onClick={() => setSelectedConflictRouteId(conflictDetail.recommendedRouteId)}
+                    >
+                      Pick recommended route
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="grid gap-4 xl:grid-cols-[1.25fr,0.75fr]">
+                <div className="space-y-3">
+                  {conflictDetail.routes.map((route) => {
+                    const selected = selectedConflictRouteId === route.id
+                    const recommended = conflictDetail.recommendedRouteId === route.id
+                    return (
+                      <button
+                        key={route.id}
+                        type="button"
+                        className={`w-full rounded-2xl border p-4 text-left transition ${selected ? 'border-orange-300 bg-orange-50/50 dark:border-orange-500/40 dark:bg-orange-500/10' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60'}`}
+                        onClick={() => setSelectedConflictRouteId(route.id)}
+                      >
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">
+                              {route.hostLabel || `Host ${route.hostId}`} · {route.routeKey}
+                            </div>
+                            <div className="truncate text-xs text-slate-500 dark:text-slate-400">
+                              {[
+                                route.workspace?.slug ? `Workspace ${route.workspace.slug}` : 'No workspace',
+                                routeSourceLabel(route.routeSource),
+                                route.connectionMode ?? 'No receiver',
+                              ].join(' · ')}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            {recommended ? <StatusPill label="recommended" tone="warning" /> : null}
+                            {selected ? <StatusPill label="selected" tone="success" /> : null}
+                            <StatusPill label={route.runtimeSessionState} tone={routeStateTone(route.runtimeSessionState)} />
+                            <StatusPill label={route.ownerResolutionState} tone={ownerResolutionTone(route.ownerResolutionState)} />
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                          <div>{`Host health ${route.hostHealth} · credential ${route.hostCredentialState}`}</div>
+                          <div>{route.lastSeenAt ? `Last seen ${formatRelativeTime(route.lastSeenAt)}` : 'No last-seen timestamp'}</div>
+                          <div>{route.lastDelivery ? `Last delivery ${formatRelativeTime(route.lastDelivery.requestedAt)} · ${route.lastDelivery.status}${route.lastDelivery.errorCode ? ` · ${route.lastDelivery.errorCode}` : ''}` : 'No delivery receipt yet'}</div>
+                          <div>{route.ownerResolutionAt ? `Owner action ${formatRelativeTime(route.ownerResolutionAt)}${route.ownerResolutionActor ? ` · ${route.ownerResolutionActor}` : ''}` : 'No owner action recorded'}</div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `prefer-route-${route.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handlePreferRoute(route)
+                            }}
+                          >
+                            {actionBusy === `prefer-route-${route.id}` ? 'Preferring…' : 'Prefer route'}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `disable-route-${route.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleDisableRoute(route)
+                            }}
+                          >
+                            {actionBusy === `disable-route-${route.id}` ? 'Disabling…' : 'Disable route'}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `clear-route-${route.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleClearRouteOwner(route)
+                            }}
+                          >
+                            {actionBusy === `clear-route-${route.id}` ? 'Resetting…' : 'Reset owner'}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `revoke-${route.hostId}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              const host = overview?.hosts.find((entry) => entry.id === route.hostId)
+                              if (host) {
+                                void handleRevoke(host)
+                              }
+                            }}
+                          >
+                            {actionBusy === `revoke-${route.hostId}` ? 'Revoking…' : 'Revoke host'}
+                          </button>
+                          {route.workspace ? (
+                            <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/workspaces?workspace=${encodeURIComponent(route.workspace.slug)}`}>
+                              Open workspace
+                            </Link>
+                          ) : null}
+                          {route.lastDelivery ? (
+                            <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={route.lastDelivery.href}>
+                              Open trace
+                            </Link>
+                          ) : null}
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+
+                <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Resolution history</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Route-owner and host actions attached to this Beam identity.
+                  </div>
+                  <div className="mt-4 space-y-3">
+                    {conflictDetail.history.length > 0 ? (
+                      conflictDetail.history.map((entry) => (
+                        <div key={entry.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div className="font-medium text-slate-900 dark:text-slate-100">{entry.action}</div>
+                            <div>{formatRelativeTime(entry.timestamp)}</div>
+                          </div>
+                          <div className="mt-1">
+                            {[
+                              entry.actor ? `Actor ${entry.actor}` : null,
+                              entry.routeId ? `Route ${entry.routeId}` : null,
+                              entry.hostId ? `Host ${entry.hostId}` : null,
+                            ].filter(Boolean).join(' · ')}
+                          </div>
+                          {entry.note ? (
+                            <div className="mt-2">{entry.note}</div>
+                          ) : null}
+                          {entry.href ? (
+                            <div className="mt-2">
+                              <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={entry.href}>
+                                Open related view
+                              </Link>
+                            </div>
+                          ) : null}
+                        </div>
+                      ))
+                    ) : (
+                      <EmptyPanel label="No conflict history recorded yet." />
+                    )}
+                  </div>
+                </div>
+              </div>
+            </>
           )}
         </div>
       </section>

@@ -392,6 +392,9 @@ export interface OpenClawHostSummary {
 export interface OpenClawConflictGroup {
   beamId: string
   routeCount: number
+  selectedOwnerRouteId: number | null
+  recommendedRouteId: number | null
+  recommendedReason: string | null
   routes: Array<{
     routeId: number
     hostId: number
@@ -401,7 +404,39 @@ export interface OpenClawConflictGroup {
     routeKey: string
     routeSource: OpenClawRouteSource
     ownerResolutionState: OpenClawRouteOwnerResolutionState
+    ownerResolutionActor: string | null
+    ownerResolutionAt: string | null
+    ownerResolutionNote: string | null
+    runtimeSessionState: OpenClawRouteRuntimeState
+    hostHealth: OpenClawHostHealth
+    lastSeenAt: string | null
+    lastDeliveryStatus: IntentLifecycleStatus | null
+    lastDeliveryHref: string | null
   }>
+}
+
+export interface OpenClawConflictHistoryItem {
+  id: string
+  source: 'route' | 'host'
+  action: string
+  actor: string | null
+  timestamp: string
+  note: string | null
+  routeId: number | null
+  hostId: number | null
+  href: string | null
+}
+
+export interface OpenClawConflictDetailResponse {
+  beamId: string
+  routeCount: number
+  activeConflictRouteCount: number
+  resolutionState: 'unresolved' | 'owner_selected'
+  selectedOwnerRouteId: number | null
+  recommendedRouteId: number | null
+  recommendedReason: string | null
+  routes: OpenClawHostRoute[]
+  history: OpenClawConflictHistoryItem[]
 }
 
 export interface OpenClawFleetOverviewResponse {
@@ -566,6 +601,18 @@ export interface OpenClawHostPolicyActionResponse {
 
 export interface OpenClawRouteActionResponse {
   route: OpenClawHostRoute | null
+}
+
+export interface OpenClawConflictResolveInput {
+  preferredRouteId: number
+  disableCompetingRoutes?: boolean
+  note?: string | null
+}
+
+export interface OpenClawConflictResolveResponse {
+  conflict: OpenClawConflictDetailResponse | null
+  preferredRouteId: number
+  disabledRouteIds: number[]
 }
 
 export interface OpenClawFleetDigestDeliveryResponse {
@@ -2318,6 +2365,7 @@ export const directoryApi = {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
+  getOpenClawConflict: (beamId: string) => request<OpenClawConflictDetailResponse>(`/admin/openclaw/conflicts/${encodeURIComponent(beamId)}`, undefined, { admin: true }),
   listOpenClawHosts: () => request<OpenClawHostsResponse>('/admin/openclaw/hosts', undefined, { admin: true }),
   getOpenClawHost: (id: number) => request<OpenClawHostDetailResponse>(`/admin/openclaw/hosts/${id}`, undefined, { admin: true }),
   getOpenClawHostRoutes: (id: number) => request<OpenClawHostRoutesResponse>(`/admin/openclaw/hosts/${id}/routes`, undefined, { admin: true }),
@@ -2342,6 +2390,10 @@ export const directoryApi = {
   revokeOpenClawHost: (id: number, input?: { reason?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  resolveOpenClawConflict: (beamId: string, input: OpenClawConflictResolveInput) => request<OpenClawConflictResolveResponse>(`/admin/openclaw/conflicts/${encodeURIComponent(beamId)}/resolve`, {
+    method: 'POST',
+    body: JSON.stringify(input),
   }, { admin: true }),
   preferOpenClawRoute: (id: number, input?: { note?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/prefer`, {
     method: 'POST',

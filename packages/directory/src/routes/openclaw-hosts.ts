@@ -22,6 +22,7 @@ import {
   listOpenClawHosts,
   listOpenClawResolvedRoutesByBeamId,
   listOpenClawResolvedRoutesForHost,
+  listAuditLog,
   listWorkspaceIdentityBindingsByBeamId,
   logAuditEvent,
   recordOpenClawHostHeartbeat,
@@ -47,6 +48,7 @@ import type {
   OpenClawRouteOwnerResolutionState,
   OpenClawResolvedRouteRow,
   OpenClawRouteReportedState,
+  OpenClawRouteRuntimeState,
   OpenClawRouteSource,
 } from '../types.js'
 
@@ -71,6 +73,9 @@ type OpenClawFleetDigestItem = {
 type OpenClawConflictGroup = {
   beamId: string
   routeCount: number
+  selectedOwnerRouteId: number | null
+  recommendedRouteId: number | null
+  recommendedReason: string | null
   routes: Array<{
     routeId: number
     hostId: number
@@ -80,7 +85,27 @@ type OpenClawConflictGroup = {
     routeKey: string
     routeSource: string
     ownerResolutionState: OpenClawRouteOwnerResolutionState
+    ownerResolutionActor: string | null
+    ownerResolutionAt: string | null
+    ownerResolutionNote: string | null
+    runtimeSessionState: OpenClawRouteRuntimeState
+    hostHealth: OpenClawHostHealth
+    lastSeenAt: string | null
+    lastDeliveryStatus: IntentLogRow['status'] | null
+    lastDeliveryHref: string | null
   }>
+}
+
+type OpenClawConflictHistoryItem = {
+  id: string
+  source: 'route' | 'host'
+  action: string
+  actor: string | null
+  timestamp: string
+  note: string | null
+  routeId: number | null
+  hostId: number | null
+  href: string | null
 }
 
 type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
@@ -429,6 +454,10 @@ function buildOpenClawFleetHref(hostId: number | null = null): string {
   return '/openclaw-fleet'
 }
 
+function buildOpenClawConflictHref(beamId: string): string {
+  return `/openclaw-fleet?conflict=${encodeURIComponent(beamId)}`
+}
+
 function buildWorkspaceHref(workspaceSlug: string | null): string | null {
   if (!workspaceSlug) {
     return null
@@ -525,6 +554,255 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
       owner: binding.owner,
       runtimeType: binding.runtime_type,
     })),
+  }
+}
+
+function rankConflictRoute(route: ReturnType<typeof serializeRoute>) {
+  let score = 0
+  const reasons: string[] = []
+
+  switch (route.hostHealth) {
+    case 'healthy':
+      score += 50
+      reasons.push('healthy host heartbeat')
+      break
+    case 'watch':
+      score += 25
+      reasons.push('host is still connected')
+      break
+    case 'pending':
+      score += 5
+      break
+    case 'stale':
+    case 'revoked':
+      score -= 50
+      break
+  }
+
+  switch (route.connectionMode) {
+    case 'websocket':
+      score += 20
+      reasons.push('live websocket receiver')
+      break
+    case 'hybrid':
+      score += 16
+      reasons.push('hybrid receiver path')
+      break
+    case 'http':
+      score += 10
+      reasons.push('HTTP receiver path')
+      break
+    default:
+      break
+  }
+
+  switch (route.routeSource) {
+    case 'gateway-agent':
+      score += 12
+      reasons.push('gateway route')
+      break
+    case 'workspace-agent':
+      score += 8
+      break
+    case 'agent-folder':
+      score += 6
+      break
+    case 'subagent-run':
+      score += 2
+      break
+  }
+
+  if (route.lastDelivery?.status === 'acked') {
+    score += 12
+    reasons.push('recent successful delivery')
+  } else if (route.lastDelivery?.status === 'failed') {
+    score -= 12
+  }
+
+  if (route.ownerResolutionState === 'preferred') {
+    score += 10
+    reasons.push('already preferred previously')
+  }
+
+  const lastSeenMs = route.lastSeenAt ? Date.parse(route.lastSeenAt) : Number.NaN
+  if (Number.isFinite(lastSeenMs)) {
+    const ageMinutes = (Date.now() - lastSeenMs) / 60_000
+    if (ageMinutes <= 5) {
+      score += 15
+      reasons.push('very recent heartbeat')
+    } else if (ageMinutes <= 30) {
+      score += 8
+    } else if (ageMinutes > 180) {
+      score -= 8
+    }
+  }
+
+  if (route.runtimeSessionState === 'conflict') {
+    score += 4
+  } else if (route.runtimeSessionState === 'stale' || route.runtimeSessionState === 'revoked') {
+    score -= 20
+  }
+
+  return {
+    score,
+    reason: reasons.slice(0, 3).join(' · ') || 'best available route based on health and delivery signals',
+  }
+}
+
+function summarizeConflictResolution(routes: Array<ReturnType<typeof serializeRoute>>) {
+  const selectedOwnerRouteId = routes.find((route) => route.ownerResolutionState === 'preferred')?.id ?? null
+  const ranked = [...routes]
+    .map((route) => ({
+      route,
+      ranking: rankConflictRoute(route),
+    }))
+    .sort((left, right) => {
+      if (right.ranking.score !== left.ranking.score) {
+        return right.ranking.score - left.ranking.score
+      }
+      return (Date.parse(right.route.lastSeenAt ?? '') || 0) - (Date.parse(left.route.lastSeenAt ?? '') || 0)
+    })
+
+  const recommended = ranked[0] ?? null
+  return {
+    selectedOwnerRouteId,
+    recommendedRouteId: recommended?.route.id ?? null,
+    recommendedReason: recommended?.ranking.reason ?? null,
+  }
+}
+
+function buildConflictHistory(
+  db: Database,
+  beamId: string,
+  routes: Array<ReturnType<typeof serializeRoute>>,
+): OpenClawConflictHistoryItem[] {
+  const historyItems: OpenClawConflictHistoryItem[] = []
+
+  for (const entry of listAuditLog(db, {
+    limit: 5,
+    target: `openclaw-conflict:${beamId}`,
+  })) {
+    let note: string | null = null
+    try {
+      const parsed = entry.details ? JSON.parse(entry.details) as Record<string, unknown> : null
+      note = normalizeOptionalString(parsed?.note)
+    } catch {
+      note = null
+    }
+    historyItems.push({
+      id: `audit-conflict:${entry.id}`,
+      source: 'route',
+      action: entry.action,
+      actor: entry.actor,
+      timestamp: entry.timestamp,
+      note,
+      routeId: null,
+      hostId: null,
+      href: buildOpenClawConflictHref(beamId),
+    })
+  }
+
+  for (const route of routes) {
+    if (route.ownerResolutionAt) {
+      historyItems.push({
+        id: `route-resolution:${route.id}:${route.ownerResolutionAt}`,
+        source: 'route',
+        action: route.ownerResolutionState,
+        actor: route.ownerResolutionActor,
+        timestamp: route.ownerResolutionAt,
+        note: route.ownerResolutionNote,
+        routeId: route.id,
+        hostId: route.hostId,
+        href: route.lastDelivery?.href ?? null,
+      })
+    }
+
+    const auditEntries = listAuditLog(db, {
+      limit: 5,
+      target: `openclaw-route:${route.id}`,
+    })
+    for (const entry of auditEntries) {
+      let note: string | null = null
+      try {
+        const parsed = entry.details ? JSON.parse(entry.details) as Record<string, unknown> : null
+        note = normalizeOptionalString(parsed?.note)
+      } catch {
+        note = null
+      }
+      historyItems.push({
+        id: `audit-route:${entry.id}`,
+        source: 'route',
+        action: entry.action,
+        actor: entry.actor,
+        timestamp: entry.timestamp,
+        note,
+        routeId: route.id,
+        hostId: route.hostId,
+        href: null,
+      })
+    }
+  }
+
+  const seenHostIds = new Set<number>()
+  for (const route of routes) {
+    if (seenHostIds.has(route.hostId)) {
+      continue
+    }
+    seenHostIds.add(route.hostId)
+    const auditEntries = listAuditLog(db, {
+      limit: 5,
+      target: `openclaw-host:${route.hostId}`,
+    }).filter((entry) => entry.action === 'admin.openclaw_host.revoked')
+    for (const entry of auditEntries) {
+      let note: string | null = null
+      try {
+        const parsed = entry.details ? JSON.parse(entry.details) as Record<string, unknown> : null
+        note = normalizeOptionalString(parsed?.reason)
+      } catch {
+        note = null
+      }
+      historyItems.push({
+        id: `audit-host:${entry.id}`,
+        source: 'host',
+        action: entry.action,
+        actor: entry.actor,
+        timestamp: entry.timestamp,
+        note,
+        routeId: null,
+        hostId: route.hostId,
+        href: buildOpenClawFleetHref(route.hostId),
+      })
+    }
+  }
+
+  return historyItems
+    .sort((left, right) => Date.parse(right.timestamp) - Date.parse(left.timestamp))
+    .filter((entry, index, items) => items.findIndex((candidate) => candidate.id === entry.id) === index)
+    .slice(0, 12)
+}
+
+function buildConflictDetail(db: Database, beamId: string) {
+  const resolvedRoutes = listOpenClawResolvedRoutesByBeamId(db, beamId)
+  if (resolvedRoutes.length === 0) {
+    return null
+  }
+
+  const routes = resolvedRoutes.map((route) => serializeRoute(db, route))
+  const summary = summarizeConflictResolution(routes)
+  const activeConflictRoutes = summary.selectedOwnerRouteId
+    ? []
+    : routes.filter((route) => route.runtimeSessionState === 'conflict')
+
+  return {
+    beamId,
+    routeCount: routes.length,
+    activeConflictRouteCount: activeConflictRoutes.length,
+    resolutionState: summary.selectedOwnerRouteId ? 'owner_selected' : 'unresolved',
+    selectedOwnerRouteId: summary.selectedOwnerRouteId,
+    recommendedRouteId: summary.recommendedRouteId,
+    recommendedReason: summary.recommendedReason,
+    routes,
+    history: buildConflictHistory(db, beamId, routes),
   }
 }
 
@@ -903,7 +1181,7 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
       hostId: primaryRoute?.hostId ?? null,
       hostLabel: primaryRoute?.hostLabel ?? primaryRoute?.hostname ?? null,
       workspaceSlug: primaryRoute?.workspaceSlug ?? null,
-      href: buildOpenClawFleetHref(primaryRoute?.hostId ?? null),
+      href: buildOpenClawConflictHref(conflict.beamId),
       traceHref: null,
     })
   }
@@ -994,34 +1272,37 @@ function listConflictGroups(db: Database): OpenClawConflictGroup[] {
   `).all() as Array<{ beam_id: string }>
 
   return rows.flatMap((row): OpenClawConflictGroup[] => {
-    const resolvedRoutes = listOpenClawResolvedRoutesByBeamId(db, row.beam_id)
-    const hasActivePreferredRoute = resolvedRoutes.some((route) =>
-      route.owner_resolution_state === 'preferred'
-      && route.runtime_session_state !== 'conflict'
-      && route.runtime_session_state !== 'revoked'
-      && route.runtime_session_state !== 'ended',
-    )
-    if (hasActivePreferredRoute) {
+    const detail = buildConflictDetail(db, row.beam_id)
+    if (!detail || detail.activeConflictRouteCount === 0) {
       return []
     }
 
-    const routes = resolvedRoutes
-      .filter((route) => route.runtime_session_state === 'conflict')
-      .map((route) => ({
-        routeId: route.id,
-        hostId: route.host_id,
-        hostLabel: route.host_label,
-        hostname: route.hostname,
-        workspaceSlug: route.workspace_slug,
-        routeKey: route.route_key,
-        routeSource: route.route_source,
-        ownerResolutionState: route.owner_resolution_state,
-      }))
-
     return [{
       beamId: row.beam_id,
-      routeCount: routes.length,
-      routes,
+      routeCount: detail.activeConflictRouteCount,
+      selectedOwnerRouteId: detail.selectedOwnerRouteId,
+      recommendedRouteId: detail.recommendedRouteId,
+      recommendedReason: detail.recommendedReason,
+      routes: detail.routes
+        .filter((route) => route.runtimeSessionState === 'conflict')
+        .map((route) => ({
+          routeId: route.id,
+          hostId: route.hostId,
+          hostLabel: route.hostLabel,
+          hostname: route.hostLabel ?? `host-${route.hostId}`,
+          workspaceSlug: route.workspaceSlug,
+          routeKey: route.routeKey,
+          routeSource: route.routeSource,
+          ownerResolutionState: route.ownerResolutionState,
+          ownerResolutionActor: route.ownerResolutionActor,
+          ownerResolutionAt: route.ownerResolutionAt,
+          ownerResolutionNote: route.ownerResolutionNote,
+          runtimeSessionState: route.runtimeSessionState,
+          hostHealth: route.hostHealth,
+          lastSeenAt: route.lastSeenAt,
+          lastDeliveryStatus: route.lastDelivery?.status ?? null,
+          lastDeliveryHref: route.lastDelivery?.href ?? null,
+        })),
     }]
   })
 }
@@ -1123,6 +1404,112 @@ export function openClawAdminRouter(db: Database) {
       },
       hosts,
       conflicts,
+    })
+  })
+
+  router.get('/conflicts/:beamId', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const beamId = normalizeOptionalString(c.req.param('beamId'))
+    if (!beamId) {
+      return c.json({ error: 'Invalid Beam ID', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    const conflict = buildConflictDetail(db, beamId)
+    if (!conflict) {
+      return c.json({ error: 'Conflict not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json(conflict)
+  })
+
+  router.post('/conflicts/:beamId/resolve', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const beamId = normalizeOptionalString(c.req.param('beamId'))
+    if (!beamId) {
+      return c.json({ error: 'Invalid Beam ID', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    const conflict = buildConflictDetail(db, beamId)
+    if (!conflict) {
+      return c.json({ error: 'Conflict not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    if (conflict.routes.length < 2) {
+      return c.json({ error: 'Route ownership conflict is no longer active', errorCode: 'NO_ACTIVE_CONFLICT' }, 409)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const preferredRouteId = normalizePositiveInteger(body.preferredRouteId)
+    if (!preferredRouteId) {
+      return c.json({ error: 'Preferred route is required', errorCode: 'PREFERRED_ROUTE_REQUIRED' }, 400)
+    }
+
+    const preferredRoute = conflict.routes.find((route) => route.id === preferredRouteId)
+    if (!preferredRoute) {
+      return c.json({ error: 'Preferred route does not belong to this Beam ID', errorCode: 'PREFERRED_ROUTE_INVALID' }, 400)
+    }
+
+    const note = normalizeOptionalString(body.note)
+    const disableCompetingRoutes = body.disableCompetingRoutes === true
+
+    setOpenClawRouteOwnerResolution(db, {
+      routeId: preferredRouteId,
+      resolutionState: 'preferred',
+      actor: auth.session.email,
+      note: note ?? `Preferred during guided remediation for ${beamId}.`,
+    })
+
+    const disabledRouteIds: number[] = []
+    if (disableCompetingRoutes) {
+      for (const route of conflict.routes) {
+        if (route.id === preferredRouteId || route.ownerResolutionState === 'disabled') {
+          continue
+        }
+        const updated = setOpenClawRouteOwnerResolution(db, {
+          routeId: route.id,
+          resolutionState: 'disabled',
+          actor: auth.session.email,
+          note: note ?? `Disabled during guided remediation for ${beamId}.`,
+        })
+        if (updated) {
+          disabledRouteIds.push(updated.id)
+        }
+      }
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_conflict.resolved',
+      actor: auth.session.email,
+      target: `openclaw-conflict:${beamId}`,
+      details: {
+        role: auth.session.role,
+        preferredRouteId,
+        disableCompetingRoutes,
+        disabledRouteIds,
+        note: note ?? null,
+      },
+    })
+
+    const updatedConflict = buildConflictDetail(db, beamId)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      conflict: updatedConflict,
+      preferredRouteId,
+      disabledRouteIds,
     })
   })
 

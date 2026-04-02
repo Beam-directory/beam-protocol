@@ -184,6 +184,7 @@ The fleet surface also gives operators explicit day-2 actions:
 - rotate host credentials without reinstalling the whole host
 - recover or replace a revoked or lost host with a new credential cutover
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
+- open a guided remediation view for one duplicated Beam ID, keep the recommended owner route, and optionally disable the competing routes in one step
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
 
 The host detail and fleet summary now also expose the operational thresholds behind those actions:
