@@ -1,8 +1,9 @@
 import { readFile } from 'node:fs/promises'
 import path from 'node:path'
-import { formatDate, formatDateTime, optionalFlag, repoRoot, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { formatDate, formatDateTime, optionalFlag, repoRoot, resolveReleaseLabel, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-buyer-dry-run.md'))
+const releaseLabel = resolveReleaseLabel()
+const outputPath = optionalFlag('--output', path.join(process.cwd(), `reports/${releaseLabel}-buyer-dry-run.md`))
 
 function assertIncludes(haystack, needle, label) {
   if (!haystack.includes(needle)) {
@@ -64,7 +65,7 @@ async function main() {
     },
   }
 
-  const markdown = `# Beam 1.3.0 Buyer Dry Run
+  const markdown = `# Beam ${releaseLabel} Buyer Dry Run
 
 ## Context
 

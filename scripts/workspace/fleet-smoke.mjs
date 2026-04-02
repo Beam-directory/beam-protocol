@@ -1,12 +1,13 @@
 import path from 'node:path'
-import { formatDate, formatDateTime, optionalFlag, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { formatDate, formatDateTime, optionalFlag, resolveReleaseLabel, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
 import {
   closeFleetClient,
   sendFleetIntent,
   startOpenClawFleetHarness,
 } from './fleet-shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-fleet-drill.md'))
+const releaseLabel = resolveReleaseLabel()
+const outputPath = optionalFlag('--output', path.join(process.cwd(), `reports/${releaseLabel}-fleet-drill.md`))
 
 async function expectInbound(ws, expectedFrom, expectedMessage) {
   const payload = await new Promise((resolve, reject) => {
@@ -196,7 +197,7 @@ async function main() {
       },
     }
 
-    const markdown = `# Beam 1.3.0 Fleet Drill
+    const markdown = `# Beam ${releaseLabel} Fleet Drill
 
 ## Context
 

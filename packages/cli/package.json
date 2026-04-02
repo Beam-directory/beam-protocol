@@ -1,6 +1,6 @@
 {
   "name": "beam-protocol-cli",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Beam Protocol CLI for verified B2B handoffs",
   "type": "module",
   "bin": {

@@ -4,9 +4,10 @@ import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
-import { formatDate, formatDateTime, optionalFlag, repoRoot, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { formatDate, formatDateTime, optionalFlag, repoRoot, resolveReleaseLabel, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-linux-fleet-smoke.md'))
+const releaseLabel = resolveReleaseLabel()
+const outputPath = optionalFlag('--output', path.join(process.cwd(), `reports/${releaseLabel}-linux-fleet-smoke.md`))
 const installerPath = path.join(repoRoot, 'scripts/workspace/install-openclaw-host-agent.mjs')
 const nodePath = process.execPath
 
@@ -162,7 +163,7 @@ async function main() {
     removed,
   }
 
-  const markdown = `# Beam 1.3.0 Linux Host Smoke
+  const markdown = `# Beam ${releaseLabel} Linux Host Smoke
 
 ## Context
 

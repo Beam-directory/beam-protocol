@@ -1,6 +1,6 @@
 {
   "name": "beam-protocol",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "description": "Verified B2B handoffs for AI agents",
   "private": true,
   "workspaces": [
