@@ -811,6 +811,97 @@ test('duplicate openclaw conflicts can be resolved by preferring one route owner
   }
 })
 
+test('conflict detail recommends an owner route and guided resolve can disable competing routes', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const receiver = createFixtureAgent('fleet-conflict@openclaw.beam.directory')
+    registerFixtureAgent(db, receiver, 'Fleet Conflict')
+
+    const app = createApp(db)
+
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Alpha',
+      hostname: 'alpha.local',
+      beamId: receiver.beamId,
+      routeKey: 'fleet-conflict-alpha',
+      workspaceSlug: 'openclaw-local',
+    })
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Bravo',
+      hostname: 'bravo.local',
+      beamId: receiver.beamId,
+      routeKey: 'fleet-conflict-bravo',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const detailResponse = await app.request(new Request(`http://localhost/admin/openclaw/conflicts/${encodeURIComponent(receiver.beamId)}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(detailResponse.status, 200)
+    const detailBody = await detailResponse.json() as {
+      beamId: string
+      routeCount: number
+      activeConflictRouteCount: number
+      recommendedRouteId: number | null
+      routes: Array<{
+        id: number
+        runtimeSessionState: string
+      }>
+      history: unknown[]
+    }
+    assert.equal(detailBody.beamId, receiver.beamId)
+    assert.equal(detailBody.routeCount, 2)
+    assert.equal(detailBody.activeConflictRouteCount, 2)
+    assert.ok(typeof detailBody.recommendedRouteId === 'number')
+    assert.equal(detailBody.history.length, 0)
+    assert.deepEqual(detailBody.routes.map((route) => route.runtimeSessionState), ['conflict', 'conflict'])
+
+    const resolveResponse = await app.request(new Request(`http://localhost/admin/openclaw/conflicts/${encodeURIComponent(receiver.beamId)}/resolve`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        preferredRouteId: detailBody.recommendedRouteId,
+        disableCompetingRoutes: true,
+        note: 'Guided remediation smoke test',
+      }),
+    }))
+    assert.equal(resolveResponse.status, 200)
+    const resolveBody = await resolveResponse.json() as {
+      preferredRouteId: number
+      disabledRouteIds: number[]
+      conflict: {
+        resolutionState: string
+        activeConflictRouteCount: number
+        selectedOwnerRouteId: number | null
+        routes: Array<{
+          id: number
+          runtimeSessionState: string
+          ownerResolutionState: string
+        }>
+        history: Array<{
+          action: string
+          note: string | null
+        }>
+      } | null
+    }
+    assert.equal(resolveBody.preferredRouteId, detailBody.recommendedRouteId)
+    assert.equal(resolveBody.disabledRouteIds.length, 1)
+    assert.equal(resolveBody.conflict?.resolutionState, 'owner_selected')
+    assert.equal(resolveBody.conflict?.activeConflictRouteCount, 0)
+    assert.equal(resolveBody.conflict?.selectedOwnerRouteId, detailBody.recommendedRouteId)
+    assert.ok(resolveBody.conflict?.routes.some((route) => route.id === detailBody.recommendedRouteId && route.runtimeSessionState === 'live'))
+    assert.ok(resolveBody.conflict?.routes.some((route) => route.id !== detailBody.recommendedRouteId && route.ownerResolutionState === 'disabled'))
+    assert.ok(resolveBody.conflict?.history.some((entry) => entry.action === 'admin.openclaw_conflict.resolved' && entry.note === 'Guided remediation smoke test'))
+  } finally {
+    db.close()
+  }
+})
+
 test('openclaw fleet overview surfaces receipt coverage and latency summaries', async () => {
   const db = createDatabase(':memory:')
 
