@@ -9,6 +9,9 @@ import {
   type WorkspaceBindingStatus,
   type WorkspaceDigestActionItem,
   type WorkspaceDigestResponse,
+  type OpenClawHostHealth,
+  type OpenClawRouteRuntimeState,
+  type OpenClawRouteSource,
   type WorkspaceIdentityBinding,
   type WorkspaceIdentityCredentialBundle,
   type WorkspaceIdentityLifecycleStatus,
@@ -166,6 +169,54 @@ function timelineTone(kind: WorkspaceTimelineEventKind): 'default' | 'success' |
       return 'success'
     default:
       return 'default'
+  }
+}
+
+function hostHealthTone(status: OpenClawHostHealth | 'conflict' | null): 'default' | 'success' | 'warning' | 'critical' {
+  switch (status) {
+    case 'healthy':
+      return 'success'
+    case 'watch':
+    case 'pending':
+      return 'warning'
+    case 'stale':
+    case 'revoked':
+    case 'conflict':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function routeRuntimeTone(status: OpenClawRouteRuntimeState | null): 'default' | 'success' | 'warning' | 'critical' {
+  switch (status) {
+    case 'live':
+      return 'success'
+    case 'idle':
+      return 'default'
+    case 'stale':
+      return 'warning'
+    case 'ended':
+    case 'conflict':
+    case 'revoked':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function routeSourceLabel(source: OpenClawRouteSource | null): string | null {
+  switch (source) {
+    case 'agent-folder':
+      return 'Agent'
+    case 'workspace-agent':
+      return 'Workspace agent'
+    case 'gateway-agent':
+      return 'Gateway agent'
+    case 'subagent-run':
+      return 'Subagent'
+    default:
+      return null
   }
 }
 
@@ -337,6 +388,27 @@ function renderBindingTransport(binding: WorkspaceIdentityBinding): string {
   return 'No live transport currently visible'
 }
 
+function renderBindingHostMeta(binding: WorkspaceIdentityBinding): string {
+  if (!binding.hostId && binding.runtimeSessionState !== 'conflict') {
+    return 'No host route attached'
+  }
+
+  const parts = [
+    binding.hostLabel ? `Host ${binding.hostLabel}` : binding.hostId ? `Host ${binding.hostId}` : 'Multiple hosts',
+  ]
+
+  const sourceLabel = routeSourceLabel(binding.routeSource)
+  if (sourceLabel) {
+    parts.push(sourceLabel)
+  }
+
+  if (binding.runtimeSessionState) {
+    parts.push(`Route ${binding.runtimeSessionState}`)
+  }
+
+  return parts.join(' · ')
+}
+
 function renderChannelMeta(channel: WorkspacePartnerChannel): string {
   return [
     channel.workspaceRoute ? `Routes to ${channel.workspaceRoute.workspaceName}` : 'External lane',
@@ -462,6 +534,7 @@ export default function WorkspacesPage() {
     () => threads.find((entry) => entry.id === selectedThreadId) ?? threads[0] ?? null,
     [selectedThreadId, threads],
   )
+  const selectedHostFilter = searchParams.get('routeHost') ?? 'all'
   const localBindings = useMemo(
     () => bindings.filter((binding) => binding.bindingType !== 'partner'),
     [bindings],
@@ -474,6 +547,33 @@ export default function WorkspacesPage() {
     () => openClawBindings.filter((binding) => binding.runtime.connected),
     [openClawBindings],
   )
+  const openClawHostOptions = useMemo(() => {
+    const options = new Map<string, { value: string; label: string }>()
+    for (const binding of openClawBindings) {
+      if (binding.hostId) {
+        options.set(String(binding.hostId), {
+          value: String(binding.hostId),
+          label: binding.hostLabel || `Host ${binding.hostId}`,
+        })
+      }
+      if (binding.runtimeSessionState === 'conflict') {
+        options.set('conflict', {
+          value: 'conflict',
+          label: 'Conflicting hosts',
+        })
+      }
+    }
+    return [...options.values()].sort((left, right) => left.label.localeCompare(right.label))
+  }, [openClawBindings])
+  const visibleBindings = useMemo(() => {
+    if (selectedHostFilter === 'all') {
+      return bindings
+    }
+    if (selectedHostFilter === 'conflict') {
+      return bindings.filter((binding) => binding.runtimeSessionState === 'conflict')
+    }
+    return bindings.filter((binding) => String(binding.hostId ?? '') === selectedHostFilter)
+  }, [bindings, selectedHostFilter])
   const defaultHandoffIntentId = useMemo(
     () => intentCatalog.find((entry) => entry.id === 'conversation.message')?.id ?? intentCatalog[0]?.id ?? FALLBACK_CONVERSATION_INTENT.id,
     [intentCatalog],
@@ -1219,14 +1319,34 @@ export default function WorkspacesPage() {
                     Runtime-backed identities, owners, key-state drift, and outbound controls for this workspace.
                   </p>
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">{formatNumber(bindings.length)} bindings</div>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select
+                    className="input-field min-w-[12rem] text-sm"
+                    value={selectedHostFilter}
+                    onChange={(event) => {
+                      const next = new URLSearchParams(searchParams)
+                      if (event.target.value === 'all') {
+                        next.delete('routeHost')
+                      } else {
+                        next.set('routeHost', event.target.value)
+                      }
+                      setSearchParams(next, { replace: true })
+                    }}
+                  >
+                    <option value="all">All bindings</option>
+                    {openClawHostOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">{formatNumber(visibleBindings.length)} shown</div>
+                </div>
               </div>
 
               <div className="mt-4 space-y-3">
-                {bindings.length === 0 ? (
+                {visibleBindings.length === 0 ? (
                   <EmptyPanel label="No workspace bindings exist yet." />
                 ) : (
-                  bindings.map((binding) => (
+                  visibleBindings.map((binding) => (
                     <div key={binding.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0">
@@ -1239,6 +1359,12 @@ export default function WorkspacesPage() {
                           <StatusPill label={binding.bindingType} />
                           <StatusPill label={binding.lifecycleStatus} tone={lifecycleTone(binding.lifecycleStatus)} />
                           <StatusPill label={binding.status} tone={binding.status === 'paused' ? 'warning' : 'default'} />
+                          {binding.hostLabel || binding.runtimeSessionState === 'conflict' ? (
+                            <StatusPill label={binding.hostLabel || 'Conflicting hosts'} tone={hostHealthTone(binding.hostHealth)} />
+                          ) : null}
+                          {binding.runtimeSessionState ? (
+                            <StatusPill label={binding.runtimeSessionState} tone={routeRuntimeTone(binding.runtimeSessionState)} />
+                          ) : null}
                         </div>
                       </div>
 
@@ -1249,6 +1375,8 @@ export default function WorkspacesPage() {
                         <div>{binding.canInitiateExternal ? 'Can initiate external' : 'Manual review required'}</div>
                         <div>{renderBindingTransport(binding)}</div>
                         <div>{binding.identity.capabilities.length > 0 ? `${binding.identity.capabilities.length} capabilities declared` : 'No capabilities declared'}</div>
+                        <div>{renderBindingHostMeta(binding)}</div>
+                        <div>{binding.hostHealth ? `Host health ${binding.hostHealth}` : 'No host health reported'}</div>
                       </div>
 
                       <div className="mt-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">

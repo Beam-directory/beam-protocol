@@ -1,138 +1,15 @@
-import { copyFile } from 'node:fs/promises'
-import fs from 'node:fs'
-import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
-const composeFile = path.join(repoRoot, 'ops/quickstart/compose.yaml')
-const envPath = path.join(repoRoot, 'ops/quickstart/.env')
-const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
-const launchAgentPlistPath = path.join(process.env.HOME ?? '', 'Library/LaunchAgents/com.beam.openclaw-live.plist')
-const receiverLaunchAgentPlistPath = path.join(process.env.HOME ?? '', 'Library/LaunchAgents/com.beam.openclaw-receiver.plist')
-const watchMode = process.argv.includes('--watch')
-const daemonMode = process.argv.includes('--daemon')
-const rebuildStack = process.argv.includes('--rebuild')
-const skipSpawnHookInstall = process.argv.includes('--skip-spawn-hook-install')
-const skipBeamSendInstall = process.argv.includes('--skip-beam-send-install')
-const skipReceiverInstall = process.argv.includes('--skip-receiver-install')
 const nodePath = process.execPath
-const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
-  ? '/opt/homebrew/bin/docker'
-  : fs.existsSync('/usr/local/bin/docker')
-    ? '/usr/local/bin/docker'
-    : 'docker'
+const daemonPath = path.join(repoRoot, 'scripts/workspace/beam-openclaw-host.mjs')
 
-function logStep(message) {
-  console.log(`[openclaw-setup] ${message}`)
-}
-
-function run(command, args) {
-  const result = spawnSync(command, args, {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    env: process.env,
-  })
-
-  if (result.status !== 0) {
-    throw new Error(`${command} ${args.join(' ')} failed with status ${result.status ?? 'unknown'}`)
-  }
-}
-
-async function ensureQuickstartEnv() {
-  if (!fs.existsSync(envPath)) {
-    await copyFile(envExamplePath, envPath)
-    logStep('created ops/quickstart/.env from .env.example')
-  }
-}
-
-async function isHealthy(url) {
-  try {
-    const response = await fetch(url)
-    return response.ok
-  } catch {
-    return false
-  }
-}
-
-async function ensureLocalStack() {
-  if (rebuildStack) {
-    logStep('rebuilding the local Beam quickstart stack with docker compose')
-    run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
-    return
-  }
-
-  const [directoryOk, dashboardOk, demoOk] = await Promise.all([
-    isHealthy('http://127.0.0.1:43100/health'),
-    isHealthy('http://127.0.0.1:43173/'),
-    isHealthy('http://127.0.0.1:43290/health'),
-  ])
-
-  if (directoryOk && dashboardOk && demoOk) {
-    logStep('local Beam quickstart stack already looks healthy')
-    return
-  }
-
-  logStep('starting the local Beam quickstart stack with docker compose')
-  run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
-}
-
-async function main() {
-  await ensureQuickstartEnv()
-  await ensureLocalStack()
-
-  if (!daemonMode) {
-    logStep('running the hosted quickstart smoke')
-    run(nodePath, [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
-  }
-
-  if (watchMode) {
-    logStep(daemonMode
-      ? 'starting daemon OpenClaw sync for agents, workspace agents, and subagents'
-      : 'starting live OpenClaw sync for agents, workspace agents, and subagents')
-    run(nodePath, [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing', '--watch'])
-    return
-  }
-
-  logStep('importing persistent OpenClaw agents, workspace agents, and recent subagents')
-  run('node', [path.join(repoRoot, 'scripts/workspace/import-openclaw.mjs'), '--register-missing'])
-
-  if (!daemonMode && !skipBeamSendInstall) {
-    logStep('installing the managed OpenClaw Beam send shim')
-    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-beam-send-shim.mjs')])
-  }
-
-  if (!daemonMode && !skipReceiverInstall) {
-    logStep('installing the OpenClaw inbound Beam receiver')
-    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-receiver-agent.mjs')])
-  }
-
-  if (!skipSpawnHookInstall) {
-    logStep('installing the direct OpenClaw spawn hook')
-    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-spawn-hook.mjs')])
-  }
-
-  if (!daemonMode && fs.existsSync(launchAgentPlistPath)) {
-    logStep('refreshing the installed OpenClaw live sync agent')
-    run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-live-agent.mjs')])
-  }
-
-  if (!daemonMode && skipReceiverInstall && fs.existsSync(receiverLaunchAgentPlistPath)) {
-    logStep('receiver launch agent already installed; leaving it untouched')
-  }
-
-  console.log('')
-  console.log('Beam OpenClaw local setup finished.')
-  console.log('Open the printed login link and then the openclaw-local workspace in the dashboard.')
-  if (!skipSpawnHookInstall) {
-    console.log('Fresh OpenClaw subagents will now sync into Beam directly at spawn time.')
-  }
-  if (!skipReceiverInstall) {
-    console.log('Inbound Beam messages will now route directly into running OpenClaw agents.')
-  }
-}
-
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error)
-  process.exit(1)
+const result = spawnSync(nodePath, [daemonPath, 'setup', ...process.argv.slice(2)], {
+  cwd: repoRoot,
+  stdio: 'inherit',
+  env: process.env,
 })
+
+process.exit(result.status ?? 1)

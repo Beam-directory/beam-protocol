@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.2.0 (draft)
+
+### OpenClaw Fleet Connector
+- add first-class OpenClaw host enrollment, approval, heartbeat, inventory, route-event, and revoke flows to the Beam control plane
+- add a dedicated OpenClaw Fleet dashboard surface with host health, route totals, duplicate conflict visibility, and host-detail drilldowns
+- extend workspace identities with host badges, host health, route source, and runtime session state so operators can see which host currently owns delivery
+- unify the OpenClaw-side tooling behind the `beam-openclaw-host` daemon while keeping the integration external to OpenClaw core
+- block duplicate Beam identities across hosts until an operator resolves or revokes the conflicting host
+- add repo-visible buyer, operator, and fleet smoke reports for the three-host OpenClaw fleet candidate
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.2.0` remains on `beam/1`.
+
 ## v1.1.0 (2026-04-01)
 
 ### Workspace Control Plane

@@ -18,6 +18,17 @@ import type {
   IntentLogRow,
   IntentTraceEventRow,
   OperatorNotificationRow,
+  OpenClawHostEnrollmentRequestRow,
+  OpenClawHostEnrollmentStatus,
+  OpenClawHostHeartbeatRow,
+  OpenClawHostHealth,
+  OpenClawHostRow,
+  OpenClawHostStatus,
+  OpenClawHostRouteRow,
+  OpenClawResolvedRouteRow,
+  OpenClawRouteReportedState,
+  OpenClawRouteRuntimeState,
+  OpenClawRouteSource,
   OrgAgentRow,
   OrgRow,
   ReportRow,
@@ -48,6 +59,7 @@ import {
   type PublicEndpointShieldPolicy,
 } from './shield/policies.js'
 import { mergeWorkspacePolicy, parseWorkspacePolicy } from './workspace-policy.js'
+import { createHostApiKey, hashApiKey } from './api-key.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 const PUBLIC_ENDPOINT_POLICY_KEY = 'public-endpoints'
@@ -313,6 +325,103 @@ function initSchema(db: DB): void {
       updated_by TEXT,
       FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
     );
+
+    CREATE TABLE IF NOT EXISTS openclaw_host_enrollment_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_key TEXT NOT NULL UNIQUE,
+      label TEXT,
+      workspace_slug TEXT,
+      notes TEXT,
+      status TEXT NOT NULL DEFAULT 'issued' CHECK(status IN ('issued', 'pending', 'approved', 'revoked', 'expired')),
+      claimed_host_id INTEGER,
+      claimed_at TEXT,
+      approved_at TEXT,
+      approved_by TEXT,
+      revoked_at TEXT,
+      expires_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (claimed_host_id) REFERENCES openclaw_hosts(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_host_enrollment_requests_status
+      ON openclaw_host_enrollment_requests(status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_hosts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_key TEXT NOT NULL UNIQUE,
+      enrollment_request_id INTEGER,
+      label TEXT,
+      hostname TEXT NOT NULL,
+      os TEXT NOT NULL,
+      connector_version TEXT NOT NULL,
+      beam_directory_url TEXT NOT NULL,
+      workspace_slug TEXT,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'active', 'revoked')),
+      health_status TEXT NOT NULL DEFAULT 'pending' CHECK(health_status IN ('pending', 'healthy', 'watch', 'stale', 'revoked')),
+      route_count INTEGER NOT NULL DEFAULT 0,
+      credential_hash TEXT,
+      approved_at TEXT,
+      approved_by TEXT,
+      revoked_at TEXT,
+      revocation_reason TEXT,
+      last_heartbeat_at TEXT,
+      last_inventory_at TEXT,
+      last_route_event_at TEXT,
+      metadata_json TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (enrollment_request_id) REFERENCES openclaw_host_enrollment_requests(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_hosts_status
+      ON openclaw_hosts(status, health_status, updated_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_hosts_workspace_slug
+      ON openclaw_hosts(workspace_slug, status, updated_at DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_host_routes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_id INTEGER NOT NULL,
+      beam_id TEXT NOT NULL,
+      workspace_slug TEXT,
+      route_source TEXT NOT NULL CHECK(route_source IN ('agent-folder', 'workspace-agent', 'gateway-agent', 'subagent-run')),
+      route_key TEXT NOT NULL,
+      runtime_type TEXT,
+      label TEXT,
+      connection_mode TEXT CHECK(connection_mode IN ('websocket', 'http', 'hybrid', 'unavailable')),
+      http_endpoint TEXT,
+      session_key TEXT,
+      reported_state TEXT NOT NULL DEFAULT 'idle' CHECK(reported_state IN ('live', 'idle', 'ended')),
+      runtime_session_state TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_session_state IN ('live', 'idle', 'stale', 'ended', 'conflict', 'revoked')),
+      metadata_json TEXT,
+      last_seen_at TEXT,
+      ended_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (host_id) REFERENCES openclaw_hosts(id) ON DELETE CASCADE,
+      UNIQUE(host_id, beam_id, route_key)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_host_routes_host
+      ON openclaw_host_routes(host_id, runtime_session_state, beam_id);
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_host_routes_beam_id
+      ON openclaw_host_routes(beam_id, runtime_session_state, host_id);
+
+    CREATE TABLE IF NOT EXISTS openclaw_host_heartbeats (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      host_id INTEGER NOT NULL,
+      route_count INTEGER NOT NULL DEFAULT 0,
+      connector_version TEXT NOT NULL,
+      health_status TEXT NOT NULL CHECK(health_status IN ('pending', 'healthy', 'watch', 'stale', 'revoked')),
+      details_json TEXT,
+      heartbeat_at TEXT NOT NULL,
+      FOREIGN KEY (host_id) REFERENCES openclaw_hosts(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_host_heartbeats_host
+      ON openclaw_host_heartbeats(host_id, heartbeat_at DESC);
 
     CREATE TABLE IF NOT EXISTS operator_notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -3537,6 +3646,897 @@ export function listFederatedTrust(db: DB, beamId?: string): FederatedTrustRow[]
     FROM federated_trust
     ORDER BY asserted_at DESC, effective_trust DESC
   `).all() as FederatedTrustRow[]
+}
+
+const OPENCLAW_HOST_STALE_AFTER_MS = Number(process.env.OPENCLAW_HOST_STALE_AFTER_MS || 120_000)
+
+function createOpenClawToken(prefix: string): string {
+  return `${prefix}${randomBytes(18).toString('base64url')}`
+}
+
+function computeOpenClawHostHealthStatus(
+  host: Pick<OpenClawHostRow, 'status' | 'last_heartbeat_at'>,
+  nowMs = Date.now(),
+): OpenClawHostHealth {
+  if (host.status === 'revoked') {
+    return 'revoked'
+  }
+
+  if (host.status === 'pending') {
+    return 'pending'
+  }
+
+  if (!host.last_heartbeat_at) {
+    return 'watch'
+  }
+
+  const heartbeatAt = Date.parse(host.last_heartbeat_at)
+  if (!Number.isFinite(heartbeatAt)) {
+    return 'watch'
+  }
+
+  const ageMs = Math.max(0, nowMs - heartbeatAt)
+  if (ageMs >= OPENCLAW_HOST_STALE_AFTER_MS) {
+    return 'stale'
+  }
+  if (ageMs >= OPENCLAW_HOST_STALE_AFTER_MS / 2) {
+    return 'watch'
+  }
+  return 'healthy'
+}
+
+function normalizeOpenClawReportedState(value: string | null | undefined): OpenClawRouteReportedState {
+  if (value === 'live' || value === 'idle' || value === 'ended') {
+    return value
+  }
+  return 'idle'
+}
+
+function nowIsoOr(value: string | null | undefined): string {
+  return value ?? nowIso()
+}
+
+export function createOpenClawEnrollmentRequest(
+  db: DB,
+  input: {
+    label?: string | null
+    workspaceSlug?: string | null
+    notes?: string | null
+    expiresAt?: string | null
+  } = {},
+): OpenClawHostEnrollmentRequestRow {
+  const now = nowIso()
+  const requestKey = createOpenClawToken('oce_')
+  const result = db.prepare(`
+    INSERT INTO openclaw_host_enrollment_requests (
+      request_key,
+      label,
+      workspace_slug,
+      notes,
+      status,
+      expires_at,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, 'issued', ?, ?, ?)
+  `).run(
+    requestKey,
+    input.label ?? null,
+    input.workspaceSlug ?? null,
+    input.notes ?? null,
+    input.expiresAt ?? null,
+    now,
+    now,
+  )
+
+  return getOpenClawEnrollmentRequestById(db, Number(result.lastInsertRowid)) as OpenClawHostEnrollmentRequestRow
+}
+
+export function getOpenClawEnrollmentRequestById(db: DB, id: number): OpenClawHostEnrollmentRequestRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_host_enrollment_requests
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OpenClawHostEnrollmentRequestRow | undefined
+
+  return row ?? null
+}
+
+export function getOpenClawEnrollmentRequestByKey(db: DB, requestKey: string): OpenClawHostEnrollmentRequestRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_host_enrollment_requests
+    WHERE request_key = ?
+    LIMIT 1
+  `).get(requestKey) as OpenClawHostEnrollmentRequestRow | undefined
+
+  return row ?? null
+}
+
+export function listOpenClawEnrollmentRequests(db: DB): OpenClawHostEnrollmentRequestRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_enrollment_requests
+    ORDER BY datetime(updated_at) DESC, id DESC
+  `).all() as OpenClawHostEnrollmentRequestRow[]
+}
+
+export function updateOpenClawEnrollmentRequest(
+  db: DB,
+  input: {
+    id: number
+    status: OpenClawHostEnrollmentStatus
+    claimedHostId?: number | null
+    claimedAt?: string | null
+    approvedAt?: string | null
+    approvedBy?: string | null
+    revokedAt?: string | null
+  },
+): OpenClawHostEnrollmentRequestRow | null {
+  const existing = getOpenClawEnrollmentRequestById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE openclaw_host_enrollment_requests
+    SET status = ?,
+        claimed_host_id = ?,
+        claimed_at = ?,
+        approved_at = ?,
+        approved_by = ?,
+        revoked_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.status,
+    input.claimedHostId === undefined ? existing.claimed_host_id : input.claimedHostId,
+    input.claimedAt === undefined ? existing.claimed_at : input.claimedAt,
+    input.approvedAt === undefined ? existing.approved_at : input.approvedAt,
+    input.approvedBy === undefined ? existing.approved_by : input.approvedBy,
+    input.revokedAt === undefined ? existing.revoked_at : input.revokedAt,
+    nowIso(),
+    input.id,
+  )
+
+  return getOpenClawEnrollmentRequestById(db, input.id)
+}
+
+export function createOpenClawHost(
+  db: DB,
+  input: {
+    enrollmentRequestId?: number | null
+    label?: string | null
+    hostname: string
+    os: string
+    connectorVersion: string
+    beamDirectoryUrl: string
+    workspaceSlug?: string | null
+    metadataJson?: string | null
+  },
+): OpenClawHostRow {
+  const now = nowIso()
+  const hostKey = createOpenClawToken('och_')
+  const result = db.prepare(`
+    INSERT INTO openclaw_hosts (
+      host_key,
+      enrollment_request_id,
+      label,
+      hostname,
+      os,
+      connector_version,
+      beam_directory_url,
+      workspace_slug,
+      status,
+      health_status,
+      route_count,
+      metadata_json,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', 'pending', 0, ?, ?, ?)
+  `).run(
+    hostKey,
+    input.enrollmentRequestId ?? null,
+    input.label ?? null,
+    input.hostname,
+    input.os,
+    input.connectorVersion,
+    input.beamDirectoryUrl,
+    input.workspaceSlug ?? null,
+    input.metadataJson ?? null,
+    now,
+    now,
+  )
+
+  return getOpenClawHostById(db, Number(result.lastInsertRowid)) as OpenClawHostRow
+}
+
+export function getOpenClawHostById(db: DB, id: number): OpenClawHostRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_hosts
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OpenClawHostRow | undefined
+
+  return row ?? null
+}
+
+export function getOpenClawHostByKey(db: DB, hostKey: string): OpenClawHostRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_hosts
+    WHERE host_key = ?
+    LIMIT 1
+  `).get(hostKey) as OpenClawHostRow | undefined
+
+  return row ?? null
+}
+
+export function getOpenClawHostByEnrollmentRequestId(db: DB, enrollmentRequestId: number): OpenClawHostRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_hosts
+    WHERE enrollment_request_id = ?
+    ORDER BY id DESC
+    LIMIT 1
+  `).get(enrollmentRequestId) as OpenClawHostRow | undefined
+
+  return row ?? null
+}
+
+export function listOpenClawHosts(db: DB): OpenClawHostRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_hosts
+    ORDER BY
+      CASE status
+        WHEN 'pending' THEN 0
+        WHEN 'active' THEN 1
+        ELSE 2
+      END ASC,
+      datetime(updated_at) DESC,
+      id DESC
+  `).all() as OpenClawHostRow[]
+}
+
+export function updateOpenClawHost(
+  db: DB,
+  input: {
+    id: number
+    label?: string | null
+    hostname?: string
+    os?: string
+    connectorVersion?: string
+    beamDirectoryUrl?: string
+    workspaceSlug?: string | null
+    status?: OpenClawHostStatus
+    healthStatus?: OpenClawHostHealth
+    routeCount?: number
+    credentialHash?: string | null
+    approvedAt?: string | null
+    approvedBy?: string | null
+    revokedAt?: string | null
+    revocationReason?: string | null
+    lastHeartbeatAt?: string | null
+    lastInventoryAt?: string | null
+    lastRouteEventAt?: string | null
+    metadataJson?: string | null
+  },
+): OpenClawHostRow | null {
+  const existing = getOpenClawHostById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE openclaw_hosts
+    SET label = ?,
+        hostname = ?,
+        os = ?,
+        connector_version = ?,
+        beam_directory_url = ?,
+        workspace_slug = ?,
+        status = ?,
+        health_status = ?,
+        route_count = ?,
+        credential_hash = ?,
+        approved_at = ?,
+        approved_by = ?,
+        revoked_at = ?,
+        revocation_reason = ?,
+        last_heartbeat_at = ?,
+        last_inventory_at = ?,
+        last_route_event_at = ?,
+        metadata_json = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.label === undefined ? existing.label : input.label,
+    input.hostname ?? existing.hostname,
+    input.os ?? existing.os,
+    input.connectorVersion ?? existing.connector_version,
+    input.beamDirectoryUrl ?? existing.beam_directory_url,
+    input.workspaceSlug === undefined ? existing.workspace_slug : input.workspaceSlug,
+    input.status ?? existing.status,
+    input.healthStatus ?? existing.health_status,
+    input.routeCount ?? existing.route_count,
+    input.credentialHash === undefined ? existing.credential_hash : input.credentialHash,
+    input.approvedAt === undefined ? existing.approved_at : input.approvedAt,
+    input.approvedBy === undefined ? existing.approved_by : input.approvedBy,
+    input.revokedAt === undefined ? existing.revoked_at : input.revokedAt,
+    input.revocationReason === undefined ? existing.revocation_reason : input.revocationReason,
+    input.lastHeartbeatAt === undefined ? existing.last_heartbeat_at : input.lastHeartbeatAt,
+    input.lastInventoryAt === undefined ? existing.last_inventory_at : input.lastInventoryAt,
+    input.lastRouteEventAt === undefined ? existing.last_route_event_at : input.lastRouteEventAt,
+    input.metadataJson === undefined ? existing.metadata_json : input.metadataJson,
+    nowIso(),
+    input.id,
+  )
+
+  return getOpenClawHostById(db, input.id)
+}
+
+export function listOpenClawHostRoutes(db: DB, hostId: number): OpenClawHostRouteRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_routes
+    WHERE host_id = ?
+    ORDER BY
+      CASE runtime_session_state
+        WHEN 'conflict' THEN 0
+        WHEN 'live' THEN 1
+        WHEN 'idle' THEN 2
+        WHEN 'stale' THEN 3
+        WHEN 'ended' THEN 4
+        ELSE 5
+      END ASC,
+      beam_id ASC,
+      route_key ASC
+  `).all(hostId) as OpenClawHostRouteRow[]
+}
+
+export function listOpenClawResolvedRoutesByBeamId(db: DB, beamId: string): OpenClawResolvedRouteRow[] {
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db, [beamId])
+
+  return db.prepare(`
+    SELECT
+      r.*,
+      h.label AS host_label,
+      h.hostname,
+      h.status AS host_status,
+      h.health_status AS host_health_status,
+      h.workspace_slug AS host_workspace_slug,
+      h.last_heartbeat_at AS host_last_heartbeat_at
+    FROM openclaw_host_routes r
+    JOIN openclaw_hosts h ON h.id = r.host_id
+    WHERE r.beam_id = ?
+    ORDER BY
+      CASE r.runtime_session_state
+        WHEN 'conflict' THEN 0
+        WHEN 'live' THEN 1
+        WHEN 'idle' THEN 2
+        WHEN 'stale' THEN 3
+        WHEN 'ended' THEN 4
+        ELSE 5
+      END ASC,
+      h.id ASC,
+      r.route_key ASC
+  `).all(beamId) as OpenClawResolvedRouteRow[]
+}
+
+export function listOpenClawResolvedRoutesForHost(db: DB, hostId: number): OpenClawResolvedRouteRow[] {
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db)
+
+  return db.prepare(`
+    SELECT
+      r.*,
+      h.label AS host_label,
+      h.hostname,
+      h.status AS host_status,
+      h.health_status AS host_health_status,
+      h.workspace_slug AS host_workspace_slug,
+      h.last_heartbeat_at AS host_last_heartbeat_at
+    FROM openclaw_host_routes r
+    JOIN openclaw_hosts h ON h.id = r.host_id
+    WHERE r.host_id = ?
+    ORDER BY
+      CASE r.runtime_session_state
+        WHEN 'conflict' THEN 0
+        WHEN 'live' THEN 1
+        WHEN 'idle' THEN 2
+        WHEN 'stale' THEN 3
+        WHEN 'ended' THEN 4
+        ELSE 5
+      END ASC,
+      r.beam_id ASC,
+      r.route_key ASC
+  `).all(hostId) as OpenClawResolvedRouteRow[]
+}
+
+export function listOpenClawHostRoutesByBeamId(db: DB, beamId: string): OpenClawHostRouteRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_routes
+    WHERE beam_id = ?
+    ORDER BY host_id ASC, route_key ASC
+  `).all(beamId) as OpenClawHostRouteRow[]
+}
+
+export function listOpenClawRoutesForWorkspace(db: DB, workspaceSlug: string): OpenClawHostRouteRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_routes
+    WHERE workspace_slug = ?
+    ORDER BY host_id ASC, beam_id ASC
+  `).all(workspaceSlug) as OpenClawHostRouteRow[]
+}
+
+export function getOpenClawHostRouteById(db: DB, id: number): OpenClawHostRouteRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_host_routes
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OpenClawHostRouteRow | undefined
+
+  return row ?? null
+}
+
+export function listOpenClawHostHeartbeats(db: DB, hostId: number, limit = 20): OpenClawHostHeartbeatRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_heartbeats
+    WHERE host_id = ?
+    ORDER BY datetime(heartbeat_at) DESC, id DESC
+    LIMIT ?
+  `).all(hostId, Math.max(1, Math.trunc(limit))) as OpenClawHostHeartbeatRow[]
+}
+
+function updateOpenClawHostRouteCount(db: DB, hostId: number): void {
+  const row = db.prepare(`
+    SELECT COUNT(*) AS count
+    FROM openclaw_host_routes
+    WHERE host_id = ? AND reported_state != 'ended'
+  `).get(hostId) as { count: number } | undefined
+
+  db.prepare(`
+    UPDATE openclaw_hosts
+    SET route_count = ?, updated_at = ?
+    WHERE id = ?
+  `).run(row?.count ?? 0, nowIso(), hostId)
+}
+
+export function refreshOpenClawHostHealth(db: DB): void {
+  const nowMs = Date.now()
+  const hosts = listOpenClawHosts(db)
+  for (const host of hosts) {
+    const nextHealth = computeOpenClawHostHealthStatus(host, nowMs)
+    if (nextHealth !== host.health_status) {
+      db.prepare(`
+        UPDATE openclaw_hosts
+        SET health_status = ?, updated_at = ?
+        WHERE id = ?
+      `).run(nextHealth, nowIso(), host.id)
+    }
+  }
+}
+
+export function recalculateOpenClawRouteStates(db: DB, beamIds?: string[]): void {
+  refreshOpenClawHostHealth(db)
+  const uniqueBeamIds = beamIds && beamIds.length > 0
+    ? [...new Set(beamIds)]
+    : (db.prepare(`
+        SELECT DISTINCT beam_id
+        FROM openclaw_host_routes
+      `).all() as Array<{ beam_id: string }>).map((row) => row.beam_id)
+
+  for (const beamId of uniqueBeamIds) {
+    const rows = db.prepare(`
+      SELECT
+        r.*,
+        h.status AS host_status,
+        h.health_status AS host_health_status
+      FROM openclaw_host_routes r
+      JOIN openclaw_hosts h ON h.id = r.host_id
+      WHERE r.beam_id = ?
+      ORDER BY r.host_id ASC, r.route_key ASC
+    `).all(beamId) as Array<OpenClawHostRouteRow & {
+      host_status: OpenClawHostStatus
+      host_health_status: OpenClawHostHealth
+    }>
+
+    const eligible = rows.filter((row) =>
+      row.host_status === 'active' &&
+      row.host_health_status !== 'stale' &&
+      row.host_health_status !== 'revoked' &&
+      row.reported_state !== 'ended'
+    )
+
+    const conflict = eligible.length > 1
+    const updatedAt = nowIso()
+    for (const row of rows) {
+      let nextState: OpenClawRouteRuntimeState
+      if (row.host_status === 'revoked' || row.host_health_status === 'revoked') {
+        nextState = 'revoked'
+      } else if (row.reported_state === 'ended') {
+        nextState = 'ended'
+      } else if (conflict && eligible.some((entry) => entry.id === row.id)) {
+        nextState = 'conflict'
+      } else if (row.host_status !== 'active' || row.host_health_status === 'stale') {
+        nextState = 'stale'
+      } else {
+        nextState = row.reported_state
+      }
+
+      if (nextState !== row.runtime_session_state) {
+        db.prepare(`
+          UPDATE openclaw_host_routes
+          SET runtime_session_state = ?, updated_at = ?
+          WHERE id = ?
+        `).run(nextState, updatedAt, row.id)
+      }
+    }
+  }
+}
+
+export function recordOpenClawHostHeartbeat(
+  db: DB,
+  input: {
+    hostId: number
+    routeCount: number
+    connectorVersion: string
+    detailsJson?: string | null
+    heartbeatAt?: string
+  },
+): OpenClawHostHeartbeatRow {
+  const heartbeatAt = input.heartbeatAt ?? nowIso()
+  const host = getOpenClawHostById(db, input.hostId)
+  if (!host) {
+    throw new Error(`OpenClaw host ${input.hostId} not found`)
+  }
+
+  const healthStatus = computeOpenClawHostHealthStatus({
+    status: host.status,
+    last_heartbeat_at: heartbeatAt,
+  })
+  const result = db.prepare(`
+    INSERT INTO openclaw_host_heartbeats (
+      host_id,
+      route_count,
+      connector_version,
+      health_status,
+      details_json,
+      heartbeat_at
+    ) VALUES (?, ?, ?, ?, ?, ?)
+  `).run(
+    input.hostId,
+    input.routeCount,
+    input.connectorVersion,
+    healthStatus,
+    input.detailsJson ?? null,
+    heartbeatAt,
+  )
+
+  updateOpenClawHost(db, {
+    id: input.hostId,
+    connectorVersion: input.connectorVersion,
+    routeCount: input.routeCount,
+    lastHeartbeatAt: heartbeatAt,
+    healthStatus,
+  })
+  recalculateOpenClawRouteStates(db)
+
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_host_heartbeats
+    WHERE id = ?
+  `).get(Number(result.lastInsertRowid)) as OpenClawHostHeartbeatRow
+}
+
+export function syncOpenClawHostRoutes(
+  db: DB,
+  input: {
+    hostId: number
+    syncedAt?: string
+    routes: Array<{
+      beamId: string
+      workspaceSlug?: string | null
+      routeSource: OpenClawRouteSource
+      routeKey: string
+      runtimeType?: string | null
+      label?: string | null
+      connectionMode?: OpenClawHostRouteRow['connection_mode']
+      httpEndpoint?: string | null
+      sessionKey?: string | null
+      reportedState?: OpenClawRouteReportedState
+      metadataJson?: string | null
+      lastSeenAt?: string | null
+      endedAt?: string | null
+    }>
+  },
+): OpenClawHostRouteRow[] {
+  const syncedAt = input.syncedAt ?? nowIso()
+  const touchedBeamIds = new Set<string>()
+  const presentKeys = new Set<string>()
+
+  for (const route of input.routes) {
+    const presentKey = `${route.beamId}::${route.routeKey}`
+    presentKeys.add(presentKey)
+    touchedBeamIds.add(route.beamId)
+
+    const existing = db.prepare(`
+      SELECT *
+      FROM openclaw_host_routes
+      WHERE host_id = ? AND beam_id = ? AND route_key = ?
+      LIMIT 1
+    `).get(input.hostId, route.beamId, route.routeKey) as OpenClawHostRouteRow | undefined
+
+    const reportedState = normalizeOpenClawReportedState(route.reportedState)
+    const lastSeenAt = route.lastSeenAt ?? syncedAt
+    const endedAt = reportedState === 'ended' ? nowIsoOr(route.endedAt) : null
+    if (existing) {
+      db.prepare(`
+        UPDATE openclaw_host_routes
+        SET workspace_slug = ?,
+            route_source = ?,
+            runtime_type = ?,
+            label = ?,
+            connection_mode = ?,
+            http_endpoint = ?,
+            session_key = ?,
+            reported_state = ?,
+            metadata_json = ?,
+            last_seen_at = ?,
+            ended_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(
+        route.workspaceSlug ?? null,
+        route.routeSource,
+        route.runtimeType ?? null,
+        route.label ?? null,
+        route.connectionMode ?? null,
+        route.httpEndpoint ?? null,
+        route.sessionKey ?? null,
+        reportedState,
+        route.metadataJson ?? null,
+        lastSeenAt,
+        endedAt,
+        syncedAt,
+        existing.id,
+      )
+    } else {
+      db.prepare(`
+        INSERT INTO openclaw_host_routes (
+          host_id,
+          beam_id,
+          workspace_slug,
+          route_source,
+          route_key,
+          runtime_type,
+          label,
+          connection_mode,
+          http_endpoint,
+          session_key,
+          reported_state,
+          runtime_session_state,
+          metadata_json,
+          last_seen_at,
+          ended_at,
+          created_at,
+          updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        input.hostId,
+        route.beamId,
+        route.workspaceSlug ?? null,
+        route.routeSource,
+        route.routeKey,
+        route.runtimeType ?? null,
+        route.label ?? null,
+        route.connectionMode ?? null,
+        route.httpEndpoint ?? null,
+        route.sessionKey ?? null,
+        reportedState,
+        reportedState === 'ended' ? 'ended' : reportedState,
+        route.metadataJson ?? null,
+        lastSeenAt,
+        endedAt,
+        syncedAt,
+        syncedAt,
+      )
+    }
+  }
+
+  const existingRoutes = listOpenClawHostRoutes(db, input.hostId)
+  for (const route of existingRoutes) {
+    const routeKey = `${route.beam_id}::${route.route_key}`
+    if (presentKeys.has(routeKey)) {
+      continue
+    }
+
+    touchedBeamIds.add(route.beam_id)
+    if (route.reported_state !== 'ended' || !route.ended_at) {
+      db.prepare(`
+        UPDATE openclaw_host_routes
+        SET reported_state = 'ended',
+            ended_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(syncedAt, syncedAt, route.id)
+    }
+  }
+
+  updateOpenClawHost(db, {
+    id: input.hostId,
+    lastInventoryAt: syncedAt,
+  })
+  updateOpenClawHostRouteCount(db, input.hostId)
+  recalculateOpenClawRouteStates(db, [...touchedBeamIds])
+
+  return listOpenClawHostRoutes(db, input.hostId)
+}
+
+export function applyOpenClawHostRouteEvents(
+  db: DB,
+  input: {
+    hostId: number
+    eventAt?: string
+    events: Array<{
+      beamId: string
+      routeKey: string
+      routeSource: OpenClawRouteSource
+      reportedState?: OpenClawRouteReportedState
+      runtimeType?: string | null
+      label?: string | null
+      workspaceSlug?: string | null
+      sessionKey?: string | null
+      connectionMode?: OpenClawHostRouteRow['connection_mode']
+      httpEndpoint?: string | null
+      metadataJson?: string | null
+    }>
+  },
+): OpenClawHostRouteRow[] {
+  const eventAt = input.eventAt ?? nowIso()
+  const routes = input.events.map((event) => ({
+    beamId: event.beamId,
+    workspaceSlug: event.workspaceSlug ?? null,
+    routeSource: event.routeSource,
+    routeKey: event.routeKey,
+    runtimeType: event.runtimeType ?? null,
+    label: event.label ?? null,
+    connectionMode: event.connectionMode ?? null,
+    httpEndpoint: event.httpEndpoint ?? null,
+    sessionKey: event.sessionKey ?? null,
+    reportedState: normalizeOpenClawReportedState(event.reportedState),
+    metadataJson: event.metadataJson ?? null,
+    lastSeenAt: eventAt,
+    endedAt: event.reportedState === 'ended' ? eventAt : null,
+  }))
+  const updated = syncOpenClawHostRoutes(db, {
+    hostId: input.hostId,
+    syncedAt: eventAt,
+    routes: [
+      ...listOpenClawHostRoutes(db, input.hostId)
+        .filter((route) => !input.events.some((event) => event.beamId === route.beam_id && event.routeKey === route.route_key))
+        .map((route) => ({
+          beamId: route.beam_id,
+          workspaceSlug: route.workspace_slug,
+          routeSource: route.route_source,
+          routeKey: route.route_key,
+          runtimeType: route.runtime_type,
+          label: route.label,
+          connectionMode: route.connection_mode,
+          httpEndpoint: route.http_endpoint,
+          sessionKey: route.session_key,
+          reportedState: route.reported_state,
+          metadataJson: route.metadata_json,
+          lastSeenAt: route.last_seen_at,
+          endedAt: route.ended_at,
+        })),
+      ...routes,
+    ],
+  })
+
+  updateOpenClawHost(db, {
+    id: input.hostId,
+    lastRouteEventAt: eventAt,
+  })
+
+  return updated
+}
+
+export function approveOpenClawHost(
+  db: DB,
+  input: {
+    id: number
+    approvedBy: string
+  },
+): { host: OpenClawHostRow; credential: string } | null {
+  const host = getOpenClawHostById(db, input.id)
+  if (!host) {
+    return null
+  }
+
+  const credential = createHostApiKey(host.host_key)
+  const approvedAt = nowIso()
+  const updated = updateOpenClawHost(db, {
+    id: input.id,
+    status: 'active',
+    healthStatus: computeOpenClawHostHealthStatus({
+      status: 'active',
+      last_heartbeat_at: host.last_heartbeat_at,
+    }),
+    credentialHash: hashApiKey(credential),
+    approvedAt,
+    approvedBy: input.approvedBy,
+    revokedAt: null,
+    revocationReason: null,
+  })
+
+  if (!updated) {
+    return null
+  }
+
+  if (updated.enrollment_request_id) {
+    updateOpenClawEnrollmentRequest(db, {
+      id: updated.enrollment_request_id,
+      status: 'approved',
+      claimedHostId: updated.id,
+      approvedAt,
+      approvedBy: input.approvedBy,
+    })
+  }
+
+  recalculateOpenClawRouteStates(db)
+  return {
+    host: getOpenClawHostById(db, updated.id) as OpenClawHostRow,
+    credential,
+  }
+}
+
+export function revokeOpenClawHost(
+  db: DB,
+  input: {
+    id: number
+    reason?: string | null
+  },
+): OpenClawHostRow | null {
+  const host = getOpenClawHostById(db, input.id)
+  if (!host) {
+    return null
+  }
+
+  const affectedBeamIds = listOpenClawHostRoutes(db, input.id).map((route) => route.beam_id)
+  const revokedAt = nowIso()
+  const updated = updateOpenClawHost(db, {
+    id: input.id,
+    status: 'revoked',
+    healthStatus: 'revoked',
+    revokedAt,
+    revocationReason: input.reason ?? null,
+  })
+
+  if (host.enrollment_request_id) {
+    updateOpenClawEnrollmentRequest(db, {
+      id: host.enrollment_request_id,
+      status: 'revoked',
+      revokedAt,
+    })
+  }
+
+  db.prepare(`
+    UPDATE openclaw_host_routes
+    SET runtime_session_state = 'revoked',
+        updated_at = ?
+    WHERE host_id = ?
+  `).run(revokedAt, input.id)
+
+  recalculateOpenClawRouteStates(db, affectedBeamIds)
+  return updated
 }
 
 function updatePairTrustScore(

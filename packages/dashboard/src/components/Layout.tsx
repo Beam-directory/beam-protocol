@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
-import { Activity, BellDot, Bot, Building2, FileText, Globe2, Inbox, Menu, Moon, Radio, ScrollText, Settings, Shield, Sun, TriangleAlert, TrendingUp, UserPlus, X, Zap } from 'lucide-react'
+import { Activity, BellDot, Bot, Building2, FileText, Globe2, Inbox, Menu, Moon, Radio, ScrollText, ServerCog, Settings, Shield, Sun, TriangleAlert, TrendingUp, UserPlus, X, Zap } from 'lucide-react'
 import { useAdminAuth } from '../lib/admin-auth'
 import { cn } from '../lib/utils'
 import { useThemeMode } from '../lib/theme'
@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { path: '/inbox', label: 'Inbox', icon: BellDot },
   { path: '/beta-requests', label: 'Beta Requests', icon: FileText },
   { path: '/partner-ops', label: 'Partner Ops', icon: TriangleAlert },
+  { path: '/openclaw-fleet', label: 'OpenClaw Fleet', icon: ServerCog },
   { path: '/workspaces', label: 'Workspaces', icon: Building2 },
   { path: '/dead-letter', label: 'Dead Letters', icon: Inbox },
   { path: '/register', label: 'Register', icon: UserPlus },

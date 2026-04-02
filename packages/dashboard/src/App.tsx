@@ -14,6 +14,7 @@ import FunnelPage from './pages/FunnelPage'
 import IntentsPage from './pages/IntentsPage'
 import LoginPage from './pages/LoginPage'
 import OperatorInboxPage from './pages/OperatorInboxPage'
+import OpenClawFleetPage from './pages/OpenClawFleetPage'
 import OverviewPage from './pages/OverviewPage'
 import PartnerOpsPage from './pages/PartnerOpsPage'
 import RegisterPage from './pages/RegisterPage'
@@ -63,6 +64,7 @@ export default function App() {
             <Route path="inbox" element={<OperatorInboxPage />} />
             <Route path="beta-requests" element={<BetaRequestsPage />} />
             <Route path="partner-ops" element={<PartnerOpsPage />} />
+            <Route path="openclaw-fleet" element={<OpenClawFleetPage />} />
             <Route path="workspaces" element={<WorkspacesPage />} />
             <Route path="dead-letter" element={<DeadLetterPage />} />
             <Route path="register" element={<RegisterPage />} />

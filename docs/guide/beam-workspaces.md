@@ -101,6 +101,42 @@ That command will:
 The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.
 It also installs the local OpenClaw receiver service, which keeps Beam WebSocket connections open for imported identities and forwards incoming intents into the matching OpenClaw runtime session.
 
+## OpenClaw Fleet
+
+Beam now has a first-class OpenClaw Fleet surface for one central control plane with multiple approved hosts.
+
+The dashboard page is:
+
+- `http://localhost:43173/openclaw-fleet`
+
+That fleet view is where operators can:
+
+- issue enrollment tokens for new OpenClaw hosts
+- wait for manual host approval or approve a pending host explicitly
+- inspect host health, last heartbeat, route counts, and attached identities
+- see duplicate identity conflicts before a route silently wins
+- revoke a host and disable its routes immediately
+
+The default local setup command now installs the unified host daemon product:
+
+```bash
+npm run workspace:openclaw-setup
+```
+
+For a foreground host process, use:
+
+```bash
+npm run workspace:openclaw-host
+```
+
+For a one-command fleet smoke, use:
+
+```bash
+npm run workspace:fleet-smoke
+```
+
+The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
+
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:
 
 ```bash

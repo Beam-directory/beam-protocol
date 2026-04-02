@@ -1,194 +1,104 @@
 import path from 'node:path'
-import { formatDate, formatDateTime, optionalFlag, requestJson, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
-import { startWorkspaceHarness } from './shared.mjs'
+import { formatDate, formatDateTime, optionalFlag, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { startOpenClawFleetHarness } from './fleet-shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.1.0-operator-dry-run.md'))
+const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.2.0-operator-dry-run.md'))
 
 async function main() {
-  const {
-    harness,
-    token,
-    workspaceSlug,
-    workflowType,
-    failedNonce,
-    localBindingId,
-    partnerBindingId,
-    partnerChannelId,
-    blockedThreadId,
-    linkedThreadId,
-  } = await startWorkspaceHarness()
+  const fleet = await startOpenClawFleetHarness()
 
   try {
-    const adminHeaders = {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
+    const overview = await fleet.fetchFleetOverview()
+    if (overview.summary.totalHosts !== 3 || overview.summary.activeHosts !== 3) {
+      throw new Error(`Expected 3 approved active hosts, found ${overview.summary.activeHosts}/${overview.summary.totalHosts}`)
+    }
+    if (overview.summary.liveRoutes < 3) {
+      throw new Error(`Expected at least 3 live fleet routes, found ${overview.summary.liveRoutes}`)
     }
 
-    await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/identities/${localBindingId}`, {
-      method: 'PATCH',
-      headers: adminHeaders,
-      body: JSON.stringify({
-        canInitiateExternal: true,
-        notes: 'Operator approved the runtime for external motion after checking the workflow rule.',
-      }),
-    })
-
-    await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/partner-channels/${partnerChannelId}`, {
-      method: 'PATCH',
-      headers: adminHeaders,
-      body: JSON.stringify({
-        owner: harness.adminEmail,
-        notes: 'Operator assigned the partner channel to the current workspace owner for live follow-up.',
-      }),
-    })
-
-    await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/threads`, {
-      method: 'POST',
-      headers: adminHeaders,
-      body: JSON.stringify({
-        kind: 'handoff',
-        title: 'Invoice appeal blocked draft',
-        summary: 'Escalated draft that stays blocked until the approver signs off.',
-        owner: harness.adminEmail,
-        status: 'blocked',
-        workflowType: `${workflowType}.appeal`,
-        participants: [
-          {
-            principalId: 'procurement@acme.beam.directory',
-            principalType: 'agent',
-            beamId: 'procurement@acme.beam.directory',
-            workspaceBindingId: localBindingId,
-            role: 'owner',
-          },
-          {
-            principalId: 'finance@northwind.beam.directory',
-            principalType: 'partner',
-            beamId: 'finance@northwind.beam.directory',
-            workspaceBindingId: partnerBindingId,
-            role: 'participant',
-          },
-        ],
-      }),
-    })
-
-    await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/policy`, {
-      method: 'PATCH',
-      headers: adminHeaders,
-      body: JSON.stringify({
-        defaults: {
-          externalInitiation: 'binding',
-          allowedPartners: ['finance@northwind.beam.directory'],
-        },
-        workflowRules: [
-          {
-            workflowType,
-            requireApproval: true,
-            allowedPartners: ['finance@northwind.beam.directory'],
-            approvers: [harness.adminEmail],
-          },
-          {
-            workflowType: `${workflowType}.appeal`,
-            requireApproval: true,
-            allowedPartners: ['finance@northwind.beam.directory'],
-            approvers: [harness.adminEmail],
-          },
-        ],
-        metadata: {
-          notes: 'Operator verified both the baseline invoice review and the appeal path.',
-        },
-      }),
-    })
-
-    const [overview, identities, channels, threads, blockedThread, linkedThread, policy, timeline, digest] = await Promise.all([
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/overview`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/identities`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/partner-channels`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/threads`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/threads/${blockedThreadId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/threads/${linkedThreadId}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/policy`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/timeline?limit=40`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-      requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/digest?days=7`, {
-        headers: { Authorization: `Bearer ${token}` },
-      }),
-    ])
-
-    const localBinding = identities.bindings.find((entry) => entry.id === localBindingId)
-    if (!localBinding || localBinding.canInitiateExternal !== true) {
-      throw new Error('Workspace operator dry run did not persist the binding approval action.')
+    const workspaceIdentities = await fleet.fetchWorkspaceIdentities()
+    if (workspaceIdentities.total !== 3) {
+      throw new Error(`Expected 3 workspace identities in the fleet workspace, found ${workspaceIdentities.total}`)
+    }
+    if (workspaceIdentities.bindings.some((binding) => !binding.hostId || binding.hostHealth !== 'healthy' || binding.runtimeSessionState !== 'live')) {
+      throw new Error('Expected all workspace fleet bindings to expose a healthy host badge and live runtime session state.')
     }
 
-    const partnerChannel = channels.channels.find((entry) => entry.id === partnerChannelId)
-    if (!partnerChannel || partnerChannel.owner !== harness.adminEmail) {
-      throw new Error('Workspace operator dry run did not persist the partner channel owner assignment.')
+    const betaHost = await fleet.fetchHost(fleet.hosts.beta.id)
+    if (betaHost.host.status !== 'active' || betaHost.host.healthStatus !== 'healthy') {
+      throw new Error('Expected the selected fleet host to be active and healthy.')
+    }
+    if (betaHost.routes.length !== 1 || betaHost.identities.length !== 1) {
+      throw new Error('Expected the selected fleet host to expose one live route and one attached identity.')
+    }
+    if ((betaHost.heartbeats?.length ?? 0) < 1) {
+      throw new Error('Expected at least one recorded fleet heartbeat for the selected host.')
     }
 
-    if (!linkedThread.thread.trace?.href || !linkedThread.thread.trace.href.includes(failedNonce)) {
-      throw new Error('Workspace linked handoff thread detail is missing the Beam trace.')
+    await fleet.createConflict()
+    const conflictOverview = await fleet.fetchFleetOverview()
+    if (conflictOverview.summary.duplicateIdentityConflicts !== 1) {
+      throw new Error(`Expected 1 duplicate identity conflict, found ${conflictOverview.summary.duplicateIdentityConflicts}`)
     }
 
-    if (policy.previews.workflows.length < 2) {
-      throw new Error('Workspace policy preview did not include the additional appeal workflow.')
+    const gammaConflict = await fleet.fetchHost(fleet.hosts.gamma.id)
+    const duplicateAlphaRoute = gammaConflict.routes.find((route) => route.beamId === fleet.agents.alpha.beamId)
+    if (!duplicateAlphaRoute || duplicateAlphaRoute.runtimeSessionState !== 'conflict') {
+      throw new Error('Expected the duplicate alpha route to surface as a conflict on the gamma host.')
     }
 
-    if (timeline.total < 6) {
-      throw new Error(`Expected at least 6 workspace timeline entries, found ${timeline.total}`)
+    await fleet.revokeHost('gamma', 'duplicate identity conflict drill')
+    const revokedOverview = await fleet.fetchFleetOverview()
+    if (revokedOverview.summary.revokedHosts !== 1 || revokedOverview.summary.duplicateIdentityConflicts !== 0) {
+      throw new Error('Expected revoking the gamma host to clear the conflict and mark one host revoked.')
+    }
+
+    const gammaRevoked = await fleet.fetchHost(fleet.hosts.gamma.id)
+    if (gammaRevoked.host.status !== 'revoked' || gammaRevoked.host.healthStatus !== 'revoked') {
+      throw new Error('Expected the gamma host to show revoked status and revoked health.')
+    }
+
+    const workspaceAfterRevoke = await fleet.fetchWorkspaceIdentities()
+    const alphaBinding = workspaceAfterRevoke.bindings.find((binding) => binding.beamId === fleet.agents.alpha.beamId)
+    const gammaBinding = workspaceAfterRevoke.bindings.find((binding) => binding.beamId === fleet.agents.gamma.beamId)
+    if (!alphaBinding || alphaBinding.runtimeSessionState !== 'live') {
+      throw new Error('Expected the alpha binding to return to a live route after the duplicate host was revoked.')
+    }
+    if (!gammaBinding || gammaBinding.hostHealth !== 'revoked' || gammaBinding.runtimeSessionState !== 'revoked') {
+      throw new Error('Expected the revoked gamma binding to surface revoked host state in the workspace roster.')
     }
 
     const result = {
       ok: true,
       date: formatDate(),
-      workspace: overview.workspace.slug,
-      localBinding: {
-        id: localBinding.id,
-        canInitiateExternal: localBinding.canInitiateExternal,
-        lifecycleStatus: localBinding.lifecycleStatus,
-      },
-      partnerChannel: {
-        id: partnerChannel.id,
-        healthStatus: partnerChannel.healthStatus,
-        owner: partnerChannel.owner,
-      },
-      blockedThread: {
-        id: blockedThread.thread.id,
-        status: blockedThread.thread.status,
-        traceHref: blockedThread.thread.trace?.href ?? null,
-      },
-      linkedThread: {
-        id: linkedThread.thread.id,
-        status: linkedThread.thread.status,
-        traceHref: linkedThread.thread.trace?.href ?? null,
-      },
+      workspace: fleet.workspaceSlug,
       summary: overview.summary,
-      digestSummary: digest.summary,
-      policyWorkflows: policy.previews.workflows.map((entry) => entry.workflowType),
-      threadCount: threads.total,
-      timelineEntries: timeline.total,
+      selectedHost: {
+        id: betaHost.host.id,
+        label: betaHost.host.label,
+        routeCount: betaHost.routes.length,
+        identityCount: betaHost.identities.length,
+        heartbeatCount: betaHost.heartbeats.length,
+      },
+      conflict: {
+        total: conflictOverview.summary.duplicateIdentityConflicts,
+        beamId: duplicateAlphaRoute.beamId,
+        routeState: duplicateAlphaRoute.runtimeSessionState,
+      },
+      revoked: {
+        hostId: gammaRevoked.host.id,
+        status: gammaRevoked.host.status,
+        healthStatus: gammaRevoked.host.healthStatus,
+      },
     }
 
-    const markdown = `# Beam 1.1.0 Operator Dry Run
+    const markdown = `# Beam 1.2.0 Operator Dry Run
 
 ## Context
 
 - run date: \`${formatDate()}\`
 - generated at: \`${formatDateTime()}\`
-- environment: local workspace harness
+- environment: local three-host OpenClaw fleet harness
 
 ## Result
 
@@ -196,21 +106,20 @@ async function main() {
 
 ## Scenario
 
-1. Approve the local runtime binding for external motion.
-2. Assign the blocked partner channel to the current operator.
-3. Create a second blocked handoff draft for the appeal path.
-4. Patch the workspace policy to cover both workflow variants.
-5. Re-open overview, identities, partner channels, thread detail, timeline, and digest.
+1. Bootstrap three approved OpenClaw hosts into one central Beam control plane.
+2. Verify the fleet overview, selected host detail, and workspace host badges.
+3. Introduce a duplicate Beam identity on a second host and confirm the operator-visible conflict surface.
+4. Revoke the conflicting host and confirm the duplicate clears while the revoked routes remain blocked and visible.
 
 ## Verification
 
-- Local binding external-ready: \`${localBinding.canInitiateExternal}\`
-- Partner channel owner: \`${partnerChannel.owner}\`
-- Blocked draft status: \`${blockedThread.thread.status}\`
-- Linked trace: \`${linkedThread.thread.trace?.href}\`
-- Policy workflows: \`${policy.previews.workflows.length}\`
-- Timeline entries: \`${timeline.total}\`
-- Digest action items: \`${digest.summary.actionItems}\`
+- Approved active hosts: \`${overview.summary.activeHosts}\`
+- Live routes: \`${overview.summary.liveRoutes}\`
+- Selected host identities: \`${betaHost.identities.length}\`
+- Duplicate conflicts after injection: \`${conflictOverview.summary.duplicateIdentityConflicts}\`
+- Revoked hosts after remediation: \`${revokedOverview.summary.revokedHosts}\`
+- Alpha route after revoke: \`${alphaBinding.runtimeSessionState}\`
+- Gamma route after revoke: \`${gammaBinding.runtimeSessionState}\`
 
 ## Evidence
 
@@ -220,7 +129,7 @@ ${toJsonBlock(result)}
     await writeMarkdownReport(outputPath, markdown)
     console.log(JSON.stringify({ ...result, report: outputPath }, null, 2))
   } finally {
-    await harness.cleanup()
+    await fleet.cleanup()
   }
 }
 

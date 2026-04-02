@@ -25,6 +25,12 @@ export type WorkspacePartnerChannelHealth = 'healthy' | 'watch' | 'critical'
 export type WorkspaceTimelineEventKind = 'workspace' | 'policy' | 'identity' | 'partner_channel' | 'thread' | 'digest'
 export type WorkspacePolicyDefaultExternalInitiation = 'binding' | 'deny'
 export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
+export type OpenClawHostStatus = 'pending' | 'active' | 'revoked'
+export type OpenClawHostHealth = 'pending' | 'healthy' | 'watch' | 'stale' | 'revoked'
+export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
+export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
+export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
+export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -152,6 +158,11 @@ export interface WorkspaceIdentityBinding {
     httpEndpoint: string | null
     deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
   }
+  hostId: number | null
+  hostLabel: string | null
+  hostHealth: OpenClawHostHealth | 'conflict' | null
+  routeSource: OpenClawRouteSource | null
+  runtimeSessionState: OpenClawRouteRuntimeState | null
   identity: {
     existsLocally: boolean
     beamId: string
@@ -203,6 +214,188 @@ export interface WorkspaceIdentityBinding {
       allowedPartners: string[]
     } | null
   }
+}
+
+export interface OpenClawEnrollmentRequest {
+  id: number
+  label: string | null
+  workspaceSlug: string | null
+  notes: string | null
+  status: OpenClawHostEnrollmentStatus
+  claimedHostId: number | null
+  claimedAt: string | null
+  approvedAt: string | null
+  approvedBy: string | null
+  revokedAt: string | null
+  expiresAt: string | null
+  createdAt: string
+  updatedAt: string
+  token?: string
+}
+
+export interface OpenClawHostRoute {
+  id: number
+  beamId: string
+  workspaceSlug: string | null
+  workspace: {
+    id: number
+    slug: string
+    name: string
+  } | null
+  routeSource: OpenClawRouteSource
+  routeKey: string
+  runtimeType: string | null
+  label: string | null
+  displayName: string | null
+  connectionMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
+  httpEndpoint: string | null
+  sessionKey: string | null
+  reportedState: OpenClawRouteReportedState
+  runtimeSessionState: OpenClawRouteRuntimeState
+  hostId: number
+  hostLabel: string | null
+  hostHealth: OpenClawHostHealth
+  metadata: Record<string, unknown> | null
+  lastSeenAt: string | null
+  endedAt: string | null
+  createdAt: string
+  updatedAt: string
+  bindings: Array<{
+    id: number
+    workspaceId: number
+    bindingType: WorkspaceBindingType
+    status: WorkspaceBindingStatus
+    owner: string | null
+    runtimeType: string | null
+  }>
+}
+
+export interface OpenClawHostSummary {
+  id: number
+  hostKey: string
+  label: string | null
+  hostname: string
+  os: string
+  connectorVersion: string
+  beamDirectoryUrl: string
+  workspaceSlug: string | null
+  status: OpenClawHostStatus
+  healthStatus: OpenClawHostHealth
+  routeCount: number
+  approvedAt: string | null
+  approvedBy: string | null
+  revokedAt: string | null
+  revocationReason: string | null
+  lastHeartbeatAt: string | null
+  lastHeartbeatAgeHours: number | null
+  lastInventoryAt: string | null
+  lastRouteEventAt: string | null
+  createdAt: string
+  updatedAt: string
+  enrollment: OpenClawEnrollmentRequest | null
+  summary: {
+    total: number
+    live: number
+    idle: number
+    stale: number
+    conflict: number
+    ended: number
+  }
+}
+
+export interface OpenClawConflictGroup {
+  beamId: string
+  routeCount: number
+  routes: Array<{
+    hostId: number
+    hostLabel: string | null
+    hostname: string
+    workspaceSlug: string | null
+    routeKey: string
+    routeSource: OpenClawRouteSource
+  }>
+}
+
+export interface OpenClawFleetOverviewResponse {
+  summary: {
+    totalHosts: number
+    pendingHosts: number
+    activeHosts: number
+    revokedHosts: number
+    staleHosts: number
+    liveRoutes: number
+    staleRoutes: number
+    conflictRoutes: number
+    endedRoutes: number
+    duplicateIdentityConflicts: number
+  }
+  hosts: OpenClawHostSummary[]
+  conflicts: OpenClawConflictGroup[]
+}
+
+export interface OpenClawHostsResponse {
+  hosts: OpenClawHostSummary[]
+  total: number
+}
+
+export interface OpenClawHostRoutesResponse {
+  host: OpenClawHostSummary
+  routes: OpenClawHostRoute[]
+  total: number
+}
+
+export interface OpenClawHostIdentitiesResponse {
+  host: OpenClawHostSummary
+  identities: Array<{
+    beamId: string
+    displayName: string | null
+    org: string | null
+    route: OpenClawHostRoute
+    bindings: Array<{
+      id: number
+      workspaceId: number
+      workspaceSlug: string | null
+      workspaceName: string | null
+      bindingType: WorkspaceBindingType
+      status: WorkspaceBindingStatus
+      owner: string | null
+      runtimeType: string | null
+    }>
+  }>
+  total: number
+}
+
+export interface OpenClawHostDetailResponse {
+  host: OpenClawHostSummary
+  routes: OpenClawHostRoute[]
+  heartbeats: Array<{
+    id: number
+    routeCount: number
+    connectorVersion: string | null
+    healthStatus: OpenClawHostHealth
+    details: Record<string, unknown> | null
+    heartbeatAt: string
+  }>
+}
+
+export interface OpenClawEnrollmentCreateInput {
+  label?: string | null
+  workspaceSlug?: string | null
+  notes?: string | null
+  expiresInHours?: number | null
+}
+
+export interface OpenClawEnrollmentCreateResponse {
+  enrollment: OpenClawEnrollmentRequest
+}
+
+export interface OpenClawHostApproveResponse {
+  host: OpenClawHostSummary
+  credential: string
+}
+
+export interface OpenClawHostRevokeResponse {
+  host: OpenClawHostSummary
 }
 
 export interface WorkspaceIdentitiesResponse {
@@ -1897,6 +2090,22 @@ export const directoryApi = {
     return request<AgentSearchResponse>(`/agents/search${query.toString() ? `?${query.toString()}` : ''}`)
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
+  getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
+  listOpenClawHosts: () => request<OpenClawHostsResponse>('/admin/openclaw/hosts', undefined, { admin: true }),
+  getOpenClawHost: (id: number) => request<OpenClawHostDetailResponse>(`/admin/openclaw/hosts/${id}`, undefined, { admin: true }),
+  getOpenClawHostRoutes: (id: number) => request<OpenClawHostRoutesResponse>(`/admin/openclaw/hosts/${id}/routes`, undefined, { admin: true }),
+  getOpenClawHostIdentities: (id: number) => request<OpenClawHostIdentitiesResponse>(`/admin/openclaw/hosts/${id}/identities`, undefined, { admin: true }),
+  createOpenClawEnrollment: (input: OpenClawEnrollmentCreateInput) => request<OpenClawEnrollmentCreateResponse>('/admin/openclaw/hosts/enrollment', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  approveOpenClawHost: (id: number) => request<OpenClawHostApproveResponse>(`/admin/openclaw/hosts/${id}/approve`, {
+    method: 'POST',
+  }, { admin: true }),
+  revokeOpenClawHost: (id: number, input?: { reason?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
   listWorkspaceIdentities: (slug: string) => request<WorkspaceIdentitiesResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities`, undefined, { admin: true }),
