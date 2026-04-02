@@ -142,7 +142,8 @@ function getOpenClawDeliveryBlock(
   }
 
   const conflictRoutes = routes.filter((route) => route.runtime_session_state === 'conflict')
-  if (conflictRoutes.length > 0) {
+  const deliverableRoute = routes.find((route) => route.runtime_session_state === 'live' || route.runtime_session_state === 'idle') ?? null
+  if (conflictRoutes.length > 0 && !deliverableRoute) {
     return {
       relayCode: 'FORBIDDEN',
       errorCode: 'HOST_ROUTE_CONFLICT',
@@ -154,7 +155,7 @@ function getOpenClawDeliveryBlock(
     }
   }
 
-  const preferredRoute = routes.find((route) => route.runtime_session_state !== 'ended') ?? routes[0]
+  const preferredRoute = deliverableRoute ?? routes.find((route) => route.runtime_session_state !== 'ended') ?? routes[0]
   if (preferredRoute.runtime_session_state === 'revoked' || preferredRoute.host_status === 'revoked' || preferredRoute.host_health_status === 'revoked') {
     return {
       relayCode: 'FORBIDDEN',

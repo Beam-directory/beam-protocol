@@ -177,9 +177,11 @@ export type WorkspaceTimelineEventKind = 'workspace' | 'policy' | 'identity' | '
 export type OpenClawHostStatus = 'pending' | 'active' | 'revoked'
 export type OpenClawHostHealth = 'pending' | 'healthy' | 'watch' | 'stale' | 'revoked'
 export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
+export type OpenClawHostCredentialState = 'missing' | 'ready' | 'rotation_pending' | 'recovery_pending' | 'revoked'
 export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
 export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
+export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
 
 export interface WorkspaceRow {
   id: number
@@ -279,6 +281,11 @@ export interface OpenClawHostRow {
   health_status: OpenClawHostHealth
   route_count: number
   credential_hash: string | null
+  credential_nonce: string | null
+  credential_state: OpenClawHostCredentialState
+  credential_issued_at: string | null
+  credential_rotated_at: string | null
+  recovery_completed_at: string | null
   approved_at: string | null
   approved_by: string | null
   revoked_at: string | null
@@ -322,6 +329,10 @@ export interface OpenClawHostRouteRow {
   session_key: string | null
   reported_state: OpenClawRouteReportedState
   runtime_session_state: OpenClawRouteRuntimeState
+  owner_resolution_state: OpenClawRouteOwnerResolutionState
+  owner_resolution_actor: string | null
+  owner_resolution_at: string | null
+  owner_resolution_note: string | null
   metadata_json: string | null
   last_seen_at: string | null
   ended_at: string | null
@@ -334,6 +345,7 @@ export interface OpenClawResolvedRouteRow extends OpenClawHostRouteRow {
   hostname: string
   host_status: OpenClawHostStatus
   host_health_status: OpenClawHostHealth
+  host_credential_state: OpenClawHostCredentialState
   host_workspace_slug: string | null
   host_last_heartbeat_at: string | null
 }

@@ -33,6 +33,7 @@ const autoApprove = process.argv.includes('--auto-approve')
 const rebuildStack = process.argv.includes('--rebuild')
 const statePath = optionalFlag('--state-path', path.join(os.homedir(), '.openclaw/workspace/secrets/beam-openclaw-host.json'))
 const sessionCachePath = optionalFlag('--admin-session-cache', path.join(os.homedir(), '.openclaw/workspace/secrets/beam-admin-session.json'))
+const credentialOverrideFlag = optionalFlag('--credential', null)
 
 const nodePath = process.execPath
 const hostAgentScriptPath = path.join(repoRoot, 'scripts/workspace/install-openclaw-host-agent.mjs')
@@ -595,6 +596,7 @@ async function statusCommand() {
   console.log(`- host key:         ${state.hostKey ?? 'not enrolled'}`)
   console.log(`- label:            ${state.label ?? buildHostMetadata(state).label}`)
   console.log(`- credential:       ${state.credential ? 'present' : 'missing'}`)
+  console.log(`- credential store: ${state.credentialStorage ?? 'unknown'}`)
   console.log(`- enrollment:       ${state.enrollmentStatus ?? 'none'}`)
   console.log(`- approved at:      ${state.approvedAt ?? 'pending'}`)
   console.log(`- revoked at:       ${state.revokedAt ?? 'no'}`)
@@ -607,6 +609,12 @@ async function statusCommand() {
     console.log(`- service:          ${serviceStatus.serviceLabel ?? 'beam-openclaw-host'}`)
     console.log(`- service installed:${serviceStatus.installed ? ' yes' : ' no'}`)
     console.log(`- service running:  ${serviceStatus.running ? 'yes' : 'no'}`)
+    if (typeof serviceStatus.enabled === 'boolean') {
+      console.log(`- service enabled:  ${serviceStatus.enabled ? 'yes' : 'no'}`)
+    }
+    if (typeof serviceStatus.activeState === 'string') {
+      console.log(`- service state:    ${serviceStatus.activeState}${serviceStatus.subState ? ` (${serviceStatus.subState})` : ''}`)
+    }
   }
   console.log('')
   console.log('Runtime discovery')
@@ -655,6 +663,41 @@ async function uninstallCommand() {
   uninstallManagedService()
   console.log('')
   console.log('Beam OpenClaw host service removed.')
+}
+
+async function useCredentialCommand() {
+  if (!credentialOverrideFlag) {
+    throw new Error('Missing --credential for beam-openclaw-host use-credential')
+  }
+
+  const existing = normalizeHostState(await loadOpenClawHostConnectorState(statePath))
+  const config = resolveConfig(existing)
+  const nextState = {
+    ...existing,
+    credential: credentialOverrideFlag,
+    directoryUrl: config.directoryUrl,
+    dashboardUrl: config.dashboardUrl,
+    adminEmail: config.adminEmail,
+    workspaceSlug: config.workspaceSlug,
+    label: config.hostLabel,
+    updatedAt: new Date().toISOString(),
+  }
+
+  await persistHostState(nextState)
+
+  try {
+    const serviceStatus = readManagedServiceStatus()
+    if (serviceStatus.installed) {
+      installManagedService()
+    }
+  } catch {
+    // Best-effort only; foreground mode can still pick up the new credential.
+  }
+
+  console.log('')
+  console.log('Beam OpenClaw host credential updated.')
+  console.log(`Workspace: ${config.dashboardUrl}/workspaces?workspace=${encodeURIComponent(config.workspaceSlug)}`)
+  console.log(`Fleet:     ${config.dashboardUrl}/openclaw-fleet${nextState.hostId ? `?host=${nextState.hostId}` : ''}`)
 }
 
 async function runCommand() {
@@ -727,6 +770,9 @@ switch (command) {
     break
   case 'uninstall':
     await uninstallCommand()
+    break
+  case 'use-credential':
+    await useCredentialCommand()
     break
   case 'status':
     await statusCommand()

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.3.0 (draft)
+
+### OpenClaw Fleet Operations
+- rotate and recover OpenClaw host credentials without rebuilding workspace bindings
+- resolve duplicate Beam identity conflicts through explicit route-owner actions in the fleet surface
+- add a recurring fleet digest and escalation loop for stale hosts, pending credential work, duplicate conflicts, and delivery follow-up
+- harden Linux/systemd parity for `beam-openclaw-host` and verify it with a repo-owned smoke
+- commit buyer, operator, fleet, digest, and Linux parity evidence before cutting the release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.3.0` remains on `beam/1`.
+
 ## v1.2.0 (2026-04-02)
 
 ### OpenClaw Fleet Connector

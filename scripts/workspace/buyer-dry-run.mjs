@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import path from 'node:path'
 import { formatDate, formatDateTime, optionalFlag, repoRoot, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.2.0-buyer-dry-run.md'))
+const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-buyer-dry-run.md'))
 
 function assertIncludes(haystack, needle, label) {
   if (!haystack.includes(needle)) {
@@ -24,6 +24,9 @@ async function main() {
   assertIncludes(workspaceGuide, '`GET /admin/workspaces/:slug/digest`', 'digest route')
   assertIncludes(workspaceGuide, 'OpenClaw Fleet', 'OpenClaw fleet guide section')
   assertIncludes(workspaceGuide, 'manual host approval', 'host approval guidance')
+  assertIncludes(workspaceGuide, 'rotate host credentials without reinstalling the whole host', 'host credential lifecycle guidance')
+  assertIncludes(workspaceGuide, 'managed Linux install command', 'linux install guidance')
+  assertIncludes(workspaceGuide, 'fleet digest', 'fleet digest guidance')
   assertIncludes(workspaceGuide, 'npm run workspace:openclaw-setup', 'openclaw setup command')
   assertIncludes(workspaceGuide, 'npm run workspace:openclaw-status', 'openclaw status command')
   assertIncludes(workspaceUi, 'Partner channels', 'workspace UI partner channels section')
@@ -34,6 +37,11 @@ async function main() {
   assertIncludes(fleetUi, 'Approve host', 'fleet approval action')
   assertIncludes(fleetUi, 'Duplicate identity conflicts', 'fleet conflict surface')
   assertIncludes(fleetUi, 'Selected host', 'fleet host detail surface')
+  assertIncludes(fleetUi, 'Rotate credential', 'fleet credential rotation action')
+  assertIncludes(fleetUi, 'Recover host', 'fleet credential recovery action')
+  assertIncludes(fleetUi, 'Fleet operator digest', 'fleet digest surface')
+  assertIncludes(fleetUi, 'Disable route', 'fleet route disable action')
+  assertIncludes(fleetUi, 'Reset owner', 'fleet route owner reset action')
 
   const result = {
     ok: true,
@@ -44,16 +52,19 @@ async function main() {
       dashboardSurface: true,
       openClawFleetSurface: true,
       manualHostApproval: true,
+      credentialLifecycle: true,
+      linuxInstallPath: true,
       hostStatusCommands: true,
       partnerChannels: true,
       timeline: true,
       digest: true,
       threadComposer: true,
       hostBadges: true,
+      routeOwnerActions: true,
     },
   }
 
-  const markdown = `# Beam 1.2.0 Buyer Dry Run
+  const markdown = `# Beam 1.3.0 Buyer Dry Run
 
 ## Context
 
@@ -68,8 +79,8 @@ async function main() {
 ## Path
 
 1. The docs home still points operators to Beam Workspaces as the identity and control-plane layer.
-2. The Beam Workspaces guide now explains the OpenClaw fleet model, host approval, daemon setup, and fleet-specific commands in plain operator language.
-3. The dashboard surface vocabulary matches the guide: host approval, host detail, duplicate identity conflicts, host badges, partner channels, timeline, digest, and thread composer.
+2. The Beam Workspaces guide now explains the OpenClaw fleet model, host approval, credential rotation and recovery, Linux install parity, and fleet digest commands in plain operator language.
+3. The dashboard surface vocabulary matches the guide: host approval, host detail, duplicate identity conflicts, host badges, partner channels, timeline, digest, route-owner actions, and thread composer.
 
 ## Evidence
 

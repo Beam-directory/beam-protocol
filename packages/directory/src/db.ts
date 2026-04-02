@@ -20,12 +20,14 @@ import type {
   OperatorNotificationRow,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostEnrollmentStatus,
+  OpenClawHostCredentialState,
   OpenClawHostHeartbeatRow,
   OpenClawHostHealth,
   OpenClawHostRow,
   OpenClawHostStatus,
   OpenClawHostRouteRow,
   OpenClawResolvedRouteRow,
+  OpenClawRouteOwnerResolutionState,
   OpenClawRouteReportedState,
   OpenClawRouteRuntimeState,
   OpenClawRouteSource,
@@ -59,7 +61,7 @@ import {
   type PublicEndpointShieldPolicy,
 } from './shield/policies.js'
 import { mergeWorkspacePolicy, parseWorkspacePolicy } from './workspace-policy.js'
-import { createHostApiKey, hashApiKey } from './api-key.js'
+import { buildHostApiKey, createHostApiKey, hashApiKey } from './api-key.js'
 
 const BEAM_DOMAIN_SUFFIX = 'beam.directory'
 const PUBLIC_ENDPOINT_POLICY_KEY = 'public-endpoints'
@@ -361,6 +363,11 @@ function initSchema(db: DB): void {
       health_status TEXT NOT NULL DEFAULT 'pending' CHECK(health_status IN ('pending', 'healthy', 'watch', 'stale', 'revoked')),
       route_count INTEGER NOT NULL DEFAULT 0,
       credential_hash TEXT,
+      credential_nonce TEXT,
+      credential_state TEXT NOT NULL DEFAULT 'missing' CHECK(credential_state IN ('missing', 'ready', 'rotation_pending', 'recovery_pending', 'revoked')),
+      credential_issued_at TEXT,
+      credential_rotated_at TEXT,
+      recovery_completed_at TEXT,
       approved_at TEXT,
       approved_by TEXT,
       revoked_at TEXT,
@@ -394,6 +401,10 @@ function initSchema(db: DB): void {
       session_key TEXT,
       reported_state TEXT NOT NULL DEFAULT 'idle' CHECK(reported_state IN ('live', 'idle', 'ended')),
       runtime_session_state TEXT NOT NULL DEFAULT 'idle' CHECK(runtime_session_state IN ('live', 'idle', 'stale', 'ended', 'conflict', 'revoked')),
+      owner_resolution_state TEXT NOT NULL DEFAULT 'implicit' CHECK(owner_resolution_state IN ('implicit', 'preferred', 'disabled')),
+      owner_resolution_actor TEXT,
+      owner_resolution_at TEXT,
+      owner_resolution_note TEXT,
       metadata_json TEXT,
       last_seen_at TEXT,
       ended_at TEXT,
@@ -834,6 +845,27 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_intent_type', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_payload_json', 'TEXT')
+  ensureColumn(db, 'openclaw_hosts', 'credential_nonce', 'TEXT')
+  ensureColumn(db, 'openclaw_hosts', 'credential_state', "TEXT NOT NULL DEFAULT 'missing'")
+  ensureColumn(db, 'openclaw_hosts', 'credential_issued_at', 'TEXT')
+  ensureColumn(db, 'openclaw_hosts', 'credential_rotated_at', 'TEXT')
+  ensureColumn(db, 'openclaw_hosts', 'recovery_completed_at', 'TEXT')
+  ensureColumn(db, 'openclaw_host_routes', 'owner_resolution_state', "TEXT NOT NULL DEFAULT 'implicit'")
+  ensureColumn(db, 'openclaw_host_routes', 'owner_resolution_actor', 'TEXT')
+  ensureColumn(db, 'openclaw_host_routes', 'owner_resolution_at', 'TEXT')
+  ensureColumn(db, 'openclaw_host_routes', 'owner_resolution_note', 'TEXT')
+  db.prepare(`
+    UPDATE openclaw_hosts
+    SET credential_state = CASE
+      WHEN status = 'revoked' THEN 'revoked'
+      WHEN credential_hash IS NULL OR credential_hash = '' THEN 'missing'
+      ELSE COALESCE(NULLIF(credential_state, ''), 'ready')
+    END
+  `).run()
+  db.prepare(`
+    UPDATE openclaw_host_routes
+    SET owner_resolution_state = COALESCE(NULLIF(owner_resolution_state, ''), 'implicit')
+  `).run()
 
   db.prepare(`
     UPDATE agents
@@ -3666,6 +3698,22 @@ function createOpenClawToken(prefix: string): string {
   return `${prefix}${randomBytes(18).toString('base64url')}`
 }
 
+export function resolveOpenClawHostCredential(host: Pick<OpenClawHostRow, 'host_key' | 'credential_nonce'>): string | null {
+  if (!host.credential_nonce) {
+    return null
+  }
+  return buildHostApiKey(host.host_key, host.credential_nonce)
+}
+
+function issueOpenClawHostCredential(hostKey: string): { credential: string; credentialNonce: string; issuedAt: string } {
+  const { credential, credentialNonce } = createHostApiKey(hostKey)
+  return {
+    credential,
+    credentialNonce,
+    issuedAt: nowIso(),
+  }
+}
+
 function computeOpenClawHostHealthStatus(
   host: Pick<OpenClawHostRow, 'status' | 'last_heartbeat_at'>,
   nowMs = Date.now(),
@@ -3926,6 +3974,11 @@ export function updateOpenClawHost(
     healthStatus?: OpenClawHostHealth
     routeCount?: number
     credentialHash?: string | null
+    credentialNonce?: string | null
+    credentialState?: OpenClawHostCredentialState
+    credentialIssuedAt?: string | null
+    credentialRotatedAt?: string | null
+    recoveryCompletedAt?: string | null
     approvedAt?: string | null
     approvedBy?: string | null
     revokedAt?: string | null
@@ -3953,6 +4006,11 @@ export function updateOpenClawHost(
         health_status = ?,
         route_count = ?,
         credential_hash = ?,
+        credential_nonce = ?,
+        credential_state = ?,
+        credential_issued_at = ?,
+        credential_rotated_at = ?,
+        recovery_completed_at = ?,
         approved_at = ?,
         approved_by = ?,
         revoked_at = ?,
@@ -3974,6 +4032,11 @@ export function updateOpenClawHost(
     input.healthStatus ?? existing.health_status,
     input.routeCount ?? existing.route_count,
     input.credentialHash === undefined ? existing.credential_hash : input.credentialHash,
+    input.credentialNonce === undefined ? existing.credential_nonce : input.credentialNonce,
+    input.credentialState ?? existing.credential_state,
+    input.credentialIssuedAt === undefined ? existing.credential_issued_at : input.credentialIssuedAt,
+    input.credentialRotatedAt === undefined ? existing.credential_rotated_at : input.credentialRotatedAt,
+    input.recoveryCompletedAt === undefined ? existing.recovery_completed_at : input.recoveryCompletedAt,
     input.approvedAt === undefined ? existing.approved_at : input.approvedAt,
     input.approvedBy === undefined ? existing.approved_by : input.approvedBy,
     input.revokedAt === undefined ? existing.revoked_at : input.revokedAt,
@@ -4019,6 +4082,7 @@ export function listOpenClawResolvedRoutesByBeamId(db: DB, beamId: string): Open
       h.hostname,
       h.status AS host_status,
       h.health_status AS host_health_status,
+      h.credential_state AS host_credential_state,
       h.workspace_slug AS host_workspace_slug,
       h.last_heartbeat_at AS host_last_heartbeat_at
     FROM openclaw_host_routes r
@@ -4049,6 +4113,7 @@ export function listOpenClawResolvedRoutesForHost(db: DB, hostId: number): OpenC
       h.hostname,
       h.status AS host_status,
       h.health_status AS host_health_status,
+      h.credential_state AS host_credential_state,
       h.workspace_slug AS host_workspace_slug,
       h.last_heartbeat_at AS host_last_heartbeat_at
     FROM openclaw_host_routes r
@@ -4136,6 +4201,29 @@ export function refreshOpenClawHostHealth(db: DB): void {
   }
 }
 
+function activateOpenClawHostCredential(
+  db: DB,
+  hostId: number,
+  activatedAt = nowIso(),
+): OpenClawHostRow | null {
+  const host = getOpenClawHostById(db, hostId)
+  if (!host) {
+    return null
+  }
+
+  if (host.credential_state !== 'rotation_pending' && host.credential_state !== 'recovery_pending') {
+    return host
+  }
+
+  return updateOpenClawHost(db, {
+    id: hostId,
+    credentialState: 'ready',
+    recoveryCompletedAt: host.credential_state === 'recovery_pending'
+      ? activatedAt
+      : host.recovery_completed_at,
+  })
+}
+
 export function recalculateOpenClawRouteStates(db: DB, beamIds?: string[]): void {
   refreshOpenClawHostHealth(db)
   const uniqueBeamIds = beamIds && beamIds.length > 0
@@ -4150,7 +4238,8 @@ export function recalculateOpenClawRouteStates(db: DB, beamIds?: string[]): void
       SELECT
         r.*,
         h.status AS host_status,
-        h.health_status AS host_health_status
+        h.health_status AS host_health_status,
+        h.credential_state AS host_credential_state
       FROM openclaw_host_routes r
       JOIN openclaw_hosts h ON h.id = r.host_id
       WHERE r.beam_id = ?
@@ -4158,27 +4247,43 @@ export function recalculateOpenClawRouteStates(db: DB, beamIds?: string[]): void
     `).all(beamId) as Array<OpenClawHostRouteRow & {
       host_status: OpenClawHostStatus
       host_health_status: OpenClawHostHealth
+      host_credential_state: OpenClawHostCredentialState
     }>
 
     const eligible = rows.filter((row) =>
       row.host_status === 'active' &&
       row.host_health_status !== 'stale' &&
       row.host_health_status !== 'revoked' &&
-      row.reported_state !== 'ended'
+      row.host_credential_state === 'ready' &&
+      row.reported_state !== 'ended' &&
+      row.owner_resolution_state !== 'disabled'
     )
 
-    const conflict = eligible.length > 1
+    const preferredEligible = eligible.filter((row) => row.owner_resolution_state === 'preferred')
+    const preferredRouteId = preferredEligible.length === 1 ? preferredEligible[0]?.id ?? null : null
+    const conflict = preferredRouteId === null && eligible.length > 1
     const updatedAt = nowIso()
     for (const row of rows) {
       let nextState: OpenClawRouteRuntimeState
-      if (row.host_status === 'revoked' || row.host_health_status === 'revoked') {
+      const isEligible = eligible.some((entry) => entry.id === row.id)
+      if (row.host_status === 'revoked' || row.host_health_status === 'revoked' || row.host_credential_state === 'revoked') {
         nextState = 'revoked'
+      } else if (row.owner_resolution_state === 'disabled') {
+        nextState = 'ended'
       } else if (row.reported_state === 'ended') {
         nextState = 'ended'
-      } else if (conflict && eligible.some((entry) => entry.id === row.id)) {
-        nextState = 'conflict'
-      } else if (row.host_status !== 'active' || row.host_health_status === 'stale') {
+      } else if (
+        row.host_status !== 'active'
+        || row.host_health_status === 'stale'
+        || row.host_credential_state === 'missing'
+        || row.host_credential_state === 'rotation_pending'
+        || row.host_credential_state === 'recovery_pending'
+      ) {
         nextState = 'stale'
+      } else if (conflict && isEligible) {
+        nextState = 'conflict'
+      } else if (preferredRouteId !== null && isEligible && row.id !== preferredRouteId) {
+        nextState = 'conflict'
       } else {
         nextState = row.reported_state
       }
@@ -4239,6 +4344,7 @@ export function recordOpenClawHostHeartbeat(
     lastHeartbeatAt: heartbeatAt,
     healthStatus,
   })
+  activateOpenClawHostCredential(db, input.hostId, heartbeatAt)
   recalculateOpenClawRouteStates(db)
 
   return db.prepare(`
@@ -4386,6 +4492,7 @@ export function syncOpenClawHostRoutes(
     id: input.hostId,
     lastInventoryAt: syncedAt,
   })
+  activateOpenClawHostCredential(db, input.hostId, syncedAt)
   updateOpenClawHostRouteCount(db, input.hostId)
   recalculateOpenClawRouteStates(db, [...touchedBeamIds])
 
@@ -4457,6 +4564,7 @@ export function applyOpenClawHostRouteEvents(
     id: input.hostId,
     lastRouteEventAt: eventAt,
   })
+  activateOpenClawHostCredential(db, input.hostId, eventAt)
 
   return updated
 }
@@ -4473,8 +4581,8 @@ export function approveOpenClawHost(
     return null
   }
 
-  const credential = createHostApiKey(host.host_key)
   const approvedAt = nowIso()
+  const credentialRecord = issueOpenClawHostCredential(host.host_key)
   const updated = updateOpenClawHost(db, {
     id: input.id,
     status: 'active',
@@ -4482,7 +4590,12 @@ export function approveOpenClawHost(
       status: 'active',
       last_heartbeat_at: host.last_heartbeat_at,
     }),
-    credentialHash: hashApiKey(credential),
+    credentialHash: hashApiKey(credentialRecord.credential),
+    credentialNonce: credentialRecord.credentialNonce,
+    credentialState: 'ready',
+    credentialIssuedAt: credentialRecord.issuedAt,
+    credentialRotatedAt: null,
+    recoveryCompletedAt: host.recovery_completed_at,
     approvedAt,
     approvedBy: input.approvedBy,
     revokedAt: null,
@@ -4506,7 +4619,90 @@ export function approveOpenClawHost(
   recalculateOpenClawRouteStates(db)
   return {
     host: getOpenClawHostById(db, updated.id) as OpenClawHostRow,
-    credential,
+    credential: credentialRecord.credential,
+  }
+}
+
+export function rotateOpenClawHostCredential(
+  db: DB,
+  input: {
+    id: number
+  },
+): { host: OpenClawHostRow; credential: string } | null {
+  const host = getOpenClawHostById(db, input.id)
+  if (!host) {
+    return null
+  }
+
+  const credentialRecord = issueOpenClawHostCredential(host.host_key)
+  const affectedBeamIds = listOpenClawHostRoutes(db, input.id).map((route) => route.beam_id)
+  const updated = updateOpenClawHost(db, {
+    id: input.id,
+    credentialHash: hashApiKey(credentialRecord.credential),
+    credentialNonce: credentialRecord.credentialNonce,
+    credentialState: 'rotation_pending',
+    credentialIssuedAt: credentialRecord.issuedAt,
+    credentialRotatedAt: credentialRecord.issuedAt,
+  })
+  if (!updated) {
+    return null
+  }
+
+  recalculateOpenClawRouteStates(db, affectedBeamIds)
+  return {
+    host: getOpenClawHostById(db, input.id) as OpenClawHostRow,
+    credential: credentialRecord.credential,
+  }
+}
+
+export function recoverOpenClawHost(
+  db: DB,
+  input: {
+    id: number
+    recoveredBy?: string | null
+  },
+): { host: OpenClawHostRow; credential: string } | null {
+  const host = getOpenClawHostById(db, input.id)
+  if (!host) {
+    return null
+  }
+
+  const credentialRecord = issueOpenClawHostCredential(host.host_key)
+  const affectedBeamIds = listOpenClawHostRoutes(db, input.id).map((route) => route.beam_id)
+  const recovered = updateOpenClawHost(db, {
+    id: input.id,
+    status: 'active',
+    healthStatus: 'watch',
+    credentialHash: hashApiKey(credentialRecord.credential),
+    credentialNonce: credentialRecord.credentialNonce,
+    credentialState: 'recovery_pending',
+    credentialIssuedAt: credentialRecord.issuedAt,
+    credentialRotatedAt: credentialRecord.issuedAt,
+    recoveryCompletedAt: null,
+    revokedAt: null,
+    revocationReason: null,
+    approvedAt: host.approved_at ?? credentialRecord.issuedAt,
+    approvedBy: host.approved_by ?? input.recoveredBy ?? null,
+  })
+  if (!recovered) {
+    return null
+  }
+
+  if (host.enrollment_request_id) {
+    updateOpenClawEnrollmentRequest(db, {
+      id: host.enrollment_request_id,
+      status: 'approved',
+      claimedHostId: host.id,
+      approvedAt: recovered.approved_at,
+      approvedBy: recovered.approved_by,
+      revokedAt: null,
+    })
+  }
+
+  recalculateOpenClawRouteStates(db, affectedBeamIds)
+  return {
+    host: getOpenClawHostById(db, input.id) as OpenClawHostRow,
+    credential: credentialRecord.credential,
   }
 }
 
@@ -4528,6 +4724,7 @@ export function revokeOpenClawHost(
     id: input.id,
     status: 'revoked',
     healthStatus: 'revoked',
+    credentialState: 'revoked',
     revokedAt,
     revocationReason: input.reason ?? null,
   })
@@ -4549,6 +4746,56 @@ export function revokeOpenClawHost(
 
   recalculateOpenClawRouteStates(db, affectedBeamIds)
   return updated
+}
+
+export function setOpenClawRouteOwnerResolution(
+  db: DB,
+  input: {
+    routeId: number
+    resolutionState: OpenClawRouteOwnerResolutionState
+    actor: string
+    note?: string | null
+  },
+): OpenClawHostRouteRow | null {
+  const route = getOpenClawHostRouteById(db, input.routeId)
+  if (!route) {
+    return null
+  }
+
+  const resolvedAt = nowIso()
+  if (input.resolutionState === 'preferred') {
+    db.prepare(`
+      UPDATE openclaw_host_routes
+      SET owner_resolution_state = 'implicit',
+          owner_resolution_actor = ?,
+          owner_resolution_at = ?,
+          owner_resolution_note = ?,
+          updated_at = ?
+      WHERE beam_id = ?
+        AND id != ?
+        AND owner_resolution_state = 'preferred'
+    `).run(input.actor, resolvedAt, 'Preference replaced by another route owner decision.', resolvedAt, route.beam_id, route.id)
+  }
+
+  db.prepare(`
+    UPDATE openclaw_host_routes
+    SET owner_resolution_state = ?,
+        owner_resolution_actor = ?,
+        owner_resolution_at = ?,
+        owner_resolution_note = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.resolutionState,
+    input.actor,
+    resolvedAt,
+    input.note ?? null,
+    resolvedAt,
+    route.id,
+  )
+
+  recalculateOpenClawRouteStates(db, [route.beam_id])
+  return getOpenClawHostRouteById(db, route.id)
 }
 
 function updatePairTrustScore(

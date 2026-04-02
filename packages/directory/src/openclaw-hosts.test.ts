@@ -315,7 +315,11 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         staleRoutes: number
         conflictRoutes: number
         endedRoutes: number
+        failedReceipts: number
         duplicateIdentityConflicts: number
+        pendingCredentialActions: number
+        actionItems: number
+        criticalItems: number
       }
       hosts: Array<{
         id: number
@@ -335,7 +339,11 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
       staleRoutes: 0,
       conflictRoutes: 0,
       endedRoutes: 0,
+      failedReceipts: 0,
       duplicateIdentityConflicts: 0,
+      pendingCredentialActions: 0,
+      actionItems: 1,
+      criticalItems: 0,
     })
     assert.equal(overviewBody.hosts[0]?.workspaceSlug, 'openclaw-local')
     assert.equal(overviewBody.hosts[0]?.healthStatus, 'healthy')
@@ -486,6 +494,206 @@ test('duplicate openclaw routes surface conflicts, block delivery, and clear aft
     assert.equal(overviewAfterRevokeBody.summary.revokedHosts, 1)
     assert.equal(overviewAfterRevokeBody.summary.duplicateIdentityConflicts, 0)
     assert.equal(overviewAfterRevokeBody.conflicts.length, 0)
+  } finally {
+    db.close()
+  }
+})
+
+test('openclaw host credentials rotate and recover without rebuilding workspace state', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const receiver = createFixtureAgent('atlas@openclaw.beam.directory')
+    registerFixtureAgent(db, receiver, 'Atlas')
+    const app = createApp(db)
+
+    const host = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Rotate',
+      hostname: 'rotate.local',
+      beamId: receiver.beamId,
+      routeKey: 'atlas-rotate',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const rotateResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/rotate`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(rotateResponse.status, 200)
+    const rotateBody = await rotateResponse.json() as {
+      credential: string
+      host: {
+        credentialState: string
+      }
+    }
+    assert.match(rotateBody.credential, /^bh_/)
+    assert.equal(rotateBody.host.credentialState, 'rotation_pending')
+
+    const oldHeartbeatResponse = await app.request(new Request('http://localhost/openclaw/hosts/heartbeat', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${host.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        routeCount: 1,
+        connectorVersion: '1.3.0-test',
+      }),
+    }))
+    assert.equal(oldHeartbeatResponse.status, 401)
+
+    const routesDuringRotate = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.equal(routesDuringRotate[0]?.runtime_session_state, 'stale')
+
+    const newHeartbeatResponse = await app.request(new Request('http://localhost/openclaw/hosts/heartbeat', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${rotateBody.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        routeCount: 1,
+        connectorVersion: '1.3.0-test',
+      }),
+    }))
+    assert.equal(newHeartbeatResponse.status, 200)
+
+    const routesAfterRotate = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.equal(routesAfterRotate[0]?.runtime_session_state, 'live')
+
+    const revokeResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/revoke`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ reason: 'recovery drill' }),
+    }))
+    assert.equal(revokeResponse.status, 200)
+
+    const recoverResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/recover`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(recoverResponse.status, 200)
+    const recoverBody = await recoverResponse.json() as {
+      credential: string
+      host: {
+        status: string
+        credentialState: string
+        revokedAt: string | null
+      }
+    }
+    assert.equal(recoverBody.host.status, 'active')
+    assert.equal(recoverBody.host.credentialState, 'recovery_pending')
+    assert.equal(recoverBody.host.revokedAt, null)
+
+    const routesDuringRecovery = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.equal(routesDuringRecovery[0]?.runtime_session_state, 'stale')
+
+    const recoverInventoryResponse = await app.request(new Request('http://localhost/openclaw/hosts/inventory', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${recoverBody.credential}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        connectorVersion: '1.3.0-test',
+        beamDirectoryUrl: 'http://127.0.0.1:43100',
+        workspaceSlug: 'openclaw-local',
+        label: 'OpenClaw Host Rotate',
+        hostname: 'rotate.local',
+        os: 'macOS 14',
+        routes: [{
+          beamId: receiver.beamId,
+          workspaceSlug: 'openclaw-local',
+          routeSource: 'gateway-agent',
+          routeKey: 'atlas-rotate',
+          runtimeType: 'openclaw:gateway',
+          label: 'Atlas',
+          connectionMode: 'websocket',
+          sessionKey: 'session-rotate',
+          reportedState: 'live',
+        }],
+      }),
+    }))
+    assert.equal(recoverInventoryResponse.status, 200)
+
+    const routesAfterRecovery = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.equal(routesAfterRecovery[0]?.runtime_session_state, 'live')
+  } finally {
+    db.close()
+  }
+})
+
+test('duplicate openclaw conflicts can be resolved by preferring one route owner', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const sender = createFixtureAgent('sender@openclaw.beam.directory')
+    const receiver = createFixtureAgent('atlas@openclaw.beam.directory')
+    registerFixtureAgent(db, sender, 'Sender')
+    registerFixtureAgent(db, receiver, 'Atlas')
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: 'conversation.message',
+      allowedFrom: sender.beamId,
+    })
+
+    const app = createApp(db)
+
+    const hostA = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Alpha',
+      hostname: 'alpha.local',
+      beamId: receiver.beamId,
+      routeKey: 'atlas-alpha',
+      workspaceSlug: 'openclaw-local',
+    })
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Bravo',
+      hostname: 'bravo.local',
+      beamId: receiver.beamId,
+      routeKey: 'atlas-bravo',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const conflictedRoutes = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.deepEqual(conflictedRoutes.map((route) => route.runtime_session_state), ['conflict', 'conflict'])
+
+    const preferResponse = await app.request(new Request(`http://localhost/admin/openclaw/routes/${conflictedRoutes[0]?.id}/prefer`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ note: 'Primary route owner' }),
+    }))
+    assert.equal(preferResponse.status, 200)
+
+    const routesAfterPreference = listOpenClawResolvedRoutesByBeamId(db, receiver.beamId)
+    assert.equal(routesAfterPreference.filter((route) => route.runtime_session_state === 'live').length, 1)
+    assert.equal(routesAfterPreference.filter((route) => route.runtime_session_state === 'conflict').length, 1)
+    assert.equal(routesAfterPreference.find((route) => route.runtime_session_state === 'live')?.host_id, hostA.host.id)
+
+    const nonce = randomUUID()
+    await assert.rejects(
+      relayIntentFromHttp(db, createSignedConversationIntent(sender, receiver.beamId, nonce), 250),
+      (error: unknown) => error instanceof RelayError && error.code !== 'FORBIDDEN',
+    )
+    assert.notEqual(getIntentLogByNonce(db, nonce)?.error_code, 'HOST_ROUTE_CONFLICT')
+
+    const overviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewResponse.status, 200)
+    const overviewBody = await overviewResponse.json() as {
+      summary: {
+        duplicateIdentityConflicts: number
+      }
+    }
+    assert.equal(overviewBody.summary.duplicateIdentityConflicts, 0)
   } finally {
     db.close()
   }
@@ -648,6 +856,143 @@ test('revoked openclaw host routes block Beam delivery immediately', async () =>
       (error: unknown) => error instanceof RelayError && error.code === 'FORBIDDEN' && error.message.includes('revoked OpenClaw host'),
     )
     assert.equal(getIntentLogByNonce(db, nonce)?.error_code, 'HOST_REVOKED')
+  } finally {
+    db.close()
+  }
+})
+
+test('fleet digest summarizes stale hosts, duplicate conflicts, and failed deliveries', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    const sender = createFixtureAgent('sender@openclaw.beam.directory')
+    const alpha = createFixtureAgent('atlas@openclaw.beam.directory')
+    const gamma = createFixtureAgent('gamma@openclaw.beam.directory')
+    const delta = createFixtureAgent('delta@openclaw.beam.directory')
+    registerFixtureAgent(db, sender, 'Sender')
+    registerFixtureAgent(db, alpha, 'Atlas')
+    registerFixtureAgent(db, gamma, 'Gamma')
+    registerFixtureAgent(db, delta, 'Delta')
+
+    createAcl(db, {
+      targetBeamId: alpha.beamId,
+      intentType: 'conversation.message',
+      allowedFrom: '*@openclaw.beam.directory',
+    })
+    createAcl(db, {
+      targetBeamId: gamma.beamId,
+      intentType: 'conversation.message',
+      allowedFrom: '*@openclaw.beam.directory',
+    })
+    createAcl(db, {
+      targetBeamId: delta.beamId,
+      intentType: 'conversation.message',
+      allowedFrom: '*@openclaw.beam.directory',
+    })
+
+    const hostAlpha = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Alpha',
+      hostname: 'alpha.local',
+      beamId: alpha.beamId,
+      routeKey: 'alpha-primary',
+      workspaceSlug: 'openclaw-local',
+    })
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Beta',
+      hostname: 'beta.local',
+      beamId: alpha.beamId,
+      routeKey: 'alpha-duplicate',
+      routeSource: 'subagent-run',
+      workspaceSlug: 'openclaw-local',
+    })
+    const hostGamma = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Gamma',
+      hostname: 'gamma.local',
+      beamId: gamma.beamId,
+      routeKey: 'gamma-primary',
+      workspaceSlug: 'openclaw-local',
+    })
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Delta',
+      hostname: 'delta.local',
+      beamId: delta.beamId,
+      routeKey: 'delta-stale',
+      workspaceSlug: 'openclaw-local',
+      heartbeatAt: new Date(Date.now() - (10 * 60 * 1000)).toISOString(),
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'ops@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const revokeResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostGamma.host.id}/revoke`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({ reason: 'digest drill revoke' }),
+    }))
+    assert.equal(revokeResponse.status, 200)
+
+    await assert.rejects(
+      () => relayIntentFromHttp(db, createSignedConversationIntent(sender, gamma.beamId)),
+      (error: unknown) => {
+        assert.ok(error instanceof RelayError)
+        assert.equal(error.code, 'FORBIDDEN')
+        return true
+      },
+    )
+
+    const digestResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest', {
+      headers: createAdminHeaders(db, 'ops@example.com', 'operator'),
+    }))
+    assert.equal(digestResponse.status, 200)
+    const digestBody = await digestResponse.json() as {
+      summary: {
+        staleHosts: number
+        duplicateIdentityConflicts: number
+        failedReceipts: number
+        actionItems: number
+        criticalItems: number
+      }
+      actionItems: Array<{
+        category: string
+        title: string
+        nextAction: string
+        traceHref: string | null
+      }>
+      markdown: string
+    }
+
+    assert.ok(digestBody.summary.staleHosts >= 1)
+    assert.equal(digestBody.summary.duplicateIdentityConflicts, 1)
+    assert.ok(digestBody.summary.failedReceipts >= 1)
+    assert.ok(digestBody.summary.actionItems >= 3)
+    assert.ok(digestBody.summary.criticalItems >= 2)
+    assert.ok(digestBody.actionItems.some((item) => item.category === 'conflict'))
+    assert.ok(digestBody.actionItems.some((item) => item.category === 'host'))
+    assert.ok(digestBody.actionItems.some((item) => item.category === 'delivery' && item.traceHref))
+    assert.match(digestBody.markdown, /Beam OpenClaw fleet digest/i)
+
+    const deliverForbidden = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest/deliver', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ email: 'ops+override@example.com' }),
+    }))
+    assert.equal(deliverForbidden.status, 403)
+
+    const deliverUnavailable = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest/deliver', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    }))
+    assert.equal(deliverUnavailable.status, 503)
   } finally {
     db.close()
   }

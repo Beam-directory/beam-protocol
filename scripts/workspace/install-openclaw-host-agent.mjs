@@ -9,6 +9,8 @@ const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const nodePath = process.execPath
 const defaultStatePath = path.join(os.homedir(), '.openclaw/workspace/secrets/beam-openclaw-host.json')
 const defaultAdminSessionCache = path.join(os.homedir(), '.openclaw/workspace/secrets/beam-admin-session.json')
+const effectivePlatform = process.env.BEAM_OPENCLAW_PLATFORM || process.platform
+const systemctlPath = process.env.BEAM_OPENCLAW_SYSTEMCTL_BIN || 'systemctl'
 
 function readFlag(flagName, fallback = null) {
   const index = process.argv.indexOf(flagName)
@@ -45,6 +47,10 @@ function run(command, args, { allowFailure = false } = {}) {
     throw new Error(`${command} ${args.join(' ')} failed${stderr ? `: ${stderr}` : ''}`)
   }
   return result
+}
+
+function runSystemctl(args, { allowFailure = false } = {}) {
+  return run(systemctlPath, ['--user', ...args], { allowFailure })
 }
 
 function createLaunchAgentPlist(stdoutPath, stderrPath) {
@@ -93,9 +99,11 @@ WorkingDirectory=${repoRoot}
 ExecStart=${nodePath} ${path.join(repoRoot, 'scripts/workspace/beam-openclaw-host.mjs')} run
 Restart=always
 RestartSec=3
+UMask=0077
 StandardOutput=append:${stdoutPath}
 StandardError=append:${stderrPath}
 Environment=PATH=${process.env.PATH ?? '/usr/local/bin:/usr/bin:/bin'}
+Environment=BEAM_OPENCLAW_KEYCHAIN=0
 Environment=BEAM_OPENCLAW_HOST_STATE_PATH=${statePath}
 Environment=BEAM_OPENCLAW_ADMIN_SESSION_CACHE=${adminSessionCachePath}
 
@@ -147,8 +155,8 @@ async function installLinux() {
   await mkdir(logsDir, { recursive: true })
   await writeFile(unitPath, createSystemdUnit(stdoutPath, stderrPath), 'utf8')
 
-  run('systemctl', ['--user', 'daemon-reload'])
-  run('systemctl', ['--user', 'enable', '--now', systemdServiceName])
+  runSystemctl(['daemon-reload'])
+  runSystemctl(['enable', '--now', systemdServiceName])
 
   console.log(`Installed systemd user service: ${systemdServiceName}`)
   console.log(`Unit:   ${unitPath}`)
@@ -159,11 +167,12 @@ async function installLinux() {
 async function uninstallLinux() {
   const systemdDir = path.join(os.homedir(), '.config/systemd/user')
   const unitPath = path.join(systemdDir, systemdServiceName)
-  run('systemctl', ['--user', 'disable', '--now', systemdServiceName], { allowFailure: true })
-  run('systemctl', ['--user', 'daemon-reload'], { allowFailure: true })
+  runSystemctl(['disable', '--now', systemdServiceName], { allowFailure: true })
   if (fs.existsSync(unitPath)) {
     fs.unlinkSync(unitPath)
   }
+  runSystemctl(['daemon-reload'], { allowFailure: true })
+  runSystemctl(['reset-failed', systemdServiceName], { allowFailure: true })
   console.log(`Removed systemd user service: ${systemdServiceName}`)
 }
 
@@ -193,16 +202,58 @@ function linuxStatus() {
   const unitPath = path.join(systemdDir, systemdServiceName)
   const stdoutPath = path.join(logsDir, 'beam-openclaw-host.log')
   const stderrPath = path.join(logsDir, 'beam-openclaw-host.err.log')
-  const running = run('systemctl', ['--user', 'is-active', '--quiet', systemdServiceName], { allowFailure: true }).status === 0
+  const activeResult = runSystemctl(['is-active', '--quiet', systemdServiceName], { allowFailure: true })
+  const enabledResult = runSystemctl(['is-enabled', systemdServiceName], { allowFailure: true })
+  const showResult = runSystemctl([
+    'show',
+    systemdServiceName,
+    '--property=ActiveState',
+    '--property=SubState',
+    '--property=UnitFileState',
+    '--no-page',
+  ], { allowFailure: true })
+  const showOutput = showResult.stdout?.toString('utf8') ?? ''
+  const properties = Object.fromEntries(
+    showOutput
+      .split('\n')
+      .map((line) => line.trim())
+      .filter(Boolean)
+      .map((line) => {
+        const index = line.indexOf('=')
+        if (index === -1) {
+          return [line, '']
+        }
+        return [line.slice(0, index), line.slice(index + 1)]
+      }),
+  )
+  const activeState = typeof properties['ActiveState'] === 'string' && properties['ActiveState'].length > 0
+    ? properties['ActiveState']
+    : activeResult.status === 0
+      ? 'active'
+      : 'inactive'
+  const subState = typeof properties['SubState'] === 'string' && properties['SubState'].length > 0
+    ? properties['SubState']
+    : null
+  const unitFileState = typeof properties['UnitFileState'] === 'string' && properties['UnitFileState'].length > 0
+    ? properties['UnitFileState']
+    : enabledResult.status === 0
+      ? 'enabled'
+      : 'disabled'
 
   return {
     platform: 'linux',
     serviceLabel: systemdServiceName,
     installed: fs.existsSync(unitPath),
-    running,
+    running: activeResult.status === 0,
+    enabled: enabledResult.status === 0,
+    activeState,
+    subState,
+    unitFileState,
     manifestPath: unitPath,
     stdoutPath,
     stderrPath,
+    statePath,
+    adminSessionCachePath,
   }
 }
 
@@ -215,13 +266,25 @@ function printStatus(status) {
   console.log(`Service:   ${status.serviceLabel}`)
   console.log(`Installed: ${status.installed ? 'yes' : 'no'}`)
   console.log(`Running:   ${status.running ? 'yes' : 'no'}`)
+  if ('enabled' in status) {
+    console.log(`Enabled:   ${status.enabled ? 'yes' : 'no'}`)
+  }
+  if ('activeState' in status && status.activeState) {
+    console.log(`State:     ${status.activeState}${status.subState ? ` (${status.subState})` : ''}`)
+  }
+  if ('unitFileState' in status && status.unitFileState) {
+    console.log(`Unit file: ${status.unitFileState}`)
+  }
   console.log(`Manifest:  ${status.manifestPath}`)
   console.log(`Stdout:    ${status.stdoutPath}`)
   console.log(`Stderr:    ${status.stderrPath}`)
+  if ('statePath' in status) {
+    console.log(`Connector: ${status.statePath}`)
+  }
 }
 
 async function main() {
-  if (process.platform === 'darwin') {
+  if (effectivePlatform === 'darwin') {
     if (mode === 'install') {
       await installMac()
     } else if (mode === 'uninstall') {
@@ -232,7 +295,7 @@ async function main() {
     return
   }
 
-  if (process.platform === 'linux') {
+  if (effectivePlatform === 'linux') {
     if (mode === 'install') {
       await installLinux()
     } else if (mode === 'uninstall') {
@@ -243,7 +306,7 @@ async function main() {
     return
   }
 
-  throw new Error(`Unsupported platform for Beam OpenClaw host install: ${process.platform}`)
+  throw new Error(`Unsupported platform for Beam OpenClaw host install: ${effectivePlatform}`)
 }
 
 main().catch((error) => {

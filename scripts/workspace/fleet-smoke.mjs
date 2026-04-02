@@ -6,7 +6,7 @@ import {
   startOpenClawFleetHarness,
 } from './fleet-shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.2.0-fleet-smoke.md'))
+const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-fleet-drill.md'))
 
 async function expectInbound(ws, expectedFrom, expectedMessage) {
   const payload = await new Promise((resolve, reject) => {
@@ -95,6 +95,14 @@ async function main() {
       throw new Error(`Expected one duplicate conflict after conflict injection, found ${conflictOverview.summary.duplicateIdentityConflicts}`)
     }
 
+    const alphaConflict = await fleet.fetchHost(fleet.hosts.alpha.id)
+    const gammaConflict = await fleet.fetchHost(fleet.hosts.gamma.id)
+    const preferredAlphaRoute = alphaConflict.routes.find((route) => route.beamId === fleet.agents.alpha.beamId && route.runtimeSessionState === 'conflict')
+    const duplicateAlphaRoute = gammaConflict.routes.find((route) => route.beamId === fleet.agents.alpha.beamId && route.runtimeSessionState === 'conflict')
+    if (!preferredAlphaRoute || !duplicateAlphaRoute) {
+      throw new Error('Expected duplicate alpha routes to surface on the alpha and gamma hosts.')
+    }
+
     const conflictFailure = await sendAndExpectFailure(
       fleet,
       fleet.agents.beta,
@@ -102,6 +110,28 @@ async function main() {
       'beta -> alpha while duplicate route exists',
       403,
     )
+
+    await fleet.preferRoute(preferredAlphaRoute.id, 'Canonical alpha host route')
+    await fleet.disableRoute(duplicateAlphaRoute.id, 'Disable duplicate alpha route on gamma')
+
+    const resolvedOverview = await fleet.fetchFleetOverview()
+    if (resolvedOverview.summary.duplicateIdentityConflicts !== 0) {
+      throw new Error('Expected route-owner resolution to clear duplicate identity conflicts.')
+    }
+
+    const resolvedMessage = await sendAndExpect(
+      fleet,
+      fleet.agents.beta,
+      fleet.agents.alpha,
+      'beta -> alpha after conflict resolution',
+      fleet.clients.alpha,
+    )
+
+    const rotated = await fleet.rotateHost('beta')
+    if (rotated.host.credentialState !== 'rotation_pending') {
+      throw new Error(`Expected beta host to enter rotation_pending, received ${rotated.host.credentialState}`)
+    }
+    await fleet.syncHost('beta', null, { stage: 'fleet-rotation-remediation' })
 
     await fleet.revokeHost('gamma', 'duplicate identity conflict drill')
     const postRevokeOverview = await fleet.fetchFleetOverview()
@@ -118,6 +148,21 @@ async function main() {
       403,
     )
 
+    const recovered = await fleet.recoverHost('gamma')
+    if (recovered.host.credentialState !== 'recovery_pending') {
+      throw new Error(`Expected gamma host to enter recovery_pending, received ${recovered.host.credentialState}`)
+    }
+    await fleet.syncHost('gamma', null, { stage: 'fleet-recovery-remediation' })
+    await fleet.reconnectHostClient('gamma')
+
+    const recoveredMessage = await sendAndExpect(
+      fleet,
+      fleet.agents.alpha,
+      fleet.agents.gamma,
+      'alpha -> gamma after recovery',
+      fleet.clients.gamma,
+    )
+
     const result = {
       ok: true,
       date: formatDate(),
@@ -132,13 +177,26 @@ async function main() {
         duplicateIdentityConflicts: conflictOverview.summary.duplicateIdentityConflicts,
         response: conflictFailure,
       },
+      resolved: {
+        duplicateIdentityConflicts: resolvedOverview.summary.duplicateIdentityConflicts,
+        message: resolvedMessage,
+      },
+      rotated: {
+        hostId: rotated.host.id,
+        credentialState: rotated.host.credentialState,
+      },
       revoked: {
         revokedHosts: postRevokeOverview.summary.revokedHosts,
         response: revokedFailure,
       },
+      recovered: {
+        hostId: recovered.host.id,
+        credentialState: recovered.host.credentialState,
+        message: recoveredMessage,
+      },
     }
 
-    const markdown = `# Beam 1.2.0 Fleet Smoke
+    const markdown = `# Beam 1.3.0 Fleet Drill
 
 ## Context
 
@@ -155,17 +213,20 @@ async function main() {
 1. Bootstrap three approved OpenClaw hosts into one central Beam directory.
 2. Connect one live Beam route per host over WebSocket.
 3. Send a real ring of host-to-host messages so every host sends and receives at least once.
-4. Inject a duplicate Beam identity conflict and confirm delivery is blocked.
-5. Revoke the conflicting host and confirm the revoked host stops accepting delivery immediately.
+4. Inject a duplicate Beam identity conflict and confirm delivery is blocked until one explicit route owner is preferred and the duplicate route is disabled.
+5. Rotate one host credential and confirm the host returns with the rotated secret.
+6. Revoke a host, confirm delivery is blocked, then recover the host and confirm delivery resumes on the same Beam trace model.
 
 ## Verification
 
 - Approved hosts visible: \`${Object.keys(fleet.hosts).length}\`
 - Ring messages delivered: \`${ring.length}\`
 - Duplicate conflict count: \`${conflictOverview.summary.duplicateIdentityConflicts}\`
+- Duplicate conflicts after owner resolution: \`${resolvedOverview.summary.duplicateIdentityConflicts}\`
 - Revoked hosts after remediation: \`${postRevokeOverview.summary.revokedHosts}\`
 - Conflict response status: \`${conflictFailure.errorCode}\`
 - Revoked response status: \`${revokedFailure.errorCode}\`
+- Recovery credential state: \`${recovered.host.credentialState}\`
 
 ## Evidence
 
