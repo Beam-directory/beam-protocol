@@ -26,12 +26,20 @@ export function hashApiKey(apiKey: string): string {
   return createHash('sha256').update(apiKey).digest('hex')
 }
 
-export function createHostApiKey(hostKey: string): string {
+export function buildHostApiKey(hostKey: string, credentialNonce: string): string {
   const derivedSecret = createHash('sha256')
-    .update(`beam-openclaw-host:${hostKey}:${process.env['JWT_SECRET'] ?? 'beam-openclaw-host'}`)
+    .update(`beam-openclaw-host:${hostKey}:${credentialNonce}:${process.env['JWT_SECRET'] ?? 'beam-openclaw-host'}`)
     .digest('base64url')
     .slice(0, 32)
-  return `${HOST_API_KEY_PREFIX}${Buffer.from(hostKey, 'utf8').toString('base64url')}.${derivedSecret}`
+  return `${HOST_API_KEY_PREFIX}${Buffer.from(hostKey, 'utf8').toString('base64url')}.${credentialNonce}.${derivedSecret}`
+}
+
+export function createHostApiKey(hostKey: string): { credential: string; credentialNonce: string } {
+  const credentialNonce = randomBytes(18).toString('base64url')
+  return {
+    credential: buildHostApiKey(hostKey, credentialNonce),
+    credentialNonce,
+  }
 }
 
 export function getSuppliedApiKey(req: { headers: HeaderSource }): string {

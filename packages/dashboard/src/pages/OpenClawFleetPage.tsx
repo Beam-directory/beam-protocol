@@ -5,6 +5,7 @@ import {
   ApiError,
   directoryApi,
   type OpenClawConflictGroup,
+  type OpenClawFleetDigestResponse,
   type OpenClawEnrollmentCreateInput,
   type OpenClawFleetOverviewResponse,
   type OpenClawHostDetailResponse,
@@ -14,7 +15,9 @@ import {
   type OpenClawHostRoute,
   type OpenClawHostSummary,
   type OpenClawHostStatus,
+  type OpenClawHostCredentialState,
   type OpenClawRouteRuntimeState,
+  type OpenClawRouteOwnerResolutionState,
   type OpenClawRouteSource,
 } from '../lib/api'
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/utils'
@@ -64,6 +67,31 @@ function routeStateTone(status: OpenClawRouteRuntimeState): 'default' | 'success
   }
 }
 
+function credentialStateTone(status: OpenClawHostCredentialState): 'default' | 'success' | 'warning' | 'critical' {
+  switch (status) {
+    case 'ready':
+      return 'success'
+    case 'rotation_pending':
+    case 'recovery_pending':
+      return 'warning'
+    case 'revoked':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function ownerResolutionTone(status: OpenClawRouteOwnerResolutionState): 'default' | 'success' | 'warning' | 'critical' {
+  switch (status) {
+    case 'preferred':
+      return 'success'
+    case 'disabled':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
 function routeSourceLabel(source: OpenClawRouteSource): string {
   switch (source) {
     case 'agent-folder':
@@ -97,9 +125,14 @@ function conflictSummary(group: OpenClawConflictGroup): string {
   return `${group.routeCount} active host routes claim ${group.beamId}`
 }
 
+function digestSeverityTone(severity: 'warning' | 'critical'): 'warning' | 'critical' {
+  return severity === 'critical' ? 'critical' : 'warning'
+}
+
 export default function OpenClawFleetPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<OpenClawFleetOverviewResponse | null>(null)
+  const [digest, setDigest] = useState<OpenClawFleetDigestResponse | null>(null)
   const [hostDetail, setHostDetail] = useState<OpenClawHostDetailResponse | null>(null)
   const [hostIdentities, setHostIdentities] = useState<OpenClawHostIdentitiesResponse | null>(null)
   const [loading, setLoading] = useState(true)
@@ -107,6 +140,14 @@ export default function OpenClawFleetPage() {
   const [actionBusy, setActionBusy] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [notice, setNotice] = useState<string | null>(null)
+  const [credentialResult, setCredentialResult] = useState<{
+    hostLabel: string
+    credential: string
+    commands: {
+      useCredential: string
+      foregroundDebug: string
+    }
+  } | null>(null)
   const [enrollmentResult, setEnrollmentResult] = useState<{
     token: string
     label: string | null
@@ -138,6 +179,11 @@ export default function OpenClawFleetPage() {
     setOverview(response)
   }
 
+  async function loadDigest() {
+    const response = await directoryApi.getOpenClawFleetDigest()
+    setDigest(response)
+  }
+
   async function loadHost(id: number) {
     const [detailResponse, identitiesResponse] = await Promise.all([
       directoryApi.getOpenClawHost(id),
@@ -151,7 +197,7 @@ export default function OpenClawFleetPage() {
     try {
       setLoading(true)
       setError(null)
-      await loadOverview()
+      await Promise.all([loadOverview(), loadDigest()])
       const hostId = nextHostId ?? selectedHostId
       if (hostId) {
         await loadHost(hostId)
@@ -229,17 +275,44 @@ export default function OpenClawFleetPage() {
         expiresAt: response.enrollment.expiresAt,
         installPack: response.enrollment.installPack ?? null,
       })
-      await loadOverview()
+      await Promise.all([loadOverview(), loadDigest()])
     }, 'Enrollment token issued.')
   }
 
   async function handleApprove(host: OpenClawHostSummary) {
     await runAction(`approve-${host.id}`, async () => {
       const response = await directoryApi.approveOpenClawHost(host.id)
+      setCredentialResult(null)
       setNotice(`Host ${hostTitle(response.host)} approved. Credential issued.`)
-      await loadOverview()
+      await Promise.all([loadOverview(), loadDigest()])
       await loadHost(host.id)
     }, `Host ${hostTitle(host)} approved.`)
+  }
+
+  async function handleRotate(host: OpenClawHostSummary) {
+    await runAction(`rotate-${host.id}`, async () => {
+      const response = await directoryApi.rotateOpenClawHost(host.id)
+      setCredentialResult({
+        hostLabel: hostTitle(response.host),
+        credential: response.credential,
+        commands: response.installPack.commands,
+      })
+      await Promise.all([loadOverview(), loadDigest()])
+      await loadHost(host.id)
+    }, `Credential for ${hostTitle(host)} rotated.`)
+  }
+
+  async function handleRecover(host: OpenClawHostSummary) {
+    await runAction(`recover-${host.id}`, async () => {
+      const response = await directoryApi.recoverOpenClawHost(host.id)
+      setCredentialResult({
+        hostLabel: hostTitle(response.host),
+        credential: response.credential,
+        commands: response.installPack.commands,
+      })
+      await Promise.all([loadOverview(), loadDigest()])
+      await loadHost(host.id)
+    }, `Recovery credential for ${hostTitle(host)} issued.`)
   }
 
   async function handleRevoke(host: OpenClawHostSummary) {
@@ -248,9 +321,44 @@ export default function OpenClawFleetPage() {
       : `Revoked by operator on ${new Date().toISOString()}`
     await runAction(`revoke-${host.id}`, async () => {
       await directoryApi.revokeOpenClawHost(host.id, { reason })
-      await loadOverview()
+      await Promise.all([loadOverview(), loadDigest()])
       await loadHost(host.id)
     }, `Host ${hostTitle(host)} revoked.`)
+  }
+
+  async function handlePreferRoute(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    await runAction(`prefer-route-${route.id}`, async () => {
+      await directoryApi.preferOpenClawRoute(route.id, {
+        note: `Preferred by operator for ${route.beamId}`,
+      })
+      await refreshAll(selectedHostId)
+    }, `Preferred route set for ${route.beamId}.`)
+  }
+
+  async function handleDisableRoute(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    await runAction(`disable-route-${route.id}`, async () => {
+      await directoryApi.disableOpenClawRoute(route.id, {
+        note: `Disabled by operator for ${route.beamId}`,
+      })
+      await refreshAll(selectedHostId)
+    }, `Route disabled for ${route.beamId}.`)
+  }
+
+  async function handleClearRouteOwner(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    await runAction(`clear-route-${route.id}`, async () => {
+      await directoryApi.clearOpenClawRouteOwner(route.id, {
+        note: `Ownership reset by operator for ${route.beamId}`,
+      })
+      await refreshAll(selectedHostId)
+    }, `Route ownership reset for ${route.beamId}.`)
+  }
+
+  async function handleDeliverDigest() {
+    await runAction('deliver-digest', async () => {
+      const response = await directoryApi.deliverOpenClawFleetDigest()
+      await loadDigest()
+      setNotice(`Fleet digest delivered to ${response.email}.`)
+    }, 'Fleet digest delivered.')
   }
 
   const hostRoutes = hostDetail?.routes ?? []
@@ -275,12 +383,100 @@ export default function OpenClawFleetPage() {
         </div>
       ) : null}
 
+      {credentialResult ? (
+        <div className="rounded-2xl border border-orange-200 bg-orange-50 px-4 py-4 text-sm text-orange-800 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-100">
+          <div className="font-medium">Credential pack ready for {credentialResult.hostLabel}</div>
+          <div className="mt-2 break-all rounded-xl bg-white/70 px-3 py-3 font-mono text-xs dark:bg-slate-950/40">
+            {credentialResult.credential}
+          </div>
+          <div className="mt-3 space-y-2 text-xs">
+            <div>
+              <div className="font-medium uppercase tracking-wide opacity-70">Use credential</div>
+              <div className="mt-1 break-all rounded-xl bg-white/70 px-3 py-3 font-mono dark:bg-slate-950/40">{credentialResult.commands.useCredential}</div>
+            </div>
+            <div>
+              <div className="font-medium uppercase tracking-wide opacity-70">Foreground debug</div>
+              <div className="mt-1 break-all rounded-xl bg-white/70 px-3 py-3 font-mono dark:bg-slate-950/40">{credentialResult.commands.foregroundDebug}</div>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
         <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.summary.totalHosts)} />
         <MetricCard label="Active hosts" value={!overview ? '—' : formatNumber(overview.summary.activeHosts)} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Pending hosts" value={!overview ? '—' : formatNumber(overview.summary.pendingHosts)} tone={(overview?.summary.pendingHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Live routes" value={!overview ? '—' : formatNumber(overview.summary.liveRoutes)} tone={(overview?.summary.liveRoutes ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Duplicate conflicts" value={!overview ? '—' : formatNumber(overview.summary.duplicateIdentityConflicts)} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
+      </section>
+
+      <section className="panel">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="panel-title">Fleet operator digest</div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              One recurring summary for stale hosts, pending credential actions, duplicate conflicts, and failed deliveries.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+            disabled={actionBusy === 'deliver-digest'}
+            onClick={() => { void handleDeliverDigest() }}
+          >
+            {actionBusy === 'deliver-digest' ? 'Delivering…' : 'Deliver digest'}
+          </button>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+          <MetricCard label="Action items" value={!digest ? '—' : formatNumber(digest.summary.actionItems)} tone={(digest?.summary.actionItems ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Critical items" value={!digest ? '—' : formatNumber(digest.summary.criticalItems)} tone={(digest?.summary.criticalItems ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="Credential actions" value={!digest ? '—' : formatNumber(digest.summary.pendingCredentialActions)} tone={(digest?.summary.pendingCredentialActions ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Failed receipts" value={!digest ? '—' : formatNumber(digest.summary.failedReceipts)} tone={(digest?.summary.failedReceipts ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="Stale hosts" value={!digest ? '—' : formatNumber(digest.summary.staleHosts)} tone={(digest?.summary.staleHosts ?? 0) > 0 ? 'critical' : 'default'} />
+        </div>
+
+        <div className="mt-4 space-y-3">
+          {digest && digest.actionItems.length > 0 ? (
+            digest.actionItems.map((item) => (
+              <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.detail}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill label={item.severity} tone={digestSeverityTone(item.severity)} />
+                    <StatusPill label={item.category} />
+                  </div>
+                </div>
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{item.nextAction}</div>
+                  <div>{item.hostLabel ? `${item.hostLabel}${item.workspaceSlug ? ` · ${item.workspaceSlug}` : ''}` : item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'Global fleet item'}</div>
+                </div>
+                <div className="mt-3 flex flex-wrap gap-3 text-xs">
+                  {item.href ? (
+                    <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={item.href}>
+                      Open host
+                    </Link>
+                  ) : null}
+                  {item.workspaceSlug ? (
+                    <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/workspaces?workspace=${encodeURIComponent(item.workspaceSlug)}`}>
+                      Open workspace
+                    </Link>
+                  ) : null}
+                  {item.traceHref ? (
+                    <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={item.traceHref}>
+                      Open trace
+                    </Link>
+                  ) : null}
+                </div>
+              </div>
+            ))
+          ) : (
+            <EmptyPanel label="No fleet action items are currently open." />
+          )}
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">
@@ -322,6 +518,7 @@ export default function OpenClawFleetPage() {
                       <div className="flex flex-wrap gap-2">
                         <StatusPill label={host.status} tone={hostStatusTone(host.status)} />
                         <StatusPill label={host.healthStatus} tone={hostHealthTone(host.healthStatus)} />
+                        <StatusPill label={host.credentialState} tone={credentialStateTone(host.credentialState)} />
                       </div>
                     </div>
 
@@ -332,6 +529,8 @@ export default function OpenClawFleetPage() {
                       <div>{host.summary.delivery.receipts > 0 ? `${formatNumber(host.summary.delivery.receipts)} receipts · ${formatNumber(host.summary.delivery.failed)} failed` : 'No delivery receipts yet'}</div>
                       <div>{host.approvedAt ? `Approved ${formatRelativeTime(host.approvedAt)}` : 'Waiting for approval'}</div>
                       <div>{host.revokedAt ? `Revoked ${formatRelativeTime(host.revokedAt)}` : 'Credential active or pending'}</div>
+                      <div>{host.credentialIssuedAt ? `Credential age ${host.credentialAgeHours ?? 0}h` : 'No credential issued yet'}</div>
+                      <div>{host.credentialRotatedAt ? `Last rotated ${formatRelativeTime(host.credentialRotatedAt)}` : 'No rotation yet'}</div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -359,6 +558,32 @@ export default function OpenClawFleetPage() {
                           }}
                         >
                           {actionBusy === `revoke-${host.id}` ? 'Revoking…' : 'Revoke host'}
+                        </button>
+                      ) : null}
+                      {host.status === 'active' ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `rotate-${host.id}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleRotate(host)
+                          }}
+                        >
+                          {actionBusy === `rotate-${host.id}` ? 'Rotating…' : 'Rotate credential'}
+                        </button>
+                      ) : null}
+                      {host.status === 'revoked' || host.healthStatus === 'stale' ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `recover-${host.id}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleRecover(host)
+                          }}
+                        >
+                          {actionBusy === `recover-${host.id}` ? 'Recovering…' : 'Recover host'}
                         </button>
                       ) : null}
                     </div>
@@ -472,12 +697,41 @@ export default function OpenClawFleetPage() {
                 </div>
                 <div className="mt-3 grid gap-2 text-xs text-red-700/80 dark:text-red-200/80 md:grid-cols-2">
                   {group.routes.map((route) => (
-                    <div key={`${route.hostId}-${route.routeKey}`}>
-                      {[
-                        route.hostLabel || route.hostname,
-                        route.workspaceSlug ? `Workspace ${route.workspaceSlug}` : 'No workspace',
-                        routeSourceLabel(route.routeSource),
-                      ].join(' · ')}
+                    <div key={`${route.hostId}-${route.routeKey}`} className="rounded-xl border border-red-200/70 bg-white/50 px-3 py-3 dark:border-red-500/20 dark:bg-slate-950/20">
+                      <div>
+                        {[
+                          route.hostLabel || route.hostname,
+                          route.workspaceSlug ? `Workspace ${route.workspaceSlug}` : 'No workspace',
+                          routeSourceLabel(route.routeSource),
+                        ].join(' · ')}
+                      </div>
+                      <div className="mt-2 flex flex-wrap gap-2">
+                        <StatusPill label={route.ownerResolutionState} tone={ownerResolutionTone(route.ownerResolutionState)} />
+                        <button
+                          type="button"
+                          className="rounded-xl border border-red-200 px-3 py-2 text-[11px] font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-60 dark:border-red-500/30 dark:text-red-100 dark:hover:bg-red-500/10"
+                          disabled={actionBusy === `prefer-route-${route.routeId}`}
+                          onClick={() => { void handlePreferRoute({ id: route.routeId, beamId: group.beamId }) }}
+                        >
+                          {actionBusy === `prefer-route-${route.routeId}` ? 'Preferring…' : 'Prefer route'}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-red-200 px-3 py-2 text-[11px] font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-60 dark:border-red-500/30 dark:text-red-100 dark:hover:bg-red-500/10"
+                          disabled={actionBusy === `disable-route-${route.routeId}`}
+                          onClick={() => { void handleDisableRoute({ id: route.routeId, beamId: group.beamId }) }}
+                        >
+                          {actionBusy === `disable-route-${route.routeId}` ? 'Disabling…' : 'Disable route'}
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-red-200 px-3 py-2 text-[11px] font-medium text-red-700 transition hover:bg-red-100 disabled:opacity-60 dark:border-red-500/30 dark:text-red-100 dark:hover:bg-red-500/10"
+                          disabled={actionBusy === `clear-route-${route.routeId}`}
+                          onClick={() => { void handleClearRouteOwner({ id: route.routeId, beamId: group.beamId }) }}
+                        >
+                          {actionBusy === `clear-route-${route.routeId}` ? 'Resetting…' : 'Reset owner'}
+                        </button>
+                      </div>
                     </div>
                   ))}
                 </div>
@@ -520,6 +774,8 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.beamDirectoryUrl}</div>
                   <div>{selectedHost.lastRouteEventAt ? `Last route event ${formatRelativeTime(selectedHost.lastRouteEventAt)}` : 'No route events yet'}</div>
                   <div>{selectedHost.revocationReason ? `Revocation reason: ${selectedHost.revocationReason}` : 'Not revoked'}</div>
+                  <div>{selectedHost.credentialIssuedAt ? `Credential issued ${formatDateTime(selectedHost.credentialIssuedAt)}` : 'No credential issued yet'}</div>
+                  <div>{selectedHost.credentialRotatedAt ? `Credential rotated ${formatDateTime(selectedHost.credentialRotatedAt)}` : 'No credential rotation yet'}</div>
                   <div>{`${formatNumber(selectedHost.summary.unavailable)} unavailable · ${formatNumber(selectedHost.summary.revoked)} revoked routes`}</div>
                   <div>{selectedHost.summary.delivery.lastRequestedAt ? `Last receipt ${formatRelativeTime(selectedHost.summary.delivery.lastRequestedAt)} · ${selectedHost.summary.delivery.lastStatus ?? 'unknown'}` : 'No delivery receipts yet'}</div>
                 </div>
@@ -541,6 +797,7 @@ export default function OpenClawFleetPage() {
                           <div className="flex flex-wrap gap-2">
                             <StatusPill label={routeSourceLabel(route.routeSource)} />
                             <StatusPill label={route.runtimeSessionState} tone={routeStateTone(route.runtimeSessionState)} />
+                            <StatusPill label={route.ownerResolutionState} tone={ownerResolutionTone(route.ownerResolutionState)} />
                           </div>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
@@ -548,10 +805,36 @@ export default function OpenClawFleetPage() {
                           <div>{route.connectionMode ? `Transport ${route.connectionMode}` : 'No transport mode'}</div>
                           <div>{route.lastSeenAt ? `Last seen ${formatRelativeTime(route.lastSeenAt)}` : 'No last-seen timestamp'}</div>
                           <div>{route.endedAt ? `Ended ${formatRelativeTime(route.endedAt)}` : 'Still active in inventory'}</div>
+                          <div>{route.ownerResolutionAt ? `Owner action ${formatRelativeTime(route.ownerResolutionAt)}${route.ownerResolutionActor ? ` · ${route.ownerResolutionActor}` : ''}` : 'No explicit owner action'}</div>
+                          <div>{route.hostCredentialState ? `Host credential ${route.hostCredentialState}` : 'No host credential state'}</div>
                           <div>{route.lastDelivery ? `Last delivery ${formatRelativeTime(route.lastDelivery.requestedAt)} · ${route.lastDelivery.status}` : 'No delivery receipt yet'}</div>
                           <div>{route.lastDelivery?.errorCode ? `Last error ${route.lastDelivery.errorCode}` : 'No delivery error recorded'}</div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `prefer-route-${route.id}`}
+                            onClick={() => { void handlePreferRoute(route) }}
+                          >
+                            {actionBusy === `prefer-route-${route.id}` ? 'Preferring…' : 'Prefer route'}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `disable-route-${route.id}`}
+                            onClick={() => { void handleDisableRoute(route) }}
+                          >
+                            {actionBusy === `disable-route-${route.id}` ? 'Disabling…' : 'Disable route'}
+                          </button>
+                          <button
+                            type="button"
+                            className="text-orange-600 hover:text-orange-700 disabled:opacity-60 dark:text-orange-300"
+                            disabled={actionBusy === `clear-route-${route.id}`}
+                            onClick={() => { void handleClearRouteOwner(route) }}
+                          >
+                            {actionBusy === `clear-route-${route.id}` ? 'Resetting…' : 'Reset owner'}
+                          </button>
                           {route.httpEndpoint ? (
                             <a className="text-orange-600 hover:text-orange-700 dark:text-orange-300" href={route.httpEndpoint} rel="noreferrer" target="_blank">
                               Open HTTP endpoint

@@ -2,7 +2,14 @@ import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { once } from 'node:events'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { WebSocket } from 'ws'
-import { createAdminHeaders, requestJson, startProductionHarness } from '../production/shared.mjs'
+import {
+  createAdminHeaders,
+  loadDirectoryDbModule,
+  requestJson,
+  startProductionHarness,
+} from '../production/shared.mjs'
+
+const connectorVersion = '1.3.0-test'
 
 function createFixtureAgent(beamId, displayName) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
@@ -122,7 +129,7 @@ export async function heartbeatOpenClawHost(directoryUrl, credential, routeCount
     },
     body: JSON.stringify({
       routeCount,
-      connectorVersion: '1.2.0-test',
+      connectorVersion,
       details,
     }),
   })
@@ -136,7 +143,7 @@ export async function syncOpenClawInventory(directoryUrl, credential, host, rout
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      connectorVersion: '1.2.0-test',
+      connectorVersion,
       beamDirectoryUrl: directoryUrl,
       workspaceSlug: host.workspaceSlug,
       label: host.label,
@@ -287,7 +294,7 @@ export async function startOpenClawFleetHarness() {
       label: blueprint.label,
       hostname: blueprint.hostname,
       os: blueprint.os,
-      connectorVersion: '1.2.0-test',
+      connectorVersion,
       beamDirectoryUrl: harness.directoryUrl,
       workspaceSlug: blueprint.workspaceSlug,
       metadata: {
@@ -330,6 +337,32 @@ export async function startOpenClawFleetHarness() {
         headers: { Authorization: `Bearer ${token}` },
       })
     },
+    async fetchFleetDigest(params = {}) {
+      const query = new URLSearchParams()
+      if (params.format) {
+        query.set('format', params.format)
+      }
+      const suffix = query.size > 0 ? `?${query.toString()}` : ''
+      if (params.format === 'markdown') {
+        const response = await fetch(`${harness.directoryUrl}/admin/openclaw/fleet/digest${suffix}`, {
+          headers: { Authorization: `Bearer ${token}` },
+        })
+        if (!response.ok) {
+          throw new Error(`Fleet digest request failed with ${response.status}`)
+        }
+        return response.text()
+      }
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest${suffix}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    },
+    async deliverFleetDigest(input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/deliver`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
     async fetchHost(hostId) {
       const host = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hostId}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -363,12 +396,86 @@ export async function startOpenClawFleetHarness() {
         stage: 'duplicate-route',
       })
     },
+    async rotateHost(hostKey) {
+      const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/rotate`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+      })
+      hosts[hostKey].credential = response.credential
+      return response
+    },
+    async recoverHost(hostKey) {
+      const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/recover`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+      })
+      hosts[hostKey].credential = response.credential
+      return response
+    },
     async revokeHost(hostKey, reason) {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/revoke`, {
         method: 'POST',
         headers: createAdminHeaders(token),
         body: JSON.stringify({ reason }),
       })
+    },
+    async syncHost(hostKey, routes = null, details = {}) {
+      const host = hosts[hostKey]
+      const inventoryRoutes = routes ?? [buildRoute(host, host.agent, host.routeSource)]
+      await syncOpenClawInventory(harness.directoryUrl, host.credential, host, inventoryRoutes)
+      await heartbeatOpenClawHost(harness.directoryUrl, host.credential, inventoryRoutes.length, {
+        hostKey,
+        stage: 'manual-sync',
+        ...details,
+      })
+    },
+    async heartbeatHost(hostKey, routeCount = 1, details = {}) {
+      return heartbeatOpenClawHost(harness.directoryUrl, hosts[hostKey].credential, routeCount, {
+        hostKey,
+        stage: 'manual-heartbeat',
+        ...details,
+      })
+    },
+    async reconnectHostClient(hostKey) {
+      await closeFleetClient(clients[hostKey])
+      clients[hostKey] = await connectFleetClient(harness.directoryUrl, agents[hostKey].beamId)
+      return clients[hostKey]
+    },
+    async preferRoute(routeId, note = 'Preferred route owner') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/routes/${routeId}/prefer`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify({ note }),
+      })
+    },
+    async disableRoute(routeId, note = 'Disabled conflicting route') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/routes/${routeId}/disable`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify({ note }),
+      })
+    },
+    async clearRouteOwner(routeId, note = 'Reset route owner resolution') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/routes/${routeId}/clear-owner`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify({ note }),
+      })
+    },
+    async markHostStale(hostKey, minutesAgo = 10) {
+      const dbApi = await loadDirectoryDbModule()
+      const db = dbApi.createDatabase(harness.directoryDbPath)
+      try {
+        const staleAt = new Date(Date.now() - minutesAgo * 60_000).toISOString()
+        db.prepare(`
+          UPDATE openclaw_hosts
+          SET last_heartbeat_at = ?, health_status = 'watch'
+          WHERE id = ?
+        `).run(staleAt, hosts[hostKey].id)
+        return staleAt
+      } finally {
+        db.close()
+      }
     },
     async cleanup() {
       await Promise.all(Object.values(clients).map((client) => closeFleetClient(client)))

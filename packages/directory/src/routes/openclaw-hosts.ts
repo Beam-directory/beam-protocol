@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
+import { isEmailDeliveryConfigured, sendOperatorDigestEmail } from '../email.js'
 import {
   applyOpenClawHostRouteEvents,
   approveOpenClawHost,
@@ -13,6 +14,7 @@ import {
   getOpenClawHostByEnrollmentRequestId,
   getOpenClawHostById,
   getOpenClawHostByKey,
+  getOpenClawHostRouteById,
   getWorkspaceById,
   getWorkspaceBySlug,
   listOpenClawEnrollmentRequests,
@@ -24,23 +26,62 @@ import {
   logAuditEvent,
   recordOpenClawHostHeartbeat,
   recalculateOpenClawRouteStates,
+  recoverOpenClawHost,
   refreshOpenClawHostHealth,
   revokeOpenClawHost,
+  resolveOpenClawHostCredential,
+  rotateOpenClawHostCredential,
+  setOpenClawRouteOwnerResolution,
   syncOpenClawHostRoutes,
   updateOpenClawEnrollmentRequest,
   updateOpenClawHost,
 } from '../db.js'
-import { createHostApiKey, getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-key.js'
+import { getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-key.js'
 import type {
   IntentLogRow,
+  OpenClawHostCredentialState,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostHealth,
   OpenClawHostRow,
   OpenClawHostRouteRow,
+  OpenClawRouteOwnerResolutionState,
   OpenClawResolvedRouteRow,
   OpenClawRouteReportedState,
   OpenClawRouteSource,
 } from '../types.js'
+
+type OpenClawFleetDigestSeverity = 'warning' | 'critical'
+
+type OpenClawFleetDigestCategory = 'host' | 'credential' | 'conflict' | 'delivery'
+
+type OpenClawFleetDigestItem = {
+  id: string
+  severity: OpenClawFleetDigestSeverity
+  category: OpenClawFleetDigestCategory
+  title: string
+  detail: string
+  nextAction: string
+  hostId: number | null
+  hostLabel: string | null
+  workspaceSlug: string | null
+  href: string | null
+  traceHref: string | null
+}
+
+type OpenClawConflictGroup = {
+  beamId: string
+  routeCount: number
+  routes: Array<{
+    routeId: number
+    hostId: number
+    hostLabel: string | null
+    hostname: string
+    workspaceSlug: string | null
+    routeKey: string
+    routeSource: string
+    ownerResolutionState: OpenClawRouteOwnerResolutionState
+  }>
+}
 
 function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -162,6 +203,45 @@ function buildIntentHref(nonce: string): string {
   return `/intents/${encodeURIComponent(nonce)}`
 }
 
+function buildOpenClawFleetHref(hostId: number | null = null): string {
+  if (typeof hostId === 'number' && hostId > 0) {
+    return `/openclaw-fleet?host=${hostId}`
+  }
+  return '/openclaw-fleet'
+}
+
+function buildWorkspaceHref(workspaceSlug: string | null): string | null {
+  if (!workspaceSlug) {
+    return null
+  }
+  return `/workspaces?workspace=${encodeURIComponent(workspaceSlug)}`
+}
+
+function absoluteHref(baseUrl: string, href: string | null): string | null {
+  if (!href) {
+    return null
+  }
+  return new URL(href, baseUrl).toString()
+}
+
+function hostCredentialAgeHours(host: Pick<OpenClawHostRow, 'credential_issued_at'>): number | null {
+  return hoursSince(host.credential_issued_at)
+}
+
+function buildCredentialRefreshPack(input: {
+  directoryUrl: string
+  credential: string
+  statePath?: string
+}) {
+  const statePath = input.statePath ?? '$HOME/.openclaw/workspace/secrets/beam-openclaw-host.json'
+  return {
+    commands: {
+      useCredential: `npm run workspace:openclaw-host:use-credential -- --credential ${shellQuote(input.credential)} --state-path ${shellQuote(statePath)} --directory-url ${shellQuote(input.directoryUrl)}`,
+      foregroundDebug: `npm run workspace:openclaw-host -- use-credential --credential ${shellQuote(input.credential)} --state-path ${shellQuote(statePath)} --directory-url ${shellQuote(input.directoryUrl)}`,
+    },
+  }
+}
+
 function serializeLatestRouteDelivery(log: IntentLogRow | null) {
   if (!log) {
     return null
@@ -204,9 +284,14 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
     sessionKey: row.session_key,
     reportedState: row.reported_state,
     runtimeSessionState: row.runtime_session_state,
+    ownerResolutionState: row.owner_resolution_state,
+    ownerResolutionActor: row.owner_resolution_actor,
+    ownerResolutionAt: row.owner_resolution_at,
+    ownerResolutionNote: row.owner_resolution_note,
     hostId: row.host_id,
     hostLabel: row.host_label,
     hostHealth: row.host_health_status,
+    hostCredentialState: row.host_credential_state,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : null,
     lastSeenAt: row.last_seen_at,
     endedAt: row.ended_at,
@@ -314,6 +399,11 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     workspaceSlug: host.workspace_slug,
     status: host.status,
     healthStatus: host.health_status,
+    credentialState: host.credential_state,
+    credentialIssuedAt: host.credential_issued_at,
+    credentialRotatedAt: host.credential_rotated_at,
+    credentialAgeHours: hostCredentialAgeHours(host),
+    recoveryCompletedAt: host.recovery_completed_at,
     routeCount: host.route_count,
     approvedAt: host.approved_at,
     approvedBy: host.approved_by,
@@ -330,7 +420,230 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
   }
 }
 
-function listConflictGroups(db: Database) {
+function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db)
+
+  const hosts = listOpenClawHosts(db).map((host) => serializeHost(db, host))
+  const conflicts = listConflictGroups(db)
+  const actionItems: OpenClawFleetDigestItem[] = []
+
+  for (const host of hosts) {
+    const hostHref = buildOpenClawFleetHref(host.id)
+    const lastTraceHref = host.summary.delivery.lastHref
+    const baseDetail = [
+      host.hostname,
+      host.workspaceSlug ? `workspace ${host.workspaceSlug}` : null,
+    ].filter(Boolean).join(' · ')
+
+    if (host.status === 'pending') {
+      actionItems.push({
+        id: `host-pending:${host.id}`,
+        severity: 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is awaiting approval`,
+        detail: `${baseDetail} has enrolled but cannot publish a trusted fleet route until an operator approves the host.`,
+        nextAction: 'Approve the host or revoke the enrollment if the machine should not join the fleet.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.healthStatus === 'stale') {
+      actionItems.push({
+        id: `host-stale:${host.id}`,
+        severity: 'critical',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} has gone stale`,
+        detail: `${baseDetail} has not sent a recent heartbeat, so its routes are currently non-deliverable.`,
+        nextAction: 'Inspect the service status on the host, then recover or replace the host if it no longer owns the route.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.status === 'revoked') {
+      actionItems.push({
+        id: `host-revoked:${host.id}`,
+        severity: 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is revoked`,
+        detail: `${baseDetail} remains visible for audit history, but its routes are disabled until recovery is explicitly started.`,
+        nextAction: 'Recover or replace the host only if this machine should rejoin the fleet; otherwise leave it revoked.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.credentialState === 'rotation_pending') {
+      actionItems.push({
+        id: `credential-rotate:${host.id}`,
+        severity: 'warning',
+        category: 'credential',
+        title: `${hostTitleForDigest(host)} is waiting for rotated credentials`,
+        detail: `${baseDetail} has a fresh credential issued, but the host has not yet come back with a heartbeat or inventory sync on the rotated secret.`,
+        nextAction: 'Apply the rotated credential pack on the host and wait for the next heartbeat to restore route health.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.credentialState === 'recovery_pending') {
+      actionItems.push({
+        id: `credential-recovery:${host.id}`,
+        severity: 'critical',
+        category: 'credential',
+        title: `${hostTitleForDigest(host)} is waiting for recovery cutover`,
+        detail: `${baseDetail} has a recovery credential issued and will stay unavailable until the replacement machine publishes inventory with the recovered host identity.`,
+        nextAction: 'Install the recovery credential on the replacement host, then verify heartbeat and inventory before closing the recovery.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.summary.delivery.failed > 0) {
+      actionItems.push({
+        id: `delivery-failed:${host.id}`,
+        severity: host.healthStatus === 'stale' || host.status === 'revoked' ? 'critical' : 'warning',
+        category: 'delivery',
+        title: `${hostTitleForDigest(host)} has failed delivery receipts`,
+        detail: `${baseDetail} recorded ${host.summary.delivery.failed} failed receipt(s) on live or recently active routes.`,
+        nextAction: 'Open the latest trace, confirm the failure reason, then repair the route or revoke the host if it should stop receiving delivery.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: lastTraceHref,
+      })
+    } else if (host.summary.live > 0 && host.summary.delivery.receipts === 0) {
+      actionItems.push({
+        id: `delivery-missing:${host.id}`,
+        severity: 'warning',
+        category: 'delivery',
+        title: `${hostTitleForDigest(host)} has live routes without receipts`,
+        detail: `${baseDetail} reports live routes, but Beam has not yet recorded a receipt for them.`,
+        nextAction: 'Send a Beam ping to the host and confirm the trace closes with a successful receipt.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.summary.conflict > 0 && !conflicts.some((conflict) => conflict.routes.some((route) => route.hostId === host.id))) {
+      actionItems.push({
+        id: `host-shadow-conflict:${host.id}`,
+        severity: 'warning',
+        category: 'conflict',
+        title: `${hostTitleForDigest(host)} still carries shadow conflict routes`,
+        detail: `${baseDetail} has at least one non-deliverable conflicting route that is no longer the active owner.`,
+        nextAction: 'Inspect the host detail and disable or clean up the shadow route if it should no longer advertise the Beam ID.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+  }
+
+  for (const conflict of conflicts) {
+    const primaryRoute = conflict.routes[0] ?? null
+    actionItems.push({
+      id: `conflict:${conflict.beamId}`,
+      severity: 'critical',
+      category: 'conflict',
+      title: `${conflict.beamId} has duplicate live routes`,
+      detail: `${conflict.routeCount} host routes currently claim ${conflict.beamId}, so Beam blocks delivery until one route owner is preferred or the competing route is disabled.`,
+      nextAction: 'Prefer exactly one route owner or revoke/disable the conflicting host route before retrying delivery.',
+      hostId: primaryRoute?.hostId ?? null,
+      hostLabel: primaryRoute?.hostLabel ?? primaryRoute?.hostname ?? null,
+      workspaceSlug: primaryRoute?.workspaceSlug ?? null,
+      href: buildOpenClawFleetHref(primaryRoute?.hostId ?? null),
+      traceHref: null,
+    })
+  }
+
+  const summary = {
+    totalHosts: hosts.length,
+    activeHosts: hosts.filter((host) => host.status === 'active').length,
+    pendingHosts: hosts.filter((host) => host.status === 'pending').length,
+    revokedHosts: hosts.filter((host) => host.status === 'revoked').length,
+    staleHosts: hosts.filter((host) => host.healthStatus === 'stale').length,
+    liveRoutes: hosts.reduce((sum, host) => sum + host.summary.live, 0),
+    staleRoutes: hosts.reduce((sum, host) => sum + host.summary.stale, 0),
+    failedReceipts: hosts.reduce((sum, host) => sum + host.summary.delivery.failed, 0),
+    duplicateIdentityConflicts: conflicts.length,
+    pendingCredentialActions: hosts.filter((host) => host.credentialState === 'rotation_pending' || host.credentialState === 'recovery_pending').length,
+    actionItems: actionItems.length,
+    criticalItems: actionItems.filter((item) => item.severity === 'critical').length,
+    warningItems: actionItems.filter((item) => item.severity === 'warning').length,
+  }
+
+  const markdownLines = [
+    `# Beam OpenClaw fleet digest · ${new Date().toISOString().slice(0, 10)}`,
+    '',
+    '## Summary',
+    '',
+    `- Hosts: \`${summary.totalHosts}\` total · \`${summary.activeHosts}\` active · \`${summary.pendingHosts}\` pending · \`${summary.revokedHosts}\` revoked`,
+    `- Fleet health: \`${summary.staleHosts}\` stale host(s) · \`${summary.pendingCredentialActions}\` credential action(s) pending`,
+    `- Routes: \`${summary.liveRoutes}\` live · \`${summary.staleRoutes}\` stale`,
+    `- Delivery: \`${summary.failedReceipts}\` failed receipt(s) · \`${summary.duplicateIdentityConflicts}\` duplicate conflict(s)`,
+    `- Operator backlog: \`${summary.actionItems}\` action item(s) · \`${summary.criticalItems}\` critical`,
+    '',
+    '## Action Items',
+    '',
+  ]
+
+  if (actionItems.length === 0) {
+    markdownLines.push('- No fleet action items are currently open.')
+  } else {
+    for (const item of actionItems) {
+      markdownLines.push(`- [${item.severity.toUpperCase()}] ${item.title}`)
+      markdownLines.push(`  - Detail: ${item.detail}`)
+      markdownLines.push(`  - Next action: ${item.nextAction}`)
+      if (item.href) {
+        markdownLines.push(`  - Host: ${absoluteHref(baseUrl, item.href)}`)
+      }
+      if (item.traceHref) {
+        markdownLines.push(`  - Trace: ${absoluteHref(baseUrl, item.traceHref)}`)
+      }
+      const workspaceHref = buildWorkspaceHref(item.workspaceSlug)
+      if (workspaceHref) {
+        markdownLines.push(`  - Workspace: ${absoluteHref(baseUrl, workspaceHref)}`)
+      }
+    }
+  }
+
+  return {
+    generatedAt: new Date().toISOString(),
+    summary,
+    actionItems,
+    markdown: `${markdownLines.join('\n')}\n`,
+  }
+}
+
+function hostTitleForDigest(host: Pick<ReturnType<typeof serializeHost>, 'label' | 'hostname'>): string {
+  return host.label || host.hostname
+}
+
+function listConflictGroups(db: Database): OpenClawConflictGroup[] {
   refreshOpenClawHostHealth(db)
   recalculateOpenClawRouteStates(db)
 
@@ -341,23 +654,36 @@ function listConflictGroups(db: Database) {
     ORDER BY beam_id ASC
   `).all() as Array<{ beam_id: string }>
 
-  return rows.map((row) => {
-    const routes = listOpenClawResolvedRoutesByBeamId(db, row.beam_id)
+  return rows.flatMap((row): OpenClawConflictGroup[] => {
+    const resolvedRoutes = listOpenClawResolvedRoutesByBeamId(db, row.beam_id)
+    const hasActivePreferredRoute = resolvedRoutes.some((route) =>
+      route.owner_resolution_state === 'preferred'
+      && route.runtime_session_state !== 'conflict'
+      && route.runtime_session_state !== 'revoked'
+      && route.runtime_session_state !== 'ended',
+    )
+    if (hasActivePreferredRoute) {
+      return []
+    }
+
+    const routes = resolvedRoutes
       .filter((route) => route.runtime_session_state === 'conflict')
       .map((route) => ({
+        routeId: route.id,
         hostId: route.host_id,
         hostLabel: route.host_label,
         hostname: route.hostname,
         workspaceSlug: route.workspace_slug,
         routeKey: route.route_key,
         routeSource: route.route_source,
+        ownerResolutionState: route.owner_resolution_state,
       }))
 
-    return {
+    return [{
       beamId: row.beam_id,
       routeCount: routes.length,
       routes,
-    }
+    }]
   })
 }
 
@@ -403,6 +729,7 @@ export function openClawAdminRouter(db: Database) {
     recalculateOpenClawRouteStates(db)
     const hosts = listOpenClawHosts(db).map((host) => serializeHost(db, host))
     const conflicts = listConflictGroups(db)
+    const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
     const summary = hosts.reduce((acc, host) => {
       acc.totalHosts += 1
       if (host.status === 'pending') acc.pendingHosts += 1
@@ -413,6 +740,7 @@ export function openClawAdminRouter(db: Database) {
       acc.staleRoutes += host.summary.stale
       acc.conflictRoutes += host.summary.conflict
       acc.endedRoutes += host.summary.ended
+      acc.failedReceipts += host.summary.delivery.failed
       return acc
     }, {
       totalHosts: 0,
@@ -424,6 +752,7 @@ export function openClawAdminRouter(db: Database) {
       staleRoutes: 0,
       conflictRoutes: 0,
       endedRoutes: 0,
+      failedReceipts: 0,
     })
 
     c.header('Cache-Control', 'no-store')
@@ -431,9 +760,87 @@ export function openClawAdminRouter(db: Database) {
       summary: {
         ...summary,
         duplicateIdentityConflicts: conflicts.length,
+        pendingCredentialActions: digest.summary.pendingCredentialActions,
+        actionItems: digest.summary.actionItems,
+        criticalItems: digest.summary.criticalItems,
       },
       hosts,
       conflicts,
+    })
+  })
+
+  router.get('/fleet/digest', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
+    const format = c.req.query('format')
+    if (format === 'markdown') {
+      c.header('Cache-Control', 'no-store')
+      c.header('Content-Type', 'text/markdown; charset=utf-8')
+      const timestamp = digest.generatedAt.slice(0, 10)
+      c.header('Content-Disposition', `attachment; filename="beam-openclaw-fleet-digest-${timestamp}.md"`)
+      return c.body(digest.markdown)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json(digest)
+  })
+
+  router.post('/fleet/digest/deliver', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const requestedEmail = normalizeOptionalString(body.email)
+    if (requestedEmail && auth.session.role !== 'admin' && requestedEmail !== auth.session.email) {
+      return c.json({ error: 'Only admins can deliver digests to a different mailbox', errorCode: 'FORBIDDEN' }, 403)
+    }
+
+    if (!isEmailDeliveryConfigured()) {
+      return c.json({ error: 'Email delivery is not configured for fleet digests', errorCode: 'EMAIL_DELIVERY_UNAVAILABLE' }, 503)
+    }
+
+    const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
+    const email = requestedEmail ?? auth.session.email
+    const delivered = await sendOperatorDigestEmail({
+      email,
+      subject: `Beam OpenClaw fleet digest · ${new Date().toISOString().slice(0, 10)}`,
+      markdown: digest.markdown,
+    })
+
+    if (!delivered) {
+      return c.json({ error: 'Failed to deliver fleet digest', errorCode: 'EMAIL_DELIVERY_FAILED' }, 500)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_digest.delivered',
+      actor: auth.session.email,
+      target: 'openclaw-fleet:digest',
+      details: {
+        role: auth.session.role,
+        email,
+        actionItems: digest.summary.actionItems,
+        criticalItems: digest.summary.criticalItems,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      email,
+      deliveredAt: new Date().toISOString(),
+      summary: digest.summary,
     })
   })
 
@@ -611,6 +1018,85 @@ export function openClawAdminRouter(db: Database) {
     })
   })
 
+  router.post('/hosts/:id/rotate', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const rotated = rotateOpenClawHostCredential(db, { id: hostId })
+    if (!rotated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.credential_rotated',
+      actor: auth.session.email,
+      target: `openclaw-host:${rotated.host.id}`,
+      details: {
+        role: auth.session.role,
+        hostname: rotated.host.hostname,
+        label: rotated.host.label,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, rotated.host),
+      credential: rotated.credential,
+      installPack: buildCredentialRefreshPack({
+        directoryUrl: new URL(c.req.url).origin,
+        credential: rotated.credential,
+      }),
+    })
+  })
+
+  router.post('/hosts/:id/recover', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const recovered = recoverOpenClawHost(db, {
+      id: hostId,
+      recoveredBy: auth.session.email,
+    })
+    if (!recovered) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.recovered',
+      actor: auth.session.email,
+      target: `openclaw-host:${recovered.host.id}`,
+      details: {
+        role: auth.session.role,
+        hostname: recovered.host.hostname,
+        label: recovered.host.label,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, recovered.host),
+      credential: recovered.credential,
+      installPack: buildCredentialRefreshPack({
+        directoryUrl: new URL(c.req.url).origin,
+        credential: recovered.credential,
+      }),
+    })
+  })
+
   router.post('/hosts/:id/revoke', async (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'admin')
     if (auth instanceof Response) {
@@ -650,6 +1136,141 @@ export function openClawAdminRouter(db: Database) {
     c.header('Cache-Control', 'no-store')
     return c.json({
       host: serializeHost(db, revoked),
+    })
+  })
+
+  router.post('/routes/:id/prefer', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const routeId = normalizePositiveInteger(c.req.param('id'))
+    if (!routeId) {
+      return c.json({ error: 'Invalid route id', errorCode: 'INVALID_ROUTE_ID' }, 400)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const updated = setOpenClawRouteOwnerResolution(db, {
+      routeId,
+      resolutionState: 'preferred',
+      actor: auth.session.email,
+      note: normalizeOptionalString(body.note),
+    })
+    if (!updated) {
+      return c.json({ error: 'Route not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_route.preferred',
+      actor: auth.session.email,
+      target: `openclaw-route:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        beamId: updated.beam_id,
+        hostId: updated.host_id,
+      },
+    })
+
+    const resolved = listOpenClawResolvedRoutesByBeamId(db, updated.beam_id).find((entry) => entry.id === updated.id)
+    return c.json({
+      route: resolved ? serializeRoute(db, resolved) : null,
+    })
+  })
+
+  router.post('/routes/:id/disable', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const routeId = normalizePositiveInteger(c.req.param('id'))
+    if (!routeId) {
+      return c.json({ error: 'Invalid route id', errorCode: 'INVALID_ROUTE_ID' }, 400)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const updated = setOpenClawRouteOwnerResolution(db, {
+      routeId,
+      resolutionState: 'disabled',
+      actor: auth.session.email,
+      note: normalizeOptionalString(body.note),
+    })
+    if (!updated) {
+      return c.json({ error: 'Route not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_route.disabled',
+      actor: auth.session.email,
+      target: `openclaw-route:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        beamId: updated.beam_id,
+        hostId: updated.host_id,
+      },
+    })
+
+    const resolved = listOpenClawResolvedRoutesByBeamId(db, updated.beam_id).find((entry) => entry.id === updated.id)
+    return c.json({
+      route: resolved ? serializeRoute(db, resolved) : null,
+    })
+  })
+
+  router.post('/routes/:id/clear-owner', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const routeId = normalizePositiveInteger(c.req.param('id'))
+    if (!routeId) {
+      return c.json({ error: 'Invalid route id', errorCode: 'INVALID_ROUTE_ID' }, 400)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const updated = setOpenClawRouteOwnerResolution(db, {
+      routeId,
+      resolutionState: 'implicit',
+      actor: auth.session.email,
+      note: normalizeOptionalString(body.note),
+    })
+    if (!updated) {
+      return c.json({ error: 'Route not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_route.owner_cleared',
+      actor: auth.session.email,
+      target: `openclaw-route:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        beamId: updated.beam_id,
+        hostId: updated.host_id,
+      },
+    })
+
+    const resolved = listOpenClawResolvedRoutesByBeamId(db, updated.beam_id).find((entry) => entry.id === updated.id)
+    return c.json({
+      route: resolved ? serializeRoute(db, resolved) : null,
     })
   })
 
@@ -771,7 +1392,7 @@ export function openClawPublicRouter(db: Database) {
       approved: host.status === 'active',
       host: serializeHost(db, host),
       enrollment: serializeEnrollment(getOpenClawEnrollmentRequestById(db, request.id)),
-      credential: host.status === 'active' ? createHostApiKey(host.host_key) : null,
+      credential: host.status === 'active' ? resolveOpenClawHostCredential(host) : null,
     }, host.status === 'active' ? 200 : 202)
   })
 
@@ -876,7 +1497,7 @@ export function openClawPublicRouter(db: Database) {
     c.header('Cache-Control', 'no-store')
     return c.json({
       ok: true,
-      host: serializeHost(db, updatedHost),
+      host: serializeHost(db, getOpenClawHostById(db, host.id) as OpenClawHostRow),
       routes: syncedRoutes.map((route) => {
         const resolved = listOpenClawResolvedRoutesByBeamId(db, route.beam_id).find((entry) => entry.id === route.id)
         return resolved ? serializeRoute(db, resolved) : null

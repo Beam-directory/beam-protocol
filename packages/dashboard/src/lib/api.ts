@@ -27,10 +27,12 @@ export type WorkspacePolicyDefaultExternalInitiation = 'binding' | 'deny'
 export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 export type OpenClawHostStatus = 'pending' | 'active' | 'revoked'
 export type OpenClawHostHealth = 'pending' | 'healthy' | 'watch' | 'stale' | 'revoked'
+export type OpenClawHostCredentialState = 'missing' | 'ready' | 'rotation_pending' | 'recovery_pending' | 'revoked'
 export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
 export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
 export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
+export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -277,9 +279,14 @@ export interface OpenClawHostRoute {
   sessionKey: string | null
   reportedState: OpenClawRouteReportedState
   runtimeSessionState: OpenClawRouteRuntimeState
+  ownerResolutionState: OpenClawRouteOwnerResolutionState
+  ownerResolutionActor: string | null
+  ownerResolutionAt: string | null
+  ownerResolutionNote: string | null
   hostId: number
   hostLabel: string | null
   hostHealth: OpenClawHostHealth
+  hostCredentialState: OpenClawHostCredentialState
   metadata: Record<string, unknown> | null
   lastSeenAt: string | null
   endedAt: string | null
@@ -307,6 +314,11 @@ export interface OpenClawHostSummary {
   workspaceSlug: string | null
   status: OpenClawHostStatus
   healthStatus: OpenClawHostHealth
+  credentialState: OpenClawHostCredentialState
+  credentialIssuedAt: string | null
+  credentialRotatedAt: string | null
+  credentialAgeHours: number | null
+  recoveryCompletedAt: string | null
   routeCount: number
   approvedAt: string | null
   approvedBy: string | null
@@ -343,12 +355,14 @@ export interface OpenClawConflictGroup {
   beamId: string
   routeCount: number
   routes: Array<{
+    routeId: number
     hostId: number
     hostLabel: string | null
     hostname: string
     workspaceSlug: string | null
     routeKey: string
     routeSource: OpenClawRouteSource
+    ownerResolutionState: OpenClawRouteOwnerResolutionState
   }>
 }
 
@@ -363,10 +377,49 @@ export interface OpenClawFleetOverviewResponse {
     staleRoutes: number
     conflictRoutes: number
     endedRoutes: number
+    failedReceipts: number
     duplicateIdentityConflicts: number
+    pendingCredentialActions: number
+    actionItems: number
+    criticalItems: number
   }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
+}
+
+export interface OpenClawFleetDigestItem {
+  id: string
+  severity: 'warning' | 'critical'
+  category: 'host' | 'credential' | 'conflict' | 'delivery'
+  title: string
+  detail: string
+  nextAction: string
+  hostId: number | null
+  hostLabel: string | null
+  workspaceSlug: string | null
+  href: string | null
+  traceHref: string | null
+}
+
+export interface OpenClawFleetDigestResponse {
+  generatedAt: string
+  summary: {
+    totalHosts: number
+    activeHosts: number
+    pendingHosts: number
+    revokedHosts: number
+    staleHosts: number
+    liveRoutes: number
+    staleRoutes: number
+    failedReceipts: number
+    duplicateIdentityConflicts: number
+    pendingCredentialActions: number
+    actionItems: number
+    criticalItems: number
+    warningItems: number
+  }
+  actionItems: OpenClawFleetDigestItem[]
+  markdown: string
 }
 
 export interface OpenClawHostsResponse {
@@ -432,6 +485,28 @@ export interface OpenClawHostApproveResponse {
 
 export interface OpenClawHostRevokeResponse {
   host: OpenClawHostSummary
+}
+
+export interface OpenClawHostCredentialActionResponse {
+  host: OpenClawHostSummary
+  credential: string
+  installPack: {
+    commands: {
+      useCredential: string
+      foregroundDebug: string
+    }
+  }
+}
+
+export interface OpenClawRouteActionResponse {
+  route: OpenClawHostRoute | null
+}
+
+export interface OpenClawFleetDigestDeliveryResponse {
+  ok: boolean
+  email: string
+  deliveredAt: string
+  summary: OpenClawFleetDigestResponse['summary']
 }
 
 export interface WorkspaceIdentitiesResponse {
@@ -2127,6 +2202,11 @@ export const directoryApi = {
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
+  getOpenClawFleetDigest: (params?: { format?: 'json' | 'markdown' }) => request<OpenClawFleetDigestResponse>(`/admin/openclaw/fleet/digest${buildQuery({ format: params?.format })}`, undefined, { admin: true }),
+  deliverOpenClawFleetDigest: (input?: { email?: string | null }) => request<OpenClawFleetDigestDeliveryResponse>('/admin/openclaw/fleet/digest/deliver', {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
   listOpenClawHosts: () => request<OpenClawHostsResponse>('/admin/openclaw/hosts', undefined, { admin: true }),
   getOpenClawHost: (id: number) => request<OpenClawHostDetailResponse>(`/admin/openclaw/hosts/${id}`, undefined, { admin: true }),
   getOpenClawHostRoutes: (id: number) => request<OpenClawHostRoutesResponse>(`/admin/openclaw/hosts/${id}/routes`, undefined, { admin: true }),
@@ -2138,7 +2218,25 @@ export const directoryApi = {
   approveOpenClawHost: (id: number) => request<OpenClawHostApproveResponse>(`/admin/openclaw/hosts/${id}/approve`, {
     method: 'POST',
   }, { admin: true }),
+  rotateOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/rotate`, {
+    method: 'POST',
+  }, { admin: true }),
+  recoverOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/recover`, {
+    method: 'POST',
+  }, { admin: true }),
   revokeOpenClawHost: (id: number, input?: { reason?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  preferOpenClawRoute: (id: number, input?: { note?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/prefer`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  disableOpenClawRoute: (id: number, input?: { note?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/disable`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  clearOpenClawRouteOwner: (id: number, input?: { note?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/clear-owner`, {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),

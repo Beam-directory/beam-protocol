@@ -144,6 +144,12 @@ For a one-command fleet smoke, use:
 npm run workspace:fleet-smoke
 ```
 
+For a repo-owned fleet digest and escalation summary, use:
+
+```bash
+npm run workspace:fleet-digest
+```
+
 The fleet enrollment response now also includes a copy-paste install pack with:
 
 - managed macOS install command
@@ -171,6 +177,13 @@ That keeps a foreground live-sync process alive and re-syncs the Beam workspace 
 It is event-driven now. Beam watches the authoritative OpenClaw files directly instead of polling on a fixed interval.
 
 The fleet and workspace surfaces now also show last-delivery receipts for host-backed routes, including status, error code, requested time, and a direct trace link back into Beam.
+
+The fleet surface also gives operators explicit day-2 actions:
+
+- rotate host credentials without reinstalling the whole host
+- recover or replace a revoked or lost host with a new credential cutover
+- prefer, disable, or reset route ownership when duplicate Beam identities appear
+- deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
 
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
