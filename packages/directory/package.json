@@ -1,6 +1,6 @@
 {
   "name": "@beam-protocol/directory",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Beam Protocol Directory Server — agent registration, discovery, and intent routing",
   "type": "module",
   "main": "./dist/index.js",

@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.2.0 (draft)
+## v1.2.0 (2026-04-02)
 
 ### OpenClaw Fleet Connector
 - add first-class OpenClaw host enrollment, approval, heartbeat, inventory, route-event, and revoke flows to the Beam control plane
