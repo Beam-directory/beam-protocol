@@ -10,6 +10,7 @@ import {
   type OpenClawHostDetailResponse,
   type OpenClawHostHealth,
   type OpenClawHostIdentitiesResponse,
+  type OpenClawInstallPack,
   type OpenClawHostRoute,
   type OpenClawHostSummary,
   type OpenClawHostStatus,
@@ -111,6 +112,7 @@ export default function OpenClawFleetPage() {
     label: string | null
     workspaceSlug: string | null
     expiresAt: string | null
+    installPack: OpenClawInstallPack | null
   } | null>(null)
   const [enrollmentForm, setEnrollmentForm] = useState<OpenClawEnrollmentCreateInput>({
     label: '',
@@ -225,6 +227,7 @@ export default function OpenClawFleetPage() {
         label: response.enrollment.label,
         workspaceSlug: response.enrollment.workspaceSlug,
         expiresAt: response.enrollment.expiresAt,
+        installPack: response.enrollment.installPack ?? null,
       })
       await loadOverview()
     }, 'Enrollment token issued.')
@@ -324,7 +327,9 @@ export default function OpenClawFleetPage() {
 
                     <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
                       <div>{`${formatNumber(host.summary.live)} live · ${formatNumber(host.summary.stale)} stale · ${formatNumber(host.summary.conflict)} conflict`}</div>
+                      <div>{`${formatNumber(host.summary.unavailable)} unavailable · ${formatNumber(host.summary.revoked)} revoked`}</div>
                       <div>{host.lastInventoryAt ? `Inventory ${formatRelativeTime(host.lastInventoryAt)}` : 'No inventory yet'}</div>
+                      <div>{host.summary.delivery.receipts > 0 ? `${formatNumber(host.summary.delivery.receipts)} receipts · ${formatNumber(host.summary.delivery.failed)} failed` : 'No delivery receipts yet'}</div>
                       <div>{host.approvedAt ? `Approved ${formatRelativeTime(host.approvedAt)}` : 'Waiting for approval'}</div>
                       <div>{host.revokedAt ? `Revoked ${formatRelativeTime(host.revokedAt)}` : 'Credential active or pending'}</div>
                     </div>
@@ -425,6 +430,25 @@ export default function OpenClawFleetPage() {
                   enrollmentResult.expiresAt ? `Expires ${formatDateTime(enrollmentResult.expiresAt)}` : null,
                 ].filter(Boolean).join(' · ')}
               </div>
+              {enrollmentResult.installPack ? (
+                <div className="mt-4 space-y-3">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Install pack</div>
+                  {[
+                    ['Managed macOS', enrollmentResult.installPack.commands.managedMacos],
+                    ['Managed Linux', enrollmentResult.installPack.commands.managedLinux],
+                    ['Foreground debug', enrollmentResult.installPack.commands.foregroundDebug],
+                    ['Status', enrollmentResult.installPack.commands.status],
+                    ['Uninstall', enrollmentResult.installPack.commands.uninstall],
+                  ].map(([label, command]) => (
+                    <div key={label}>
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
+                      <div className="mt-1 break-all rounded-xl bg-slate-100 px-3 py-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                        {command}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -496,6 +520,8 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.beamDirectoryUrl}</div>
                   <div>{selectedHost.lastRouteEventAt ? `Last route event ${formatRelativeTime(selectedHost.lastRouteEventAt)}` : 'No route events yet'}</div>
                   <div>{selectedHost.revocationReason ? `Revocation reason: ${selectedHost.revocationReason}` : 'Not revoked'}</div>
+                  <div>{`${formatNumber(selectedHost.summary.unavailable)} unavailable · ${formatNumber(selectedHost.summary.revoked)} revoked routes`}</div>
+                  <div>{selectedHost.summary.delivery.lastRequestedAt ? `Last receipt ${formatRelativeTime(selectedHost.summary.delivery.lastRequestedAt)} · ${selectedHost.summary.delivery.lastStatus ?? 'unknown'}` : 'No delivery receipts yet'}</div>
                 </div>
               </div>
 
@@ -522,6 +548,8 @@ export default function OpenClawFleetPage() {
                           <div>{route.connectionMode ? `Transport ${route.connectionMode}` : 'No transport mode'}</div>
                           <div>{route.lastSeenAt ? `Last seen ${formatRelativeTime(route.lastSeenAt)}` : 'No last-seen timestamp'}</div>
                           <div>{route.endedAt ? `Ended ${formatRelativeTime(route.endedAt)}` : 'Still active in inventory'}</div>
+                          <div>{route.lastDelivery ? `Last delivery ${formatRelativeTime(route.lastDelivery.requestedAt)} · ${route.lastDelivery.status}` : 'No delivery receipt yet'}</div>
+                          <div>{route.lastDelivery?.errorCode ? `Last error ${route.lastDelivery.errorCode}` : 'No delivery error recorded'}</div>
                         </div>
                         <div className="mt-3 flex flex-wrap gap-2 text-xs">
                           {route.httpEndpoint ? (
@@ -532,6 +560,11 @@ export default function OpenClawFleetPage() {
                           {route.workspace ? (
                             <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={`/workspaces?workspace=${encodeURIComponent(route.workspace.slug)}`}>
                               Open workspace
+                            </Link>
+                          ) : null}
+                          {route.lastDelivery ? (
+                            <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={route.lastDelivery.href}>
+                              Open trace
                             </Link>
                           ) : null}
                         </div>
@@ -584,6 +617,11 @@ export default function OpenClawFleetPage() {
                     <StatusPill label={identity.route.runtimeSessionState} tone={routeStateTone(identity.route.runtimeSessionState)} />
                   </div>
                   <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400">
+                    <div>
+                      {identity.route.lastDelivery
+                        ? `Last delivery ${formatRelativeTime(identity.route.lastDelivery.requestedAt)} · ${identity.route.lastDelivery.status}${identity.route.lastDelivery.errorCode ? ` · ${identity.route.lastDelivery.errorCode}` : ''}`
+                        : 'No delivery receipt yet'}
+                    </div>
                     {identity.bindings.length > 0 ? (
                       identity.bindings.map((binding) => (
                         <div key={binding.id}>
@@ -599,6 +637,13 @@ export default function OpenClawFleetPage() {
                       <div>No workspace bindings reference this Beam ID yet.</div>
                     )}
                   </div>
+                  {identity.route.lastDelivery ? (
+                    <div className="mt-3 text-xs">
+                      <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={identity.route.lastDelivery.href}>
+                        Open trace
+                      </Link>
+                    </div>
+                  ) : null}
                 </div>
               ))
             ) : (

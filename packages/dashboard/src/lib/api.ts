@@ -158,6 +158,7 @@ export interface WorkspaceIdentityBinding {
     httpEndpoint: string | null
     deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
   }
+  lastDelivery: OpenClawRouteDelivery | null
   hostId: number | null
   hostLabel: string | null
   hostHealth: OpenClawHostHealth | 'conflict' | null
@@ -231,6 +232,30 @@ export interface OpenClawEnrollmentRequest {
   createdAt: string
   updatedAt: string
   token?: string
+  installPack?: OpenClawInstallPack
+}
+
+export interface OpenClawInstallPack {
+  directoryUrl: string
+  workspaceSlug: string
+  commands: {
+    managedMacos: string
+    managedLinux: string
+    foregroundDebug: string
+    status: string
+    uninstall: string
+  }
+}
+
+export interface OpenClawRouteDelivery {
+  nonce: string
+  intentType: string
+  status: IntentLifecycleStatus
+  errorCode: string | null
+  requestedAt: string
+  completedAt: string | null
+  latencyMs: number | null
+  href: string
 }
 
 export interface OpenClawHostRoute {
@@ -258,6 +283,7 @@ export interface OpenClawHostRoute {
   metadata: Record<string, unknown> | null
   lastSeenAt: string | null
   endedAt: string | null
+  lastDelivery: OpenClawRouteDelivery | null
   createdAt: string
   updatedAt: string
   bindings: Array<{
@@ -300,6 +326,16 @@ export interface OpenClawHostSummary {
     stale: number
     conflict: number
     ended: number
+    revoked: number
+    unavailable: number
+    delivery: {
+      receipts: number
+      failed: number
+      lastRequestedAt: string | null
+      lastStatus: IntentLifecycleStatus | null
+      lastErrorCode: string | null
+      lastHref: string | null
+    }
   }
 }
 

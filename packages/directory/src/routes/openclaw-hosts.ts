@@ -7,6 +7,7 @@ import {
   createOpenClawEnrollmentRequest,
   createOpenClawHost,
   getAgent,
+  getLatestIntentLogByTarget,
   getOpenClawEnrollmentRequestById,
   getOpenClawEnrollmentRequestByKey,
   getOpenClawHostByEnrollmentRequestId,
@@ -31,6 +32,7 @@ import {
 } from '../db.js'
 import { createHostApiKey, getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-key.js'
 import type {
+  IntentLogRow,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostHealth,
   OpenClawHostRow,
@@ -117,10 +119,71 @@ function serializeEnrollment(row: OpenClawHostEnrollmentRequestRow | null) {
   }
 }
 
+function shellQuote(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`
+}
+
+function buildOpenClawInstallPack(input: {
+  directoryUrl: string
+  workspaceSlug: string | null
+  token: string
+  label: string | null
+}) {
+  const directoryUrl = input.directoryUrl
+  const workspaceSlug = input.workspaceSlug ?? 'openclaw-local'
+  const baseArgs = [
+    '--directory-url',
+    shellQuote(directoryUrl),
+    '--workspace',
+    shellQuote(workspaceSlug),
+    '--enrollment-token',
+    shellQuote(input.token),
+  ]
+
+  if (input.label) {
+    baseArgs.push('--host-label', shellQuote(input.label))
+  }
+
+  const joinedArgs = baseArgs.join(' ')
+  return {
+    directoryUrl,
+    workspaceSlug,
+    commands: {
+      managedMacos: `npm run workspace:openclaw-host:install -- ${joinedArgs}`,
+      managedLinux: `npm run workspace:openclaw-host:install -- ${joinedArgs}`,
+      foregroundDebug: `npm run workspace:openclaw-host -- ${joinedArgs}`,
+      status: 'npm run workspace:openclaw-status',
+      uninstall: 'npm run workspace:openclaw-host:uninstall',
+    },
+  }
+}
+
+function buildIntentHref(nonce: string): string {
+  return `/intents/${encodeURIComponent(nonce)}`
+}
+
+function serializeLatestRouteDelivery(log: IntentLogRow | null) {
+  if (!log) {
+    return null
+  }
+
+  return {
+    nonce: log.nonce,
+    intentType: log.intent_type,
+    status: log.status,
+    errorCode: log.error_code,
+    requestedAt: log.requested_at,
+    completedAt: log.completed_at,
+    latencyMs: log.round_trip_latency_ms,
+    href: buildIntentHref(log.nonce),
+  }
+}
+
 function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
   const workspace = row.workspace_slug ? getWorkspaceBySlug(db, row.workspace_slug) : null
   const bindings = listWorkspaceIdentityBindingsByBeamId(db, row.beam_id)
   const displayName = getAgent(db, row.beam_id)?.display_name ?? null
+  const latestDelivery = serializeLatestRouteDelivery(getLatestIntentLogByTarget(db, row.beam_id))
 
   return {
     id: row.id,
@@ -147,6 +210,7 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : null,
     lastSeenAt: row.last_seen_at,
     endedAt: row.ended_at,
+    lastDelivery: latestDelivery,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     bindings: bindings.map((binding) => ({
@@ -160,27 +224,56 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
   }
 }
 
-function summarizeRoutes(routes: OpenClawResolvedRouteRow[]) {
-  return routes.reduce((summary, route) => {
-    summary.total += 1
+function summarizeRoutes(db: Database, routes: OpenClawResolvedRouteRow[]) {
+  const summary = routes.reduce((current, route) => {
+    const latestDelivery = getLatestIntentLogByTarget(db, route.beam_id)
+    current.total += 1
     switch (route.runtime_session_state) {
       case 'live':
-        summary.live += 1
+        current.live += 1
         break
       case 'stale':
-        summary.stale += 1
+        current.stale += 1
         break
       case 'conflict':
-        summary.conflict += 1
+        current.conflict += 1
+        break
+      case 'revoked':
+        current.revoked += 1
         break
       case 'ended':
-        summary.ended += 1
+        current.ended += 1
         break
       default:
-        summary.idle += 1
+        current.idle += 1
         break
     }
-    return summary
+
+    if (
+      route.connection_mode === 'unavailable'
+      || route.runtime_session_state === 'stale'
+      || route.runtime_session_state === 'revoked'
+      || route.runtime_session_state === 'conflict'
+    ) {
+      current.unavailable += 1
+    }
+
+    if (latestDelivery) {
+      current.delivery.receipts += 1
+      if (latestDelivery.status === 'failed' || latestDelivery.error_code) {
+        current.delivery.failed += 1
+      }
+
+      const isNewer = !current.delivery.lastRequestedAt || Date.parse(latestDelivery.requested_at) >= Date.parse(current.delivery.lastRequestedAt)
+      if (isNewer) {
+        current.delivery.lastRequestedAt = latestDelivery.requested_at
+        current.delivery.lastStatus = latestDelivery.status
+        current.delivery.lastErrorCode = latestDelivery.error_code
+        current.delivery.lastHref = buildIntentHref(latestDelivery.nonce)
+      }
+    }
+
+    return current
   }, {
     total: 0,
     live: 0,
@@ -188,7 +281,19 @@ function summarizeRoutes(routes: OpenClawResolvedRouteRow[]) {
     stale: 0,
     conflict: 0,
     ended: 0,
+    revoked: 0,
+    unavailable: 0,
+    delivery: {
+      receipts: 0,
+      failed: 0,
+      lastRequestedAt: null as string | null,
+      lastStatus: null as IntentLogRow['status'] | null,
+      lastErrorCode: null as string | null,
+      lastHref: null as string | null,
+    },
   })
+
+  return summary
 }
 
 function serializeHost(db: Database, host: OpenClawHostRow) {
@@ -196,7 +301,7 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     ? listOpenClawEnrollmentRequests(db).find((entry) => entry.id === host.enrollment_request_id) ?? null
     : null
   const routes = listOpenClawResolvedRoutesForHost(db, host.id)
-  const summary = summarizeRoutes(routes)
+  const summary = summarizeRoutes(db, routes)
 
   return {
     id: host.id,
@@ -369,6 +474,12 @@ export function openClawAdminRouter(db: Database) {
       enrollment: {
         ...serializeEnrollment(enrollment),
         token: enrollment.request_key,
+        installPack: buildOpenClawInstallPack({
+          directoryUrl: new URL(c.req.url).origin,
+          workspaceSlug: enrollment.workspace_slug,
+          token: enrollment.request_key,
+          label: enrollment.label,
+        }),
       },
     }, 201)
   })

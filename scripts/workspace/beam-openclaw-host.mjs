@@ -21,11 +21,11 @@ const envPath = path.join(repoRoot, 'ops/quickstart/.env')
 const envExamplePath = path.join(repoRoot, 'ops/quickstart/.env.example')
 const command = process.argv[2] && !process.argv[2].startsWith('--') ? process.argv[2] : 'run'
 
-const directoryUrl = optionalFlag('--directory-url', process.env.BEAM_DIRECTORY_URL || 'http://localhost:43100')
-const dashboardUrl = optionalFlag('--dashboard-url', process.env.BEAM_DASHBOARD_URL || 'http://localhost:43173')
-const adminEmail = optionalFlag('--email', process.env.BEAM_ADMIN_EMAIL || 'ops@beam.local')
-const workspaceSlug = optionalFlag('--workspace', process.env.BEAM_WORKSPACE_SLUG || 'openclaw-local')
-const hostLabelOverride = optionalFlag('--host-label', process.env.BEAM_OPENCLAW_HOST_LABEL || null)
+const directoryUrlFlag = optionalFlag('--directory-url', process.env.BEAM_DIRECTORY_URL || null)
+const dashboardUrlFlag = optionalFlag('--dashboard-url', process.env.BEAM_DASHBOARD_URL || null)
+const adminEmailFlag = optionalFlag('--email', process.env.BEAM_ADMIN_EMAIL || null)
+const workspaceSlugFlag = optionalFlag('--workspace', process.env.BEAM_WORKSPACE_SLUG || null)
+const hostLabelOverrideFlag = optionalFlag('--host-label', process.env.BEAM_OPENCLAW_HOST_LABEL || null)
 const enrollmentTokenOverride = optionalFlag('--enrollment-token', process.env.BEAM_OPENCLAW_ENROLLMENT_TOKEN || null)
 const syncIntervalMs = Number.parseInt(optionalFlag('--sync-interval-ms', '10000'), 10)
 const heartbeatIntervalMs = Number.parseInt(optionalFlag('--heartbeat-interval-ms', '10000'), 10)
@@ -35,6 +35,7 @@ const statePath = optionalFlag('--state-path', path.join(os.homedir(), '.opencla
 const sessionCachePath = optionalFlag('--admin-session-cache', path.join(os.homedir(), '.openclaw/workspace/secrets/beam-admin-session.json'))
 
 const nodePath = process.execPath
+const hostAgentScriptPath = path.join(repoRoot, 'scripts/workspace/install-openclaw-host-agent.mjs')
 const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
   ? '/opt/homebrew/bin/docker'
   : fs.existsSync('/usr/local/bin/docker')
@@ -60,6 +61,18 @@ function normalizeHostState(state) {
     return {}
   }
   return state
+}
+
+function resolveConfig(state) {
+  const resolvedState = normalizeHostState(state)
+  return {
+    directoryUrl: directoryUrlFlag || resolvedState.directoryUrl || 'http://localhost:43100',
+    dashboardUrl: dashboardUrlFlag || resolvedState.dashboardUrl || 'http://localhost:43173',
+    adminEmail: adminEmailFlag || resolvedState.adminEmail || 'ops@beam.local',
+    workspaceSlug: workspaceSlugFlag || resolvedState.workspaceSlug || 'openclaw-local',
+    hostLabel: hostLabelOverrideFlag || resolvedState.label || os.hostname(),
+    enrollmentToken: enrollmentTokenOverride || resolvedState.enrollmentToken || null,
+  }
 }
 
 function isLocalDirectory(targetUrl) {
@@ -94,8 +107,8 @@ async function isHealthy(url) {
   }
 }
 
-async function ensureLocalStack() {
-  if (!isLocalDirectory(directoryUrl)) {
+async function ensureLocalStack(config) {
+  if (!isLocalDirectory(config.directoryUrl)) {
     return
   }
 
@@ -108,8 +121,8 @@ async function ensureLocalStack() {
   }
 
   const [directoryOk, dashboardOk] = await Promise.all([
-    isHealthy(`${directoryUrl}/health`),
-    isHealthy(dashboardUrl),
+    isHealthy(`${config.directoryUrl}/health`),
+    isHealthy(config.dashboardUrl),
   ])
 
   if (directoryOk && dashboardOk) {
@@ -145,17 +158,17 @@ function createAdminHeaders(token) {
   }
 }
 
-async function createAdminSession() {
-  const challenge = await requestJson(`${directoryUrl}/admin/auth/magic-link`, {
+async function createAdminSession(config) {
+  const challenge = await requestJson(`${config.directoryUrl}/admin/auth/magic-link`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Origin: dashboardUrl,
+      Origin: config.dashboardUrl,
     },
-    body: JSON.stringify({ email: adminEmail }),
+    body: JSON.stringify({ email: config.adminEmail }),
   })
 
-  const verify = await requestJson(`${directoryUrl}/admin/auth/verify`, {
+  const verify = await requestJson(`${config.directoryUrl}/admin/auth/verify`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ token: challenge.token }),
@@ -165,13 +178,13 @@ async function createAdminSession() {
     token: verify.token,
     url: challenge.url,
     createdAt: Date.now(),
-    email: adminEmail,
+    email: config.adminEmail,
   }
   await storeOpenClawAdminSession(sessionCachePath, session)
   return session
 }
 
-async function getAdminSession({ force = false } = {}) {
+async function getAdminSession(config, { force = false } = {}) {
   if (!force) {
     const cached = await loadOpenClawAdminSession(sessionCachePath)
     if (cached && typeof cached.token === 'string' && typeof cached.createdAt === 'number') {
@@ -182,23 +195,24 @@ async function getAdminSession({ force = false } = {}) {
     }
   }
 
-  return createAdminSession()
+  return createAdminSession(config)
 }
 
 function buildHostMetadata(state = {}) {
+  const config = resolveConfig(state)
   return {
-    label: hostLabelOverride || state.label || os.hostname(),
+    label: config.hostLabel,
     hostname: os.hostname(),
     os: `${process.platform} ${os.release()}`,
     connectorVersion: readPackageVersion(),
-    beamDirectoryUrl: directoryUrl,
-    workspaceSlug,
+    beamDirectoryUrl: config.directoryUrl,
+    workspaceSlug: config.workspaceSlug,
     metadata: {
       controlPlane: 'beam-openclaw-host',
       node: process.version,
       platform: process.platform,
       arch: process.arch,
-      workspaceSlug,
+      workspaceSlug: config.workspaceSlug,
     },
   }
 }
@@ -215,14 +229,15 @@ function createHostHeaders(credential) {
   }
 }
 
-async function issueEnrollment(adminSession) {
-  const response = await requestJson(`${directoryUrl}/admin/openclaw/hosts/enrollment`, {
+async function issueEnrollment(state, adminSession) {
+  const config = resolveConfig(state)
+  const response = await requestJson(`${config.directoryUrl}/admin/openclaw/hosts/enrollment`, {
     method: 'POST',
     headers: createAdminHeaders(adminSession.token),
     body: JSON.stringify({
-      label: buildHostMetadata().label,
-      workspaceSlug,
-      notes: `Issued by ${adminEmail} for ${os.hostname()}`,
+      label: buildHostMetadata(state).label,
+      workspaceSlug: config.workspaceSlug,
+      notes: `Issued by ${config.adminEmail} for ${os.hostname()}`,
       expiresInHours: 72,
     }),
   })
@@ -230,13 +245,14 @@ async function issueEnrollment(adminSession) {
 }
 
 async function enrollHost(state) {
-  const enrollmentToken = enrollmentTokenOverride || state.enrollmentToken
+  const config = resolveConfig(state)
+  const enrollmentToken = config.enrollmentToken
   if (!enrollmentToken) {
     throw new Error('No OpenClaw host enrollment token is available. Supply --enrollment-token or run setup with admin access.')
   }
 
   const metadata = buildHostMetadata(state)
-  const response = await requestJsonAllow(`${directoryUrl}/openclaw/hosts/enroll`, {
+  const response = await requestJsonAllow(`${config.directoryUrl}/openclaw/hosts/enroll`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
@@ -256,7 +272,6 @@ async function enrollHost(state) {
   const nextState = {
     ...state,
     label: host?.label ?? metadata.label,
-    workspaceSlug: host?.workspaceSlug ?? workspaceSlug,
     hostId: host?.id ?? state.hostId ?? null,
     hostKey: host?.hostKey ?? state.hostKey ?? null,
     enrollmentId: enrollment?.id ?? state.enrollmentId ?? null,
@@ -265,6 +280,10 @@ async function enrollHost(state) {
     credential: response.payload?.credential ?? state.credential ?? null,
     status: host?.status ?? state.status ?? 'pending',
     healthStatus: host?.healthStatus ?? state.healthStatus ?? 'pending',
+    directoryUrl: config.directoryUrl,
+    dashboardUrl: config.dashboardUrl,
+    adminEmail: config.adminEmail,
+    workspaceSlug: host?.workspaceSlug ?? state.workspaceSlug ?? config.workspaceSlug,
     approvedAt: host?.approvedAt ?? state.approvedAt ?? null,
     approvedBy: host?.approvedBy ?? state.approvedBy ?? null,
     revokedAt: host?.revokedAt ?? state.revokedAt ?? null,
@@ -280,7 +299,8 @@ async function approveHost(state, adminSession) {
     return state
   }
 
-  const response = await requestJson(`${directoryUrl}/admin/openclaw/hosts/${state.hostId}/approve`, {
+  const config = resolveConfig(state)
+  const response = await requestJson(`${config.directoryUrl}/admin/openclaw/hosts/${state.hostId}/approve`, {
     method: 'POST',
     headers: createAdminHeaders(adminSession.token),
   })
@@ -306,15 +326,19 @@ async function ensureHostCredential(initialState, { allowBootstrapAdmin = false,
   }
 
   if (!state.enrollmentToken && allowBootstrapAdmin) {
-    const adminSession = await getAdminSession()
-    const enrollment = await issueEnrollment(adminSession)
+    const config = resolveConfig(state)
+    const adminSession = await getAdminSession(config)
+    const enrollment = await issueEnrollment(state, adminSession)
     state = await persistHostState({
       ...state,
       enrollmentId: enrollment.id,
       enrollmentToken: enrollment.token,
       enrollmentStatus: enrollment.status,
-      label: enrollment.label ?? state.label ?? buildHostMetadata().label,
-      workspaceSlug: enrollment.workspaceSlug ?? state.workspaceSlug ?? workspaceSlug,
+      label: enrollment.label ?? state.label ?? buildHostMetadata(state).label,
+      directoryUrl: config.directoryUrl,
+      dashboardUrl: config.dashboardUrl,
+      adminEmail: config.adminEmail,
+      workspaceSlug: enrollment.workspaceSlug ?? state.workspaceSlug ?? config.workspaceSlug,
       updatedAt: new Date().toISOString(),
     })
   }
@@ -322,14 +346,14 @@ async function ensureHostCredential(initialState, { allowBootstrapAdmin = false,
   state = await enrollHost(state)
 
   if (!state.credential && allowAutoApprove && state.hostId) {
-    const adminSession = await getAdminSession()
+    const adminSession = await getAdminSession(resolveConfig(state))
     state = await approveHost(state, adminSession)
   }
 
   return state
 }
 
-function mapRouteToInventoryEntry(route) {
+function mapRouteToInventoryEntry(route, config) {
   const routeSource = route.source
   const routeKey = openClawRouteKeyForDescriptor(route)
 
@@ -346,7 +370,7 @@ function mapRouteToInventoryEntry(route) {
 
   return {
     beamId: route.beamId,
-    workspaceSlug,
+    workspaceSlug: config.workspaceSlug,
     routeSource,
     routeKey,
     runtimeType: route.runtimeType ?? null,
@@ -366,18 +390,19 @@ async function syncHostInventory(state) {
     return { routeCount: 0, runtime: null }
   }
 
+  const config = resolveConfig(state)
   const runtime = await loadOpenClawRuntimeState({
     includeEndedSubagents: true,
   })
-  const routes = runtime.routes.map((route) => mapRouteToInventoryEntry(route))
+  const routes = runtime.routes.map((route) => mapRouteToInventoryEntry(route, config))
 
-  await requestJson(`${directoryUrl}/openclaw/hosts/inventory`, {
+  await requestJson(`${config.directoryUrl}/openclaw/hosts/inventory`, {
     method: 'POST',
     headers: createHostHeaders(state.credential),
     body: JSON.stringify({
       connectorVersion: readPackageVersion(),
-      beamDirectoryUrl: directoryUrl,
-      workspaceSlug,
+      beamDirectoryUrl: config.directoryUrl,
+      workspaceSlug: config.workspaceSlug,
       label: buildHostMetadata(state).label,
       hostname: os.hostname(),
       os: `${process.platform} ${os.release()}`,
@@ -396,7 +421,8 @@ async function heartbeatHost(state, routeCount) {
     return null
   }
 
-  const response = await requestJson(`${directoryUrl}/openclaw/hosts/heartbeat`, {
+  const config = resolveConfig(state)
+  const response = await requestJson(`${config.directoryUrl}/openclaw/hosts/heartbeat`, {
     method: 'POST',
     headers: createHostHeaders(state.credential),
     body: JSON.stringify({
@@ -413,12 +439,13 @@ async function heartbeatHost(state, routeCount) {
 }
 
 function startReceiverChild(state) {
+  const config = resolveConfig(state)
   const child = spawn(nodePath, [path.join(repoRoot, 'scripts/workspace/openclaw-beam-receiver.mjs')], {
     cwd: repoRoot,
     env: {
       ...process.env,
-      BEAM_DIRECTORY_URL: directoryUrl,
-      BEAM_WORKSPACE_SLUG: workspaceSlug,
+      BEAM_DIRECTORY_URL: config.directoryUrl,
+      BEAM_WORKSPACE_SLUG: config.workspaceSlug,
       BEAM_OPENCLAW_HOST_CREDENTIAL: state.credential ?? '',
       BEAM_OPENCLAW_HOST_STATE_PATH: statePath,
     },
@@ -428,10 +455,45 @@ function startReceiverChild(state) {
   return child
 }
 
-async function setupCommand() {
-  await ensureLocalStack()
+function serviceCommandArgs(extraArgs = []) {
+  return [
+    hostAgentScriptPath,
+    ...extraArgs,
+    '--state-path',
+    statePath,
+    '--admin-session-cache',
+    sessionCachePath,
+  ]
+}
 
-  if (isLocalDirectory(directoryUrl)) {
+function readManagedServiceStatus() {
+  const result = spawnSync(nodePath, serviceCommandArgs(['--status', '--json']), {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: process.env,
+  })
+  if (result.status !== 0) {
+    const stderr = result.stderr?.trim()
+    throw new Error(stderr || `Unable to inspect Beam OpenClaw host service (status ${result.status ?? 'unknown'})`)
+  }
+
+  return JSON.parse(result.stdout || '{}')
+}
+
+function installManagedService() {
+  run(nodePath, serviceCommandArgs())
+}
+
+function uninstallManagedService() {
+  run(nodePath, serviceCommandArgs(['--uninstall']))
+}
+
+async function setupCommand() {
+  const initialState = await loadOpenClawHostConnectorState(statePath)
+  const config = resolveConfig(initialState)
+  await ensureLocalStack(config)
+
+  if (isLocalDirectory(config.directoryUrl)) {
     log('running local quickstart smoke')
     run(nodePath, [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
   }
@@ -445,11 +507,23 @@ async function setupCommand() {
   log('installing direct OpenClaw spawn hook')
   run(nodePath, [path.join(repoRoot, 'scripts/workspace/install-openclaw-spawn-hook.mjs')])
 
-  let state = await loadOpenClawHostConnectorState(statePath)
+  let state = await persistHostState({
+    ...normalizeHostState(initialState),
+    directoryUrl: config.directoryUrl,
+    dashboardUrl: config.dashboardUrl,
+    adminEmail: config.adminEmail,
+    workspaceSlug: config.workspaceSlug,
+    label: config.hostLabel,
+    enrollmentToken: config.enrollmentToken,
+    updatedAt: new Date().toISOString(),
+  })
   state = await ensureHostCredential(state, {
     allowBootstrapAdmin: true,
-    allowAutoApprove: autoApprove || isLocalDirectory(directoryUrl),
+    allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
   })
+
+  log('installing managed Beam OpenClaw host service')
+  installManagedService()
 
   if (!state.credential) {
     log('host is enrolled but still waiting for manual approval')
@@ -459,19 +533,21 @@ async function setupCommand() {
 
   let loginUrl = null
   try {
-    const adminSession = await getAdminSession()
+    const adminSession = await getAdminSession(resolveConfig(state))
     loginUrl = adminSession.url ?? null
   } catch {
     loginUrl = null
   }
+
+  const resolvedConfig = resolveConfig(state)
 
   console.log('')
   console.log('Beam OpenClaw host setup finished.')
   if (loginUrl) {
     console.log(`Login:     ${loginUrl}`)
   }
-  console.log(`Workspace: ${dashboardUrl}/workspaces?workspace=${encodeURIComponent(workspaceSlug)}`)
-  console.log(`Fleet:     ${dashboardUrl}/openclaw-fleet`)
+  console.log(`Workspace: ${resolvedConfig.dashboardUrl}/workspaces?workspace=${encodeURIComponent(resolvedConfig.workspaceSlug)}`)
+  console.log(`Fleet:     ${resolvedConfig.dashboardUrl}/openclaw-fleet`)
   if (!state.credential) {
     console.log('Status:    waiting for manual host approval')
     console.log(`Host key:  ${state.hostKey ?? 'pending'}`)
@@ -483,20 +559,27 @@ async function setupCommand() {
 
 async function statusCommand() {
   const state = normalizeHostState(await loadOpenClawHostConnectorState(statePath))
+  const config = resolveConfig(state)
   const runtime = await loadOpenClawRuntimeState({ includeEndedSubagents: true })
 
   let fleetHost = null
   let adminSession = null
+  let serviceStatus = null
   try {
-    adminSession = await getAdminSession()
+    adminSession = await getAdminSession(config)
     if (state.hostId) {
-      const detail = await requestJson(`${directoryUrl}/admin/openclaw/hosts/${state.hostId}`, {
+      const detail = await requestJson(`${config.directoryUrl}/admin/openclaw/hosts/${state.hostId}`, {
         headers: { Authorization: `Bearer ${adminSession.token}` },
       })
       fleetHost = detail.host
     }
   } catch {
     fleetHost = null
+  }
+  try {
+    serviceStatus = readManagedServiceStatus()
+  } catch {
+    serviceStatus = null
   }
 
   console.log('')
@@ -505,12 +588,12 @@ async function statusCommand() {
   if (adminSession?.url) {
     console.log(`Login:           ${adminSession.url}`)
   }
-  console.log(`Workspace:       ${dashboardUrl}/workspaces?workspace=${encodeURIComponent(workspaceSlug)}`)
-  console.log(`OpenClaw Fleet:  ${dashboardUrl}/openclaw-fleet${state.hostId ? `?host=${state.hostId}` : ''}`)
+  console.log(`Workspace:       ${config.dashboardUrl}/workspaces?workspace=${encodeURIComponent(config.workspaceSlug)}`)
+  console.log(`OpenClaw Fleet:  ${config.dashboardUrl}/openclaw-fleet${state.hostId ? `?host=${state.hostId}` : ''}`)
   console.log('')
   console.log('Host connector')
   console.log(`- host key:         ${state.hostKey ?? 'not enrolled'}`)
-  console.log(`- label:            ${state.label ?? buildHostMetadata().label}`)
+  console.log(`- label:            ${state.label ?? buildHostMetadata(state).label}`)
   console.log(`- credential:       ${state.credential ? 'present' : 'missing'}`)
   console.log(`- enrollment:       ${state.enrollmentStatus ?? 'none'}`)
   console.log(`- approved at:      ${state.approvedAt ?? 'pending'}`)
@@ -519,6 +602,11 @@ async function statusCommand() {
     console.log(`- fleet health:     ${fleetHost.healthStatus}`)
     console.log(`- route count:      ${fleetHost.routeCount}`)
     console.log(`- last heartbeat:   ${fleetHost.lastHeartbeatAt ?? 'never'}`)
+  }
+  if (serviceStatus) {
+    console.log(`- service:          ${serviceStatus.serviceLabel ?? 'beam-openclaw-host'}`)
+    console.log(`- service installed:${serviceStatus.installed ? ' yes' : ' no'}`)
+    console.log(`- service running:  ${serviceStatus.running ? 'yes' : 'no'}`)
   }
   console.log('')
   console.log('Runtime discovery')
@@ -530,11 +618,51 @@ async function statusCommand() {
   console.log('')
 }
 
+async function installCommand() {
+  let state = normalizeHostState(await loadOpenClawHostConnectorState(statePath))
+  const config = resolveConfig(state)
+  state = await persistHostState({
+    ...state,
+    directoryUrl: config.directoryUrl,
+    dashboardUrl: config.dashboardUrl,
+    adminEmail: config.adminEmail,
+    workspaceSlug: config.workspaceSlug,
+    label: config.hostLabel,
+    enrollmentToken: config.enrollmentToken,
+    updatedAt: new Date().toISOString(),
+  })
+
+  if (isLocalDirectory(config.directoryUrl)) {
+    await ensureLocalStack(config)
+  }
+
+  state = await ensureHostCredential(state, {
+    allowBootstrapAdmin: isLocalDirectory(config.directoryUrl),
+    allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
+  })
+
+  installManagedService()
+
+  console.log('')
+  console.log('Beam OpenClaw host service installed.')
+  console.log(`Workspace: ${config.dashboardUrl}/workspaces?workspace=${encodeURIComponent(config.workspaceSlug)}`)
+  console.log(`Fleet:     ${config.dashboardUrl}/openclaw-fleet${state.hostId ? `?host=${state.hostId}` : ''}`)
+  console.log(`Host key:  ${state.hostKey ?? 'pending'}`)
+  console.log(`Credential:${state.credential ? ' issued' : ' pending manual approval'}`)
+}
+
+async function uninstallCommand() {
+  uninstallManagedService()
+  console.log('')
+  console.log('Beam OpenClaw host service removed.')
+}
+
 async function runCommand() {
   let state = await loadOpenClawHostConnectorState(statePath)
+  let config = resolveConfig(state)
   state = await ensureHostCredential(state, {
-    allowBootstrapAdmin: isLocalDirectory(directoryUrl),
-    allowAutoApprove: autoApprove || isLocalDirectory(directoryUrl),
+    allowBootstrapAdmin: isLocalDirectory(config.directoryUrl),
+    allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
   })
 
   let receiver = startReceiverChild(state)
@@ -559,7 +687,7 @@ async function runCommand() {
   process.on('SIGINT', () => { void shutdown() })
   process.on('SIGTERM', () => { void shutdown() })
 
-  log(`running Beam OpenClaw host for ${state.label ?? buildHostMetadata().label}`)
+  log(`running Beam OpenClaw host for ${state.label ?? buildHostMetadata(state).label}`)
 
   while (true) {
     try {
@@ -575,6 +703,7 @@ async function runCommand() {
       }
 
       if (state.credential) {
+        config = resolveConfig(state)
         const inventory = await syncHostInventory(state)
         if ((Date.now() - lastHeartbeat) >= heartbeatIntervalMs) {
           await heartbeatHost(state, inventory.routeCount)
@@ -592,6 +721,12 @@ async function runCommand() {
 switch (command) {
   case 'setup':
     await setupCommand()
+    break
+  case 'install':
+    await installCommand()
+    break
+  case 'uninstall':
+    await uninstallCommand()
     break
   case 'status':
     await statusCommand()

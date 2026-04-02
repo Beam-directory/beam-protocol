@@ -409,6 +409,23 @@ function renderBindingHostMeta(binding: WorkspaceIdentityBinding): string {
   return parts.join(' · ')
 }
 
+function renderBindingLastDelivery(binding: WorkspaceIdentityBinding): string {
+  if (!binding.lastDelivery) {
+    return 'No delivery receipt yet'
+  }
+
+  const parts = [
+    `Last delivery ${formatRelativeTime(binding.lastDelivery.requestedAt)}`,
+    binding.lastDelivery.status,
+  ]
+
+  if (binding.lastDelivery.errorCode) {
+    parts.push(binding.lastDelivery.errorCode)
+  }
+
+  return parts.join(' · ')
+}
+
 function renderChannelMeta(channel: WorkspacePartnerChannel): string {
   return [
     channel.workspaceRoute ? `Routes to ${channel.workspaceRoute.workspaceName}` : 'External lane',
@@ -1377,6 +1394,8 @@ export default function WorkspacesPage() {
                         <div>{binding.identity.capabilities.length > 0 ? `${binding.identity.capabilities.length} capabilities declared` : 'No capabilities declared'}</div>
                         <div>{renderBindingHostMeta(binding)}</div>
                         <div>{binding.hostHealth ? `Host health ${binding.hostHealth}` : 'No host health reported'}</div>
+                        <div>{renderBindingLastDelivery(binding)}</div>
+                        <div>{binding.lastDelivery?.latencyMs != null ? `Last latency ${formatLatency(binding.lastDelivery.latencyMs)}` : 'No delivery latency recorded'}</div>
                       </div>
 
                       <div className="mt-3 rounded-2xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
@@ -1415,6 +1434,11 @@ export default function WorkspacesPage() {
                             <a className="text-orange-600 hover:text-orange-700 dark:text-orange-300" href={binding.identity.did.agentUrl} rel="noreferrer" target="_blank">
                               Open agent record
                             </a>
+                          ) : null}
+                          {binding.lastDelivery ? (
+                            <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={binding.lastDelivery.href}>
+                              Open last trace
+                            </Link>
                           ) : null}
                         </div>
                       </div>

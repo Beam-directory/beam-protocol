@@ -2896,6 +2896,18 @@ export function getIntentLogByNonce(db: DB, nonce: string): IntentLogRow | null 
   return row ?? null
 }
 
+export function getLatestIntentLogByTarget(db: DB, targetBeamId: string): IntentLogRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM intent_log
+    WHERE to_beam_id = ?
+    ORDER BY datetime(requested_at) DESC, id DESC
+    LIMIT 1
+  `).get(targetBeamId) as IntentLogRow | undefined
+
+  return row ?? null
+}
+
 export function getLatestIntentTraceEvent(db: DB, nonce: string): IntentTraceEventRow | null {
   const row = db.prepare(`
     SELECT *

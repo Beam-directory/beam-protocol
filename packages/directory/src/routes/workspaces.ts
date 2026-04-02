@@ -11,6 +11,7 @@ import {
   createWorkspaceThreadParticipant,
   getAgent,
   getIntentLogByNonce,
+  getLatestIntentLogByTarget,
   getOrg,
   getWorkspaceById,
   getWorkspaceBySlug,
@@ -137,6 +138,16 @@ type SerializedWorkspaceIdentityBinding = {
     httpEndpoint: string | null
     deliveryMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
   }
+  lastDelivery: {
+    nonce: string
+    intentType: string
+    status: IntentLogRow['status']
+    errorCode: string | null
+    requestedAt: string
+    completedAt: string | null
+    latencyMs: number | null
+    href: string
+  } | null
   identity: {
     existsLocally: boolean
     beamId: string
@@ -794,6 +805,27 @@ function parseAuditDetails(value: string | null): Record<string, unknown> | null
   }
 }
 
+function buildIntentHref(nonce: string): string {
+  return `/intents/${encodeURIComponent(nonce)}`
+}
+
+function serializeLatestDelivery(log: IntentLogRow | null) {
+  if (!log) {
+    return null
+  }
+
+  return {
+    nonce: log.nonce,
+    intentType: log.intent_type,
+    status: log.status,
+    errorCode: log.error_code,
+    requestedAt: log.requested_at,
+    completedAt: log.completed_at,
+    latencyMs: log.round_trip_latency_ms,
+    href: buildIntentHref(log.nonce),
+  }
+}
+
 function extractTraceHref(details: Record<string, unknown> | null): string | null {
   const nonceCandidates = [
     details?.['linkedIntentNonce'],
@@ -902,6 +934,7 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
   const { policy } = getWorkspacePolicyDocument(db, row.workspace_id)
   const effectivePolicy = buildWorkspacePolicyPreview(policy, row)
   const bindingRule = [...policy.bindingRules].reverse().find((rule) => rule.beamId === row.beam_id) ?? null
+  const lastDelivery = serializeLatestDelivery(getLatestIntentLogByTarget(db, row.beam_id))
 
   return {
     id: row.id,
@@ -931,6 +964,7 @@ function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityB
       httpEndpoint,
       deliveryMode,
     },
+    lastDelivery,
     identity: agent ? {
       existsLocally: true,
       beamId: agent.beam_id,

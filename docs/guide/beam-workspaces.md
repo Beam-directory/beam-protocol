@@ -82,7 +82,9 @@ That prints:
 
 - a fresh dashboard login link
 - the `openclaw-local` workspace URL
+- the `openclaw-fleet` URL
 - whether the Beam receiver is really live
+- whether the managed Beam OpenClaw host service is installed and running
 - how many OpenClaw identities were imported
 - which routes are currently live over Beam
 - the next copy-paste command to send a local proof
@@ -123,6 +125,13 @@ The default local setup command now installs the unified host daemon product:
 npm run workspace:openclaw-setup
 ```
 
+If you want to install or remove the managed daemon explicitly, use:
+
+```bash
+npm run workspace:openclaw-host:install
+npm run workspace:openclaw-host:uninstall
+```
+
 For a foreground host process, use:
 
 ```bash
@@ -134,6 +143,16 @@ For a one-command fleet smoke, use:
 ```bash
 npm run workspace:fleet-smoke
 ```
+
+The fleet enrollment response now also includes a copy-paste install pack with:
+
+- managed macOS install command
+- managed Linux install command
+- foreground debug command
+- status command
+- uninstall command
+
+That keeps the operator path explicit: issue enrollment, hand off one command, approve the host, and then watch receipts and health in the fleet view.
 
 The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
 
@@ -150,6 +169,8 @@ That keeps a foreground live-sync process alive and re-syncs the Beam workspace 
 - `~/.openclaw/subagents/runs.json` gets a new subagent run
 
 It is event-driven now. Beam watches the authoritative OpenClaw files directly instead of polling on a fixed interval.
+
+The fleet and workspace surfaces now also show last-delivery receipts for host-backed routes, including status, error code, requested time, and a direct trace link back into Beam.
 
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
