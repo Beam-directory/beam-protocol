@@ -406,6 +406,29 @@ export interface OpenClawFleetDigestDeliveryRow {
   details_json: string | null
 }
 
+export interface OpenClawPolicyPackRow {
+  id: number
+  pack_key: string
+  label: string
+  description: string | null
+  host_group_label: string | null
+  policy_json: string
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawWorkspaceTemplateRow {
+  id: number
+  template_key: string
+  label: string
+  description: string | null
+  host_group_label: string | null
+  policy_pack_key: string | null
+  template_json: string
+  created_at: string
+  updated_at: string
+}
+
 export interface WorkspacePolicyRow {
   workspace_id: number
   policy_json: string
@@ -430,6 +453,15 @@ export interface WorkspacePolicyWorkflowRule {
 
 export interface WorkspacePolicyMetadata {
   notes: string | null
+  template?: {
+    templateKey: string | null
+    templateLabel: string | null
+    policyPackKey: string | null
+    policyPackLabel: string | null
+    hostGroupLabel: string | null
+    appliedAt: string | null
+    appliedBy: string | null
+  } | null
 }
 
 export interface WorkspacePolicy {

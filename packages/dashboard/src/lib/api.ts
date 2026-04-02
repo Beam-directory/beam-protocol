@@ -493,6 +493,103 @@ export interface OpenClawConflictDetailResponse {
   history: OpenClawConflictHistoryItem[]
 }
 
+export interface OpenClawPolicyPack {
+  id: number
+  key: string
+  label: string
+  description: string | null
+  hostGroupLabel: string | null
+  policy: WorkspacePolicyDocument
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OpenClawWorkspaceTemplate {
+  id: number
+  key: string
+  label: string
+  description: string | null
+  hostGroupLabel: string | null
+  policyPackKey: string | null
+  policyPackLabel: string | null
+  template: {
+    defaultThreadScope: WorkspaceThreadScope
+    externalHandoffsEnabled: boolean
+    description: string | null
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+export interface OpenClawFleetTemplateAttentionWorkspace {
+  workspaceId: number
+  workspaceSlug: string
+  workspaceName: string
+  hostGroups: string[]
+  templateKey: string | null
+  expectedTemplateKey: string | null
+  policyPackKey: string | null
+  drifted: boolean
+  reason: string
+  href: string
+}
+
+export interface OpenClawFleetTemplateSummary {
+  summary: {
+    policyPacks: number
+    workspaceTemplates: number
+    templatedWorkspaces: number
+    driftedWorkspaces: number
+  }
+  policyPacks: OpenClawPolicyPack[]
+  workspaceTemplates: OpenClawWorkspaceTemplate[]
+  attentionWorkspaces: OpenClawFleetTemplateAttentionWorkspace[]
+}
+
+export type OpenClawFleetRemediationKind =
+  | 'align_rollout'
+  | 'end_stale_routes'
+  | 'drain_missing_receipts'
+  | 'reapply_template'
+
+export interface OpenClawFleetRemediationItem {
+  id: string
+  kind: OpenClawFleetRemediationKind
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  nextAction: string
+  safe: boolean
+  requiresConfirmation: boolean
+  hostId: number | null
+  hostLabel: string | null
+  workspaceSlug: string | null
+  templateKey: string | null
+  href: string | null
+}
+
+export interface OpenClawFleetRemediationHistoryItem {
+  id: string
+  action: string
+  actor: string | null
+  timestamp: string
+  target: string
+  kind: OpenClawFleetRemediationKind | null
+  note: string | null
+  href: string | null
+}
+
+export interface OpenClawFleetRemediationSummary {
+  summary: {
+    suggested: number
+    critical: number
+    requiresConfirmation: number
+    appliedRecently: number
+  }
+  suggested: OpenClawFleetRemediationItem[]
+  history: OpenClawFleetRemediationHistoryItem[]
+}
+
 export interface OpenClawFleetOverviewResponse {
   summary: {
     totalHosts: number
@@ -515,6 +612,9 @@ export interface OpenClawFleetOverviewResponse {
     pendingCredentialActions: number
     actionItems: number
     criticalItems: number
+    templateDriftedWorkspaces: number
+    suggestedRemediations: number
+    criticalRemediations: number
   }
   credentialPolicy: {
     counts: {
@@ -655,6 +755,8 @@ export interface OpenClawFleetOverviewResponse {
   }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
+  templates: OpenClawFleetTemplateSummary
+  remediation: OpenClawFleetRemediationSummary
   environments: OpenClawFleetEnvironmentSummary[]
   hostGroups: OpenClawFleetHostGroupSummary[]
 }
@@ -1271,6 +1373,15 @@ export interface WorkspacePolicyDocument {
   workflowRules: WorkspacePolicyWorkflowRule[]
   metadata: {
     notes: string | null
+    template: {
+      templateKey: string | null
+      templateLabel: string | null
+      policyPackKey: string | null
+      policyPackLabel: string | null
+      hostGroupLabel: string | null
+      appliedAt: string | null
+      appliedBy: string | null
+    } | null
   }
 }
 
@@ -1333,6 +1444,34 @@ export interface WorkspaceIdentityPolicyResponse {
   } | null
   preview: WorkspacePolicyPreview
   binding: WorkspaceIdentityBinding
+}
+
+export interface OpenClawPolicyPackUpsertInput {
+  label?: string | null
+  description?: string | null
+  hostGroupLabel?: string | null
+  policy: Partial<WorkspacePolicyDocument> | WorkspacePolicyDocument
+}
+
+export interface OpenClawWorkspaceTemplateUpsertInput {
+  label?: string | null
+  description?: string | null
+  hostGroupLabel?: string | null
+  policyPackKey?: string | null
+  template: {
+    defaultThreadScope?: WorkspaceThreadScope
+    externalHandoffsEnabled?: boolean
+    description?: string | null
+  }
+}
+
+export interface OpenClawFleetRemediationApplyInput {
+  kind: OpenClawFleetRemediationKind
+  hostId?: number | null
+  workspaceSlug?: string | null
+  templateKey?: string | null
+  confirmPhrase?: string | null
+  note?: string | null
 }
 
 export interface WorkspaceIdentityCredentialBundle {
@@ -2677,6 +2816,38 @@ export const directoryApi = {
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
+  listOpenClawPolicyPacks: () => request<{ total: number; policyPacks: OpenClawPolicyPack[] }>('/admin/openclaw/fleet/policy-packs', undefined, { admin: true }),
+  upsertOpenClawPolicyPack: (key: string, input: OpenClawPolicyPackUpsertInput) => request<{ policyPack: OpenClawPolicyPack }>(`/admin/openclaw/fleet/policy-packs/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  listOpenClawWorkspaceTemplates: () => request<{ total: number; workspaceTemplates: OpenClawWorkspaceTemplate[] }>('/admin/openclaw/fleet/workspace-templates', undefined, { admin: true }),
+  upsertOpenClawWorkspaceTemplate: (key: string, input: OpenClawWorkspaceTemplateUpsertInput) => request<{ workspaceTemplate: OpenClawWorkspaceTemplate }>(`/admin/openclaw/fleet/workspace-templates/${encodeURIComponent(key)}`, {
+    method: 'PUT',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  applyOpenClawWorkspaceTemplate: (key: string, input: { workspaceSlug: string; note?: string | null }) => request<{
+    workspace: WorkspaceRecord
+    policy: WorkspacePolicyDocument
+    updatedAt: string | null
+    updatedBy: string | null
+  }>(`/admin/openclaw/fleet/workspace-templates/${encodeURIComponent(key)}/apply`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  applyOpenClawFleetRemediation: (input: OpenClawFleetRemediationApplyInput) => request<{
+    ok: boolean
+    kind: OpenClawFleetRemediationKind
+    host?: OpenClawHostSummary
+    workspace?: WorkspaceRecord
+    policy?: WorkspacePolicyDocument
+    updatedAt?: string | null
+    updatedBy?: string | null
+    routes?: OpenClawHostRoute[]
+  }>('/admin/openclaw/fleet/remediations/apply', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   getOpenClawFleetDigest: (params?: { format?: 'json' | 'markdown' }) => request<OpenClawFleetDigestResponse>(`/admin/openclaw/fleet/digest${buildQuery({ format: params?.format })}`, undefined, { admin: true }),
   updateOpenClawFleetDigestSchedule: (input: OpenClawFleetDigestSchedulePatchInput) => request<OpenClawFleetDigestSchedulePatchResponse>('/admin/openclaw/fleet/digest/schedule', {
     method: 'PATCH',
