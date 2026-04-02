@@ -6,9 +6,12 @@ import {
   type OpenClawConflictDetailResponse,
   directoryApi,
   type OpenClawConflictGroup,
+  type OpenClawFleetBulkActionInput,
   type OpenClawFleetDigestResponse,
+  type OpenClawFleetEnvironmentSummary,
   type OpenClawEnrollmentCreateInput,
   type OpenClawFleetOverviewResponse,
+  type OpenClawFleetHostGroupSummary,
   type OpenClawHostDetailResponse,
   type OpenClawHostHealth,
   type OpenClawHostIdentitiesResponse,
@@ -17,6 +20,7 @@ import {
   type OpenClawHostSummary,
   type OpenClawHostStatus,
   type OpenClawHostCredentialState,
+  type OpenClawHostProfilePatchInput,
   type OpenClawHostPolicyPatchInput,
   type OpenClawHostRecoveryRunbookState,
   type OpenClawRouteRuntimeState,
@@ -124,6 +128,14 @@ function hostMeta(host: OpenClawHostSummary): string {
   ].join(' · ')
 }
 
+function hostEnvironmentLabel(host: OpenClawHostSummary): string {
+  return host.placement.environmentLabel ?? 'unassigned'
+}
+
+function hostGroupLabels(host: OpenClawHostSummary): string[] {
+  return host.placement.groupLabels ?? []
+}
+
 function conflictSummary(group: OpenClawConflictGroup): string {
   return `${group.routeCount} active host routes claim ${group.beamId}`
 }
@@ -165,6 +177,20 @@ function fromDateTimeLocalValue(value: string): string | null {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
 }
 
+function parseCommaSeparatedLabels(value: string): string[] {
+  const seen = new Set<string>()
+  const labels: string[] = []
+  for (const part of value.split(',')) {
+    const trimmed = part.trim()
+    if (!trimmed || seen.has(trimmed)) {
+      continue
+    }
+    seen.add(trimmed)
+    labels.push(trimmed)
+  }
+  return labels
+}
+
 type HostPolicyFormState = {
   rotationIntervalHours: string
   rotationWindowStartHour: string
@@ -176,6 +202,14 @@ type HostPolicyFormState = {
   recoveryWindowStartsAt: string
   recoveryWindowEndsAt: string
 }
+
+type HostPlacementFormState = {
+  environmentLabel: string
+  groupLabels: string
+  owner: string
+}
+
+type FleetBulkMode = 'labels' | 'stage_revoke_review' | 'clear_revoke_review' | null
 
 export default function OpenClawFleetPage() {
   const [searchParams, setSearchParams] = useSearchParams()
@@ -221,6 +255,20 @@ export default function OpenClawFleetPage() {
     recoveryWindowStartsAt: '',
     recoveryWindowEndsAt: '',
   })
+  const [placementForm, setPlacementForm] = useState<HostPlacementFormState>({
+    environmentLabel: '',
+    groupLabels: '',
+    owner: '',
+  })
+  const [selectedHostIds, setSelectedHostIds] = useState<number[]>([])
+  const [bulkMode, setBulkMode] = useState<FleetBulkMode>(null)
+  const [bulkForm, setBulkForm] = useState({
+    environmentLabel: '',
+    groupLabels: '',
+    owner: '',
+    reason: '',
+    confirmPhrase: '',
+  })
   const [selectedConflictRouteId, setSelectedConflictRouteId] = useState<number | null>(null)
 
   const selectedHostId = useMemo(() => {
@@ -230,14 +278,46 @@ export default function OpenClawFleetPage() {
     return Number.isFinite(parsed) && parsed > 0 ? parsed : null
   }, [searchParams])
 
+  const selectedEnvironment = useMemo(() => {
+    const raw = searchParams.get('environment')
+    return raw && raw.trim() ? raw.trim() : 'all'
+  }, [searchParams])
+
+  const selectedGroup = useMemo(() => {
+    const raw = searchParams.get('group')
+    return raw && raw.trim() ? raw.trim() : 'all'
+  }, [searchParams])
+
   const selectedConflictBeamId = useMemo(() => {
     const raw = searchParams.get('conflict')
     return raw ? raw.trim() || null : null
   }, [searchParams])
 
+  const visibleHosts = useMemo(() => {
+    const hosts = overview?.hosts ?? []
+    return hosts.filter((host) => {
+      const matchesEnvironment = selectedEnvironment === 'all' || hostEnvironmentLabel(host) === selectedEnvironment
+      const matchesGroup = selectedGroup === 'all' || hostGroupLabels(host).includes(selectedGroup)
+      return matchesEnvironment && matchesGroup
+    })
+  }, [overview?.hosts, selectedEnvironment, selectedGroup])
+
+  const environmentOptions = useMemo(() => overview?.environments ?? [], [overview?.environments])
+  const hostGroupOptions = useMemo(() => overview?.hostGroups ?? [], [overview?.hostGroups])
+
   const selectedHost = useMemo(
-    () => overview?.hosts.find((host) => host.id === selectedHostId) ?? overview?.hosts[0] ?? null,
-    [overview, selectedHostId],
+    () => visibleHosts.find((host) => host.id === selectedHostId) ?? visibleHosts[0] ?? null,
+    [visibleHosts, selectedHostId],
+  )
+
+  const selectedBulkHosts = useMemo(
+    () => visibleHosts.filter((host) => selectedHostIds.includes(host.id)),
+    [visibleHosts, selectedHostIds],
+  )
+
+  const selectedBulkHostsWithRevokeReview = useMemo(
+    () => selectedBulkHosts.filter((host) => Boolean(host.placement.revokeReviewRequestedAt)),
+    [selectedBulkHosts],
   )
 
   const selectedConflictRoute = useMemo(
@@ -296,13 +376,13 @@ export default function OpenClawFleetPage() {
   }, [])
 
   useEffect(() => {
-    if (!overview?.hosts.length) {
+    if (!visibleHosts.length) {
       setHostDetail(null)
       setHostIdentities(null)
       return
     }
 
-    const nextHost = overview.hosts.find((host) => host.id === selectedHostId) ?? overview.hosts[0]
+    const nextHost = visibleHosts.find((host) => host.id === selectedHostId) ?? visibleHosts[0]
     if (!nextHost) {
       return
     }
@@ -325,7 +405,12 @@ export default function OpenClawFleetPage() {
         setDetailLoading(false)
       }
     })()
-  }, [overview, searchParams, selectedHostId, setSearchParams])
+  }, [visibleHosts, searchParams, selectedHostId, setSearchParams])
+
+  useEffect(() => {
+    const visibleHostIds = new Set(visibleHosts.map((host) => host.id))
+    setSelectedHostIds((current) => current.filter((hostId) => visibleHostIds.has(hostId)))
+  }, [visibleHosts])
 
   useEffect(() => {
     if (!selectedConflictBeamId) {
@@ -371,6 +456,11 @@ export default function OpenClawFleetPage() {
       recoveryWindowStartsAt: toDateTimeLocalValue(selectedHost.policy.recovery.windowStartsAt),
       recoveryWindowEndsAt: toDateTimeLocalValue(selectedHost.policy.recovery.windowEndsAt),
     })
+    setPlacementForm({
+      environmentLabel: selectedHost.placement.environmentLabel ?? '',
+      groupLabels: hostGroupLabels(selectedHost).join(', '),
+      owner: selectedHost.placement.owner ?? '',
+    })
   }, [selectedHost?.id, selectedHost?.updatedAt])
 
   async function runAction(actionKey: string, fn: () => Promise<void>, successMessage: string) {
@@ -385,6 +475,30 @@ export default function OpenClawFleetPage() {
     } finally {
       setActionBusy(null)
     }
+  }
+
+  function updateFleetQueryParam(key: 'environment' | 'group', value: string) {
+    const next = new URLSearchParams(searchParams)
+    if (!value || value === 'all') {
+      next.delete(key)
+    } else {
+      next.set(key, value)
+    }
+    next.delete('host')
+    setSearchParams(next, { replace: true })
+  }
+
+  function toggleHostSelection(hostId: number, checked: boolean) {
+    setSelectedHostIds((current) => {
+      if (checked) {
+        return current.includes(hostId) ? current : [...current, hostId]
+      }
+      return current.filter((id) => id !== hostId)
+    })
+  }
+
+  function setAllVisibleHostsSelected(checked: boolean) {
+    setSelectedHostIds(checked ? visibleHosts.map((host) => host.id) : [])
   }
 
   async function handleCreateEnrollment(event: FormEvent<HTMLFormElement>) {
@@ -443,6 +557,26 @@ export default function OpenClawFleetPage() {
     }, `Recovery credential for ${hostTitle(host)} issued.`)
   }
 
+  async function handleSavePlacement(host: OpenClawHostSummary) {
+    const input: OpenClawHostProfilePatchInput = {
+      environmentLabel: placementForm.environmentLabel.trim() || null,
+      groupLabels: parseCommaSeparatedLabels(placementForm.groupLabels),
+      owner: placementForm.owner.trim() || null,
+    }
+
+    await runAction(`placement-${host.id}`, async () => {
+      await directoryApi.updateOpenClawHostProfile(host.id, input)
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Placement for ${hostTitle(host)} updated.`)
+  }
+
+  async function handleClearPlacementRevokeReview(host: OpenClawHostSummary) {
+    await runAction(`placement-clear-revoke-${host.id}`, async () => {
+      await directoryApi.updateOpenClawHostProfile(host.id, { clearRevokeReview: true })
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Revoke review cleared for ${hostTitle(host)}.`)
+  }
+
   async function handleSavePolicy(host: OpenClawHostSummary) {
     const input: OpenClawHostPolicyPatchInput = {
       rotationIntervalHours: Number.parseInt(policyForm.rotationIntervalHours, 10) || host.policy.rotation.intervalHours,
@@ -471,6 +605,14 @@ export default function OpenClawFleetPage() {
       await directoryApi.revokeOpenClawHost(host.id, { reason })
       await refreshAll(host.id, selectedConflictBeamId)
     }, `Host ${hostTitle(host)} revoked.`)
+  }
+
+  async function handleBulkAction(input: OpenClawFleetBulkActionInput, successMessage: string, nextMode: FleetBulkMode = null) {
+    await runAction(`bulk-${input.action}`, async () => {
+      await directoryApi.runOpenClawFleetBulkAction(input)
+      await refreshAll(selectedHostId, selectedConflictBeamId)
+      setBulkMode(nextMode)
+    }, successMessage)
   }
 
   function focusConflict(beamId: string) {
@@ -664,40 +806,351 @@ export default function OpenClawFleetPage() {
               </p>
             </div>
             <div className="text-xs text-slate-500 dark:text-slate-400">
-              {!overview ? 'Loading…' : `${formatNumber(overview.hosts.length)} visible`}
+              {!overview ? 'Loading…' : `${formatNumber(visibleHosts.length)} visible${visibleHosts.length !== overview.hosts.length ? ` of ${formatNumber(overview.hosts.length)}` : ''}`}
             </div>
           </div>
 
-          <div className="mt-4 space-y-3">
+          <div className="mt-4 space-y-4">
+            <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr),minmax(0,1fr),auto]">
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Environment</span>
+                <select
+                  className="input-field"
+                  value={selectedEnvironment}
+                  onChange={(event) => updateFleetQueryParam('environment', event.target.value)}
+                >
+                  <option value="all">All environments</option>
+                  {environmentOptions.map((environment: OpenClawFleetEnvironmentSummary) => (
+                    <option key={environment.label} value={environment.label}>
+                      {environment.label} ({environment.hostCount})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Host group</span>
+                <select
+                  className="input-field"
+                  value={selectedGroup}
+                  onChange={(event) => updateFleetQueryParam('group', event.target.value)}
+                >
+                  <option value="all">All groups</option>
+                  {hostGroupOptions.map((group: OpenClawFleetHostGroupSummary) => (
+                    <option key={group.label} value={group.label}>
+                      {group.label} ({group.hostCount})
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <div className="flex items-end">
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  disabled={selectedEnvironment === 'all' && selectedGroup === 'all'}
+                  onClick={() => {
+                    const next = new URLSearchParams(searchParams)
+                    next.delete('environment')
+                    next.delete('group')
+                    next.delete('host')
+                    setSearchParams(next, { replace: true })
+                  }}
+                >
+                  Clear filters
+                </button>
+              </div>
+            </div>
+
+            {overview ? (
+              <div className="grid gap-3 lg:grid-cols-2">
+                <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Environments</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {environmentOptions.length > 0 ? (
+                      environmentOptions.map((environment) => (
+                        <button
+                          key={environment.label}
+                          type="button"
+                          className={`rounded-full border px-3 py-1 text-xs transition ${selectedEnvironment === environment.label ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-200' : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                          onClick={() => updateFleetQueryParam('environment', environment.label)}
+                        >
+                          {environment.label} · {formatNumber(environment.hostCount)}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-500 dark:text-slate-400">No host environments labeled yet.</span>
+                    )}
+                  </div>
+                </div>
+                <div className="rounded-2xl border border-slate-200 px-4 py-3 dark:border-slate-800">
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Host groups</div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {hostGroupOptions.length > 0 ? (
+                      hostGroupOptions.map((group) => (
+                        <button
+                          key={group.label}
+                          type="button"
+                          className={`rounded-full border px-3 py-1 text-xs transition ${selectedGroup === group.label ? 'border-orange-300 bg-orange-50 text-orange-700 dark:border-orange-500/40 dark:bg-orange-500/10 dark:text-orange-200' : 'border-slate-200 text-slate-600 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-300 dark:hover:bg-slate-800'}`}
+                          onClick={() => updateFleetQueryParam('group', group.label)}
+                        >
+                          {group.label} · {formatNumber(group.hostCount)}
+                        </button>
+                      ))
+                    ) : (
+                      <span className="text-xs text-slate-500 dark:text-slate-400">No host groups labeled yet.</span>
+                    )}
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {selectedHostIds.length > 0 ? (
+              <div className="rounded-2xl border border-orange-200 bg-orange-50/70 px-4 py-4 dark:border-orange-500/30 dark:bg-orange-500/10">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">
+                      {formatNumber(selectedHostIds.length)} host{selectedHostIds.length === 1 ? '' : 's'} selected
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      {selectedBulkHosts.slice(0, 4).map((host) => hostTitle(host)).join(', ')}
+                      {selectedBulkHosts.length > 4 ? ` +${selectedBulkHosts.length - 4} more` : ''}
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className={`rounded-xl border px-3 py-2 text-sm transition ${bulkMode === 'labels' ? 'border-orange-300 bg-orange-100 text-orange-800 dark:border-orange-500/40 dark:bg-orange-500/20 dark:text-orange-100' : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                      onClick={() => setBulkMode('labels')}
+                    >
+                      Apply labels
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-xl border px-3 py-2 text-sm transition ${bulkMode === 'stage_revoke_review' ? 'border-orange-300 bg-orange-100 text-orange-800 dark:border-orange-500/40 dark:bg-orange-500/20 dark:text-orange-100' : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                      onClick={() => setBulkMode('stage_revoke_review')}
+                    >
+                      Stage revoke review
+                    </button>
+                    <button
+                      type="button"
+                      className={`rounded-xl border px-3 py-2 text-sm transition ${bulkMode === 'clear_revoke_review' ? 'border-orange-300 bg-orange-100 text-orange-800 dark:border-orange-500/40 dark:bg-orange-500/20 dark:text-orange-100' : 'border-slate-200 text-slate-700 hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800'}`}
+                      onClick={() => setBulkMode('clear_revoke_review')}
+                    >
+                      Clear staged revoke review
+                    </button>
+                  </div>
+                </div>
+
+                {bulkMode === 'labels' ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <span>Environment label</span>
+                        <input
+                          className="input-field"
+                          placeholder="prod"
+                          value={bulkForm.environmentLabel}
+                          onChange={(event) => setBulkForm((current) => ({ ...current, environmentLabel: event.target.value }))}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <span>Group labels</span>
+                        <input
+                          className="input-field"
+                          placeholder="edge, team-alpha"
+                          value={bulkForm.groupLabels}
+                          onChange={(event) => setBulkForm((current) => ({ ...current, groupLabels: event.target.value }))}
+                        />
+                      </label>
+                      <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                        <span>Owner</span>
+                        <input
+                          className="input-field"
+                          placeholder="ops@example.com"
+                          value={bulkForm.owner}
+                          onChange={(event) => setBulkForm((current) => ({ ...current, owner: event.target.value }))}
+                        />
+                      </label>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-orange-500 dark:text-slate-950 dark:hover:bg-orange-400"
+                        disabled={actionBusy === 'bulk-apply_labels'}
+                        onClick={() => {
+                          void handleBulkAction({
+                            action: 'apply_labels',
+                            hostIds: selectedHostIds,
+                            environmentLabel: bulkForm.environmentLabel.trim() || null,
+                            groupLabels: parseCommaSeparatedLabels(bulkForm.groupLabels),
+                            owner: bulkForm.owner.trim() || null,
+                          }, `Labels updated for ${selectedHostIds.length} host(s).`)
+                        }}
+                      >
+                        {actionBusy === 'bulk-apply_labels' ? 'Applying…' : 'Apply labels'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {bulkMode === 'stage_revoke_review' ? (
+                  <div className="mt-4 space-y-3">
+                    <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span>Reason</span>
+                      <textarea
+                        className="input-field min-h-[96px]"
+                        placeholder="Why these hosts should move into revoke review."
+                        value={bulkForm.reason}
+                        onChange={(event) => setBulkForm((current) => ({ ...current, reason: event.target.value }))}
+                      />
+                    </label>
+                    <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                      <span>Confirm phrase</span>
+                      <input
+                        className="input-field"
+                        placeholder="STAGE_REVOKE"
+                        value={bulkForm.confirmPhrase}
+                        onChange={(event) => setBulkForm((current) => ({ ...current, confirmPhrase: event.target.value }))}
+                      />
+                    </label>
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      This only stages the hosts for human revoke review. It does not revoke them yet.
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-orange-500 dark:text-slate-950 dark:hover:bg-orange-400"
+                        disabled={actionBusy === 'bulk-stage_revoke_review' || !bulkForm.reason.trim() || bulkForm.confirmPhrase.trim() !== 'STAGE_REVOKE'}
+                        onClick={() => {
+                          void handleBulkAction({
+                            action: 'stage_revoke_review',
+                            hostIds: selectedHostIds,
+                            reason: bulkForm.reason.trim(),
+                            confirmPhrase: bulkForm.confirmPhrase.trim(),
+                          }, `Revoke review staged for ${selectedHostIds.length} host(s).`)
+                        }}
+                      >
+                        {actionBusy === 'bulk-stage_revoke_review' ? 'Staging…' : 'Stage revoke review'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+
+                {bulkMode === 'clear_revoke_review' ? (
+                  <div className="mt-4 space-y-3">
+                    <div className="text-xs text-slate-500 dark:text-slate-400">
+                      {selectedBulkHostsWithRevokeReview.length > 0
+                        ? `${formatNumber(selectedBulkHostsWithRevokeReview.length)} selected host(s) currently have a staged revoke review.`
+                        : 'None of the selected hosts currently have a staged revoke review.'}
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-orange-500 dark:text-slate-950 dark:hover:bg-orange-400"
+                        disabled={actionBusy === 'bulk-clear_revoke_review' || selectedBulkHostsWithRevokeReview.length === 0}
+                        onClick={() => {
+                          void handleBulkAction({
+                            action: 'clear_revoke_review',
+                            hostIds: selectedHostIds,
+                          }, `Staged revoke review cleared for ${selectedBulkHostsWithRevokeReview.length} host(s).`)
+                        }}
+                      >
+                        {actionBusy === 'bulk-clear_revoke_review' ? 'Clearing…' : 'Clear revoke review'}
+                      </button>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
+            {visibleHosts.length > 0 ? (
+              <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500 dark:text-slate-400">
+                <div>
+                  {selectedHostIds.length > 0
+                    ? `${formatNumber(selectedHostIds.length)} selected`
+                    : 'Select hosts to apply bulk labels or guarded revoke-review staging.'}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    onClick={() => setAllVisibleHostsSelected(true)}
+                  >
+                    Select visible
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    onClick={() => setAllVisibleHostsSelected(false)}
+                  >
+                    Clear selection
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             {loading && !overview ? (
               <EmptyPanel label="Loading host fleet…" />
-            ) : overview && overview.hosts.length > 0 ? (
-              overview.hosts.map((host) => {
+            ) : overview && visibleHosts.length > 0 ? (
+              visibleHosts.map((host) => {
                 const active = selectedHost?.id === host.id
+                const groups = hostGroupLabels(host)
+                const extraGroups = Math.max(groups.length - 2, 0)
+                const selected = selectedHostIds.includes(host.id)
                 return (
-                  <button
+                  <div
                     key={host.id}
-                    type="button"
-                    className={`w-full rounded-2xl border p-4 text-left transition ${active ? 'border-orange-300 bg-orange-50/50 dark:border-orange-500/40 dark:bg-orange-500/10' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60'}`}
+                    className={`rounded-2xl border p-4 transition ${active ? 'border-orange-300 bg-orange-50/50 dark:border-orange-500/40 dark:bg-orange-500/10' : 'border-slate-200 hover:bg-slate-50 dark:border-slate-800 dark:hover:bg-slate-900/60'}`}
                     onClick={() => {
                       const next = new URLSearchParams(searchParams)
                       next.set('host', String(host.id))
                       setSearchParams(next)
                     }}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter' || event.key === ' ') {
+                        event.preventDefault()
+                        const next = new URLSearchParams(searchParams)
+                        next.set('host', String(host.id))
+                        setSearchParams(next)
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div className="min-w-0">
                         <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{hostTitle(host)}</div>
                         <div className="truncate text-xs text-slate-500 dark:text-slate-400">{hostMeta(host)}</div>
                       </div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap items-center gap-2" onClick={(event) => event.stopPropagation()}>
+                        <label className="flex items-center gap-2 rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-600 dark:border-slate-700 dark:text-slate-300">
+                          <input
+                            checked={selected}
+                            type="checkbox"
+                            onChange={(event) => toggleHostSelection(host.id, event.target.checked)}
+                          />
+                          <span>Select</span>
+                        </label>
                         <StatusPill label={host.status} tone={hostStatusTone(host.status)} />
                         <StatusPill label={host.healthStatus} tone={hostHealthTone(host.healthStatus)} />
                         <StatusPill label={host.credentialState} tone={credentialStateTone(host.credentialState)} />
                       </div>
                     </div>
 
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <StatusPill label={`env:${hostEnvironmentLabel(host)}`} />
+                      {groups.slice(0, 2).map((group) => (
+                        <StatusPill key={`${host.id}-${group}`} label={`group:${group}`} />
+                      ))}
+                      {extraGroups > 0 ? (
+                        <StatusPill label={`+${extraGroups} more`} />
+                      ) : null}
+                      {host.placement.revokeReviewRequestedAt ? (
+                        <StatusPill label="revoke review" tone="warning" />
+                      ) : null}
+                    </div>
+
                     <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                      <div>{host.placement.owner ? `Owner ${host.placement.owner}` : 'No host owner assigned'}</div>
                       <div>{`${formatNumber(host.summary.live)} live · ${formatNumber(host.summary.stale)} stale · ${formatNumber(host.summary.conflict)} conflict`}</div>
                       <div>{`${formatNumber(host.summary.unavailable)} unavailable · ${formatNumber(host.summary.revoked)} revoked`}</div>
                       <div>{host.lastInventoryAt ? `Inventory ${formatRelativeTime(host.lastInventoryAt)}` : 'No inventory yet'}</div>
@@ -764,11 +1217,11 @@ export default function OpenClawFleetPage() {
                         </button>
                       ) : null}
                     </div>
-                  </button>
+                  </div>
                 )
               })
             ) : (
-              <EmptyPanel label="No OpenClaw hosts have enrolled yet." />
+              <EmptyPanel label={overview ? 'No hosts match the current fleet filters.' : 'No OpenClaw hosts have enrolled yet.'} />
             )}
           </div>
         </div>
@@ -1219,7 +1672,17 @@ export default function OpenClawFleetPage() {
               <div className="rounded-2xl border border-slate-200 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
                 <div className="text-base font-medium text-slate-900 dark:text-slate-100">{hostTitle(selectedHost)}</div>
                 <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{hostMeta(selectedHost)}</div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <StatusPill label={`env:${hostEnvironmentLabel(selectedHost)}`} />
+                  {hostGroupLabels(selectedHost).map((group) => (
+                    <StatusPill key={`${selectedHost.id}-${group}`} label={`group:${group}`} />
+                  ))}
+                  {selectedHost.placement.revokeReviewRequestedAt ? (
+                    <StatusPill label="revoke review" tone="warning" />
+                  ) : null}
+                </div>
                 <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{selectedHost.placement.owner ? `Owner ${selectedHost.placement.owner}` : 'No host owner assigned'}</div>
                   <div>{selectedHost.approvedBy ? `Approved by ${selectedHost.approvedBy}` : 'No approval recorded yet'}</div>
                   <div>{selectedHost.beamDirectoryUrl}</div>
                   <div>{selectedHost.lastRouteEventAt ? `Last route event ${formatRelativeTime(selectedHost.lastRouteEventAt)}` : 'No route events yet'}</div>
@@ -1232,6 +1695,87 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.summary.delivery.latency.samples > 0 ? `Latency avg ${formatLatency(selectedHost.summary.delivery.latency.avgMs)} · p95 ${formatLatency(selectedHost.summary.delivery.latency.p95Ms)}` : 'No latency samples yet'}</div>
                   <div>{selectedHost.policy.rotation.nextRotationWindowStartsAt ? `Rotation window ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowStartsAt)}` : 'No rotation window scheduled'}</div>
                   <div>{selectedHost.policy.recovery.status !== 'idle' ? `Recovery ${selectedHost.policy.recovery.status}${selectedHost.policy.recovery.owner ? ` · ${selectedHost.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Placement and safe host labels</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Environment, group, and owner labels feed fleet filters and guarded bulk actions.
+                    </div>
+                  </div>
+                  {selectedHost.placement.revokeReviewRequestedAt ? (
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label="revoke review" tone="warning" />
+                      {selectedHost.placement.revokeReviewReason ? (
+                        <span className="text-xs text-slate-500 dark:text-slate-400">{selectedHost.placement.revokeReviewReason}</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Environment label</span>
+                    <input
+                      className="input-field"
+                      placeholder="prod"
+                      value={placementForm.environmentLabel}
+                      onChange={(event) => setPlacementForm((current) => ({ ...current, environmentLabel: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Group labels</span>
+                    <input
+                      className="input-field"
+                      placeholder="edge, team-alpha"
+                      value={placementForm.groupLabels}
+                      onChange={(event) => setPlacementForm((current) => ({ ...current, groupLabels: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Owner</span>
+                    <input
+                      className="input-field"
+                      placeholder="ops@example.com"
+                      value={placementForm.owner}
+                      onChange={(event) => setPlacementForm((current) => ({ ...current, owner: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>
+                    {selectedHost.placement.revokeReviewRequestedAt
+                      ? `Staged revoke review ${formatRelativeTime(selectedHost.placement.revokeReviewRequestedAt)}${selectedHost.placement.revokeReviewRequestedBy ? ` · ${selectedHost.placement.revokeReviewRequestedBy}` : ''}`
+                      : 'No staged revoke review on this host'}
+                  </div>
+                  <div>
+                    {selectedHost.placement.revokeReviewReason
+                      ? `Review reason: ${selectedHost.placement.revokeReviewReason}`
+                      : 'No revoke review reason recorded'}
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={actionBusy === `placement-${selectedHost.id}`}
+                    onClick={() => { void handleSavePlacement(selectedHost) }}
+                  >
+                    {actionBusy === `placement-${selectedHost.id}` ? 'Saving…' : 'Save placement'}
+                  </button>
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={actionBusy === `placement-clear-revoke-${selectedHost.id}` || !selectedHost.placement.revokeReviewRequestedAt}
+                    onClick={() => { void handleClearPlacementRevokeReview(selectedHost) }}
+                  >
+                    {actionBusy === `placement-clear-revoke-${selectedHost.id}` ? 'Clearing…' : 'Clear staged revoke review'}
+                  </button>
                 </div>
               </div>
 

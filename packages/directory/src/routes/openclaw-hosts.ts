@@ -112,6 +112,30 @@ type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
 
 type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
 
+type OpenClawHostEnvironmentSummary = {
+  label: string
+  hostCount: number
+  staleHosts: number
+  degradedHosts: number
+  pendingHosts: number
+  hostIds: number[]
+}
+
+type OpenClawHostGroupSummary = {
+  label: string
+  hostCount: number
+  staleHosts: number
+  degradedHosts: number
+  pendingHosts: number
+  environments: string[]
+  hostIds: number[]
+}
+
+type OpenClawFleetBulkAction =
+  | 'apply_labels'
+  | 'stage_revoke_review'
+  | 'clear_revoke_review'
+
 type OpenClawHostMetadataJson = {
   credentialPolicy?: {
     rotationIntervalHours?: number | null
@@ -126,6 +150,14 @@ type OpenClawHostMetadataJson = {
     windowStartsAt?: string | null
     windowEndsAt?: string | null
     updatedAt?: string | null
+  }
+  placement?: {
+    environmentLabel?: string | null
+    groupLabels?: string[] | null
+    owner?: string | null
+    revokeReviewRequestedAt?: string | null
+    revokeReviewRequestedBy?: string | null
+    revokeReviewReason?: string | null
   }
 }
 
@@ -169,6 +201,17 @@ function normalizeIsoDateTime(value: unknown): string | null {
   }
   const parsed = Date.parse(normalized)
   return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null
+}
+
+function normalizeOptionalStringArray(value: unknown): string[] | null {
+  if (!Array.isArray(value)) {
+    return null
+  }
+
+  const normalized = [...new Set(value
+    .map((entry) => (typeof entry === 'string' ? entry.trim() : ''))
+    .filter(Boolean))]
+  return normalized
 }
 
 function normalizeOpenClawRouteSource(value: unknown): OpenClawRouteSource | null {
@@ -247,7 +290,10 @@ function serializeOpenClawHostMetadata(metadata: OpenClawHostMetadataJson): stri
   if (metadata.recoveryRunbook) {
     cleaned.recoveryRunbook = metadata.recoveryRunbook
   }
-  if (!cleaned.credentialPolicy && !cleaned.recoveryRunbook) {
+  if (metadata.placement) {
+    cleaned.placement = metadata.placement
+  }
+  if (!cleaned.credentialPolicy && !cleaned.recoveryRunbook && !cleaned.placement) {
     return null
   }
   return JSON.stringify(cleaned)
@@ -379,6 +425,76 @@ function serializeOpenClawHostPolicy(host: OpenClawHostRow) {
       windowEndsAt: normalizeIsoDateTime(recoveryRunbook.windowEndsAt),
       updatedAt: normalizeIsoDateTime(recoveryRunbook.updatedAt) ?? host.recovery_completed_at,
     },
+  }
+}
+
+function serializeOpenClawHostPlacement(host: OpenClawHostRow) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const placement = metadata.placement && typeof metadata.placement === 'object'
+    ? metadata.placement
+    : {}
+
+  return {
+    environmentLabel: normalizeOptionalString(placement.environmentLabel),
+    groupLabels: normalizeOptionalStringArray(placement.groupLabels) ?? [],
+    owner: normalizeOptionalString(placement.owner),
+    revokeReviewRequestedAt: normalizeIsoDateTime(placement.revokeReviewRequestedAt),
+    revokeReviewRequestedBy: normalizeOptionalString(placement.revokeReviewRequestedBy),
+    revokeReviewReason: normalizeOptionalString(placement.revokeReviewReason),
+  }
+}
+
+function buildOpenClawHostPlacementPatch(
+  host: OpenClawHostRow,
+  input: {
+    environmentLabel?: string | null
+    groupLabels?: string[] | null
+    owner?: string | null
+    clearRevokeReview?: boolean
+    stageRevokeReview?: {
+      requestedAt: string
+      requestedBy: string
+      reason: string
+    } | null
+  },
+) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const currentPlacement = serializeOpenClawHostPlacement(host)
+  const nextPlacement = {
+    environmentLabel: input.environmentLabel !== undefined
+      ? normalizeOptionalString(input.environmentLabel)
+      : currentPlacement.environmentLabel,
+    groupLabels: input.groupLabels !== undefined
+      ? (normalizeOptionalStringArray(input.groupLabels) ?? [])
+      : currentPlacement.groupLabels,
+    owner: input.owner !== undefined
+      ? normalizeOptionalString(input.owner)
+      : currentPlacement.owner,
+    revokeReviewRequestedAt: currentPlacement.revokeReviewRequestedAt,
+    revokeReviewRequestedBy: currentPlacement.revokeReviewRequestedBy,
+    revokeReviewReason: currentPlacement.revokeReviewReason,
+  }
+
+  if (input.clearRevokeReview) {
+    nextPlacement.revokeReviewRequestedAt = null
+    nextPlacement.revokeReviewRequestedBy = null
+    nextPlacement.revokeReviewReason = null
+  }
+
+  if (input.stageRevokeReview) {
+    nextPlacement.revokeReviewRequestedAt = input.stageRevokeReview.requestedAt
+    nextPlacement.revokeReviewRequestedBy = input.stageRevokeReview.requestedBy
+    nextPlacement.revokeReviewReason = input.stageRevokeReview.reason
+  }
+
+  const nextMetadata: OpenClawHostMetadataJson = {
+    ...metadata,
+    placement: nextPlacement,
+  }
+
+  return {
+    placement: nextPlacement,
+    metadataJson: serializeOpenClawHostMetadata(nextMetadata),
   }
 }
 
@@ -940,6 +1056,7 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
   const routes = listOpenClawResolvedRoutesForHost(db, host.id)
   const summary = summarizeRoutes(db, routes)
   const policy = serializeOpenClawHostPolicy(host)
+  const placement = serializeOpenClawHostPlacement(host)
 
   return {
     id: host.id,
@@ -969,9 +1086,71 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     createdAt: host.created_at,
     updatedAt: host.updated_at,
     policy,
+    placement,
     enrollment: serializeEnrollment(enrollment),
     summary,
   }
+}
+
+function summarizeOpenClawFleetEnvironments(hosts: Array<ReturnType<typeof serializeHost>>): OpenClawHostEnvironmentSummary[] {
+  const buckets = new Map<string, OpenClawHostEnvironmentSummary>()
+
+  for (const host of hosts) {
+    const label = host.placement.environmentLabel ?? 'unassigned'
+    const existing = buckets.get(label) ?? {
+      label,
+      hostCount: 0,
+      staleHosts: 0,
+      degradedHosts: 0,
+      pendingHosts: 0,
+      hostIds: [],
+    }
+
+    existing.hostCount += 1
+    existing.staleHosts += host.healthStatus === 'stale' ? 1 : 0
+    existing.degradedHosts += host.summary.delivery.latency.degraded ? 1 : 0
+    existing.pendingHosts += host.status === 'pending' ? 1 : 0
+    existing.hostIds.push(host.id)
+    buckets.set(label, existing)
+  }
+
+  return [...buckets.values()].sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function summarizeOpenClawFleetGroups(hosts: Array<ReturnType<typeof serializeHost>>): OpenClawHostGroupSummary[] {
+  const buckets = new Map<string, OpenClawHostGroupSummary>()
+
+  for (const host of hosts) {
+    for (const groupLabel of host.placement.groupLabels) {
+      const existing = buckets.get(groupLabel) ?? {
+        label: groupLabel,
+        hostCount: 0,
+        staleHosts: 0,
+        degradedHosts: 0,
+        pendingHosts: 0,
+        environments: [],
+        hostIds: [],
+      }
+
+      existing.hostCount += 1
+      existing.staleHosts += host.healthStatus === 'stale' ? 1 : 0
+      existing.degradedHosts += host.summary.delivery.latency.degraded ? 1 : 0
+      existing.pendingHosts += host.status === 'pending' ? 1 : 0
+      existing.hostIds.push(host.id)
+      const environmentLabel = host.placement.environmentLabel ?? 'unassigned'
+      if (!existing.environments.includes(environmentLabel)) {
+        existing.environments.push(environmentLabel)
+      }
+      buckets.set(groupLabel, existing)
+    }
+  }
+
+  return [...buckets.values()]
+    .map((group) => ({
+      ...group,
+      environments: [...group.environments].sort((left, right) => left.localeCompare(right)),
+    }))
+    .sort((left, right) => left.label.localeCompare(right.label))
 }
 
 function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
@@ -1101,6 +1280,22 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         workspaceSlug: host.workspaceSlug,
         href: hostHref,
         traceHref: null,
+      })
+    }
+
+    if (host.placement.revokeReviewRequestedAt) {
+      actionItems.push({
+        id: `host-revoke-review:${host.id}`,
+        severity: 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is staged for revoke review`,
+        detail: `${baseDetail} has a staged revoke review${host.placement.revokeReviewReason ? `: ${host.placement.revokeReviewReason}` : ''}.`,
+        nextAction: 'Review the host health and route ownership, then either clear the staged review or perform a targeted revoke.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: lastTraceHref,
       })
     }
 
@@ -1350,6 +1545,8 @@ export function openClawAdminRouter(db: Database) {
     const hosts = listOpenClawHosts(db).map((host) => serializeHost(db, host))
     const conflicts = listConflictGroups(db)
     const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
+    const environments = summarizeOpenClawFleetEnvironments(hosts)
+    const hostGroups = summarizeOpenClawFleetGroups(hosts)
     const summary = hosts.reduce((acc, host) => {
       acc.totalHosts += 1
       if (host.status === 'pending') acc.pendingHosts += 1
@@ -1404,6 +1601,8 @@ export function openClawAdminRouter(db: Database) {
       },
       hosts,
       conflicts,
+      environments,
+      hostGroups,
     })
   })
 
@@ -1585,6 +1784,158 @@ export function openClawAdminRouter(db: Database) {
       email,
       deliveredAt: new Date().toISOString(),
       summary: digest.summary,
+    })
+  })
+
+  router.post('/fleet/bulk-actions', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const action: OpenClawFleetBulkAction | null =
+      body.action === 'apply_labels'
+        || body.action === 'stage_revoke_review'
+        || body.action === 'clear_revoke_review'
+        ? body.action
+        : null
+    if (!action) {
+      return c.json({ error: 'Invalid bulk action', errorCode: 'INVALID_ACTION' }, 400)
+    }
+
+    if (!Array.isArray(body.hostIds)) {
+      return c.json({ error: 'hostIds must be an array', errorCode: 'INVALID_HOST_IDS' }, 400)
+    }
+    const hostIds = [...new Set(body.hostIds
+      .map((value) => normalizePositiveInteger(value))
+      .filter((value): value is number => Boolean(value)))]
+    if (hostIds.length === 0) {
+      return c.json({ error: 'At least one host id is required', errorCode: 'HOST_IDS_REQUIRED' }, 400)
+    }
+
+    const hosts = hostIds.map((hostId) => getOpenClawHostById(db, hostId)).filter((host): host is OpenClawHostRow => Boolean(host))
+    if (hosts.length !== hostIds.length) {
+      return c.json({ error: 'One or more hosts were not found', errorCode: 'HOST_NOT_FOUND' }, 404)
+    }
+
+    const updatedHosts: Array<ReturnType<typeof serializeHost>> = []
+    const changedHostIds: number[] = []
+
+    if (action === 'apply_labels') {
+      const environmentLabel = Object.prototype.hasOwnProperty.call(body, 'environmentLabel')
+        ? normalizeOptionalString(body.environmentLabel)
+        : undefined
+      const groupLabels = Object.prototype.hasOwnProperty.call(body, 'groupLabels')
+        ? (normalizeOptionalStringArray(body.groupLabels) ?? [])
+        : undefined
+      const owner = Object.prototype.hasOwnProperty.call(body, 'owner')
+        ? normalizeOptionalString(body.owner)
+        : undefined
+
+      for (const host of hosts) {
+        const patch = buildOpenClawHostPlacementPatch(host, {
+          environmentLabel,
+          groupLabels,
+          owner,
+        })
+        const updated = updateOpenClawHost(db, {
+          id: host.id,
+          metadataJson: patch.metadataJson,
+        })
+        if (updated) {
+          changedHostIds.push(updated.id)
+          updatedHosts.push(serializeHost(db, updated))
+        }
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet.bulk_labels_applied',
+        actor: auth.session.email,
+        target: 'openclaw-fleet:bulk',
+        details: {
+          role: auth.session.role,
+          hostIds: changedHostIds,
+          environmentLabel: environmentLabel ?? null,
+          groupLabels: groupLabels ?? null,
+          owner: owner ?? null,
+        },
+      })
+    } else if (action === 'stage_revoke_review') {
+      const reason = normalizeOptionalString(body.reason)
+      if (!reason) {
+        return c.json({ error: 'A revoke review reason is required', errorCode: 'REASON_REQUIRED' }, 400)
+      }
+      if (normalizeOptionalString(body.confirmPhrase) !== 'STAGE_REVOKE') {
+        return c.json({ error: 'Bulk revoke staging requires confirmPhrase STAGE_REVOKE', errorCode: 'CONFIRMATION_REQUIRED' }, 400)
+      }
+
+      const requestedAt = new Date().toISOString()
+      for (const host of hosts) {
+        const patch = buildOpenClawHostPlacementPatch(host, {
+          stageRevokeReview: {
+            requestedAt,
+            requestedBy: auth.session.email,
+            reason,
+          },
+        })
+        const updated = updateOpenClawHost(db, {
+          id: host.id,
+          metadataJson: patch.metadataJson,
+        })
+        if (updated) {
+          changedHostIds.push(updated.id)
+          updatedHosts.push(serializeHost(db, updated))
+        }
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet.bulk_revoke_review_staged',
+        actor: auth.session.email,
+        target: 'openclaw-fleet:bulk',
+        details: {
+          role: auth.session.role,
+          hostIds: changedHostIds,
+          reason,
+        },
+      })
+    } else if (action === 'clear_revoke_review') {
+      for (const host of hosts) {
+        const patch = buildOpenClawHostPlacementPatch(host, {
+          clearRevokeReview: true,
+        })
+        const updated = updateOpenClawHost(db, {
+          id: host.id,
+          metadataJson: patch.metadataJson,
+        })
+        if (updated) {
+          changedHostIds.push(updated.id)
+          updatedHosts.push(serializeHost(db, updated))
+        }
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet.bulk_revoke_review_cleared',
+        actor: auth.session.email,
+        target: 'openclaw-fleet:bulk',
+        details: {
+          role: auth.session.role,
+          hostIds: changedHostIds,
+        },
+      })
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      action,
+      hostIds: changedHostIds,
+      hosts: updatedHosts,
     })
   })
 
@@ -1811,6 +2162,69 @@ export function openClawAdminRouter(db: Database) {
         directoryUrl: new URL(c.req.url).origin,
         credential: rotated.credential,
       }),
+    })
+  })
+
+  router.patch('/hosts/:id/profile', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const patch = buildOpenClawHostPlacementPatch(host, {
+      environmentLabel: Object.prototype.hasOwnProperty.call(body, 'environmentLabel')
+        ? normalizeOptionalString(body.environmentLabel)
+        : undefined,
+      groupLabels: Object.prototype.hasOwnProperty.call(body, 'groupLabels')
+        ? (normalizeOptionalStringArray(body.groupLabels) ?? [])
+        : undefined,
+      owner: Object.prototype.hasOwnProperty.call(body, 'owner')
+        ? normalizeOptionalString(body.owner)
+        : undefined,
+      clearRevokeReview: body.clearRevokeReview === true,
+    })
+
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.profile_updated',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        environmentLabel: patch.placement.environmentLabel,
+        groupLabels: patch.placement.groupLabels,
+        owner: patch.placement.owner,
+        clearRevokeReview: body.clearRevokeReview === true,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, updated),
     })
   })
 

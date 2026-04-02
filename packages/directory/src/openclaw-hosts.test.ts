@@ -902,6 +902,174 @@ test('conflict detail recommends an owner route and guided resolve can disable c
   }
 })
 
+test('openclaw fleet groups hosts by environment and supports guarded bulk actions', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const alpha = createFixtureAgent('alpha-fleet@openclaw.beam.directory')
+    const bravo = createFixtureAgent('bravo-fleet@openclaw.beam.directory')
+    const charlie = createFixtureAgent('charlie-fleet@openclaw.beam.directory')
+    registerFixtureAgent(db, alpha, 'Alpha Fleet')
+    registerFixtureAgent(db, bravo, 'Bravo Fleet')
+    registerFixtureAgent(db, charlie, 'Charlie Fleet')
+
+    const app = createApp(db)
+    const hostAlpha = createApprovedHostWithRoute(db, {
+      label: 'Fleet Alpha',
+      hostname: 'alpha.local',
+      beamId: alpha.beamId,
+      routeKey: 'alpha-prod',
+      workspaceSlug: 'openclaw-local',
+    })
+    const hostBravo = createApprovedHostWithRoute(db, {
+      label: 'Fleet Bravo',
+      hostname: 'bravo.local',
+      beamId: bravo.beamId,
+      routeKey: 'bravo-prod',
+      workspaceSlug: 'openclaw-local',
+    })
+    const hostCharlie = createApprovedHostWithRoute(db, {
+      label: 'Fleet Charlie',
+      hostname: 'charlie.local',
+      beamId: charlie.beamId,
+      routeKey: 'charlie-stage',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const bulkLabelResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/bulk-actions', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'apply_labels',
+        hostIds: [hostAlpha.host.id, hostBravo.host.id],
+        environmentLabel: 'prod',
+        groupLabels: ['edge', 'team-alpha', 'edge'],
+        owner: 'ops@example.com',
+      }),
+    }))
+    assert.equal(bulkLabelResponse.status, 200)
+
+    const profileResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostCharlie.host.id}/profile`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        environmentLabel: 'staging',
+        groupLabels: ['lab'],
+      }),
+    }))
+    assert.equal(profileResponse.status, 200)
+
+    const invalidStageResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/bulk-actions', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'stage_revoke_review',
+        hostIds: [hostAlpha.host.id, hostBravo.host.id],
+        reason: 'retire prod pair',
+        confirmPhrase: 'NOPE',
+      }),
+    }))
+    assert.equal(invalidStageResponse.status, 400)
+
+    const stageResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/bulk-actions', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'stage_revoke_review',
+        hostIds: [hostAlpha.host.id, hostBravo.host.id],
+        reason: 'retire prod pair',
+        confirmPhrase: 'STAGE_REVOKE',
+      }),
+    }))
+    assert.equal(stageResponse.status, 200)
+    const stageBody = await stageResponse.json() as {
+      action: string
+      hostIds: number[]
+      hosts: Array<{
+        placement: {
+          revokeReviewRequestedAt: string | null
+          revokeReviewRequestedBy: string | null
+          revokeReviewReason: string | null
+        }
+      }>
+    }
+    assert.equal(stageBody.action, 'stage_revoke_review')
+    assert.equal(stageBody.hostIds.length, 2)
+    assert.ok(stageBody.hosts.every((host) => host.placement.revokeReviewRequestedBy === 'admin@example.com'))
+    assert.ok(stageBody.hosts.every((host) => host.placement.revokeReviewReason === 'retire prod pair'))
+
+    const clearStageResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/bulk-actions', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        action: 'clear_revoke_review',
+        hostIds: [hostBravo.host.id],
+      }),
+    }))
+    assert.equal(clearStageResponse.status, 200)
+
+    const overviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewResponse.status, 200)
+    const overviewBody = await overviewResponse.json() as {
+      environments: Array<{
+        label: string
+        hostCount: number
+      }>
+      hostGroups: Array<{
+        label: string
+        hostCount: number
+      }>
+      hosts: Array<{
+        id: number
+        placement: {
+          environmentLabel: string | null
+          groupLabels: string[]
+          owner: string | null
+          revokeReviewRequestedAt: string | null
+          revokeReviewReason: string | null
+        }
+      }>
+    }
+
+    assert.ok(overviewBody.environments.some((environment) => environment.label === 'prod' && environment.hostCount === 2))
+    assert.ok(overviewBody.environments.some((environment) => environment.label === 'staging' && environment.hostCount === 1))
+    assert.ok(overviewBody.hostGroups.some((group) => group.label === 'edge' && group.hostCount === 2))
+    assert.ok(overviewBody.hostGroups.some((group) => group.label === 'team-alpha' && group.hostCount === 2))
+    assert.ok(overviewBody.hostGroups.some((group) => group.label === 'lab' && group.hostCount === 1))
+
+    const overviewAlpha = overviewBody.hosts.find((host) => host.id === hostAlpha.host.id)
+    const overviewBravo = overviewBody.hosts.find((host) => host.id === hostBravo.host.id)
+    const overviewCharlie = overviewBody.hosts.find((host) => host.id === hostCharlie.host.id)
+    assert.equal(overviewAlpha?.placement.environmentLabel, 'prod')
+    assert.deepEqual(overviewAlpha?.placement.groupLabels, ['edge', 'team-alpha'])
+    assert.equal(overviewAlpha?.placement.owner, 'ops@example.com')
+    assert.equal(overviewAlpha?.placement.revokeReviewReason, 'retire prod pair')
+    assert.equal(overviewBravo?.placement.revokeReviewRequestedAt, null)
+    assert.equal(overviewCharlie?.placement.environmentLabel, 'staging')
+    assert.deepEqual(overviewCharlie?.placement.groupLabels, ['lab'])
+  } finally {
+    db.close()
+  }
+})
+
 test('openclaw fleet overview surfaces receipt coverage and latency summaries', async () => {
   const db = createDatabase(':memory:')
 
