@@ -6,9 +6,12 @@ import {
   applyOpenClawHostRouteEvents,
   approveOpenClawHost,
   createOpenClawEnrollmentRequest,
+  createOpenClawFleetDigestRun,
   createOpenClawHost,
   getAgent,
   getLatestIntentLogByTarget,
+  getOpenClawFleetDigestRunById,
+  getOpenClawFleetDigestSchedule,
   getOpenClawEnrollmentRequestById,
   getOpenClawEnrollmentRequestByKey,
   getOpenClawHostByEnrollmentRequestId,
@@ -18,6 +21,8 @@ import {
   getWorkspaceById,
   getWorkspaceBySlug,
   listOpenClawEnrollmentRequests,
+  listOpenClawFleetDigestDeliveries,
+  listOpenClawFleetDigestRuns,
   listOpenClawHostHeartbeats,
   listOpenClawHosts,
   listOpenClawResolvedRoutesByBeamId,
@@ -32,14 +37,23 @@ import {
   revokeOpenClawHost,
   resolveOpenClawHostCredential,
   rotateOpenClawHostCredential,
+  recordOpenClawFleetDigestDelivery,
   setOpenClawRouteOwnerResolution,
   syncOpenClawHostRoutes,
   updateOpenClawEnrollmentRequest,
+  updateOpenClawFleetDigestSchedule,
   updateOpenClawHost,
 } from '../db.js'
 import { getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-key.js'
 import type {
   IntentLogRow,
+  OpenClawFleetDigestDeliveryKind,
+  OpenClawFleetDigestDeliveryRow,
+  OpenClawFleetDigestDeliveryStatus,
+  OpenClawFleetDigestRunDeliveryState,
+  OpenClawFleetDigestRunRow,
+  OpenClawFleetDigestRunTriggerKind,
+  OpenClawFleetDigestScheduleRow,
   OpenClawHostCredentialState,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostHealth,
@@ -68,6 +82,56 @@ type OpenClawFleetDigestItem = {
   workspaceSlug: string | null
   href: string | null
   traceHref: string | null
+}
+
+type OpenClawFleetEscalation = OpenClawFleetDigestItem
+
+type SerializedOpenClawFleetDigestSchedule = {
+  enabled: boolean
+  deliveryEmail: string | null
+  escalationEmail: string | null
+  runHourUtc: number
+  runMinuteUtc: number
+  escalateOnCritical: boolean
+  lastScheduledForAt: string | null
+  lastRunAt: string | null
+  lastDeliveryAt: string | null
+  lastEscalationDeliveryAt: string | null
+  nextRunAt: string | null
+}
+
+type SerializedOpenClawFleetDigestRun = {
+  id: number
+  triggerKind: OpenClawFleetDigestRunTriggerKind
+  actor: string | null
+  generatedAt: string
+  deliveryState: OpenClawFleetDigestRunDeliveryState
+  lastDeliveryErrorCode: string | null
+  summary: {
+    actionItems: number
+    criticalItems: number
+    staleHosts: number
+    failedReceipts: number
+    duplicateIdentityConflicts: number
+    escalations: number
+  }
+}
+
+type SerializedOpenClawFleetDigestDelivery = {
+  id: number
+  runId: number | null
+  runGeneratedAt: string | null
+  kind: OpenClawFleetDigestDeliveryKind
+  status: OpenClawFleetDigestDeliveryStatus
+  recipientEmail: string
+  errorCode: string | null
+  errorMessage: string | null
+  deliveredAt: string
+  summary: {
+    actionItems: number
+    criticalItems: number
+    escalations: number
+  } | null
 }
 
 type OpenClawConflictGroup = {
@@ -279,6 +343,18 @@ function parseOpenClawHostMetadata(raw: string | null): OpenClawHostMetadataJson
     return parsed as OpenClawHostMetadataJson
   } catch {
     return {}
+  }
+}
+
+function parseJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) {
+    return fallback
+  }
+
+  try {
+    return JSON.parse(raw) as T
+  } catch {
+    return fallback
   }
 }
 
@@ -1153,6 +1229,123 @@ function summarizeOpenClawFleetGroups(hosts: Array<ReturnType<typeof serializeHo
     .sort((left, right) => left.label.localeCompare(right.label))
 }
 
+function buildOpenClawFleetEscalations(actionItems: OpenClawFleetDigestItem[]): OpenClawFleetEscalation[] {
+  return actionItems.filter((item) => item.severity === 'critical')
+}
+
+function computeOpenClawFleetDigestCurrentScheduleSlot(
+  runHourUtc: number,
+  runMinuteUtc: number,
+  now = new Date(),
+): string {
+  const slot = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    runHourUtc,
+    runMinuteUtc,
+    0,
+    0,
+  ))
+  if (now.getTime() < slot.getTime()) {
+    slot.setUTCDate(slot.getUTCDate() - 1)
+  }
+  return slot.toISOString()
+}
+
+function computeOpenClawFleetDigestNextRunAt(
+  schedule: OpenClawFleetDigestScheduleRow,
+  now = new Date(),
+): string | null {
+  if (!schedule.enabled) {
+    return null
+  }
+
+  const next = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate(),
+    schedule.run_hour_utc,
+    schedule.run_minute_utc,
+    0,
+    0,
+  ))
+  if (now.getTime() >= next.getTime()) {
+    next.setUTCDate(next.getUTCDate() + 1)
+  }
+  return next.toISOString()
+}
+
+function serializeOpenClawFleetDigestSchedule(
+  schedule: OpenClawFleetDigestScheduleRow,
+  runsById: Map<number, OpenClawFleetDigestRunRow>,
+): SerializedOpenClawFleetDigestSchedule {
+  const lastRun = schedule.last_run_id ? runsById.get(schedule.last_run_id) ?? null : null
+
+  return {
+    enabled: schedule.enabled === 1,
+    deliveryEmail: schedule.delivery_email,
+    escalationEmail: schedule.escalation_email,
+    runHourUtc: schedule.run_hour_utc,
+    runMinuteUtc: schedule.run_minute_utc,
+    escalateOnCritical: schedule.escalate_on_critical === 1,
+    lastScheduledForAt: schedule.last_scheduled_for_at,
+    lastRunAt: lastRun?.generated_at ?? null,
+    lastDeliveryAt: schedule.last_delivery_at,
+    lastEscalationDeliveryAt: schedule.last_escalation_delivery_at,
+    nextRunAt: computeOpenClawFleetDigestNextRunAt(schedule),
+  }
+}
+
+function serializeOpenClawFleetDigestRun(row: OpenClawFleetDigestRunRow): SerializedOpenClawFleetDigestRun {
+  const summary = parseJson<Record<string, unknown>>(row.summary_json, {})
+  const escalationItems = parseJson<unknown[]>(row.escalation_items_json, [])
+  return {
+    id: row.id,
+    triggerKind: row.trigger_kind,
+    actor: row.actor,
+    generatedAt: row.generated_at,
+    deliveryState: row.delivery_state,
+    lastDeliveryErrorCode: row.last_delivery_error_code,
+    summary: {
+      actionItems: Number(summary['actionItems'] ?? 0),
+      criticalItems: Number(summary['criticalItems'] ?? 0),
+      staleHosts: Number(summary['staleHosts'] ?? 0),
+      failedReceipts: Number(summary['failedReceipts'] ?? 0),
+      duplicateIdentityConflicts: Number(summary['duplicateIdentityConflicts'] ?? 0),
+      escalations: escalationItems.length,
+    },
+  }
+}
+
+function serializeOpenClawFleetDigestDelivery(
+  row: OpenClawFleetDigestDeliveryRow,
+  runsById: Map<number, OpenClawFleetDigestRunRow>,
+): SerializedOpenClawFleetDigestDelivery {
+  const run = row.run_id ? runsById.get(row.run_id) ?? null : null
+  const summary = run ? parseJson<Record<string, unknown>>(run.summary_json, {}) : null
+  const escalationItems = run ? parseJson<unknown[]>(run.escalation_items_json, []) : []
+
+  return {
+    id: row.id,
+    runId: row.run_id,
+    runGeneratedAt: run?.generated_at ?? null,
+    kind: row.delivery_kind,
+    status: row.status,
+    recipientEmail: row.recipient_email,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    deliveredAt: row.delivered_at,
+    summary: summary
+      ? {
+          actionItems: Number(summary['actionItems'] ?? 0),
+          criticalItems: Number(summary['criticalItems'] ?? 0),
+          escalations: escalationItems.length,
+        }
+      : null,
+  }
+}
+
 function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
   refreshOpenClawHostHealth(db)
   recalculateOpenClawRouteStates(db)
@@ -1404,6 +1597,7 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
     pendingCredentialActions: hosts.filter((host) => host.credentialState === 'rotation_pending' || host.credentialState === 'recovery_pending').length,
     actionItems: actionItems.length,
     criticalItems: actionItems.filter((item) => item.severity === 'critical').length,
+    escalations: buildOpenClawFleetEscalations(actionItems).length,
     warningItems: actionItems.filter((item) => item.severity === 'warning').length,
   }
 
@@ -1443,11 +1637,190 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
     }
   }
 
+  const escalationItems = buildOpenClawFleetEscalations(actionItems)
+  markdownLines.push('', '## Escalations', '')
+  if (escalationItems.length === 0) {
+    markdownLines.push('- No critical fleet escalations are currently open.')
+  } else {
+    for (const item of escalationItems) {
+      markdownLines.push(`- ${item.title}`)
+      markdownLines.push(`  - Detail: ${item.detail}`)
+      markdownLines.push(`  - Next action: ${item.nextAction}`)
+    }
+  }
+
   return {
     generatedAt: new Date().toISOString(),
     summary,
     actionItems,
+    escalations: escalationItems,
     markdown: `${markdownLines.join('\n')}\n`,
+  }
+}
+
+type BuiltOpenClawFleetDigest = ReturnType<typeof buildOpenClawFleetDigest>
+
+function buildPersistedOpenClawFleetDigestRun(
+  db: Database,
+  baseUrl: string,
+  input: {
+    triggerKind: OpenClawFleetDigestRunTriggerKind
+    actor?: string | null
+    scheduledForAt?: string | null
+  },
+): { digest: BuiltOpenClawFleetDigest; run: OpenClawFleetDigestRunRow } {
+  const digest = buildOpenClawFleetDigest(db, baseUrl)
+  const run = createOpenClawFleetDigestRun(db, {
+    triggerKind: input.triggerKind,
+    actor: input.actor ?? null,
+    generatedAt: digest.generatedAt,
+    summaryJson: JSON.stringify(digest.summary),
+    actionItemsJson: JSON.stringify(digest.actionItems),
+    escalationItemsJson: JSON.stringify(digest.escalations),
+    markdown: digest.markdown,
+  })
+
+  if (input.scheduledForAt !== undefined) {
+    updateOpenClawFleetDigestSchedule(db, {
+      lastRunId: run.id,
+      lastScheduledForAt: input.scheduledForAt,
+    })
+  }
+
+  return { digest, run }
+}
+
+function buildOpenClawFleetEscalationMarkdown(run: OpenClawFleetDigestRunRow): string {
+  const escalations = parseJson<OpenClawFleetEscalation[]>(run.escalation_items_json, [])
+  const summary = parseJson<Record<string, unknown>>(run.summary_json, {})
+  const lines = [
+    `# Beam OpenClaw fleet escalation · ${run.generated_at.slice(0, 10)}`,
+    '',
+    '## Summary',
+    '',
+    `- Trigger: \`${run.trigger_kind}\``,
+    `- Critical items: \`${Number(summary['criticalItems'] ?? escalations.length)}\``,
+    `- Action items: \`${Number(summary['actionItems'] ?? 0)}\``,
+    '',
+    '## Escalations',
+    '',
+  ]
+
+  if (escalations.length === 0) {
+    lines.push('- No critical fleet escalations are currently open.')
+  } else {
+    for (const item of escalations) {
+      lines.push(`- ${item.title}`)
+      lines.push(`  - Detail: ${item.detail}`)
+      lines.push(`  - Next action: ${item.nextAction}`)
+    }
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+async function deliverOpenClawFleetDigestRun(
+  db: Database,
+  run: OpenClawFleetDigestRunRow,
+  input: {
+    actor: string
+    recipientEmail: string
+    deliveryKind: OpenClawFleetDigestDeliveryKind
+  },
+): Promise<{
+  ok: boolean
+  status: OpenClawFleetDigestDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  delivery: OpenClawFleetDigestDeliveryRow
+}> {
+  const markdown = input.deliveryKind === 'escalation'
+    ? buildOpenClawFleetEscalationMarkdown(run)
+    : run.markdown
+  const subject = input.deliveryKind === 'escalation'
+    ? `Beam OpenClaw fleet escalation · ${run.generated_at.slice(0, 10)}`
+    : `Beam OpenClaw fleet digest · ${run.generated_at.slice(0, 10)}`
+
+  if (!isEmailDeliveryConfigured()) {
+    const delivery = recordOpenClawFleetDigestDelivery(db, {
+      runId: run.id,
+      deliveryKind: input.deliveryKind,
+      recipientEmail: input.recipientEmail,
+      status: 'unavailable',
+      errorCode: 'EMAIL_DELIVERY_UNAVAILABLE',
+      errorMessage: 'Email delivery is not configured for fleet digests.',
+      detailsJson: JSON.stringify({ actor: input.actor }),
+    })
+    return {
+      ok: false,
+      status: 'unavailable',
+      errorCode: 'EMAIL_DELIVERY_UNAVAILABLE',
+      errorMessage: 'Email delivery is not configured for fleet digests.',
+      delivery,
+    }
+  }
+
+  const delivered = await sendOperatorDigestEmail({
+    email: input.recipientEmail,
+    subject,
+    markdown,
+  })
+
+  const delivery = recordOpenClawFleetDigestDelivery(db, {
+    runId: run.id,
+    deliveryKind: input.deliveryKind,
+    recipientEmail: input.recipientEmail,
+    status: delivered ? 'delivered' : 'failed',
+    errorCode: delivered ? null : 'EMAIL_DELIVERY_FAILED',
+    errorMessage: delivered ? null : 'Failed to deliver fleet digest email.',
+    detailsJson: JSON.stringify({ actor: input.actor }),
+  })
+
+  return {
+    ok: delivered,
+    status: delivered ? 'delivered' : 'failed',
+    errorCode: delivered ? null : 'EMAIL_DELIVERY_FAILED',
+    errorMessage: delivered ? null : 'Failed to deliver fleet digest email.',
+    delivery,
+  }
+}
+
+function buildOpenClawFleetDigestEnvelope(db: Database, baseUrl: string) {
+  const digest = buildOpenClawFleetDigest(db, baseUrl)
+  const schedule = getOpenClawFleetDigestSchedule(db)
+  const runs = listOpenClawFleetDigestRuns(db, 10)
+  const runsById = new Map(runs.map((run) => [run.id, run]))
+  const deliveries = listOpenClawFleetDigestDeliveries(db, 20)
+
+  return {
+    ...digest,
+    schedule: serializeOpenClawFleetDigestSchedule(schedule, runsById),
+    history: {
+      runs: runs.map((run) => serializeOpenClawFleetDigestRun(run)),
+      deliveries: deliveries.map((delivery) => serializeOpenClawFleetDigestDelivery(delivery, runsById)),
+    },
+  }
+}
+
+function isOpenClawFleetDigestDue(schedule: OpenClawFleetDigestScheduleRow, now = new Date()) {
+  if (!schedule.enabled) {
+    return {
+      due: false,
+      scheduledForAt: null,
+      nextRunAt: computeOpenClawFleetDigestNextRunAt(schedule, now),
+    }
+  }
+
+  const scheduledForAt = computeOpenClawFleetDigestCurrentScheduleSlot(
+    schedule.run_hour_utc,
+    schedule.run_minute_utc,
+    now,
+  )
+
+  return {
+    due: schedule.last_scheduled_for_at !== scheduledForAt,
+    scheduledForAt,
+    nextRunAt: computeOpenClawFleetDigestNextRunAt(schedule, now),
   }
 }
 
@@ -1718,7 +2091,7 @@ export function openClawAdminRouter(db: Database) {
       return auth
     }
 
-    const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
+    const digest = buildOpenClawFleetDigestEnvelope(db, new URL(c.req.url).origin)
     const format = c.req.query('format')
     if (format === 'markdown') {
       c.header('Cache-Control', 'no-store')
@@ -1730,6 +2103,246 @@ export function openClawAdminRouter(db: Database) {
 
     c.header('Cache-Control', 'no-store')
     return c.json(digest)
+  })
+
+  router.patch('/fleet/digest/schedule', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const enabled = body.enabled === undefined ? undefined : body.enabled === true
+    const deliveryEmail = body.deliveryEmail === undefined ? undefined : normalizeOptionalString(body.deliveryEmail)
+    const escalationEmail = body.escalationEmail === undefined ? undefined : normalizeOptionalString(body.escalationEmail)
+    const runHourUtc = body.runHourUtc === undefined ? undefined : normalizeBoundedInteger(body.runHourUtc, 0, 23)
+    const runMinuteUtc = body.runMinuteUtc === undefined ? undefined : normalizeBoundedInteger(body.runMinuteUtc, 0, 59)
+    const escalateOnCritical = body.escalateOnCritical === undefined ? undefined : body.escalateOnCritical === true
+
+    const schedule = updateOpenClawFleetDigestSchedule(db, {
+      enabled,
+      deliveryEmail,
+      escalationEmail,
+      runHourUtc: runHourUtc ?? undefined,
+      runMinuteUtc: runMinuteUtc ?? undefined,
+      escalateOnCritical,
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_digest.schedule_updated',
+      actor: auth.session.email,
+      target: 'openclaw-fleet:digest-schedule',
+      details: {
+        role: auth.session.role,
+        enabled: schedule.enabled === 1,
+        deliveryEmail: schedule.delivery_email,
+        escalationEmail: schedule.escalation_email,
+        runHourUtc: schedule.run_hour_utc,
+        runMinuteUtc: schedule.run_minute_utc,
+        escalateOnCritical: schedule.escalate_on_critical === 1,
+      },
+    })
+
+    const runs = listOpenClawFleetDigestRuns(db, 10)
+    const runsById = new Map(runs.map((run) => [run.id, run]))
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      schedule: serializeOpenClawFleetDigestSchedule(schedule, runsById),
+    })
+  })
+
+  router.post('/fleet/digest/run', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const triggerKind: OpenClawFleetDigestRunTriggerKind = body.triggerKind === 'scheduled' ? 'scheduled' : 'manual'
+    const deliver = body.deliver === true
+    const respectSchedule = body.respectSchedule === true
+    const schedule = getOpenClawFleetDigestSchedule(db)
+    if (triggerKind === 'scheduled' && respectSchedule) {
+      const dueState = isOpenClawFleetDigestDue(schedule)
+      if (!dueState.due) {
+        c.header('Cache-Control', 'no-store')
+        return c.json({
+          ok: true,
+          skipped: true,
+          reason: schedule.enabled ? 'not_due' : 'disabled',
+          schedule: serializeOpenClawFleetDigestSchedule(schedule, new Map(listOpenClawFleetDigestRuns(db, 10).map((run) => [run.id, run]))),
+          nextRunAt: dueState.nextRunAt,
+        })
+      }
+
+      const { digest, run } = buildPersistedOpenClawFleetDigestRun(db, new URL(c.req.url).origin, {
+        triggerKind,
+        actor: auth.session.email,
+        scheduledForAt: dueState.scheduledForAt,
+      })
+
+      const deliveries: Array<{
+        ok: boolean
+        status: OpenClawFleetDigestDeliveryStatus
+        errorCode: string | null
+        errorMessage: string | null
+        delivery: SerializedOpenClawFleetDigestDelivery
+      }> = []
+
+      if (deliver) {
+        if (schedule.delivery_email) {
+          const digestDelivery = await deliverOpenClawFleetDigestRun(db, run, {
+            actor: auth.session.email,
+            recipientEmail: schedule.delivery_email,
+            deliveryKind: 'digest',
+          })
+          deliveries.push({
+            ...digestDelivery,
+            delivery: serializeOpenClawFleetDigestDelivery(digestDelivery.delivery, new Map([[run.id, run]])),
+          })
+        } else {
+          const missingDigestDelivery = recordOpenClawFleetDigestDelivery(db, {
+            runId: run.id,
+            deliveryKind: 'digest',
+            recipientEmail: 'unconfigured',
+            status: 'skipped',
+            errorCode: 'NO_DIGEST_RECIPIENT',
+            errorMessage: 'No default fleet digest recipient is configured.',
+            detailsJson: JSON.stringify({ actor: auth.session.email }),
+          })
+          deliveries.push({
+            ok: false,
+            status: 'skipped',
+            errorCode: 'NO_DIGEST_RECIPIENT',
+            errorMessage: 'No default fleet digest recipient is configured.',
+            delivery: serializeOpenClawFleetDigestDelivery(missingDigestDelivery, new Map([[run.id, run]])),
+          })
+        }
+
+        if (schedule.escalate_on_critical === 1 && digest.escalations.length > 0) {
+          if (schedule.escalation_email) {
+            const escalationDelivery = await deliverOpenClawFleetDigestRun(db, run, {
+              actor: auth.session.email,
+              recipientEmail: schedule.escalation_email,
+              deliveryKind: 'escalation',
+            })
+            deliveries.push({
+              ...escalationDelivery,
+              delivery: serializeOpenClawFleetDigestDelivery(escalationDelivery.delivery, new Map([[run.id, run]])),
+            })
+          } else {
+            const missingEscalationDelivery = recordOpenClawFleetDigestDelivery(db, {
+              runId: run.id,
+              deliveryKind: 'escalation',
+              recipientEmail: 'unconfigured',
+              status: 'skipped',
+              errorCode: 'NO_ESCALATION_RECIPIENT',
+              errorMessage: 'No escalation recipient is configured for the fleet digest.',
+              detailsJson: JSON.stringify({ actor: auth.session.email }),
+            })
+            deliveries.push({
+              ok: false,
+              status: 'skipped',
+              errorCode: 'NO_ESCALATION_RECIPIENT',
+              errorMessage: 'No escalation recipient is configured for the fleet digest.',
+              delivery: serializeOpenClawFleetDigestDelivery(missingEscalationDelivery, new Map([[run.id, run]])),
+            })
+          }
+        }
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet_digest.run',
+        actor: auth.session.email,
+        target: 'openclaw-fleet:digest',
+        details: {
+          role: auth.session.role,
+          triggerKind,
+          deliver,
+          scheduledForAt: dueState.scheduledForAt,
+          runId: run.id,
+          deliveryCount: deliveries.length,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        skipped: false,
+        run: serializeOpenClawFleetDigestRun(getOpenClawFleetDigestRunById(db, run.id) as OpenClawFleetDigestRunRow),
+        digest: buildOpenClawFleetDigestEnvelope(db, new URL(c.req.url).origin),
+        deliveries,
+      })
+    }
+
+    const { digest, run } = buildPersistedOpenClawFleetDigestRun(db, new URL(c.req.url).origin, {
+      triggerKind,
+      actor: auth.session.email,
+    })
+    const deliveries: Array<{
+      ok: boolean
+      status: OpenClawFleetDigestDeliveryStatus
+      errorCode: string | null
+      errorMessage: string | null
+      delivery: SerializedOpenClawFleetDigestDelivery
+    }> = []
+    if (deliver) {
+      const schedule = getOpenClawFleetDigestSchedule(db)
+      const targetEmail = schedule.delivery_email ?? auth.session.email
+      const digestDelivery = await deliverOpenClawFleetDigestRun(db, run, {
+        actor: auth.session.email,
+        recipientEmail: targetEmail,
+        deliveryKind: 'digest',
+      })
+      deliveries.push({
+        ...digestDelivery,
+        delivery: serializeOpenClawFleetDigestDelivery(digestDelivery.delivery, new Map([[run.id, run]])),
+      })
+      if (schedule.escalate_on_critical === 1 && digest.escalations.length > 0 && schedule.escalation_email) {
+        const escalationDelivery = await deliverOpenClawFleetDigestRun(db, run, {
+          actor: auth.session.email,
+          recipientEmail: schedule.escalation_email,
+          deliveryKind: 'escalation',
+        })
+        deliveries.push({
+          ...escalationDelivery,
+          delivery: serializeOpenClawFleetDigestDelivery(escalationDelivery.delivery, new Map([[run.id, run]])),
+        })
+      }
+    }
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_digest.run',
+      actor: auth.session.email,
+      target: 'openclaw-fleet:digest',
+      details: {
+        role: auth.session.role,
+        triggerKind,
+        deliver,
+        runId: run.id,
+        deliveryCount: deliveries.length,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      skipped: false,
+      run: serializeOpenClawFleetDigestRun(getOpenClawFleetDigestRunById(db, run.id) as OpenClawFleetDigestRunRow),
+      digest: buildOpenClawFleetDigestEnvelope(db, new URL(c.req.url).origin),
+      deliveries,
+    })
   })
 
   router.post('/fleet/digest/deliver', async (c) => {
@@ -1750,40 +2363,56 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Only admins can deliver digests to a different mailbox', errorCode: 'FORBIDDEN' }, 403)
     }
 
-    if (!isEmailDeliveryConfigured()) {
-      return c.json({ error: 'Email delivery is not configured for fleet digests', errorCode: 'EMAIL_DELIVERY_UNAVAILABLE' }, 503)
+    const deliveryKind: OpenClawFleetDigestDeliveryKind = body.kind === 'escalation' ? 'escalation' : 'digest'
+    const runId = normalizePositiveInteger(body.runId)
+    const run = runId
+      ? getOpenClawFleetDigestRunById(db, runId)
+      : buildPersistedOpenClawFleetDigestRun(db, new URL(c.req.url).origin, {
+          triggerKind: 'manual',
+          actor: auth.session.email,
+        }).run
+
+    if (!run) {
+      return c.json({ error: 'Digest run not found', errorCode: 'NOT_FOUND' }, 404)
     }
 
-    const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
     const email = requestedEmail ?? auth.session.email
-    const delivered = await sendOperatorDigestEmail({
-      email,
-      subject: `Beam OpenClaw fleet digest · ${new Date().toISOString().slice(0, 10)}`,
-      markdown: digest.markdown,
+    const result = await deliverOpenClawFleetDigestRun(db, run, {
+      actor: auth.session.email,
+      recipientEmail: email,
+      deliveryKind,
     })
 
-    if (!delivered) {
-      return c.json({ error: 'Failed to deliver fleet digest', errorCode: 'EMAIL_DELIVERY_FAILED' }, 500)
-    }
-
     logAuditEvent(db, {
-      action: 'admin.openclaw_fleet_digest.delivered',
+      action: result.ok ? 'admin.openclaw_fleet_digest.delivered' : 'admin.openclaw_fleet_digest.delivery_failed',
       actor: auth.session.email,
       target: 'openclaw-fleet:digest',
       details: {
         role: auth.session.role,
         email,
-        actionItems: digest.summary.actionItems,
-        criticalItems: digest.summary.criticalItems,
+        deliveryKind,
+        runId: run.id,
+        status: result.status,
+        errorCode: result.errorCode,
       },
     })
+
+    if (!result.ok) {
+      const statusCode = result.status === 'unavailable' ? 503 : 500
+      return c.json({
+        error: result.errorMessage ?? 'Failed to deliver fleet digest',
+        errorCode: result.errorCode ?? 'EMAIL_DELIVERY_FAILED',
+        runId: run.id,
+      }, statusCode)
+    }
 
     c.header('Cache-Control', 'no-store')
     return c.json({
       ok: true,
       email,
-      deliveredAt: new Date().toISOString(),
-      summary: digest.summary,
+      kind: deliveryKind,
+      deliveredAt: result.delivery.delivered_at,
+      summary: parseJson<Record<string, unknown>>(run.summary_json, {}) as BuiltOpenClawFleetDigest['summary'],
     })
   })
 

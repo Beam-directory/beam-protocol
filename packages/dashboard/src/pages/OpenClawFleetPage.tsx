@@ -209,6 +209,15 @@ type HostPlacementFormState = {
   owner: string
 }
 
+type DigestScheduleFormState = {
+  enabled: boolean
+  deliveryEmail: string
+  escalationEmail: string
+  runHourUtc: string
+  runMinuteUtc: string
+  escalateOnCritical: boolean
+}
+
 type FleetBulkMode = 'labels' | 'stage_revoke_review' | 'clear_revoke_review' | null
 
 export default function OpenClawFleetPage() {
@@ -259,6 +268,14 @@ export default function OpenClawFleetPage() {
     environmentLabel: '',
     groupLabels: '',
     owner: '',
+  })
+  const [digestScheduleForm, setDigestScheduleForm] = useState<DigestScheduleFormState>({
+    enabled: true,
+    deliveryEmail: '',
+    escalationEmail: '',
+    runHourUtc: '8',
+    runMinuteUtc: '0',
+    escalateOnCritical: true,
   })
   const [selectedHostIds, setSelectedHostIds] = useState<number[]>([])
   const [bulkMode, setBulkMode] = useState<FleetBulkMode>(null)
@@ -463,6 +480,21 @@ export default function OpenClawFleetPage() {
     })
   }, [selectedHost?.id, selectedHost?.updatedAt])
 
+  useEffect(() => {
+    if (!digest) {
+      return
+    }
+
+    setDigestScheduleForm({
+      enabled: digest.schedule.enabled,
+      deliveryEmail: digest.schedule.deliveryEmail ?? '',
+      escalationEmail: digest.schedule.escalationEmail ?? '',
+      runHourUtc: String(digest.schedule.runHourUtc),
+      runMinuteUtc: String(digest.schedule.runMinuteUtc),
+      escalateOnCritical: digest.schedule.escalateOnCritical,
+    })
+  }, [digest?.schedule.enabled, digest?.schedule.deliveryEmail, digest?.schedule.escalationEmail, digest?.schedule.runHourUtc, digest?.schedule.runMinuteUtc, digest?.schedule.escalateOnCritical])
+
   async function runAction(actionKey: string, fn: () => Promise<void>, successMessage: string) {
     try {
       setActionBusy(actionKey)
@@ -665,12 +697,60 @@ export default function OpenClawFleetPage() {
     }, `Route ownership reset for ${route.beamId}.`)
   }
 
-  async function handleDeliverDigest() {
-    await runAction('deliver-digest', async () => {
-      const response = await directoryApi.deliverOpenClawFleetDigest()
+  async function handleSaveDigestSchedule() {
+    await runAction('digest-schedule', async () => {
+      await directoryApi.updateOpenClawFleetDigestSchedule({
+        enabled: digestScheduleForm.enabled,
+        deliveryEmail: digestScheduleForm.deliveryEmail.trim() || null,
+        escalationEmail: digestScheduleForm.escalationEmail.trim() || null,
+        runHourUtc: Math.max(0, Math.min(23, Number.parseInt(digestScheduleForm.runHourUtc, 10) || 0)),
+        runMinuteUtc: Math.max(0, Math.min(59, Number.parseInt(digestScheduleForm.runMinuteUtc, 10) || 0)),
+        escalateOnCritical: digestScheduleForm.escalateOnCritical,
+      })
       await loadDigest()
-      setNotice(`Fleet digest delivered to ${response.email}.`)
-    }, 'Fleet digest delivered.')
+    }, 'Fleet digest schedule updated.')
+  }
+
+  async function handleRunDigest(options?: {
+    triggerKind?: 'manual' | 'scheduled'
+    deliver?: boolean
+    respectSchedule?: boolean
+  }) {
+    const triggerKind = options?.triggerKind ?? 'manual'
+    const actionKey = `run-digest-${triggerKind}${options?.deliver ? '-deliver' : ''}${options?.respectSchedule ? '-respect' : ''}`
+    let nextNotice: string | null = null
+    await runAction(actionKey, async () => {
+      const response = await directoryApi.runOpenClawFleetDigest({
+        triggerKind,
+        deliver: options?.deliver ?? false,
+        respectSchedule: options?.respectSchedule ?? false,
+      })
+      if (response.skipped) {
+        nextNotice = response.reason === 'disabled'
+          ? 'Fleet digest schedule is disabled.'
+          : `Fleet digest is not due yet. Next run ${response.nextRunAt ? formatRelativeTime(response.nextRunAt) : 'is not scheduled'}.`
+      }
+      await loadDigest()
+    }, triggerKind === 'scheduled' ? 'Scheduled fleet digest processed.' : 'Fleet digest generated.')
+    if (nextNotice) {
+      setNotice(nextNotice)
+    }
+  }
+
+  async function handleDeliverDigest(input?: { kind?: 'digest' | 'escalation'; runId?: number | null }) {
+    const deliveryKind = input?.kind ?? 'digest'
+    let nextNotice: string | null = null
+    await runAction(`deliver-${deliveryKind}`, async () => {
+      const response = await directoryApi.deliverOpenClawFleetDigest({
+        kind: deliveryKind,
+        runId: input?.runId ?? null,
+      })
+      await loadDigest()
+      nextNotice = `${deliveryKind === 'escalation' ? 'Fleet escalation' : 'Fleet digest'} delivered to ${response.email}.`
+    }, deliveryKind === 'escalation' ? 'Fleet escalation delivered.' : 'Fleet digest delivered.')
+    if (nextNotice) {
+      setNotice(nextNotice)
+    }
   }
 
   const hostRoutes = hostDetail?.routes ?? []
@@ -714,7 +794,7 @@ export default function OpenClawFleetPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-8">
         <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.summary.totalHosts)} />
         <MetricCard label="Active hosts" value={!overview ? '—' : formatNumber(overview.summary.activeHosts)} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Pending hosts" value={!overview ? '—' : formatNumber(overview.summary.pendingHosts)} tone={(overview?.summary.pendingHosts ?? 0) > 0 ? 'warning' : 'default'} />
@@ -733,25 +813,257 @@ export default function OpenClawFleetPage() {
               One recurring summary for stale hosts, pending credential actions, duplicate conflicts, and failed deliveries.
             </p>
           </div>
-          <button
-            type="button"
-            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
-            disabled={actionBusy === 'deliver-digest'}
-            onClick={() => { void handleDeliverDigest() }}
-          >
-            {actionBusy === 'deliver-digest' ? 'Delivering…' : 'Deliver digest'}
-          </button>
+          <div className="text-xs text-slate-500 dark:text-slate-400">
+            {digest?.schedule.nextRunAt ? `Next run ${formatRelativeTime(digest.schedule.nextRunAt)}` : 'No digest schedule loaded yet'}
+          </div>
         </div>
 
         <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
           <MetricCard label="Action items" value={!digest ? '—' : formatNumber(digest.summary.actionItems)} tone={(digest?.summary.actionItems ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Critical items" value={!digest ? '—' : formatNumber(digest.summary.criticalItems)} tone={(digest?.summary.criticalItems ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="Escalations" value={!digest ? '—' : formatNumber(digest.summary.escalations)} tone={(digest?.summary.escalations ?? 0) > 0 ? 'critical' : 'default'} />
           <MetricCard label="Credential actions" value={!digest ? '—' : formatNumber(digest.summary.pendingCredentialActions)} tone={(digest?.summary.pendingCredentialActions ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Failed receipts" value={!digest ? '—' : formatNumber(digest.summary.failedReceipts)} tone={(digest?.summary.failedReceipts ?? 0) > 0 ? 'critical' : 'default'} />
           <MetricCard label="Stale hosts" value={!digest ? '—' : formatNumber(digest.summary.staleHosts)} tone={(digest?.summary.staleHosts ?? 0) > 0 ? 'critical' : 'default'} />
           <MetricCard label="Missing receipts" value={!digest ? '—' : formatNumber(digest.summary.routesMissingReceipts)} tone={(digest?.summary.routesMissingReceipts ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="SLO breaches" value={!digest ? '—' : formatNumber(digest.summary.latencySloBreaches)} tone={(digest?.summary.latencySloBreaches ?? 0) > 0 ? 'warning' : 'default'} />
         </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
+          <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Digest schedule</div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Delivery email</span>
+                <input
+                  className="input-field"
+                  placeholder="ops@example.com"
+                  value={digestScheduleForm.deliveryEmail}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, deliveryEmail: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Escalation email</span>
+                <input
+                  className="input-field"
+                  placeholder="critical@example.com"
+                  value={digestScheduleForm.escalationEmail}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, escalationEmail: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Run hour (UTC)</span>
+                <input
+                  className="input-field"
+                  inputMode="numeric"
+                  value={digestScheduleForm.runHourUtc}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, runHourUtc: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Run minute (UTC)</span>
+                <input
+                  className="input-field"
+                  inputMode="numeric"
+                  value={digestScheduleForm.runMinuteUtc}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, runMinuteUtc: event.target.value }))}
+                />
+              </label>
+            </div>
+
+            <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-400">
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={digestScheduleForm.enabled}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, enabled: event.target.checked }))}
+                />
+                <span>Schedule enabled</span>
+              </label>
+              <label className="inline-flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  checked={digestScheduleForm.escalateOnCritical}
+                  onChange={(event) => setDigestScheduleForm((current) => ({ ...current, escalateOnCritical: event.target.checked }))}
+                />
+                <span>Escalate on critical items</span>
+              </label>
+            </div>
+
+            <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+              <div>Last scheduled slot: {digest?.schedule.lastScheduledForAt ? formatDateTime(digest.schedule.lastScheduledForAt) : '—'}</div>
+              <div>Last run: {digest?.schedule.lastRunAt ? formatRelativeTime(digest.schedule.lastRunAt) : '—'}</div>
+              <div>Last digest delivery: {digest?.schedule.lastDeliveryAt ? formatRelativeTime(digest.schedule.lastDeliveryAt) : '—'}</div>
+              <div>Last escalation: {digest?.schedule.lastEscalationDeliveryAt ? formatRelativeTime(digest.schedule.lastEscalationDeliveryAt) : '—'}</div>
+            </div>
+
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-orange-500 dark:text-slate-950 dark:hover:bg-orange-400"
+                disabled={actionBusy === 'digest-schedule'}
+                onClick={() => { void handleSaveDigestSchedule() }}
+              >
+                {actionBusy === 'digest-schedule' ? 'Saving…' : 'Save schedule'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'run-digest-manual'}
+                onClick={() => { void handleRunDigest({ triggerKind: 'manual' }) }}
+              >
+                {actionBusy === 'run-digest-manual' ? 'Running…' : 'Run now'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'run-digest-manual-deliver'}
+                onClick={() => { void handleRunDigest({ triggerKind: 'manual', deliver: true }) }}
+              >
+                {actionBusy === 'run-digest-manual-deliver' ? 'Running…' : 'Run + deliver'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'run-digest-scheduled-deliver-respect'}
+                onClick={() => { void handleRunDigest({ triggerKind: 'scheduled', deliver: true, respectSchedule: true }) }}
+              >
+                {actionBusy === 'run-digest-scheduled-deliver-respect' ? 'Running due…' : 'Run if due'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'deliver-digest'}
+                onClick={() => { void handleDeliverDigest({ kind: 'digest' }) }}
+              >
+                {actionBusy === 'deliver-digest' ? 'Delivering…' : 'Deliver digest'}
+              </button>
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'deliver-escalation'}
+                onClick={() => { void handleDeliverDigest({ kind: 'escalation' }) }}
+              >
+                {actionBusy === 'deliver-escalation' ? 'Delivering…' : 'Deliver escalation'}
+              </button>
+            </div>
+          </div>
+
+          <div className="grid gap-4">
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Recent runs</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Persistent run history for scheduled and manual digests.</div>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {digest ? `${formatNumber(digest.history.runs.length)} runs` : '—'}
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {digest && digest.history.runs.length > 0 ? (
+                  digest.history.runs.map((run) => (
+                    <div key={run.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs dark:border-slate-800">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="font-medium text-slate-900 dark:text-slate-100">Run #{run.id}</div>
+                        <div className="flex flex-wrap gap-2">
+                          <StatusPill label={run.triggerKind} />
+                          <StatusPill label={run.deliveryState} tone={run.deliveryState === 'delivered' ? 'success' : run.deliveryState === 'partial' ? 'warning' : run.deliveryState === 'failed' || run.deliveryState === 'unavailable' ? 'critical' : 'default'} />
+                        </div>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                        <div>Generated {formatRelativeTime(run.generatedAt)}</div>
+                        <div>{run.actor ? `Actor ${run.actor}` : 'System generated'}</div>
+                        <div>{formatNumber(run.summary.actionItems)} action items · {formatNumber(run.summary.criticalItems)} critical</div>
+                        <div>{formatNumber(run.summary.escalations)} escalations · {formatNumber(run.summary.failedReceipts)} failed receipts</div>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyPanel label="No digest runs recorded yet." />
+                )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Recent deliveries</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Digest and escalation delivery history with delivery-state evidence.</div>
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {digest ? `${formatNumber(digest.history.deliveries.length)} deliveries` : '—'}
+                </div>
+              </div>
+              <div className="mt-3 space-y-2">
+                {digest && digest.history.deliveries.length > 0 ? (
+                  digest.history.deliveries.map((delivery) => (
+                    <div key={delivery.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs dark:border-slate-800">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div className="font-medium text-slate-900 dark:text-slate-100">{delivery.kind === 'escalation' ? 'Escalation' : 'Digest'} delivery</div>
+                        <div className="flex flex-wrap gap-2">
+                          <StatusPill label={delivery.kind} />
+                          <StatusPill label={delivery.status} tone={delivery.status === 'delivered' ? 'success' : delivery.status === 'skipped' ? 'warning' : 'critical'} />
+                        </div>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                        <div>{delivery.recipientEmail}</div>
+                        <div>{delivery.runGeneratedAt ? `Run ${formatRelativeTime(delivery.runGeneratedAt)}` : 'Manual delivery without persisted run'}</div>
+                        <div>{formatRelativeTime(delivery.deliveredAt)}</div>
+                        <div>{delivery.summary ? `${formatNumber(delivery.summary.actionItems)} items · ${formatNumber(delivery.summary.criticalItems)} critical` : 'No summary'}</div>
+                      </div>
+                      {delivery.errorCode ? (
+                        <div className="mt-2 text-[11px] text-red-600 dark:text-red-300">
+                          {delivery.errorCode}: {delivery.errorMessage ?? 'Delivery failed'}
+                        </div>
+                      ) : null}
+                    </div>
+                  ))
+                ) : (
+                  <EmptyPanel label="No digest deliveries recorded yet." />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {digest && digest.escalations.length > 0 ? (
+          <div className="mt-4 rounded-2xl border border-red-200 bg-red-50/70 p-4 dark:border-red-500/30 dark:bg-red-500/10">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="panel-title">Escalations</div>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Critical fleet items that should trigger the explicit escalation path.
+                </p>
+              </div>
+              <button
+                type="button"
+                className="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-700 transition hover:bg-red-100 disabled:opacity-60 dark:border-red-500/30 dark:text-red-200 dark:hover:bg-red-500/10"
+                disabled={actionBusy === 'deliver-escalation'}
+                onClick={() => { void handleDeliverDigest({ kind: 'escalation' }) }}
+              >
+                {actionBusy === 'deliver-escalation' ? 'Delivering…' : 'Deliver escalations'}
+              </button>
+            </div>
+            <div className="mt-4 space-y-3">
+              {digest.escalations.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-red-200 bg-white/80 p-4 dark:border-red-500/20 dark:bg-slate-950/40">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.detail}</div>
+                    </div>
+                    <StatusPill label={item.severity} tone={digestSeverityTone(item.severity)} />
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{item.nextAction}</div>
+                    <div>{item.hostLabel ? `${item.hostLabel}${item.workspaceSlug ? ` · ${item.workspaceSlug}` : ''}` : item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'Global fleet item'}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
 
         <div className="mt-4 space-y-3">
           {digest && digest.actionItems.length > 0 ? (
