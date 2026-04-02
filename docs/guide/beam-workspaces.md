@@ -151,6 +151,14 @@ For a repo-owned fleet digest and escalation summary, use:
 npm run workspace:fleet-digest
 ```
 
+To run the scheduled digest engine against an already running local Beam stack, use:
+
+```bash
+npm run workspace:fleet-digest:tick
+```
+
+That command hits the canonical scheduled run path, respects the configured digest schedule by default, and records persistent digest runs plus delivery history.
+
 The fleet enrollment response now also includes a copy-paste install pack with:
 
 - managed macOS install command
@@ -186,6 +194,8 @@ The fleet surface also gives operators explicit day-2 actions:
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
 - open a guided remediation view for one duplicated Beam ID, keep the recommended owner route, and optionally disable the competing routes in one step
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
+- configure one daily digest schedule with a separate escalation mailbox for critical fleet items
+- inspect persistent digest run history and delivery history directly in the fleet surface
 - label hosts with environment and group metadata such as `prod`, `staging`, `lab`, `edge`, or team ownership
 - stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
 - clear staged revoke reviews again when a maintenance plan changes

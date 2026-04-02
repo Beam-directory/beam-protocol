@@ -739,6 +739,156 @@ test('openclaw host policy patch surfaces rotation windows and recovery runbook 
   }
 })
 
+test('fleet digest schedule persists scheduled runs and delivery history', async () => {
+  const db = createDatabase(':memory:')
+  const originalSmtpHost = process.env['SMTP_HOST']
+  const originalSmtpPort = process.env['SMTP_PORT']
+  const originalSmtpUser = process.env['SMTP_USER']
+  const originalSmtpPass = process.env['SMTP_PASS']
+  const originalSmtpPassword = process.env['SMTP_PASSWORD']
+  const originalSmtpFrom = process.env['SMTP_FROM']
+  const originalResendApiKey = process.env['RESEND_API_KEY']
+
+  delete process.env['SMTP_HOST']
+  delete process.env['SMTP_PORT']
+  delete process.env['SMTP_USER']
+  delete process.env['SMTP_PASS']
+  delete process.env['SMTP_PASSWORD']
+  delete process.env['SMTP_FROM']
+  delete process.env['RESEND_API_KEY']
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const receiver = createFixtureAgent('atlas@openclaw.beam.directory')
+    registerFixtureAgent(db, receiver, 'Atlas')
+    const staleAt = new Date(Date.now() - (20 * 60 * 1000)).toISOString()
+    createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Digest',
+      hostname: 'digest.local',
+      beamId: receiver.beamId,
+      routeKey: 'atlas-digest',
+      workspaceSlug: 'openclaw-local',
+      heartbeatAt: staleAt,
+    })
+
+    const app = createApp(db)
+    const now = new Date()
+    const scheduleResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest/schedule', {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        enabled: true,
+        deliveryEmail: 'ops@example.com',
+        escalationEmail: 'critical@example.com',
+        runHourUtc: now.getUTCHours(),
+        runMinuteUtc: now.getUTCMinutes(),
+        escalateOnCritical: true,
+      }),
+    }))
+    assert.equal(scheduleResponse.status, 200)
+
+    const runResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest/run', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        triggerKind: 'scheduled',
+        deliver: true,
+        respectSchedule: true,
+      }),
+    }))
+    assert.equal(runResponse.status, 200)
+    const runBody = await runResponse.json() as {
+      ok: boolean
+      skipped: boolean
+      run: {
+        id: number
+        triggerKind: string
+        deliveryState: string
+      }
+      deliveries: Array<{
+        status: string
+        errorCode: string | null
+        delivery: {
+          kind: string
+          recipientEmail: string
+        }
+      }>
+    }
+    assert.equal(runBody.ok, true)
+    assert.equal(runBody.skipped, false)
+    assert.equal(runBody.run.triggerKind, 'scheduled')
+    assert.equal(runBody.run.deliveryState, 'unavailable')
+    assert.ok(runBody.deliveries.some((delivery) => delivery.delivery.kind === 'digest' && delivery.status === 'unavailable'))
+    assert.ok(runBody.deliveries.some((delivery) => delivery.delivery.kind === 'escalation' && delivery.status === 'unavailable'))
+    assert.ok(runBody.deliveries.some((delivery) => delivery.errorCode === 'EMAIL_DELIVERY_UNAVAILABLE'))
+
+    const digestResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest', {
+      headers: createAdminHeaders(db, 'ops@example.com', 'operator'),
+    }))
+    assert.equal(digestResponse.status, 200)
+    const digestBody = await digestResponse.json() as {
+      summary: {
+        staleHosts: number
+        escalations: number
+      }
+      schedule: {
+        enabled: boolean
+        deliveryEmail: string | null
+        escalationEmail: string | null
+        lastRunAt: string | null
+        lastDeliveryAt: string | null
+        lastEscalationDeliveryAt: string | null
+      }
+      history: {
+        runs: Array<{
+          id: number
+          deliveryState: string
+        }>
+        deliveries: Array<{
+          kind: string
+          status: string
+        }>
+      }
+      markdown: string
+    }
+    assert.equal(digestBody.summary.staleHosts, 1)
+    assert.ok(digestBody.summary.escalations >= 1)
+    assert.equal(digestBody.schedule.enabled, true)
+    assert.equal(digestBody.schedule.deliveryEmail, 'ops@example.com')
+    assert.equal(digestBody.schedule.escalationEmail, 'critical@example.com')
+    assert.ok(digestBody.schedule.lastRunAt)
+    assert.ok(digestBody.schedule.lastDeliveryAt)
+    assert.ok(digestBody.schedule.lastEscalationDeliveryAt)
+    assert.ok(digestBody.history.runs.length >= 1)
+    assert.equal(digestBody.history.runs[0]?.deliveryState, 'unavailable')
+    assert.ok(digestBody.history.deliveries.some((delivery) => delivery.kind === 'digest' && delivery.status === 'unavailable'))
+    assert.ok(digestBody.history.deliveries.some((delivery) => delivery.kind === 'escalation' && delivery.status === 'unavailable'))
+    assert.match(digestBody.markdown, /## Escalations/)
+  } finally {
+    if (originalSmtpHost === undefined) delete process.env['SMTP_HOST']
+    else process.env['SMTP_HOST'] = originalSmtpHost
+    if (originalSmtpPort === undefined) delete process.env['SMTP_PORT']
+    else process.env['SMTP_PORT'] = originalSmtpPort
+    if (originalSmtpUser === undefined) delete process.env['SMTP_USER']
+    else process.env['SMTP_USER'] = originalSmtpUser
+    if (originalSmtpPass === undefined) delete process.env['SMTP_PASS']
+    else process.env['SMTP_PASS'] = originalSmtpPass
+    if (originalSmtpPassword === undefined) delete process.env['SMTP_PASSWORD']
+    else process.env['SMTP_PASSWORD'] = originalSmtpPassword
+    if (originalSmtpFrom === undefined) delete process.env['SMTP_FROM']
+    else process.env['SMTP_FROM'] = originalSmtpFrom
+    if (originalResendApiKey === undefined) delete process.env['RESEND_API_KEY']
+    else process.env['RESEND_API_KEY'] = originalResendApiKey
+    db.close()
+  }
+})
+
 test('duplicate openclaw conflicts can be resolved by preferring one route owner', async () => {
   const db = createDatabase(':memory:')
 

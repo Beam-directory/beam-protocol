@@ -18,6 +18,13 @@ import type {
   IntentLogRow,
   IntentTraceEventRow,
   OperatorNotificationRow,
+  OpenClawFleetDigestDeliveryKind,
+  OpenClawFleetDigestDeliveryRow,
+  OpenClawFleetDigestDeliveryStatus,
+  OpenClawFleetDigestRunDeliveryState,
+  OpenClawFleetDigestRunRow,
+  OpenClawFleetDigestRunTriggerKind,
+  OpenClawFleetDigestScheduleRow,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostEnrollmentStatus,
   OpenClawHostCredentialState,
@@ -433,6 +440,56 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_openclaw_host_heartbeats_host
       ON openclaw_host_heartbeats(host_id, heartbeat_at DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_fleet_digest_schedules (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      enabled INTEGER NOT NULL DEFAULT 1,
+      delivery_email TEXT,
+      escalation_email TEXT,
+      run_hour_utc INTEGER NOT NULL DEFAULT 8,
+      run_minute_utc INTEGER NOT NULL DEFAULT 0,
+      escalate_on_critical INTEGER NOT NULL DEFAULT 1,
+      last_scheduled_for_at TEXT,
+      last_run_id INTEGER,
+      last_delivery_at TEXT,
+      last_escalation_delivery_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (last_run_id) REFERENCES openclaw_fleet_digest_runs(id) ON DELETE SET NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS openclaw_fleet_digest_runs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      trigger_kind TEXT NOT NULL CHECK(trigger_kind IN ('manual', 'scheduled')),
+      actor TEXT,
+      generated_at TEXT NOT NULL,
+      summary_json TEXT NOT NULL,
+      action_items_json TEXT NOT NULL,
+      escalation_items_json TEXT NOT NULL,
+      markdown TEXT NOT NULL,
+      delivery_state TEXT NOT NULL DEFAULT 'pending' CHECK(delivery_state IN ('pending', 'delivered', 'partial', 'failed', 'unavailable')),
+      last_delivery_error_code TEXT,
+      created_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_digest_runs_generated
+      ON openclaw_fleet_digest_runs(generated_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_fleet_digest_deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      run_id INTEGER,
+      delivery_kind TEXT NOT NULL CHECK(delivery_kind IN ('digest', 'escalation')),
+      recipient_email TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('delivered', 'failed', 'unavailable', 'skipped')),
+      error_code TEXT,
+      error_message TEXT,
+      delivered_at TEXT NOT NULL,
+      details_json TEXT,
+      FOREIGN KEY (run_id) REFERENCES openclaw_fleet_digest_runs(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_digest_deliveries_run
+      ON openclaw_fleet_digest_deliveries(run_id, delivered_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS operator_notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -866,6 +923,24 @@ function initSchema(db: DB): void {
     UPDATE openclaw_host_routes
     SET owner_resolution_state = COALESCE(NULLIF(owner_resolution_state, ''), 'implicit')
   `).run()
+
+  db.prepare(`
+    INSERT OR IGNORE INTO openclaw_fleet_digest_schedules (
+      id,
+      enabled,
+      delivery_email,
+      escalation_email,
+      run_hour_utc,
+      run_minute_utc,
+      escalate_on_critical,
+      last_scheduled_for_at,
+      last_run_id,
+      last_delivery_at,
+      last_escalation_delivery_at,
+      created_at,
+      updated_at
+    ) VALUES (1, 1, NULL, NULL, 8, 0, 1, NULL, NULL, NULL, NULL, ?, ?)
+  `).run(nowIso(), nowIso())
 
   db.prepare(`
     UPDATE agents
@@ -4170,6 +4245,261 @@ export function listOpenClawHostHeartbeats(db: DB, hostId: number, limit = 20): 
     ORDER BY datetime(heartbeat_at) DESC, id DESC
     LIMIT ?
   `).all(hostId, Math.max(1, Math.trunc(limit))) as OpenClawHostHeartbeatRow[]
+}
+
+export function getOpenClawFleetDigestSchedule(db: DB): OpenClawFleetDigestScheduleRow {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_schedules
+    WHERE id = 1
+    LIMIT 1
+  `).get() as OpenClawFleetDigestScheduleRow | undefined
+
+  if (row) {
+    return row
+  }
+
+  const now = nowIso()
+  db.prepare(`
+    INSERT INTO openclaw_fleet_digest_schedules (
+      id,
+      enabled,
+      delivery_email,
+      escalation_email,
+      run_hour_utc,
+      run_minute_utc,
+      escalate_on_critical,
+      last_scheduled_for_at,
+      last_run_id,
+      last_delivery_at,
+      last_escalation_delivery_at,
+      created_at,
+      updated_at
+    ) VALUES (1, 1, NULL, NULL, 8, 0, 1, NULL, NULL, NULL, NULL, ?, ?)
+  `).run(now, now)
+
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_schedules
+    WHERE id = 1
+    LIMIT 1
+  `).get() as OpenClawFleetDigestScheduleRow
+}
+
+export function updateOpenClawFleetDigestSchedule(
+  db: DB,
+  input: {
+    enabled?: boolean
+    deliveryEmail?: string | null
+    escalationEmail?: string | null
+    runHourUtc?: number
+    runMinuteUtc?: number
+    escalateOnCritical?: boolean
+    lastScheduledForAt?: string | null
+    lastRunId?: number | null
+    lastDeliveryAt?: string | null
+    lastEscalationDeliveryAt?: string | null
+  },
+): OpenClawFleetDigestScheduleRow {
+  const existing = getOpenClawFleetDigestSchedule(db)
+  db.prepare(`
+    UPDATE openclaw_fleet_digest_schedules
+    SET enabled = ?,
+        delivery_email = ?,
+        escalation_email = ?,
+        run_hour_utc = ?,
+        run_minute_utc = ?,
+        escalate_on_critical = ?,
+        last_scheduled_for_at = ?,
+        last_run_id = ?,
+        last_delivery_at = ?,
+        last_escalation_delivery_at = ?,
+        updated_at = ?
+    WHERE id = 1
+  `).run(
+    input.enabled === undefined ? existing.enabled : (input.enabled ? 1 : 0),
+    input.deliveryEmail === undefined ? existing.delivery_email : input.deliveryEmail,
+    input.escalationEmail === undefined ? existing.escalation_email : input.escalationEmail,
+    input.runHourUtc === undefined ? existing.run_hour_utc : input.runHourUtc,
+    input.runMinuteUtc === undefined ? existing.run_minute_utc : input.runMinuteUtc,
+    input.escalateOnCritical === undefined ? existing.escalate_on_critical : (input.escalateOnCritical ? 1 : 0),
+    input.lastScheduledForAt === undefined ? existing.last_scheduled_for_at : input.lastScheduledForAt,
+    input.lastRunId === undefined ? existing.last_run_id : input.lastRunId,
+    input.lastDeliveryAt === undefined ? existing.last_delivery_at : input.lastDeliveryAt,
+    input.lastEscalationDeliveryAt === undefined ? existing.last_escalation_delivery_at : input.lastEscalationDeliveryAt,
+    nowIso(),
+  )
+  return getOpenClawFleetDigestSchedule(db)
+}
+
+export function createOpenClawFleetDigestRun(
+  db: DB,
+  input: {
+    triggerKind: OpenClawFleetDigestRunTriggerKind
+    actor?: string | null
+    generatedAt?: string
+    summaryJson: string
+    actionItemsJson: string
+    escalationItemsJson: string
+    markdown: string
+  },
+): OpenClawFleetDigestRunRow {
+  const generatedAt = input.generatedAt ?? nowIso()
+  const result = db.prepare(`
+    INSERT INTO openclaw_fleet_digest_runs (
+      trigger_kind,
+      actor,
+      generated_at,
+      summary_json,
+      action_items_json,
+      escalation_items_json,
+      markdown,
+      delivery_state,
+      last_delivery_error_code,
+      created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', NULL, ?)
+  `).run(
+    input.triggerKind,
+    input.actor ?? null,
+    generatedAt,
+    input.summaryJson,
+    input.actionItemsJson,
+    input.escalationItemsJson,
+    input.markdown,
+    generatedAt,
+  )
+  const run = getOpenClawFleetDigestRunById(db, Number(result.lastInsertRowid))
+  updateOpenClawFleetDigestSchedule(db, { lastRunId: run?.id ?? null })
+  return run as OpenClawFleetDigestRunRow
+}
+
+export function getOpenClawFleetDigestRunById(db: DB, id: number): OpenClawFleetDigestRunRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_runs
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OpenClawFleetDigestRunRow | undefined
+
+  return row ?? null
+}
+
+export function listOpenClawFleetDigestRuns(db: DB, limit = 20): OpenClawFleetDigestRunRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_runs
+    ORDER BY datetime(generated_at) DESC, id DESC
+    LIMIT ?
+  `).all(Math.max(1, Math.trunc(limit))) as OpenClawFleetDigestRunRow[]
+}
+
+function computeOpenClawFleetDigestRunDeliveryState(
+  deliveries: OpenClawFleetDigestDeliveryRow[],
+): OpenClawFleetDigestRunDeliveryState {
+  if (deliveries.length === 0) {
+    return 'pending'
+  }
+
+  const deliveredCount = deliveries.filter((delivery) => delivery.status === 'delivered').length
+  const unavailableOnly = deliveries.every((delivery) => delivery.status === 'unavailable' || delivery.status === 'skipped')
+
+  if (deliveredCount === deliveries.length) {
+    return 'delivered'
+  }
+  if (deliveredCount > 0) {
+    return 'partial'
+  }
+  if (unavailableOnly) {
+    return 'unavailable'
+  }
+  return 'failed'
+}
+
+function refreshOpenClawFleetDigestRunDeliveryState(db: DB, runId: number): OpenClawFleetDigestRunRow | null {
+  const run = getOpenClawFleetDigestRunById(db, runId)
+  if (!run) {
+    return null
+  }
+
+  const deliveries = db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_deliveries
+    WHERE run_id = ?
+    ORDER BY datetime(delivered_at) DESC, id DESC
+  `).all(runId) as OpenClawFleetDigestDeliveryRow[]
+
+  const nextState = computeOpenClawFleetDigestRunDeliveryState(deliveries)
+  const lastDeliveryError = deliveries.find((delivery) => delivery.error_code)?.error_code ?? null
+  db.prepare(`
+    UPDATE openclaw_fleet_digest_runs
+    SET delivery_state = ?,
+        last_delivery_error_code = ?
+    WHERE id = ?
+  `).run(nextState, lastDeliveryError, runId)
+
+  return getOpenClawFleetDigestRunById(db, runId)
+}
+
+export function recordOpenClawFleetDigestDelivery(
+  db: DB,
+  input: {
+    runId?: number | null
+    deliveryKind: OpenClawFleetDigestDeliveryKind
+    recipientEmail: string
+    status: OpenClawFleetDigestDeliveryStatus
+    errorCode?: string | null
+    errorMessage?: string | null
+    deliveredAt?: string
+    detailsJson?: string | null
+  },
+): OpenClawFleetDigestDeliveryRow {
+  const deliveredAt = input.deliveredAt ?? nowIso()
+  const result = db.prepare(`
+    INSERT INTO openclaw_fleet_digest_deliveries (
+      run_id,
+      delivery_kind,
+      recipient_email,
+      status,
+      error_code,
+      error_message,
+      delivered_at,
+      details_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.runId ?? null,
+    input.deliveryKind,
+    input.recipientEmail,
+    input.status,
+    input.errorCode ?? null,
+    input.errorMessage ?? null,
+    deliveredAt,
+    input.detailsJson ?? null,
+  )
+
+  if (input.runId) {
+    refreshOpenClawFleetDigestRunDeliveryState(db, input.runId)
+  }
+
+  updateOpenClawFleetDigestSchedule(db, {
+    lastDeliveryAt: input.deliveryKind === 'digest' ? deliveredAt : undefined,
+    lastEscalationDeliveryAt: input.deliveryKind === 'escalation' ? deliveredAt : undefined,
+  })
+
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_deliveries
+    WHERE id = ?
+    LIMIT 1
+  `).get(Number(result.lastInsertRowid)) as OpenClawFleetDigestDeliveryRow
+}
+
+export function listOpenClawFleetDigestDeliveries(db: DB, limit = 20): OpenClawFleetDigestDeliveryRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_digest_deliveries
+    ORDER BY datetime(delivered_at) DESC, id DESC
+    LIMIT ?
+  `).all(Math.max(1, Math.trunc(limit))) as OpenClawFleetDigestDeliveryRow[]
 }
 
 function updateOpenClawHostRouteCount(db: DB, hostId: number): void {

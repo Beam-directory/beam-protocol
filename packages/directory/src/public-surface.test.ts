@@ -732,9 +732,10 @@ test('hosted beta requests can be created publicly, reviewed by operators, and e
       details: { route: 'direct-http' },
     })
 
-    const contactTimestamp = '2026-03-30T20:15:00.000Z'
-    const meetingTimestamp = '2026-04-02T14:00:00.000Z'
-    const reminderTimestamp = '2026-03-30T21:00:00.000Z'
+    const now = Date.now()
+    const contactTimestamp = new Date(now - 60 * 60 * 1000).toISOString()
+    const meetingTimestamp = new Date(now + 60 * 60 * 1000).toISOString()
+    const reminderTimestamp = new Date(now - 30 * 60 * 1000).toISOString()
     const contactResponse = await app.request(new Request(`http://localhost/admin/beta-requests/${created.request.id}`, {
       method: 'PATCH',
       headers: {

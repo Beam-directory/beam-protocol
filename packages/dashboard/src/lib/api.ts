@@ -36,6 +36,10 @@ export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disa
 export type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
 export type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
 export type OpenClawFleetBulkAction = 'apply_labels' | 'stage_revoke_review' | 'clear_revoke_review'
+export type OpenClawFleetDigestRunTriggerKind = 'manual' | 'scheduled'
+export type OpenClawFleetDigestDeliveryKind = 'digest' | 'escalation'
+export type OpenClawFleetDigestDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
+export type OpenClawFleetDigestRunDeliveryState = 'pending' | 'delivered' | 'partial' | 'failed' | 'unavailable'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -510,6 +514,54 @@ export interface OpenClawFleetDigestItem {
   traceHref: string | null
 }
 
+export interface OpenClawFleetDigestSchedule {
+  enabled: boolean
+  deliveryEmail: string | null
+  escalationEmail: string | null
+  runHourUtc: number
+  runMinuteUtc: number
+  escalateOnCritical: boolean
+  lastScheduledForAt: string | null
+  lastRunAt: string | null
+  lastDeliveryAt: string | null
+  lastEscalationDeliveryAt: string | null
+  nextRunAt: string | null
+}
+
+export interface OpenClawFleetDigestRun {
+  id: number
+  triggerKind: OpenClawFleetDigestRunTriggerKind
+  actor: string | null
+  generatedAt: string
+  deliveryState: OpenClawFleetDigestRunDeliveryState
+  lastDeliveryErrorCode: string | null
+  summary: {
+    actionItems: number
+    criticalItems: number
+    staleHosts: number
+    failedReceipts: number
+    duplicateIdentityConflicts: number
+    escalations: number
+  }
+}
+
+export interface OpenClawFleetDigestDelivery {
+  id: number
+  runId: number | null
+  runGeneratedAt: string | null
+  kind: OpenClawFleetDigestDeliveryKind
+  status: OpenClawFleetDigestDeliveryStatus
+  recipientEmail: string
+  errorCode: string | null
+  errorMessage: string | null
+  deliveredAt: string
+  summary: {
+    actionItems: number
+    criticalItems: number
+    escalations: number
+  } | null
+}
+
 export interface OpenClawFleetDigestResponse {
   generatedAt: string
   summary: {
@@ -531,10 +583,34 @@ export interface OpenClawFleetDigestResponse {
     pendingCredentialActions: number
     actionItems: number
     criticalItems: number
+    escalations: number
     warningItems: number
   }
   actionItems: OpenClawFleetDigestItem[]
+  escalations: OpenClawFleetDigestItem[]
+  schedule: OpenClawFleetDigestSchedule
+  history: {
+    runs: OpenClawFleetDigestRun[]
+    deliveries: OpenClawFleetDigestDelivery[]
+  }
   markdown: string
+}
+
+export interface OpenClawFleetDigestRunResponse {
+  ok: boolean
+  skipped: boolean
+  reason?: 'disabled' | 'not_due'
+  nextRunAt?: string | null
+  schedule?: OpenClawFleetDigestSchedule
+  run?: OpenClawFleetDigestRun
+  digest?: OpenClawFleetDigestResponse
+  deliveries?: Array<{
+    ok: boolean
+    status: OpenClawFleetDigestDeliveryStatus
+    errorCode: string | null
+    errorMessage: string | null
+    delivery: OpenClawFleetDigestDelivery
+  }>
 }
 
 export interface OpenClawHostsResponse {
@@ -636,6 +712,19 @@ export interface OpenClawFleetBulkActionResponse {
   hosts: OpenClawHostSummary[]
 }
 
+export interface OpenClawFleetDigestSchedulePatchInput {
+  enabled?: boolean
+  deliveryEmail?: string | null
+  escalationEmail?: string | null
+  runHourUtc?: number
+  runMinuteUtc?: number
+  escalateOnCritical?: boolean
+}
+
+export interface OpenClawFleetDigestSchedulePatchResponse {
+  schedule: OpenClawFleetDigestSchedule
+}
+
 export interface OpenClawHostPolicyPatchInput {
   rotationIntervalHours?: number | null
   rotationWindowStartHour?: number | null
@@ -671,6 +760,7 @@ export interface OpenClawConflictResolveResponse {
 export interface OpenClawFleetDigestDeliveryResponse {
   ok: boolean
   email: string
+  kind: OpenClawFleetDigestDeliveryKind
   deliveredAt: string
   summary: OpenClawFleetDigestResponse['summary']
 }
@@ -2414,7 +2504,15 @@ export const directoryApi = {
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
   getOpenClawFleetDigest: (params?: { format?: 'json' | 'markdown' }) => request<OpenClawFleetDigestResponse>(`/admin/openclaw/fleet/digest${buildQuery({ format: params?.format })}`, undefined, { admin: true }),
-  deliverOpenClawFleetDigest: (input?: { email?: string | null }) => request<OpenClawFleetDigestDeliveryResponse>('/admin/openclaw/fleet/digest/deliver', {
+  updateOpenClawFleetDigestSchedule: (input: OpenClawFleetDigestSchedulePatchInput) => request<OpenClawFleetDigestSchedulePatchResponse>('/admin/openclaw/fleet/digest/schedule', {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  runOpenClawFleetDigest: (input?: { triggerKind?: OpenClawFleetDigestRunTriggerKind; deliver?: boolean; respectSchedule?: boolean }) => request<OpenClawFleetDigestRunResponse>('/admin/openclaw/fleet/digest/run', {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  deliverOpenClawFleetDigest: (input?: { email?: string | null; kind?: OpenClawFleetDigestDeliveryKind; runId?: number | null }) => request<OpenClawFleetDigestDeliveryResponse>('/admin/openclaw/fleet/digest/deliver', {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),

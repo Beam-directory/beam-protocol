@@ -182,6 +182,10 @@ export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
 export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
 export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
+export type OpenClawFleetDigestRunTriggerKind = 'manual' | 'scheduled'
+export type OpenClawFleetDigestDeliveryKind = 'digest' | 'escalation'
+export type OpenClawFleetDigestDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
+export type OpenClawFleetDigestRunDeliveryState = 'pending' | 'delivered' | 'partial' | 'failed' | 'unavailable'
 
 export interface WorkspaceRow {
   id: number
@@ -358,6 +362,48 @@ export interface OpenClawHostHeartbeatRow {
   health_status: OpenClawHostHealth
   details_json: string | null
   heartbeat_at: string
+}
+
+export interface OpenClawFleetDigestScheduleRow {
+  id: number
+  enabled: number
+  delivery_email: string | null
+  escalation_email: string | null
+  run_hour_utc: number
+  run_minute_utc: number
+  escalate_on_critical: number
+  last_scheduled_for_at: string | null
+  last_run_id: number | null
+  last_delivery_at: string | null
+  last_escalation_delivery_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawFleetDigestRunRow {
+  id: number
+  trigger_kind: OpenClawFleetDigestRunTriggerKind
+  actor: string | null
+  generated_at: string
+  summary_json: string
+  action_items_json: string
+  escalation_items_json: string
+  markdown: string
+  delivery_state: OpenClawFleetDigestRunDeliveryState
+  last_delivery_error_code: string | null
+  created_at: string
+}
+
+export interface OpenClawFleetDigestDeliveryRow {
+  id: number
+  run_id: number | null
+  delivery_kind: OpenClawFleetDigestDeliveryKind
+  recipient_email: string
+  status: OpenClawFleetDigestDeliveryStatus
+  error_code: string | null
+  error_message: string | null
+  delivered_at: string
+  details_json: string | null
 }
 
 export interface WorkspacePolicyRow {

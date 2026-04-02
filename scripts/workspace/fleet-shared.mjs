@@ -356,6 +356,20 @@ export async function startOpenClawFleetHarness() {
         headers: { Authorization: `Bearer ${token}` },
       })
     },
+    async updateFleetDigestSchedule(input) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/schedule`, {
+        method: 'PATCH',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
+    async runFleetDigest(input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/run`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
     async deliverFleetDigest(input = {}) {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/deliver`, {
         method: 'POST',
