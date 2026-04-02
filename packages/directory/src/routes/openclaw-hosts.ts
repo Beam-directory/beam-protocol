@@ -83,6 +83,35 @@ type OpenClawConflictGroup = {
   }>
 }
 
+type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
+
+type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
+
+type OpenClawHostMetadataJson = {
+  credentialPolicy?: {
+    rotationIntervalHours?: number | null
+    rotationWindowStartHour?: number | null
+    rotationWindowDurationHours?: number | null
+  }
+  recoveryRunbook?: {
+    owner?: string | null
+    status?: OpenClawHostRecoveryRunbookState | null
+    notes?: string | null
+    replacementHostLabel?: string | null
+    windowStartsAt?: string | null
+    windowEndsAt?: string | null
+    updatedAt?: string | null
+  }
+}
+
+const DEFAULT_OPENCLAW_ROTATION_INTERVAL_HOURS = 24 * 30
+const DEFAULT_OPENCLAW_ROTATION_WINDOW_START_HOUR = 2
+const DEFAULT_OPENCLAW_ROTATION_WINDOW_DURATION_HOURS = 4
+const OPENCLAW_ROTATION_DUE_SOON_HOURS = 72
+const OPENCLAW_ROUTE_LATENCY_SLO_MS = 5_000
+const OPENCLAW_ROUTE_LATENCY_LOOKBACK_HOURS = 24 * 7
+const OPENCLAW_ROUTE_LATENCY_LOG_LIMIT = 500
+
 function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== 'string') {
     return null
@@ -95,6 +124,26 @@ function normalizeOptionalString(value: unknown): string | null {
 function normalizePositiveInteger(value: unknown): number | null {
   const parsed = Number.parseInt(String(value ?? ''), 10)
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+}
+
+function normalizeBoundedInteger(value: unknown, min: number, max: number): number | null {
+  const parsed = Number.parseInt(String(value ?? ''), 10)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+  return Math.min(max, Math.max(min, parsed))
+}
+
+function normalizeIsoDateTime(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+  const normalized = value.trim()
+  if (!normalized) {
+    return null
+  }
+  const parsed = Date.parse(normalized)
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : null
 }
 
 function normalizeOpenClawRouteSource(value: unknown): OpenClawRouteSource | null {
@@ -136,6 +185,176 @@ function hoursSince(value: string | null): number | null {
     return null
   }
   return Math.round(((Date.now() - parsed) / 3_600_000) * 10) / 10
+}
+
+function hoursUntil(value: string | null): number | null {
+  if (!value) {
+    return null
+  }
+  const parsed = Date.parse(value)
+  if (!Number.isFinite(parsed)) {
+    return null
+  }
+  return Math.round(((parsed - Date.now()) / 3_600_000) * 10) / 10
+}
+
+function parseOpenClawHostMetadata(raw: string | null): OpenClawHostMetadataJson {
+  if (!raw) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return {}
+    }
+    return parsed as OpenClawHostMetadataJson
+  } catch {
+    return {}
+  }
+}
+
+function serializeOpenClawHostMetadata(metadata: OpenClawHostMetadataJson): string | null {
+  const cleaned: OpenClawHostMetadataJson = {}
+  if (metadata.credentialPolicy) {
+    cleaned.credentialPolicy = metadata.credentialPolicy
+  }
+  if (metadata.recoveryRunbook) {
+    cleaned.recoveryRunbook = metadata.recoveryRunbook
+  }
+  if (!cleaned.credentialPolicy && !cleaned.recoveryRunbook) {
+    return null
+  }
+  return JSON.stringify(cleaned)
+}
+
+function computeNextRotationWindow(
+  issuedAt: string | null,
+  intervalHours: number,
+  windowStartHour: number,
+  windowDurationHours: number,
+) {
+  const issuedMs = issuedAt ? Date.parse(issuedAt) : Number.NaN
+  if (!Number.isFinite(issuedMs)) {
+    return {
+      nextRotationDueAt: null as string | null,
+      nextRotationWindowStartsAt: null as string | null,
+      nextRotationWindowEndsAt: null as string | null,
+      dueInHours: null as number | null,
+      reviewState: 'scheduled' as OpenClawHostRotationReviewState,
+    }
+  }
+
+  const dueMs = issuedMs + (intervalHours * 60 * 60 * 1000)
+  const dueAt = new Date(dueMs)
+  const windowStart = new Date(dueMs)
+  windowStart.setUTCMinutes(0, 0, 0)
+  windowStart.setUTCHours(windowStartHour)
+  if (windowStart.getTime() < dueMs) {
+    windowStart.setUTCDate(windowStart.getUTCDate() + 1)
+  }
+  const windowEnd = new Date(windowStart.getTime() + (windowDurationHours * 60 * 60 * 1000))
+  const dueInHours = hoursUntil(dueAt.toISOString())
+  const reviewState: OpenClawHostRotationReviewState =
+    dueMs <= Date.now()
+      ? 'overdue'
+      : dueMs <= (Date.now() + (OPENCLAW_ROTATION_DUE_SOON_HOURS * 60 * 60 * 1000))
+        ? 'due_soon'
+        : 'scheduled'
+
+  return {
+    nextRotationDueAt: dueAt.toISOString(),
+    nextRotationWindowStartsAt: windowStart.toISOString(),
+    nextRotationWindowEndsAt: windowEnd.toISOString(),
+    dueInHours,
+    reviewState,
+  }
+}
+
+function percentile(values: number[], quantile: number): number | null {
+  if (values.length === 0) {
+    return null
+  }
+
+  const sorted = [...values].sort((a, b) => a - b)
+  const index = Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * quantile) - 1))
+  return sorted[index] ?? null
+}
+
+function listRecentIntentLogsByTargets(db: Database, targetBeamIds: string[]) {
+  const uniqueTargetBeamIds = [...new Set(targetBeamIds.filter(Boolean))]
+  if (uniqueTargetBeamIds.length === 0) {
+    return [] as IntentLogRow[]
+  }
+
+  const placeholders = uniqueTargetBeamIds.map(() => '?').join(', ')
+  const cutoffIso = new Date(Date.now() - (OPENCLAW_ROUTE_LATENCY_LOOKBACK_HOURS * 60 * 60 * 1000)).toISOString()
+  return db.prepare(`
+    SELECT *
+    FROM intent_log
+    WHERE to_beam_id IN (${placeholders})
+      AND datetime(requested_at) >= datetime(?)
+    ORDER BY datetime(requested_at) DESC, id DESC
+    LIMIT ?
+  `).all(...uniqueTargetBeamIds, cutoffIso, OPENCLAW_ROUTE_LATENCY_LOG_LIMIT) as IntentLogRow[]
+}
+
+function serializeOpenClawHostPolicy(host: OpenClawHostRow) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const rotationPolicy = metadata.credentialPolicy && typeof metadata.credentialPolicy === 'object'
+    ? metadata.credentialPolicy
+    : {}
+  const recoveryRunbook = metadata.recoveryRunbook && typeof metadata.recoveryRunbook === 'object'
+    ? metadata.recoveryRunbook
+    : {}
+
+  const rotationIntervalHours = normalizeBoundedInteger(rotationPolicy.rotationIntervalHours, 1, 24 * 180)
+    ?? DEFAULT_OPENCLAW_ROTATION_INTERVAL_HOURS
+  const rotationWindowStartHour = normalizeBoundedInteger(rotationPolicy.rotationWindowStartHour, 0, 23)
+    ?? DEFAULT_OPENCLAW_ROTATION_WINDOW_START_HOUR
+  const rotationWindowDurationHours = normalizeBoundedInteger(rotationPolicy.rotationWindowDurationHours, 1, 24)
+    ?? DEFAULT_OPENCLAW_ROTATION_WINDOW_DURATION_HOURS
+  const nextRotation = computeNextRotationWindow(
+    host.credential_issued_at,
+    rotationIntervalHours,
+    rotationWindowStartHour,
+    rotationWindowDurationHours,
+  )
+
+  const rawRecoveryStatus = recoveryRunbook.status === 'prepared'
+    || recoveryRunbook.status === 'cutover_pending'
+    || recoveryRunbook.status === 'completed'
+    || recoveryRunbook.status === 'idle'
+    ? recoveryRunbook.status
+    : null
+  const recoveryStatus: OpenClawHostRecoveryRunbookState =
+    host.credential_state === 'recovery_pending'
+      ? 'cutover_pending'
+      : host.recovery_completed_at
+        ? 'completed'
+        : (rawRecoveryStatus ?? 'idle')
+
+  return {
+    rotation: {
+      intervalHours: rotationIntervalHours,
+      windowStartHour: rotationWindowStartHour,
+      windowDurationHours: rotationWindowDurationHours,
+      nextRotationDueAt: nextRotation.nextRotationDueAt,
+      nextRotationWindowStartsAt: nextRotation.nextRotationWindowStartsAt,
+      nextRotationWindowEndsAt: nextRotation.nextRotationWindowEndsAt,
+      dueInHours: nextRotation.dueInHours,
+      reviewState: nextRotation.reviewState,
+    },
+    recovery: {
+      owner: normalizeOptionalString(recoveryRunbook.owner),
+      status: recoveryStatus,
+      notes: normalizeOptionalString(recoveryRunbook.notes),
+      replacementHostLabel: normalizeOptionalString(recoveryRunbook.replacementHostLabel),
+      windowStartsAt: normalizeIsoDateTime(recoveryRunbook.windowStartsAt),
+      windowEndsAt: normalizeIsoDateTime(recoveryRunbook.windowEndsAt),
+      updatedAt: normalizeIsoDateTime(recoveryRunbook.updatedAt) ?? host.recovery_completed_at,
+    },
+  }
 }
 
 function serializeEnrollment(row: OpenClawHostEnrollmentRequestRow | null) {
@@ -310,8 +529,20 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
 }
 
 function summarizeRoutes(db: Database, routes: OpenClawResolvedRouteRow[]) {
+  const recentLogs = listRecentIntentLogsByTargets(db, routes.map((route) => route.beam_id))
+  const recentLogsByTarget = new Map<string, IntentLogRow[]>()
+  for (const log of recentLogs) {
+    const existing = recentLogsByTarget.get(log.to_beam_id)
+    if (existing) {
+      existing.push(log)
+    } else {
+      recentLogsByTarget.set(log.to_beam_id, [log])
+    }
+  }
+
   const summary = routes.reduce((current, route) => {
-    const latestDelivery = getLatestIntentLogByTarget(db, route.beam_id)
+    const targetLogs = recentLogsByTarget.get(route.beam_id) ?? []
+    const latestDelivery = targetLogs[0] ?? getLatestIntentLogByTarget(db, route.beam_id)
     current.total += 1
     switch (route.runtime_session_state) {
       case 'live':
@@ -345,6 +576,7 @@ function summarizeRoutes(db: Database, routes: OpenClawResolvedRouteRow[]) {
 
     if (latestDelivery) {
       current.delivery.receipts += 1
+      current.delivery.coverage.routesWithReceipts += 1
       if (latestDelivery.status === 'failed' || latestDelivery.error_code) {
         current.delivery.failed += 1
       }
@@ -375,8 +607,50 @@ function summarizeRoutes(db: Database, routes: OpenClawResolvedRouteRow[]) {
       lastStatus: null as IntentLogRow['status'] | null,
       lastErrorCode: null as string | null,
       lastHref: null as string | null,
+      coverage: {
+        activeRoutes: 0,
+        routesWithReceipts: 0,
+        missingReceipts: 0,
+        ratio: null as number | null,
+      },
+      latency: {
+        targetMs: OPENCLAW_ROUTE_LATENCY_SLO_MS,
+        samples: 0,
+        avgMs: null as number | null,
+        p50Ms: null as number | null,
+        p95Ms: null as number | null,
+        overSlo: 0,
+        degraded: false,
+      },
     },
   })
+
+  summary.delivery.coverage.activeRoutes = routes.filter((route) =>
+    route.runtime_session_state === 'live' || route.runtime_session_state === 'idle',
+  ).length
+  summary.delivery.coverage.missingReceipts = Math.max(
+    0,
+    summary.delivery.coverage.activeRoutes - summary.delivery.coverage.routesWithReceipts,
+  )
+  summary.delivery.coverage.ratio = summary.delivery.coverage.activeRoutes > 0
+    ? Number((summary.delivery.coverage.routesWithReceipts / summary.delivery.coverage.activeRoutes).toFixed(3))
+    : null
+
+  const ackLatencies = recentLogs
+    .filter((log) => log.status === 'acked' && typeof log.round_trip_latency_ms === 'number')
+    .map((log) => log.round_trip_latency_ms as number)
+  if (ackLatencies.length > 0) {
+    const total = ackLatencies.reduce((sum, value) => sum + value, 0)
+    summary.delivery.latency.samples = ackLatencies.length
+    summary.delivery.latency.avgMs = Math.round(total / ackLatencies.length)
+    summary.delivery.latency.p50Ms = percentile(ackLatencies, 0.5)
+    summary.delivery.latency.p95Ms = percentile(ackLatencies, 0.95)
+    summary.delivery.latency.overSlo = ackLatencies.filter((value) => value > OPENCLAW_ROUTE_LATENCY_SLO_MS).length
+  }
+  summary.delivery.latency.degraded =
+    summary.delivery.failed > 0
+    || summary.delivery.coverage.missingReceipts > 0
+    || summary.delivery.latency.overSlo > 0
 
   return summary
 }
@@ -387,6 +661,7 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     : null
   const routes = listOpenClawResolvedRoutesForHost(db, host.id)
   const summary = summarizeRoutes(db, routes)
+  const policy = serializeOpenClawHostPolicy(host)
 
   return {
     id: host.id,
@@ -415,6 +690,7 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     lastRouteEventAt: host.last_route_event_at,
     createdAt: host.created_at,
     updatedAt: host.updated_at,
+    policy,
     enrollment: serializeEnrollment(enrollment),
     summary,
   }
@@ -484,6 +760,22 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
       })
     }
 
+    if (host.policy.rotation.reviewState === 'overdue' || host.policy.rotation.reviewState === 'due_soon') {
+      actionItems.push({
+        id: `credential-window:${host.id}`,
+        severity: host.policy.rotation.reviewState === 'overdue' ? 'critical' : 'warning',
+        category: 'credential',
+        title: `${hostTitleForDigest(host)} is due for credential rotation`,
+        detail: `${baseDetail} last issued a host credential ${host.credentialAgeHours ?? 0}h ago. The next rotation window starts ${host.policy.rotation.nextRotationWindowStartsAt ? `at ${host.policy.rotation.nextRotationWindowStartsAt}` : 'soon'}.`,
+        nextAction: 'Review the host rotation window, rotate the credential in Beam, then confirm the host returns with a fresh heartbeat and inventory sync.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
     if (host.credentialState === 'rotation_pending') {
       actionItems.push({
         id: `credential-rotate:${host.id}`,
@@ -508,6 +800,24 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         title: `${hostTitleForDigest(host)} is waiting for recovery cutover`,
         detail: `${baseDetail} has a recovery credential issued and will stay unavailable until the replacement machine publishes inventory with the recovered host identity.`,
         nextAction: 'Install the recovery credential on the replacement host, then verify heartbeat and inventory before closing the recovery.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.policy.recovery.status === 'prepared' || host.policy.recovery.status === 'cutover_pending') {
+      actionItems.push({
+        id: `recovery-runbook:${host.id}`,
+        severity: host.policy.recovery.status === 'cutover_pending' ? 'critical' : 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} has an open recovery runbook`,
+        detail: `${baseDetail} is assigned to ${host.policy.recovery.owner ?? 'an operator'} with recovery state ${host.policy.recovery.status}${host.policy.recovery.replacementHostLabel ? ` on ${host.policy.recovery.replacementHostLabel}` : ''}.`,
+        nextAction: host.policy.recovery.status === 'cutover_pending'
+          ? 'Complete the recovery cutover, confirm fresh routes on the replacement host, then close the runbook state.'
+          : 'Review the recovery notes and schedule the replacement window before the next operator handoff.',
         hostId: host.id,
         hostLabel: host.label,
         workspaceSlug: host.workspaceSlug,
@@ -543,6 +853,24 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         workspaceSlug: host.workspaceSlug,
         href: hostHref,
         traceHref: null,
+      })
+    }
+
+    if (host.summary.delivery.latency.overSlo > 0) {
+      actionItems.push({
+        id: `delivery-latency:${host.id}`,
+        severity: host.summary.delivery.latency.p95Ms && host.summary.delivery.latency.p95Ms > OPENCLAW_ROUTE_LATENCY_SLO_MS * 2
+          ? 'critical'
+          : 'warning',
+        category: 'delivery',
+        title: `${hostTitleForDigest(host)} is breaching fleet delivery latency`,
+        detail: `${baseDetail} has ${host.summary.delivery.latency.overSlo} receipt(s) above the ${OPENCLAW_ROUTE_LATENCY_SLO_MS}ms target. Recent p95 is ${host.summary.delivery.latency.p95Ms ?? 'unknown'}ms.`,
+        nextAction: 'Open the affected traces, verify route transport and host health, then confirm fresh receipts land within the fleet SLO.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: lastTraceHref,
       })
     }
 
@@ -589,6 +917,16 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
     liveRoutes: hosts.reduce((sum, host) => sum + host.summary.live, 0),
     staleRoutes: hosts.reduce((sum, host) => sum + host.summary.stale, 0),
     failedReceipts: hosts.reduce((sum, host) => sum + host.summary.delivery.failed, 0),
+    routesMissingReceipts: hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.missingReceipts, 0),
+    degradedHosts: hosts.filter((host) => host.summary.delivery.latency.degraded).length,
+    latencySloBreaches: hosts.reduce((sum, host) => sum + host.summary.delivery.latency.overSlo, 0),
+    rotationDueHosts: hosts.filter((host) => host.policy.rotation.reviewState === 'due_soon' || host.policy.rotation.reviewState === 'overdue').length,
+    recoveryRunbooksOpen: hosts.filter((host) => host.policy.recovery.status === 'prepared' || host.policy.recovery.status === 'cutover_pending').length,
+    receiptCoverageRatio: (() => {
+      const activeRoutes = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.activeRoutes, 0)
+      const routesWithReceipts = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.routesWithReceipts, 0)
+      return activeRoutes > 0 ? Number((routesWithReceipts / activeRoutes).toFixed(3)) : null
+    })(),
     duplicateIdentityConflicts: conflicts.length,
     pendingCredentialActions: hosts.filter((host) => host.credentialState === 'rotation_pending' || host.credentialState === 'recovery_pending').length,
     actionItems: actionItems.length,
@@ -604,7 +942,8 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
     `- Hosts: \`${summary.totalHosts}\` total · \`${summary.activeHosts}\` active · \`${summary.pendingHosts}\` pending · \`${summary.revokedHosts}\` revoked`,
     `- Fleet health: \`${summary.staleHosts}\` stale host(s) · \`${summary.pendingCredentialActions}\` credential action(s) pending`,
     `- Routes: \`${summary.liveRoutes}\` live · \`${summary.staleRoutes}\` stale`,
-    `- Delivery: \`${summary.failedReceipts}\` failed receipt(s) · \`${summary.duplicateIdentityConflicts}\` duplicate conflict(s)`,
+    `- Delivery: \`${summary.failedReceipts}\` failed receipt(s) · \`${summary.routesMissingReceipts}\` route(s) without receipts · \`${summary.duplicateIdentityConflicts}\` duplicate conflict(s)`,
+    `- SLO: \`${summary.degradedHosts}\` degraded host(s) · \`${summary.latencySloBreaches}\` latency breach(es) · coverage \`${summary.receiptCoverageRatio === null ? 'n/a' : `${Math.round(summary.receiptCoverageRatio * 100)}%`}\``,
     `- Operator backlog: \`${summary.actionItems}\` action item(s) · \`${summary.criticalItems}\` critical`,
     '',
     '## Action Items',
@@ -741,6 +1080,15 @@ export function openClawAdminRouter(db: Database) {
       acc.conflictRoutes += host.summary.conflict
       acc.endedRoutes += host.summary.ended
       acc.failedReceipts += host.summary.delivery.failed
+      acc.routesMissingReceipts += host.summary.delivery.coverage.missingReceipts
+      acc.degradedHosts += host.summary.delivery.latency.degraded ? 1 : 0
+      acc.latencySloBreaches += host.summary.delivery.latency.overSlo
+      if (host.policy.rotation.reviewState === 'due_soon' || host.policy.rotation.reviewState === 'overdue') {
+        acc.rotationDueHosts += 1
+      }
+      if (host.policy.recovery.status === 'prepared' || host.policy.recovery.status === 'cutover_pending') {
+        acc.recoveryRunbooksOpen += 1
+      }
       return acc
     }, {
       totalHosts: 0,
@@ -753,12 +1101,21 @@ export function openClawAdminRouter(db: Database) {
       conflictRoutes: 0,
       endedRoutes: 0,
       failedReceipts: 0,
+      routesMissingReceipts: 0,
+      degradedHosts: 0,
+      latencySloBreaches: 0,
+      rotationDueHosts: 0,
+      recoveryRunbooksOpen: 0,
     })
+
+    const activeRoutes = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.activeRoutes, 0)
+    const routesWithReceipts = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.routesWithReceipts, 0)
 
     c.header('Cache-Control', 'no-store')
     return c.json({
       summary: {
         ...summary,
+        receiptCoverageRatio: activeRoutes > 0 ? Number((routesWithReceipts / activeRoutes).toFixed(3)) : null,
         duplicateIdentityConflicts: conflicts.length,
         pendingCredentialActions: digest.summary.pendingCredentialActions,
         actionItems: digest.summary.actionItems,
@@ -923,10 +1280,17 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
     }
 
-    const routes = listOpenClawResolvedRoutesForHost(db, host.id).map((route) => serializeRoute(db, route))
+    refreshOpenClawHostHealth(db)
+    recalculateOpenClawRouteStates(db)
+    const refreshedHost = getOpenClawHostById(db, hostId)
+    if (!refreshedHost) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const routes = listOpenClawResolvedRoutesForHost(db, refreshedHost.id).map((route) => serializeRoute(db, route))
     c.header('Cache-Control', 'no-store')
     return c.json({
-      host: serializeHost(db, host),
+      host: serializeHost(db, refreshedHost),
       routes,
       total: routes.length,
     })
@@ -948,7 +1312,14 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
     }
 
-    const routes = listOpenClawResolvedRoutesForHost(db, host.id)
+    refreshOpenClawHostHealth(db)
+    recalculateOpenClawRouteStates(db)
+    const refreshedHost = getOpenClawHostById(db, hostId)
+    if (!refreshedHost) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const routes = listOpenClawResolvedRoutesForHost(db, refreshedHost.id)
     const identities = routes.map((route) => {
       const bindings = listWorkspaceIdentityBindingsByBeamId(db, route.beam_id)
       const agent = getAgent(db, route.beam_id)
@@ -975,7 +1346,7 @@ export function openClawAdminRouter(db: Database) {
 
     c.header('Cache-Control', 'no-store')
     return c.json({
-      host: serializeHost(db, host),
+      host: serializeHost(db, refreshedHost),
       identities,
       total: identities.length,
     })
@@ -1056,6 +1427,99 @@ export function openClawAdminRouter(db: Database) {
     })
   })
 
+  router.patch('/hosts/:id/policy', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const metadata = parseOpenClawHostMetadata(host.metadata_json)
+    const nextMetadata: OpenClawHostMetadataJson = {
+      ...metadata,
+      credentialPolicy: {
+        ...(metadata.credentialPolicy ?? {}),
+        rotationIntervalHours: normalizePositiveInteger(body.rotationIntervalHours)
+          ?? metadata.credentialPolicy?.rotationIntervalHours
+          ?? DEFAULT_OPENCLAW_ROTATION_INTERVAL_HOURS,
+        rotationWindowStartHour: normalizeBoundedInteger(body.rotationWindowStartHour, 0, 23)
+          ?? metadata.credentialPolicy?.rotationWindowStartHour
+          ?? DEFAULT_OPENCLAW_ROTATION_WINDOW_START_HOUR,
+        rotationWindowDurationHours: normalizeBoundedInteger(body.rotationWindowDurationHours, 1, 24)
+          ?? metadata.credentialPolicy?.rotationWindowDurationHours
+          ?? DEFAULT_OPENCLAW_ROTATION_WINDOW_DURATION_HOURS,
+      },
+      recoveryRunbook: {
+        ...(metadata.recoveryRunbook ?? {}),
+        owner: normalizeOptionalString(body.recoveryOwner)
+          ?? metadata.recoveryRunbook?.owner
+          ?? null,
+        status: body.recoveryStatus === 'prepared'
+          || body.recoveryStatus === 'cutover_pending'
+          || body.recoveryStatus === 'completed'
+          || body.recoveryStatus === 'idle'
+          ? body.recoveryStatus
+          : (metadata.recoveryRunbook?.status ?? 'idle'),
+        notes: normalizeOptionalString(body.recoveryNotes)
+          ?? metadata.recoveryRunbook?.notes
+          ?? null,
+        replacementHostLabel: normalizeOptionalString(body.replacementHostLabel)
+          ?? metadata.recoveryRunbook?.replacementHostLabel
+          ?? null,
+        windowStartsAt: normalizeIsoDateTime(body.recoveryWindowStartsAt)
+          ?? metadata.recoveryRunbook?.windowStartsAt
+          ?? null,
+        windowEndsAt: normalizeIsoDateTime(body.recoveryWindowEndsAt)
+          ?? metadata.recoveryRunbook?.windowEndsAt
+          ?? null,
+        updatedAt: new Date().toISOString(),
+      },
+    }
+
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: serializeOpenClawHostMetadata(nextMetadata),
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.policy_updated',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        rotationIntervalHours: nextMetadata.credentialPolicy?.rotationIntervalHours ?? null,
+        rotationWindowStartHour: nextMetadata.credentialPolicy?.rotationWindowStartHour ?? null,
+        rotationWindowDurationHours: nextMetadata.credentialPolicy?.rotationWindowDurationHours ?? null,
+        recoveryOwner: nextMetadata.recoveryRunbook?.owner ?? null,
+        recoveryStatus: nextMetadata.recoveryRunbook?.status ?? null,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, updated),
+    })
+  })
+
   router.post('/hosts/:id/recover', async (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'admin')
     if (auth instanceof Response) {
@@ -1075,20 +1539,34 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
     }
 
+    const recoveryMetadata = parseOpenClawHostMetadata(recovered.host.metadata_json)
+    const recoveredHost = updateOpenClawHost(db, {
+      id: recovered.host.id,
+      metadataJson: serializeOpenClawHostMetadata({
+        ...recoveryMetadata,
+        recoveryRunbook: {
+          ...(recoveryMetadata.recoveryRunbook ?? {}),
+          owner: normalizeOptionalString(recoveryMetadata.recoveryRunbook?.owner) ?? auth.session.email,
+          status: 'cutover_pending',
+          updatedAt: new Date().toISOString(),
+        },
+      }),
+    }) as OpenClawHostRow
+
     logAuditEvent(db, {
       action: 'admin.openclaw_host.recovered',
       actor: auth.session.email,
-      target: `openclaw-host:${recovered.host.id}`,
+      target: `openclaw-host:${recoveredHost.id}`,
       details: {
         role: auth.session.role,
-        hostname: recovered.host.hostname,
-        label: recovered.host.label,
+        hostname: recoveredHost.hostname,
+        label: recoveredHost.label,
       },
     })
 
     c.header('Cache-Control', 'no-store')
     return c.json({
-      host: serializeHost(db, recovered.host),
+      host: serializeHost(db, recoveredHost),
       credential: recovered.credential,
       installPack: buildCredentialRefreshPack({
         directoryUrl: new URL(c.req.url).origin,
@@ -1290,11 +1768,18 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
     }
 
+    refreshOpenClawHostHealth(db)
+    recalculateOpenClawRouteStates(db)
+    const refreshedHost = getOpenClawHostById(db, hostId)
+    if (!refreshedHost) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
     c.header('Cache-Control', 'no-store')
     return c.json({
-      host: serializeHost(db, host),
-      routes: listOpenClawResolvedRoutesForHost(db, host.id).map((route) => serializeRoute(db, route)),
-      heartbeats: listOpenClawHostHeartbeats(db, host.id, 20).map((row) => ({
+      host: serializeHost(db, refreshedHost),
+      routes: listOpenClawResolvedRoutesForHost(db, refreshedHost.id).map((route) => serializeRoute(db, route)),
+      heartbeats: listOpenClawHostHeartbeats(db, refreshedHost.id, 20).map((row) => ({
         id: row.id,
         routeCount: row.route_count,
         connectorVersion: row.connector_version,

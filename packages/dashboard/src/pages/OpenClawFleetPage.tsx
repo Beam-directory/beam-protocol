@@ -16,6 +16,8 @@ import {
   type OpenClawHostSummary,
   type OpenClawHostStatus,
   type OpenClawHostCredentialState,
+  type OpenClawHostPolicyPatchInput,
+  type OpenClawHostRecoveryRunbookState,
   type OpenClawRouteRuntimeState,
   type OpenClawRouteOwnerResolutionState,
   type OpenClawRouteSource,
@@ -129,6 +131,47 @@ function digestSeverityTone(severity: 'warning' | 'critical'): 'warning' | 'crit
   return severity === 'critical' ? 'critical' : 'warning'
 }
 
+function formatPercent(value: number | null): string {
+  return value === null ? '—' : `${Math.round(value * 100)}%`
+}
+
+function formatLatency(value: number | null): string {
+  return value === null ? '—' : `${formatNumber(value)} ms`
+}
+
+function toDateTimeLocalValue(value: string | null): string {
+  if (!value) {
+    return ''
+  }
+  const parsed = new Date(value)
+  if (Number.isNaN(parsed.getTime())) {
+    return ''
+  }
+  const localMs = parsed.getTime() - (parsed.getTimezoneOffset() * 60_000)
+  return new Date(localMs).toISOString().slice(0, 16)
+}
+
+function fromDateTimeLocalValue(value: string): string | null {
+  const trimmed = value.trim()
+  if (!trimmed) {
+    return null
+  }
+  const parsed = new Date(trimmed)
+  return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString()
+}
+
+type HostPolicyFormState = {
+  rotationIntervalHours: string
+  rotationWindowStartHour: string
+  rotationWindowDurationHours: string
+  recoveryOwner: string
+  recoveryStatus: OpenClawHostRecoveryRunbookState
+  recoveryNotes: string
+  replacementHostLabel: string
+  recoveryWindowStartsAt: string
+  recoveryWindowEndsAt: string
+}
+
 export default function OpenClawFleetPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<OpenClawFleetOverviewResponse | null>(null)
@@ -160,6 +203,17 @@ export default function OpenClawFleetPage() {
     workspaceSlug: '',
     notes: '',
     expiresInHours: 72,
+  })
+  const [policyForm, setPolicyForm] = useState<HostPolicyFormState>({
+    rotationIntervalHours: '720',
+    rotationWindowStartHour: '2',
+    rotationWindowDurationHours: '4',
+    recoveryOwner: '',
+    recoveryStatus: 'idle',
+    recoveryNotes: '',
+    replacementHostLabel: '',
+    recoveryWindowStartsAt: '',
+    recoveryWindowEndsAt: '',
   })
 
   const selectedHostId = useMemo(() => {
@@ -245,6 +299,24 @@ export default function OpenClawFleetPage() {
     })()
   }, [overview, searchParams, selectedHostId, setSearchParams])
 
+  useEffect(() => {
+    if (!selectedHost) {
+      return
+    }
+
+    setPolicyForm({
+      rotationIntervalHours: String(selectedHost.policy.rotation.intervalHours),
+      rotationWindowStartHour: String(selectedHost.policy.rotation.windowStartHour),
+      rotationWindowDurationHours: String(selectedHost.policy.rotation.windowDurationHours),
+      recoveryOwner: selectedHost.policy.recovery.owner ?? '',
+      recoveryStatus: selectedHost.policy.recovery.status,
+      recoveryNotes: selectedHost.policy.recovery.notes ?? '',
+      replacementHostLabel: selectedHost.policy.recovery.replacementHostLabel ?? '',
+      recoveryWindowStartsAt: toDateTimeLocalValue(selectedHost.policy.recovery.windowStartsAt),
+      recoveryWindowEndsAt: toDateTimeLocalValue(selectedHost.policy.recovery.windowEndsAt),
+    })
+  }, [selectedHost?.id, selectedHost?.updatedAt])
+
   async function runAction(actionKey: string, fn: () => Promise<void>, successMessage: string) {
     try {
       setActionBusy(actionKey)
@@ -313,6 +385,26 @@ export default function OpenClawFleetPage() {
       await Promise.all([loadOverview(), loadDigest()])
       await loadHost(host.id)
     }, `Recovery credential for ${hostTitle(host)} issued.`)
+  }
+
+  async function handleSavePolicy(host: OpenClawHostSummary) {
+    const input: OpenClawHostPolicyPatchInput = {
+      rotationIntervalHours: Number.parseInt(policyForm.rotationIntervalHours, 10) || host.policy.rotation.intervalHours,
+      rotationWindowStartHour: Number.parseInt(policyForm.rotationWindowStartHour, 10) || 0,
+      rotationWindowDurationHours: Number.parseInt(policyForm.rotationWindowDurationHours, 10) || 1,
+      recoveryOwner: policyForm.recoveryOwner.trim() || null,
+      recoveryStatus: policyForm.recoveryStatus,
+      recoveryNotes: policyForm.recoveryNotes.trim() || null,
+      replacementHostLabel: policyForm.replacementHostLabel.trim() || null,
+      recoveryWindowStartsAt: fromDateTimeLocalValue(policyForm.recoveryWindowStartsAt),
+      recoveryWindowEndsAt: fromDateTimeLocalValue(policyForm.recoveryWindowEndsAt),
+    }
+
+    await runAction(`policy-${host.id}`, async () => {
+      await directoryApi.updateOpenClawHostPolicy(host.id, input)
+      await Promise.all([loadOverview(), loadDigest()])
+      await loadHost(host.id)
+    }, `Policy for ${hostTitle(host)} updated.`)
   }
 
   async function handleRevoke(host: OpenClawHostSummary) {
@@ -402,11 +494,14 @@ export default function OpenClawFleetPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-7">
         <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.summary.totalHosts)} />
         <MetricCard label="Active hosts" value={!overview ? '—' : formatNumber(overview.summary.activeHosts)} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Pending hosts" value={!overview ? '—' : formatNumber(overview.summary.pendingHosts)} tone={(overview?.summary.pendingHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Live routes" value={!overview ? '—' : formatNumber(overview.summary.liveRoutes)} tone={(overview?.summary.liveRoutes ?? 0) > 0 ? 'success' : 'default'} />
+        <MetricCard label="Receipt coverage" value={!overview ? '—' : formatPercent(overview.summary.receiptCoverageRatio)} tone={(overview?.summary.receiptCoverageRatio ?? 1) < 0.8 ? 'warning' : 'success'} />
+        <MetricCard label="Latency watch" value={!overview ? '—' : formatNumber(overview.summary.degradedHosts)} tone={(overview?.summary.degradedHosts ?? 0) > 0 ? 'warning' : 'default'} />
+        <MetricCard label="Rotation due" value={!overview ? '—' : formatNumber(overview.summary.rotationDueHosts)} tone={(overview?.summary.rotationDueHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Duplicate conflicts" value={!overview ? '—' : formatNumber(overview.summary.duplicateIdentityConflicts)} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
       </section>
 
@@ -428,12 +523,14 @@ export default function OpenClawFleetPage() {
           </button>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-7">
           <MetricCard label="Action items" value={!digest ? '—' : formatNumber(digest.summary.actionItems)} tone={(digest?.summary.actionItems ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Critical items" value={!digest ? '—' : formatNumber(digest.summary.criticalItems)} tone={(digest?.summary.criticalItems ?? 0) > 0 ? 'critical' : 'default'} />
           <MetricCard label="Credential actions" value={!digest ? '—' : formatNumber(digest.summary.pendingCredentialActions)} tone={(digest?.summary.pendingCredentialActions ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Failed receipts" value={!digest ? '—' : formatNumber(digest.summary.failedReceipts)} tone={(digest?.summary.failedReceipts ?? 0) > 0 ? 'critical' : 'default'} />
           <MetricCard label="Stale hosts" value={!digest ? '—' : formatNumber(digest.summary.staleHosts)} tone={(digest?.summary.staleHosts ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="Missing receipts" value={!digest ? '—' : formatNumber(digest.summary.routesMissingReceipts)} tone={(digest?.summary.routesMissingReceipts ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="SLO breaches" value={!digest ? '—' : formatNumber(digest.summary.latencySloBreaches)} tone={(digest?.summary.latencySloBreaches ?? 0) > 0 ? 'warning' : 'default'} />
         </div>
 
         <div className="mt-4 space-y-3">
@@ -526,11 +623,13 @@ export default function OpenClawFleetPage() {
                       <div>{`${formatNumber(host.summary.live)} live · ${formatNumber(host.summary.stale)} stale · ${formatNumber(host.summary.conflict)} conflict`}</div>
                       <div>{`${formatNumber(host.summary.unavailable)} unavailable · ${formatNumber(host.summary.revoked)} revoked`}</div>
                       <div>{host.lastInventoryAt ? `Inventory ${formatRelativeTime(host.lastInventoryAt)}` : 'No inventory yet'}</div>
-                      <div>{host.summary.delivery.receipts > 0 ? `${formatNumber(host.summary.delivery.receipts)} receipts · ${formatNumber(host.summary.delivery.failed)} failed` : 'No delivery receipts yet'}</div>
+                      <div>{host.summary.delivery.receipts > 0 ? `${formatNumber(host.summary.delivery.receipts)} receipts · ${formatNumber(host.summary.delivery.failed)} failed · ${formatPercent(host.summary.delivery.coverage.ratio)} coverage` : 'No delivery receipts yet'}</div>
                       <div>{host.approvedAt ? `Approved ${formatRelativeTime(host.approvedAt)}` : 'Waiting for approval'}</div>
                       <div>{host.revokedAt ? `Revoked ${formatRelativeTime(host.revokedAt)}` : 'Credential active or pending'}</div>
                       <div>{host.credentialIssuedAt ? `Credential age ${host.credentialAgeHours ?? 0}h` : 'No credential issued yet'}</div>
-                      <div>{host.credentialRotatedAt ? `Last rotated ${formatRelativeTime(host.credentialRotatedAt)}` : 'No rotation yet'}</div>
+                      <div>{host.policy.rotation.nextRotationDueAt ? `Rotation ${host.policy.rotation.reviewState === 'overdue' ? 'overdue' : 'due'} ${formatRelativeTime(host.policy.rotation.nextRotationDueAt)}` : 'No rotation schedule yet'}</div>
+                      <div>{host.summary.delivery.latency.samples > 0 ? `p95 ${formatLatency(host.summary.delivery.latency.p95Ms)} · ${formatNumber(host.summary.delivery.latency.overSlo)} breach` : 'No latency samples yet'}</div>
+                      <div>{host.policy.recovery.status !== 'idle' ? `Recovery ${host.policy.recovery.status}${host.policy.recovery.owner ? ` · ${host.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -778,6 +877,136 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.credentialRotatedAt ? `Credential rotated ${formatDateTime(selectedHost.credentialRotatedAt)}` : 'No credential rotation yet'}</div>
                   <div>{`${formatNumber(selectedHost.summary.unavailable)} unavailable · ${formatNumber(selectedHost.summary.revoked)} revoked routes`}</div>
                   <div>{selectedHost.summary.delivery.lastRequestedAt ? `Last receipt ${formatRelativeTime(selectedHost.summary.delivery.lastRequestedAt)} · ${selectedHost.summary.delivery.lastStatus ?? 'unknown'}` : 'No delivery receipts yet'}</div>
+                  <div>{`Receipt coverage ${formatPercent(selectedHost.summary.delivery.coverage.ratio)} · ${formatNumber(selectedHost.summary.delivery.coverage.missingReceipts)} missing`}</div>
+                  <div>{selectedHost.summary.delivery.latency.samples > 0 ? `Latency avg ${formatLatency(selectedHost.summary.delivery.latency.avgMs)} · p95 ${formatLatency(selectedHost.summary.delivery.latency.p95Ms)}` : 'No latency samples yet'}</div>
+                  <div>{selectedHost.policy.rotation.nextRotationWindowStartsAt ? `Rotation window ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowStartsAt)}` : 'No rotation window scheduled'}</div>
+                  <div>{selectedHost.policy.recovery.status !== 'idle' ? `Recovery ${selectedHost.policy.recovery.status}${selectedHost.policy.recovery.owner ? ` · ${selectedHost.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Rotation and recovery</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Keep credential policy, rotation windows, and recovery handoff details attached to the host itself.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill label={selectedHost.policy.rotation.reviewState} tone={selectedHost.policy.rotation.reviewState === 'overdue' ? 'critical' : selectedHost.policy.rotation.reviewState === 'due_soon' ? 'warning' : 'default'} />
+                    <StatusPill label={selectedHost.policy.recovery.status} tone={selectedHost.policy.recovery.status === 'cutover_pending' ? 'critical' : selectedHost.policy.recovery.status === 'prepared' ? 'warning' : selectedHost.policy.recovery.status === 'completed' ? 'success' : 'default'} />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Rotation interval (hours)</span>
+                    <input
+                      className="input-field"
+                      min={1}
+                      step={1}
+                      type="number"
+                      value={policyForm.rotationIntervalHours}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, rotationIntervalHours: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Window start hour (UTC)</span>
+                    <input
+                      className="input-field"
+                      min={0}
+                      max={23}
+                      step={1}
+                      type="number"
+                      value={policyForm.rotationWindowStartHour}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, rotationWindowStartHour: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Window duration (hours)</span>
+                    <input
+                      className="input-field"
+                      min={1}
+                      max={24}
+                      step={1}
+                      type="number"
+                      value={policyForm.rotationWindowDurationHours}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, rotationWindowDurationHours: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Recovery owner</span>
+                    <input
+                      className="input-field"
+                      value={policyForm.recoveryOwner}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, recoveryOwner: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Recovery status</span>
+                    <select
+                      className="input-field"
+                      value={policyForm.recoveryStatus}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, recoveryStatus: event.target.value as OpenClawHostRecoveryRunbookState }))}
+                    >
+                      <option value="idle">idle</option>
+                      <option value="prepared">prepared</option>
+                      <option value="cutover_pending">cutover_pending</option>
+                      <option value="completed">completed</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Replacement host</span>
+                    <input
+                      className="input-field"
+                      value={policyForm.replacementHostLabel}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, replacementHostLabel: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Recovery window start</span>
+                    <input
+                      className="input-field"
+                      type="datetime-local"
+                      value={policyForm.recoveryWindowStartsAt}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, recoveryWindowStartsAt: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Recovery window end</span>
+                    <input
+                      className="input-field"
+                      type="datetime-local"
+                      value={policyForm.recoveryWindowEndsAt}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, recoveryWindowEndsAt: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
+                    <span>Recovery notes</span>
+                    <textarea
+                      className="input-field min-h-[96px]"
+                      value={policyForm.recoveryNotes}
+                      onChange={(event) => setPolicyForm((current) => ({ ...current, recoveryNotes: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{selectedHost.policy.rotation.nextRotationDueAt ? `Next rotation due ${formatDateTime(selectedHost.policy.rotation.nextRotationDueAt)}` : 'No next rotation due yet'}</div>
+                  <div>{selectedHost.policy.rotation.nextRotationWindowEndsAt ? `Window ends ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowEndsAt)}` : 'No rotation window end yet'}</div>
+                  <div>{selectedHost.policy.recovery.windowStartsAt ? `Recovery window starts ${formatDateTime(selectedHost.policy.recovery.windowStartsAt)}` : 'No recovery window start yet'}</div>
+                  <div>{selectedHost.policy.recovery.windowEndsAt ? `Recovery window ends ${formatDateTime(selectedHost.policy.recovery.windowEndsAt)}` : 'No recovery window end yet'}</div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={actionBusy === `policy-${selectedHost.id}`}
+                    onClick={() => { void handleSavePolicy(selectedHost) }}
+                  >
+                    {actionBusy === `policy-${selectedHost.id}` ? 'Saving…' : 'Save policy'}
+                  </button>
                 </div>
               </div>
 

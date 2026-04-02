@@ -185,6 +185,15 @@ The fleet surface also gives operators explicit day-2 actions:
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
 
+The host detail and fleet summary now also expose the operational thresholds behind those actions:
+
+- credential rotation interval, next due time, and the next allowed rotation window
+- recovery owner, replacement host label, and cutover window notes
+- receipt coverage across active routes
+- p50 / p95 latency and latency SLO breaches for recent host-backed deliveries
+
+That means operators can treat the fleet page as the source of truth for both host health and the next required maintenance action, instead of jumping between traces and local host logs.
+
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
 ```bash
