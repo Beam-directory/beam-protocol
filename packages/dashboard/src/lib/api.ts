@@ -28,6 +28,9 @@ export type WorkspacePolicyRuleExternalInitiation = 'inherit' | 'allow' | 'deny'
 export type OpenClawHostStatus = 'pending' | 'active' | 'revoked'
 export type OpenClawHostHealth = 'pending' | 'healthy' | 'watch' | 'stale' | 'revoked'
 export type OpenClawHostCredentialState = 'missing' | 'ready' | 'rotation_pending' | 'recovery_pending' | 'revoked'
+export type OpenClawHostMaintenanceState = 'serving' | 'maintenance' | 'draining'
+export type OpenClawHostRolloutRing = 'canary' | 'stable' | 'pinned'
+export type OpenClawHostRolloutVersionState = 'unmanaged' | 'current' | 'drifted'
 export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
 export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
@@ -369,6 +372,22 @@ export interface OpenClawHostSummary {
     revokeReviewRequestedBy: string | null
     revokeReviewReason: string | null
   }
+  maintenance: {
+    state: OpenClawHostMaintenanceState
+    owner: string | null
+    reason: string | null
+    startedAt: string | null
+    updatedAt: string | null
+    deliveryBlocked: boolean
+  }
+  rollout: {
+    ring: OpenClawHostRolloutRing
+    desiredConnectorVersion: string | null
+    notes: string | null
+    updatedAt: string | null
+    versionState: OpenClawHostRolloutVersionState
+    canary: boolean
+  }
   enrollment: OpenClawEnrollmentRequest | null
   summary: {
     total: number
@@ -574,6 +593,66 @@ export interface OpenClawFleetOverviewResponse {
       traceHref: string | null
     }>
   }
+  maintenance: {
+    counts: {
+      maintenance: number
+      draining: number
+      blocked: number
+    }
+    attentionHosts: Array<{
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      healthStatus: OpenClawHostHealth
+      state: OpenClawHostMaintenanceState
+      owner: string | null
+      reason: string | null
+      startedAt: string | null
+      reasons: string[]
+      severity: 'warning' | 'critical'
+      href: string
+      workspaceHref: string | null
+    }>
+  }
+  rollout: {
+    summary: {
+      versions: number
+      canaryHosts: number
+      driftHosts: number
+      unmanagedHosts: number
+    }
+    versions: Array<{
+      version: string
+      hostCount: number
+      canaryHosts: number
+      staleHosts: number
+      driftHosts: number
+      rings: OpenClawHostRolloutRing[]
+      hostIds: number[]
+    }>
+    rings: Array<{
+      ring: OpenClawHostRolloutRing
+      hostCount: number
+      canaryHosts: number
+      driftHosts: number
+      versions: string[]
+      hostIds: number[]
+    }>
+    attentionHosts: Array<{
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      healthStatus: OpenClawHostHealth
+      ring: OpenClawHostRolloutRing
+      connectorVersion: string
+      desiredConnectorVersion: string | null
+      versionState: OpenClawHostRolloutVersionState
+      reasons: string[]
+      severity: 'warning' | 'critical'
+      href: string
+      workspaceHref: string | null
+    }>
+  }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
   environments: OpenClawFleetEnvironmentSummary[]
@@ -776,6 +855,11 @@ export interface OpenClawHostProfilePatchInput {
   clearRevokeReview?: boolean
 }
 
+export interface OpenClawHostMaintenanceActionInput {
+  owner?: string | null
+  reason?: string | null
+}
+
 export interface OpenClawFleetBulkActionInput {
   action: OpenClawFleetBulkAction
   hostIds: number[]
@@ -815,6 +899,12 @@ export interface OpenClawHostPolicyPatchInput {
   replacementHostLabel?: string | null
   recoveryWindowStartsAt?: string | null
   recoveryWindowEndsAt?: string | null
+}
+
+export interface OpenClawHostRolloutPatchInput {
+  ring?: OpenClawHostRolloutRing | null
+  desiredConnectorVersion?: string | null
+  notes?: string | null
 }
 
 export interface OpenClawHostPolicyActionResponse {
@@ -2609,6 +2699,17 @@ export const directoryApi = {
     method: 'PATCH',
     body: JSON.stringify(input),
   }, { admin: true }),
+  enableOpenClawHostMaintenance: (id: number, input?: OpenClawHostMaintenanceActionInput) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/maintenance`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  drainOpenClawHost: (id: number, input?: OpenClawHostMaintenanceActionInput) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/drain`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
+  }, { admin: true }),
+  resumeOpenClawHost: (id: number) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/resume`, {
+    method: 'POST',
+  }, { admin: true }),
   runOpenClawFleetBulkAction: (input: OpenClawFleetBulkActionInput) => request<OpenClawFleetBulkActionResponse>('/admin/openclaw/fleet/bulk-actions', {
     method: 'POST',
     body: JSON.stringify(input),
@@ -2630,6 +2731,10 @@ export const directoryApi = {
     method: 'POST',
   }, { admin: true }),
   updateOpenClawHostPolicy: (id: number, input: OpenClawHostPolicyPatchInput) => request<OpenClawHostPolicyActionResponse>(`/admin/openclaw/hosts/${id}/policy`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  updateOpenClawHostRollout: (id: number, input: OpenClawHostRolloutPatchInput) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/rollout`, {
     method: 'PATCH',
     body: JSON.stringify(input),
   }, { admin: true }),

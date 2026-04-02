@@ -6,6 +6,7 @@ import type { IntentFrame, IntentLogRow, IntentTraceEventRow, ResultFrame } from
 import {
   finalizeIntentLog,
   getAgent,
+  getOpenClawHostById,
   getIntentLogByNonce,
   getLatestIntentTraceEvent,
   hasActiveDelegation,
@@ -48,6 +49,8 @@ type ConnectionSession = {
   ws: WebSocket
   authenticatedViaApiKey: boolean
 }
+
+type OpenClawHostMaintenanceState = 'serving' | 'maintenance' | 'draining'
 
 const connections = new Map<string, ConnectionSession>()
 const intentFeedSubscribers = new Set<WebSocket>()
@@ -127,6 +130,33 @@ function parseTraceDetails(trace: IntentTraceEventRow | null): Record<string, un
   }
 }
 
+function getOpenClawHostMaintenance(metadataJson: string | null): {
+  state: OpenClawHostMaintenanceState
+  reason: string | null
+} {
+  if (!metadataJson) {
+    return { state: 'serving', reason: null }
+  }
+
+  try {
+    const parsed = JSON.parse(metadataJson) as {
+      maintenance?: {
+        state?: unknown
+        reason?: unknown
+      }
+    }
+    const state = parsed?.maintenance?.state === 'maintenance' || parsed?.maintenance?.state === 'draining'
+      ? parsed.maintenance.state
+      : 'serving'
+    const reason = typeof parsed?.maintenance?.reason === 'string' && parsed.maintenance.reason.trim()
+      ? parsed.maintenance.reason.trim()
+      : null
+    return { state, reason }
+  } catch {
+    return { state: 'serving', reason: null }
+  }
+}
+
 function getOpenClawDeliveryBlock(
   db: Database,
   beamId: string,
@@ -164,6 +194,24 @@ function getOpenClawDeliveryBlock(
       details: {
         hostId: preferredRoute.host_id,
         hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+      },
+    }
+  }
+
+  const host = getOpenClawHostById(db, preferredRoute.host_id)
+  const maintenance = getOpenClawHostMaintenance(host?.metadata_json ?? null)
+  if (maintenance.state === 'maintenance' || maintenance.state === 'draining') {
+    return {
+      relayCode: 'FORBIDDEN',
+      errorCode: maintenance.state === 'draining' ? 'HOST_DRAINING' : 'HOST_MAINTENANCE',
+      message: maintenance.state === 'draining'
+        ? `Agent ${beamId} belongs to a draining OpenClaw host`
+        : `Agent ${beamId} belongs to an OpenClaw host in maintenance mode`,
+      details: {
+        hostId: preferredRoute.host_id,
+        hostLabel: preferredRoute.host_label ?? preferredRoute.hostname,
+        maintenanceState: maintenance.state,
+        reason: maintenance.reason,
       },
     }
   }

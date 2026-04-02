@@ -176,6 +176,12 @@ type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
 
 type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
 
+type OpenClawHostMaintenanceState = 'serving' | 'maintenance' | 'draining'
+
+type OpenClawHostRolloutRing = 'canary' | 'stable' | 'pinned'
+
+type OpenClawHostRolloutVersionState = 'unmanaged' | 'current' | 'drifted'
+
 type OpenClawHostEnvironmentSummary = {
   label: string
   hostCount: number
@@ -278,6 +284,76 @@ type OpenClawFleetRouteHealthSummary = {
   attentionHosts: OpenClawFleetRouteHealthAttentionHost[]
 }
 
+type OpenClawFleetMaintenanceAttentionHost = {
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  healthStatus: OpenClawHostHealth
+  state: OpenClawHostMaintenanceState
+  owner: string | null
+  reason: string | null
+  startedAt: string | null
+  reasons: string[]
+  severity: OpenClawFleetDigestSeverity
+  href: string
+  workspaceHref: string | null
+}
+
+type OpenClawFleetMaintenanceSummary = {
+  counts: {
+    maintenance: number
+    draining: number
+    blocked: number
+  }
+  attentionHosts: OpenClawFleetMaintenanceAttentionHost[]
+}
+
+type OpenClawFleetRolloutAttentionHost = {
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  healthStatus: OpenClawHostHealth
+  ring: OpenClawHostRolloutRing
+  connectorVersion: string
+  desiredConnectorVersion: string | null
+  versionState: OpenClawHostRolloutVersionState
+  reasons: string[]
+  severity: OpenClawFleetDigestSeverity
+  href: string
+  workspaceHref: string | null
+}
+
+type OpenClawFleetConnectorVersionSummary = {
+  version: string
+  hostCount: number
+  canaryHosts: number
+  staleHosts: number
+  driftHosts: number
+  rings: OpenClawHostRolloutRing[]
+  hostIds: number[]
+}
+
+type OpenClawFleetRolloutRingSummary = {
+  ring: OpenClawHostRolloutRing
+  hostCount: number
+  canaryHosts: number
+  driftHosts: number
+  versions: string[]
+  hostIds: number[]
+}
+
+type OpenClawFleetRolloutSummary = {
+  summary: {
+    versions: number
+    canaryHosts: number
+    driftHosts: number
+    unmanagedHosts: number
+  }
+  versions: OpenClawFleetConnectorVersionSummary[]
+  rings: OpenClawFleetRolloutRingSummary[]
+  attentionHosts: OpenClawFleetRolloutAttentionHost[]
+}
+
 type OpenClawFleetBulkAction =
   | 'apply_labels'
   | 'stage_revoke_review'
@@ -305,6 +381,19 @@ type OpenClawHostMetadataJson = {
     revokeReviewRequestedAt?: string | null
     revokeReviewRequestedBy?: string | null
     revokeReviewReason?: string | null
+  }
+  maintenance?: {
+    state?: OpenClawHostMaintenanceState | null
+    owner?: string | null
+    reason?: string | null
+    startedAt?: string | null
+    updatedAt?: string | null
+  }
+  rollout?: {
+    ring?: OpenClawHostRolloutRing | null
+    desiredConnectorVersion?: string | null
+    notes?: string | null
+    updatedAt?: string | null
   }
 }
 
@@ -452,7 +541,13 @@ function serializeOpenClawHostMetadata(metadata: OpenClawHostMetadataJson): stri
   if (metadata.placement) {
     cleaned.placement = metadata.placement
   }
-  if (!cleaned.credentialPolicy && !cleaned.recoveryRunbook && !cleaned.placement) {
+  if (metadata.maintenance) {
+    cleaned.maintenance = metadata.maintenance
+  }
+  if (metadata.rollout) {
+    cleaned.rollout = metadata.rollout
+  }
+  if (!cleaned.credentialPolicy && !cleaned.recoveryRunbook && !cleaned.placement && !cleaned.maintenance && !cleaned.rollout) {
     return null
   }
   return JSON.stringify(cleaned)
@@ -623,6 +718,119 @@ function serializeOpenClawHostPlacement(host: OpenClawHostRow) {
     revokeReviewRequestedAt: normalizeIsoDateTime(placement.revokeReviewRequestedAt),
     revokeReviewRequestedBy: normalizeOptionalString(placement.revokeReviewRequestedBy),
     revokeReviewReason: normalizeOptionalString(placement.revokeReviewReason),
+  }
+}
+
+function normalizeOpenClawHostMaintenanceState(value: unknown): OpenClawHostMaintenanceState {
+  return value === 'maintenance' || value === 'draining' ? value : 'serving'
+}
+
+function normalizeOpenClawHostRolloutRing(value: unknown): OpenClawHostRolloutRing {
+  return value === 'canary' || value === 'pinned' ? value : 'stable'
+}
+
+function serializeOpenClawHostMaintenance(host: OpenClawHostRow) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const maintenance = metadata.maintenance && typeof metadata.maintenance === 'object'
+    ? metadata.maintenance
+    : {}
+
+  const state = normalizeOpenClawHostMaintenanceState(maintenance.state)
+  return {
+    state,
+    owner: normalizeOptionalString(maintenance.owner),
+    reason: normalizeOptionalString(maintenance.reason),
+    startedAt: normalizeIsoDateTime(maintenance.startedAt),
+    updatedAt: normalizeIsoDateTime(maintenance.updatedAt),
+    deliveryBlocked: state !== 'serving',
+  }
+}
+
+function serializeOpenClawHostRollout(host: OpenClawHostRow) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const rollout = metadata.rollout && typeof metadata.rollout === 'object'
+    ? metadata.rollout
+    : {}
+
+  const desiredConnectorVersion = normalizeOptionalString(rollout.desiredConnectorVersion)
+  const versionState: OpenClawHostRolloutVersionState = desiredConnectorVersion
+    ? (desiredConnectorVersion === host.connector_version ? 'current' : 'drifted')
+    : 'unmanaged'
+
+  return {
+    ring: normalizeOpenClawHostRolloutRing(rollout.ring),
+    desiredConnectorVersion,
+    notes: normalizeOptionalString(rollout.notes),
+    updatedAt: normalizeIsoDateTime(rollout.updatedAt),
+    versionState,
+    canary: normalizeOpenClawHostRolloutRing(rollout.ring) === 'canary',
+  }
+}
+
+function buildOpenClawHostMaintenancePatch(
+  host: OpenClawHostRow,
+  input: {
+    state: OpenClawHostMaintenanceState
+    owner?: string | null
+    reason?: string | null
+  },
+) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const current = serializeOpenClawHostMaintenance(host)
+  const now = new Date().toISOString()
+  const state = normalizeOpenClawHostMaintenanceState(input.state)
+  const nextMaintenance = {
+    state,
+    owner: input.owner !== undefined ? normalizeOptionalString(input.owner) : current.owner,
+    reason: state === 'serving'
+      ? null
+      : (input.reason !== undefined ? normalizeOptionalString(input.reason) : current.reason),
+    startedAt: state === 'serving'
+      ? null
+      : (current.state === state && current.startedAt ? current.startedAt : now),
+    updatedAt: now,
+  }
+
+  const nextMetadata: OpenClawHostMetadataJson = {
+    ...metadata,
+    maintenance: nextMaintenance,
+  }
+
+  return {
+    maintenance: nextMaintenance,
+    metadataJson: serializeOpenClawHostMetadata(nextMetadata),
+  }
+}
+
+function buildOpenClawHostRolloutPatch(
+  host: OpenClawHostRow,
+  input: {
+    ring?: OpenClawHostRolloutRing | null
+    desiredConnectorVersion?: string | null
+    notes?: string | null
+  },
+) {
+  const metadata = parseOpenClawHostMetadata(host.metadata_json)
+  const current = serializeOpenClawHostRollout(host)
+  const nextRollout = {
+    ring: input.ring ? normalizeOpenClawHostRolloutRing(input.ring) : current.ring,
+    desiredConnectorVersion: input.desiredConnectorVersion !== undefined
+      ? normalizeOptionalString(input.desiredConnectorVersion)
+      : current.desiredConnectorVersion,
+    notes: input.notes !== undefined
+      ? normalizeOptionalString(input.notes)
+      : current.notes,
+    updatedAt: new Date().toISOString(),
+  }
+
+  const nextMetadata: OpenClawHostMetadataJson = {
+    ...metadata,
+    rollout: nextRollout,
+  }
+
+  return {
+    rollout: nextRollout,
+    metadataJson: serializeOpenClawHostMetadata(nextMetadata),
   }
 }
 
@@ -1239,6 +1447,8 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
   const summary = summarizeRoutes(db, routes)
   const policy = serializeOpenClawHostPolicy(host)
   const placement = serializeOpenClawHostPlacement(host)
+  const maintenance = serializeOpenClawHostMaintenance(host)
+  const rollout = serializeOpenClawHostRollout(host)
 
   return {
     id: host.id,
@@ -1269,6 +1479,8 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     updatedAt: host.updated_at,
     policy,
     placement,
+    maintenance,
+    rollout,
     enrollment: serializeEnrollment(enrollment),
     summary,
   }
@@ -1333,6 +1545,189 @@ function summarizeOpenClawFleetGroups(hosts: Array<ReturnType<typeof serializeHo
       environments: [...group.environments].sort((left, right) => left.localeCompare(right)),
     }))
     .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function buildOpenClawFleetMaintenanceSummary(
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): OpenClawFleetMaintenanceSummary {
+  const counts: OpenClawFleetMaintenanceSummary['counts'] = {
+    maintenance: 0,
+    draining: 0,
+    blocked: 0,
+  }
+  const attentionHosts: OpenClawFleetMaintenanceAttentionHost[] = []
+
+  for (const host of hosts) {
+    if (host.maintenance.state === 'serving') {
+      continue
+    }
+
+    if (host.maintenance.state === 'maintenance') {
+      counts.maintenance += 1
+    }
+    if (host.maintenance.state === 'draining') {
+      counts.draining += 1
+    }
+    counts.blocked += 1
+
+    const reasons = [
+      host.maintenance.state === 'draining' ? 'delivery drain active' : 'maintenance mode active',
+      host.maintenance.reason,
+    ].filter(Boolean) as string[]
+
+    attentionHosts.push({
+      hostId: host.id,
+      hostLabel: host.label,
+      workspaceSlug: host.workspaceSlug,
+      healthStatus: host.healthStatus,
+      state: host.maintenance.state,
+      owner: host.maintenance.owner,
+      reason: host.maintenance.reason,
+      startedAt: host.maintenance.startedAt,
+      reasons,
+      severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
+      href: buildOpenClawFleetHref(host.id),
+      workspaceHref: buildWorkspaceHref(host.workspaceSlug),
+    })
+  }
+
+  attentionHosts.sort((left, right) =>
+    severityWeight(left.severity) - severityWeight(right.severity)
+      || (Date.parse(left.startedAt ?? '') || 0) - (Date.parse(right.startedAt ?? '') || 0)
+      || left.hostId - right.hostId)
+
+  return {
+    counts,
+    attentionHosts,
+  }
+}
+
+function buildOpenClawFleetRolloutSummary(
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): OpenClawFleetRolloutSummary {
+  const versionBuckets = new Map<string, OpenClawFleetConnectorVersionSummary>()
+  const ringBuckets = new Map<OpenClawHostRolloutRing, OpenClawFleetRolloutRingSummary>()
+  const attentionHosts: OpenClawFleetRolloutAttentionHost[] = []
+  let canaryHosts = 0
+  let driftHosts = 0
+  let unmanagedHosts = 0
+
+  for (const host of hosts) {
+    const versionLabel = host.connectorVersion || 'unknown'
+    const versionBucket = versionBuckets.get(versionLabel) ?? {
+      version: versionLabel,
+      hostCount: 0,
+      canaryHosts: 0,
+      staleHosts: 0,
+      driftHosts: 0,
+      rings: [],
+      hostIds: [],
+    }
+    versionBucket.hostCount += 1
+    versionBucket.staleHosts += host.healthStatus === 'stale' ? 1 : 0
+    versionBucket.hostIds.push(host.id)
+    if (!versionBucket.rings.includes(host.rollout.ring)) {
+      versionBucket.rings.push(host.rollout.ring)
+    }
+    if (host.rollout.canary) {
+      versionBucket.canaryHosts += 1
+      canaryHosts += 1
+    }
+    if (host.rollout.versionState === 'drifted') {
+      versionBucket.driftHosts += 1
+      driftHosts += 1
+    }
+    if (host.rollout.versionState === 'unmanaged') {
+      unmanagedHosts += 1
+    }
+    versionBuckets.set(versionLabel, versionBucket)
+
+    const ringBucket = ringBuckets.get(host.rollout.ring) ?? {
+      ring: host.rollout.ring,
+      hostCount: 0,
+      canaryHosts: 0,
+      driftHosts: 0,
+      versions: [],
+      hostIds: [],
+    }
+    ringBucket.hostCount += 1
+    ringBucket.hostIds.push(host.id)
+    if (host.rollout.canary) {
+      ringBucket.canaryHosts += 1
+    }
+    if (host.rollout.versionState === 'drifted') {
+      ringBucket.driftHosts += 1
+    }
+    if (!ringBucket.versions.includes(versionLabel)) {
+      ringBucket.versions.push(versionLabel)
+    }
+    ringBuckets.set(host.rollout.ring, ringBucket)
+
+    const reasons: string[] = []
+    let severity: OpenClawFleetDigestSeverity = 'warning'
+    if (host.rollout.versionState === 'drifted') {
+      reasons.push(`expected ${host.rollout.desiredConnectorVersion}`)
+    }
+    if (host.rollout.canary) {
+      reasons.push('canary ring')
+    }
+    if (host.rollout.canary && host.healthStatus === 'stale') {
+      reasons.push('canary host is stale')
+      severity = 'critical'
+    }
+    if (host.rollout.versionState === 'drifted' && host.healthStatus === 'stale') {
+      severity = 'critical'
+    }
+    if (reasons.length === 0) {
+      continue
+    }
+
+    attentionHosts.push({
+      hostId: host.id,
+      hostLabel: host.label,
+      workspaceSlug: host.workspaceSlug,
+      healthStatus: host.healthStatus,
+      ring: host.rollout.ring,
+      connectorVersion: host.connectorVersion,
+      desiredConnectorVersion: host.rollout.desiredConnectorVersion,
+      versionState: host.rollout.versionState,
+      reasons,
+      severity,
+      href: buildOpenClawFleetHref(host.id),
+      workspaceHref: buildWorkspaceHref(host.workspaceSlug),
+    })
+  }
+
+  const versions = [...versionBuckets.values()]
+    .map((bucket) => ({
+      ...bucket,
+      rings: [...bucket.rings].sort((left, right) => left.localeCompare(right)),
+    }))
+    .sort((left, right) => right.hostCount - left.hostCount || left.version.localeCompare(right.version))
+
+  const rings = [...ringBuckets.values()]
+    .map((bucket) => ({
+      ...bucket,
+      versions: [...bucket.versions].sort((left, right) => left.localeCompare(right)),
+    }))
+    .sort((left, right) => left.ring.localeCompare(right.ring))
+
+  attentionHosts.sort((left, right) =>
+    severityWeight(left.severity) - severityWeight(right.severity)
+      || left.ring.localeCompare(right.ring)
+      || left.hostId - right.hostId)
+
+  return {
+    summary: {
+      versions: versions.length,
+      canaryHosts,
+      driftHosts,
+      unmanagedHosts,
+    },
+    versions,
+    rings,
+    attentionHosts,
+  }
 }
 
 function severityWeight(severity: OpenClawFleetDigestSeverity): number {
@@ -1716,6 +2111,24 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
       })
     }
 
+    if (host.maintenance.state === 'maintenance' || host.maintenance.state === 'draining') {
+      actionItems.push({
+        id: `host-maintenance:${host.id}`,
+        severity: host.maintenance.state === 'draining' ? 'critical' : 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is ${host.maintenance.state}`,
+        detail: `${baseDetail} is blocking new Beam delivery while ${host.maintenance.state === 'draining' ? 'draining live routes for maintenance' : 'under scheduled maintenance'}${host.maintenance.reason ? `: ${host.maintenance.reason}` : ''}.`,
+        nextAction: host.maintenance.state === 'draining'
+          ? 'Resume the host after the maintenance window ends, or complete the cutover to a replacement host.'
+          : 'Resume the host when maintenance is complete, or switch to drain mode if the machine is about to be replaced.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: lastTraceHref,
+      })
+    }
+
     if (host.policy.rotation.reviewState === 'overdue' || host.policy.rotation.reviewState === 'due_soon') {
       actionItems.push({
         id: `credential-window:${host.id}`,
@@ -1811,6 +2224,38 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         workspaceSlug: host.workspaceSlug,
         href: hostHref,
         traceHref: lastTraceHref,
+      })
+    }
+
+    if (host.rollout.versionState === 'drifted') {
+      actionItems.push({
+        id: `rollout-drift:${host.id}`,
+        severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is off the desired connector version`,
+        detail: `${baseDetail} is on connector ${host.connectorVersion} while the rollout target is ${host.rollout.desiredConnectorVersion}.`,
+        nextAction: 'Finish the connector rollout on this host or move it to a pinned ring with an explicit owner note.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.rollout.canary && host.healthStatus === 'stale') {
+      actionItems.push({
+        id: `rollout-canary:${host.id}`,
+        severity: 'critical',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is a stale canary host`,
+        detail: `${baseDetail} is carrying canary rollout visibility but is currently stale, so the rollout signal is no longer trustworthy.`,
+        nextAction: 'Recover the canary host or remove it from the canary ring before trusting rollout health for this connector version.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
       })
     }
 
@@ -2242,6 +2687,8 @@ export function openClawAdminRouter(db: Database) {
     const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
     const environments = summarizeOpenClawFleetEnvironments(hosts)
     const hostGroups = summarizeOpenClawFleetGroups(hosts)
+    const maintenance = buildOpenClawFleetMaintenanceSummary(hosts)
+    const rollout = buildOpenClawFleetRolloutSummary(hosts)
     const credentialPolicy = buildOpenClawFleetCredentialPolicySummary(hosts)
     const routeHealth = buildOpenClawFleetRouteHealthSummary(db, hosts)
     const summary = hosts.reduce((acc, host) => {
@@ -2298,6 +2745,8 @@ export function openClawAdminRouter(db: Database) {
       },
       hosts,
       conflicts,
+      maintenance,
+      rollout,
       credentialPolicy,
       routeHealth,
       environments,
@@ -3183,6 +3632,148 @@ export function openClawAdminRouter(db: Database) {
     })
   })
 
+  router.post('/hosts/:id/maintenance', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const patch = buildOpenClawHostMaintenancePatch(host, {
+      state: 'maintenance',
+      owner: normalizeOptionalString(body.owner) ?? auth.session.email,
+      reason: normalizeOptionalString(body.reason),
+    })
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.maintenance_enabled',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        owner: patch.maintenance.owner,
+        reason: patch.maintenance.reason,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({ host: serializeHost(db, updated) })
+  })
+
+  router.post('/hosts/:id/drain', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const patch = buildOpenClawHostMaintenancePatch(host, {
+      state: 'draining',
+      owner: normalizeOptionalString(body.owner) ?? auth.session.email,
+      reason: normalizeOptionalString(body.reason),
+    })
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.drain_started',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        owner: patch.maintenance.owner,
+        reason: patch.maintenance.reason,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({ host: serializeHost(db, updated) })
+  })
+
+  router.post('/hosts/:id/resume', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const patch = buildOpenClawHostMaintenancePatch(host, {
+      state: 'serving',
+    })
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.resumed',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({ host: serializeHost(db, updated) })
+  })
+
   router.patch('/hosts/:id/policy', async (c) => {
     const auth = requireAdminRole(db, c.req.raw, 'admin')
     if (auth instanceof Response) {
@@ -3267,6 +3858,66 @@ export function openClawAdminRouter(db: Database) {
         rotationWindowDurationHours: nextMetadata.credentialPolicy?.rotationWindowDurationHours ?? null,
         recoveryOwner: nextMetadata.recoveryRunbook?.owner ?? null,
         recoveryStatus: nextMetadata.recoveryRunbook?.status ?? null,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, updated),
+    })
+  })
+
+  router.patch('/hosts/:id/rollout', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const patch = buildOpenClawHostRolloutPatch(host, {
+      ring: body.ring === 'canary' || body.ring === 'stable' || body.ring === 'pinned'
+        ? body.ring
+        : undefined,
+      desiredConnectorVersion: Object.prototype.hasOwnProperty.call(body, 'desiredConnectorVersion')
+        ? normalizeOptionalString(body.desiredConnectorVersion)
+        : undefined,
+      notes: Object.prototype.hasOwnProperty.call(body, 'notes')
+        ? normalizeOptionalString(body.notes)
+        : undefined,
+    })
+
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.rollout_updated',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        ring: patch.rollout.ring,
+        desiredConnectorVersion: patch.rollout.desiredConnectorVersion,
       },
     })
 

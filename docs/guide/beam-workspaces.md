@@ -191,6 +191,7 @@ The fleet surface also gives operators explicit day-2 actions:
 
 - rotate host credentials without reinstalling the whole host
 - recover or replace a revoked or lost host with a new credential cutover
+- place a host into maintenance mode or drain it before planned work, then resume it explicitly when Beam delivery is safe again
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
 - open a guided remediation view for one duplicated Beam ID, keep the recommended owner route, and optionally disable the competing routes in one step
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
@@ -200,6 +201,8 @@ The fleet surface also gives operators explicit day-2 actions:
 - complete recovery cleanup after a successful cutover so the host drops back into the normal credential review loop
 - inspect a route-health and SLO summary that rolls up missing receipts, failed receipts, latency buckets, and the exact hosts currently degrading fleet delivery
 - label hosts with environment and group metadata such as `prod`, `staging`, `lab`, `edge`, or team ownership
+- track connector rollout rings (`stable`, `canary`, `pinned`), desired connector versions, and drift directly on each host
+- inspect one fleet-wide rollout inventory that shows version buckets, canary coverage, pinned hosts, and drift attention before a connector rollout spreads
 - stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
 - clear staged revoke reviews again when a maintenance plan changes
 
@@ -207,6 +210,8 @@ The host detail and fleet summary now also expose the operational thresholds beh
 
 - credential rotation interval, next due time, and the next allowed rotation window
 - recovery owner, replacement host label, cutover window notes, and a cleanup-ready state after recovery completes
+- maintenance owner, maintenance reason, maintenance start time, and whether Beam delivery is intentionally blocked for that host
+- the connector rollout ring, desired connector version, and whether the currently reported connector version has drifted
 - receipt coverage across active routes
 - p50 / p95 latency, SLO bucket counts, and direct links back to the host, workspace, and latest trace that caused the warning
 
