@@ -509,6 +509,12 @@ export default function OpenClawFleetPage() {
     }
   }
 
+  function focusHost(hostId: number) {
+    const next = new URLSearchParams(searchParams)
+    next.set('host', String(hostId))
+    setSearchParams(next, { replace: true })
+  }
+
   function updateFleetQueryParam(key: 'environment' | 'group', value: string) {
     const next = new URLSearchParams(searchParams)
     if (!value || value === 'all') {
@@ -587,6 +593,14 @@ export default function OpenClawFleetPage() {
       await Promise.all([loadOverview(), loadDigest()])
       await loadHost(host.id)
     }, `Recovery credential for ${hostTitle(host)} issued.`)
+  }
+
+  async function handleCompleteRecoveryCleanup(host: OpenClawHostSummary) {
+    await runAction(`cleanup-${host.id}`, async () => {
+      await directoryApi.completeOpenClawHostRecoveryCleanup(host.id)
+      await Promise.all([loadOverview(), loadDigest()])
+      await loadHost(host.id)
+    }, `Recovery cleanup completed for ${hostTitle(host)}.`)
   }
 
   async function handleSavePlacement(host: OpenClawHostSummary) {
@@ -803,6 +817,177 @@ export default function OpenClawFleetPage() {
         <MetricCard label="Latency watch" value={!overview ? '—' : formatNumber(overview.summary.degradedHosts)} tone={(overview?.summary.degradedHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Rotation due" value={!overview ? '—' : formatNumber(overview.summary.rotationDueHosts)} tone={(overview?.summary.rotationDueHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Duplicate conflicts" value={!overview ? '—' : formatNumber(overview.summary.duplicateIdentityConflicts)} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Credential review queue</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Hosts that need rotation attention, recovery ownership, or post-recovery cleanup before they fall out of the normal fleet loop.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.credentialPolicy.attentionHosts.length)} queued` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+            <MetricCard label="Overdue" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.overdue)} tone={(overview?.credentialPolicy.counts.overdue ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="Due soon" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.dueSoon)} tone={(overview?.credentialPolicy.counts.dueSoon ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Window open" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.windowOpen)} tone={(overview?.credentialPolicy.counts.windowOpen ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Cutovers open" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.recoveryCutover)} tone={(overview?.credentialPolicy.counts.recoveryCutover ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="Cleanup ready" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.cleanupRecommended)} tone={(overview?.credentialPolicy.counts.cleanupRecommended ?? 0) > 0 ? 'warning' : 'default'} />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.credentialPolicy.attentionHosts.length > 0 ? (
+              overview.credentialPolicy.attentionHosts.map((item) => {
+                const host = overview.hosts.find((candidate) => candidate.id === item.hostId) ?? null
+                return (
+                  <div key={`credential-review-${item.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.hostLabel || `Host ${item.hostId}`}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          {item.reasons.join(' · ')}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <StatusPill label={item.severity} tone={item.severity === 'critical' ? 'critical' : 'warning'} />
+                        <StatusPill label={item.rotationReviewState} tone={item.rotationReviewState === 'overdue' ? 'critical' : item.rotationReviewState === 'due_soon' ? 'warning' : 'default'} />
+                        <StatusPill label={item.recoveryStatus} tone={item.recoveryStatus === 'cutover_pending' ? 'critical' : item.recoveryStatus === 'prepared' ? 'warning' : item.recoveryStatus === 'completed' ? 'success' : 'default'} />
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                      <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
+                      <div>{item.credentialAgeHours === null ? 'No credential age recorded' : `Credential age ${formatNumber(item.credentialAgeHours)}h`}</div>
+                      <div>{item.nextRotationDueAt ? `Rotation due ${formatDateTime(item.nextRotationDueAt)}` : 'No rotation due timestamp'}</div>
+                      <div>{item.windowOpen ? 'Rotation window is open now' : item.nextRotationWindowStartsAt ? `Window opens ${formatDateTime(item.nextRotationWindowStartsAt)}` : 'No rotation window yet'}</div>
+                      <div>{item.recoveryOwner ? `Recovery owner ${item.recoveryOwner}` : 'No recovery owner assigned'}</div>
+                      <div>{item.cleanupRecommended ? 'Recovery cleanup is ready' : 'No cleanup action pending'}</div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        onClick={() => focusHost(item.hostId)}
+                      >
+                        Open host
+                      </button>
+                      {host?.status === 'active' ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `rotate-${host.id}`}
+                          onClick={() => { void handleRotate(host) }}
+                        >
+                          {actionBusy === `rotate-${host.id}` ? 'Rotating…' : 'Rotate credential'}
+                        </button>
+                      ) : null}
+                      {host && (host.status === 'revoked' || host.healthStatus === 'stale' || item.recoveryStatus === 'cutover_pending') ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `recover-${host.id}`}
+                          onClick={() => { void handleRecover(host) }}
+                        >
+                          {actionBusy === `recover-${host.id}` ? 'Recovering…' : 'Recover host'}
+                        </button>
+                      ) : null}
+                      {host && item.cleanupRecommended ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `cleanup-${host.id}`}
+                          onClick={() => { void handleCompleteRecoveryCleanup(host) }}
+                        >
+                          {actionBusy === `cleanup-${host.id}` ? 'Cleaning…' : 'Complete cleanup'}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                )
+              })
+            ) : (
+              <EmptyPanel label="No hosts are waiting in the credential review queue." />
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Route health and SLO</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Fleet-wide receipt coverage, latency buckets, and the hosts currently driving degraded route health.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.routeHealth.attentionHosts.length)} hosts need review` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Coverage" value={!overview ? '—' : formatPercent(overview.routeHealth.summary.receiptCoverageRatio)} tone={(overview?.routeHealth.summary.receiptCoverageRatio ?? 1) < 0.8 ? 'warning' : 'success'} />
+            <MetricCard label="Missing receipts" value={!overview ? '—' : formatNumber(overview.routeHealth.summary.routesMissingReceipts)} tone={(overview?.routeHealth.summary.routesMissingReceipts ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Failed receipts" value={!overview ? '—' : formatNumber(overview.routeHealth.summary.failedReceipts)} tone={(overview?.routeHealth.summary.failedReceipts ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="p95 latency" value={!overview ? '—' : formatLatency(overview.routeHealth.latency.p95Ms)} tone={(overview?.routeHealth.latency.overSlo ?? 0) > 0 ? 'warning' : 'success'} />
+          </div>
+
+          <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2 xl:grid-cols-3">
+            <div>{overview ? `${formatNumber(overview.routeHealth.summary.activeRoutes)} active routes · ${formatNumber(overview.routeHealth.summary.routesWithReceipts)} with receipts` : '—'}</div>
+            <div>{overview ? `${formatNumber(overview.routeHealth.summary.hostsWithMissingReceipts)} hosts missing receipts · ${formatNumber(overview.routeHealth.summary.hostsWithFailedReceipts)} hosts failing` : '—'}</div>
+            <div>{overview ? `${formatNumber(overview.routeHealth.latency.buckets.withinTarget)} within target · ${formatNumber(overview.routeHealth.latency.buckets.overTarget)} over target · ${formatNumber(overview.routeHealth.latency.buckets.overDoubleTarget)} over 2x` : '—'}</div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.routeHealth.attentionHosts.length > 0 ? (
+              overview.routeHealth.attentionHosts.map((item) => (
+                <div key={`route-health-${item.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.hostLabel || `Host ${item.hostId}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.reasons.join(' · ')}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label={item.severity} tone={item.severity === 'critical' ? 'critical' : 'warning'} />
+                      <StatusPill label={item.healthStatus} tone={hostHealthTone(item.healthStatus)} />
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
+                    <div>{`${formatNumber(item.activeRoutes)} active · ${formatNumber(item.missingReceipts)} missing · ${formatNumber(item.failedReceipts)} failed`}</div>
+                    <div>{`Receipt coverage ${formatPercent(item.receiptCoverageRatio)}`}</div>
+                    <div>{`p95 ${formatLatency(item.p95LatencyMs)} · ${formatNumber(item.overSlo)} over target`}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      onClick={() => focusHost(item.hostId)}
+                    >
+                      Open host
+                    </button>
+                    {item.workspaceHref && item.workspaceSlug ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.workspaceHref}>
+                        Open workspace
+                      </Link>
+                    ) : null}
+                    {item.traceHref ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.traceHref}>
+                        Open trace
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No hosts are currently breaching route-health review thresholds." />
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="panel">
@@ -1459,6 +1644,12 @@ export default function OpenClawFleetPage() {
                       {host.placement.revokeReviewRequestedAt ? (
                         <StatusPill label="revoke review" tone="warning" />
                       ) : null}
+                      {host.policy.rotation.windowOpen ? (
+                        <StatusPill label="rotation window open" tone="warning" />
+                      ) : null}
+                      {host.policy.recovery.cleanupRecommended ? (
+                        <StatusPill label="recovery cleanup" tone="warning" />
+                      ) : null}
                     </div>
 
                     <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
@@ -1473,6 +1664,7 @@ export default function OpenClawFleetPage() {
                       <div>{host.policy.rotation.nextRotationDueAt ? `Rotation ${host.policy.rotation.reviewState === 'overdue' ? 'overdue' : 'due'} ${formatRelativeTime(host.policy.rotation.nextRotationDueAt)}` : 'No rotation schedule yet'}</div>
                       <div>{host.summary.delivery.latency.samples > 0 ? `p95 ${formatLatency(host.summary.delivery.latency.p95Ms)} · ${formatNumber(host.summary.delivery.latency.overSlo)} breach` : 'No latency samples yet'}</div>
                       <div>{host.policy.recovery.status !== 'idle' ? `Recovery ${host.policy.recovery.status}${host.policy.recovery.owner ? ` · ${host.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
+                      <div>{host.policy.recovery.cleanupRecommended ? 'Recovery cleanup ready' : 'No recovery cleanup pending'}</div>
                     </div>
 
                     <div className="mt-3 flex flex-wrap gap-2">
@@ -1526,6 +1718,19 @@ export default function OpenClawFleetPage() {
                           }}
                         >
                           {actionBusy === `recover-${host.id}` ? 'Recovering…' : 'Recover host'}
+                        </button>
+                      ) : null}
+                      {host.policy.recovery.cleanupRecommended ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `cleanup-${host.id}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleCompleteRecoveryCleanup(host)
+                          }}
+                        >
+                          {actionBusy === `cleanup-${host.id}` ? 'Cleaning…' : 'Complete cleanup'}
                         </button>
                       ) : null}
                     </div>
@@ -2005,8 +2210,9 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.summary.delivery.lastRequestedAt ? `Last receipt ${formatRelativeTime(selectedHost.summary.delivery.lastRequestedAt)} · ${selectedHost.summary.delivery.lastStatus ?? 'unknown'}` : 'No delivery receipts yet'}</div>
                   <div>{`Receipt coverage ${formatPercent(selectedHost.summary.delivery.coverage.ratio)} · ${formatNumber(selectedHost.summary.delivery.coverage.missingReceipts)} missing`}</div>
                   <div>{selectedHost.summary.delivery.latency.samples > 0 ? `Latency avg ${formatLatency(selectedHost.summary.delivery.latency.avgMs)} · p95 ${formatLatency(selectedHost.summary.delivery.latency.p95Ms)}` : 'No latency samples yet'}</div>
-                  <div>{selectedHost.policy.rotation.nextRotationWindowStartsAt ? `Rotation window ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowStartsAt)}` : 'No rotation window scheduled'}</div>
+                  <div>{selectedHost.policy.rotation.windowOpen ? 'Rotation window is open now' : selectedHost.policy.rotation.nextRotationWindowStartsAt ? `Rotation window ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowStartsAt)}` : 'No rotation window scheduled'}</div>
                   <div>{selectedHost.policy.recovery.status !== 'idle' ? `Recovery ${selectedHost.policy.recovery.status}${selectedHost.policy.recovery.owner ? ` · ${selectedHost.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
+                  <div>{selectedHost.policy.recovery.cleanupRecommended ? 'Recovery cleanup ready' : 'No recovery cleanup pending'}</div>
                 </div>
               </div>
 
@@ -2201,8 +2407,10 @@ export default function OpenClawFleetPage() {
                 <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
                   <div>{selectedHost.policy.rotation.nextRotationDueAt ? `Next rotation due ${formatDateTime(selectedHost.policy.rotation.nextRotationDueAt)}` : 'No next rotation due yet'}</div>
                   <div>{selectedHost.policy.rotation.nextRotationWindowEndsAt ? `Window ends ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowEndsAt)}` : 'No rotation window end yet'}</div>
+                  <div>{selectedHost.policy.rotation.windowOpen ? 'Rotation window is open now' : selectedHost.policy.rotation.hoursUntilWindowStarts !== null ? `Window opens in ${formatNumber(selectedHost.policy.rotation.hoursUntilWindowStarts)}h` : 'No rotation window queued'}</div>
                   <div>{selectedHost.policy.recovery.windowStartsAt ? `Recovery window starts ${formatDateTime(selectedHost.policy.recovery.windowStartsAt)}` : 'No recovery window start yet'}</div>
                   <div>{selectedHost.policy.recovery.windowEndsAt ? `Recovery window ends ${formatDateTime(selectedHost.policy.recovery.windowEndsAt)}` : 'No recovery window end yet'}</div>
+                  <div>{selectedHost.policy.recovery.cleanupRecommended ? 'Post-recovery cleanup is ready' : 'No post-recovery cleanup needed'}</div>
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">
@@ -2214,6 +2422,16 @@ export default function OpenClawFleetPage() {
                   >
                     {actionBusy === `policy-${selectedHost.id}` ? 'Saving…' : 'Save policy'}
                   </button>
+                  {selectedHost.policy.recovery.cleanupRecommended ? (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      disabled={actionBusy === `cleanup-${selectedHost.id}`}
+                      onClick={() => { void handleCompleteRecoveryCleanup(selectedHost) }}
+                    >
+                      {actionBusy === `cleanup-${selectedHost.id}` ? 'Cleaning…' : 'Complete recovery cleanup'}
+                    </button>
+                  ) : null}
                 </div>
               </div>
 

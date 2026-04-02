@@ -195,6 +195,89 @@ type OpenClawHostGroupSummary = {
   hostIds: number[]
 }
 
+type OpenClawFleetCredentialPolicyAttentionHost = {
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  healthStatus: OpenClawHostHealth
+  credentialState: OpenClawHostCredentialState
+  credentialAgeHours: number | null
+  rotationReviewState: OpenClawHostRotationReviewState
+  nextRotationDueAt: string | null
+  nextRotationWindowStartsAt: string | null
+  nextRotationWindowEndsAt: string | null
+  dueInHours: number | null
+  windowOpen: boolean
+  recoveryStatus: OpenClawHostRecoveryRunbookState
+  recoveryOwner: string | null
+  cleanupRecommended: boolean
+  reasons: string[]
+  severity: OpenClawFleetDigestSeverity
+  href: string
+  workspaceHref: string | null
+}
+
+type OpenClawFleetCredentialPolicySummary = {
+  counts: {
+    overdue: number
+    dueSoon: number
+    windowOpen: number
+    rotationPending: number
+    recoveryPrepared: number
+    recoveryCutover: number
+    recoveryCompleted: number
+    cleanupRecommended: number
+    missingRecoveryOwner: number
+  }
+  attentionHosts: OpenClawFleetCredentialPolicyAttentionHost[]
+}
+
+type OpenClawFleetRouteHealthAttentionHost = {
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  healthStatus: OpenClawHostHealth
+  receiptCoverageRatio: number | null
+  missingReceipts: number
+  failedReceipts: number
+  activeRoutes: number
+  p95LatencyMs: number | null
+  overSlo: number
+  reasons: string[]
+  severity: OpenClawFleetDigestSeverity
+  href: string
+  workspaceHref: string | null
+  traceHref: string | null
+}
+
+type OpenClawFleetRouteHealthSummary = {
+  summary: {
+    targetLatencyMs: number
+    activeRoutes: number
+    routesWithReceipts: number
+    routesMissingReceipts: number
+    receiptCoverageRatio: number | null
+    failedReceipts: number
+    degradedHosts: number
+    hostsWithMissingReceipts: number
+    hostsWithFailedReceipts: number
+  }
+  latency: {
+    samples: number
+    avgMs: number | null
+    p50Ms: number | null
+    p95Ms: number | null
+    overSlo: number
+    overDoubleSlo: number
+    buckets: {
+      withinTarget: number
+      overTarget: number
+      overDoubleTarget: number
+    }
+  }
+  attentionHosts: OpenClawFleetRouteHealthAttentionHost[]
+}
+
 type OpenClawFleetBulkAction =
   | 'apply_labels'
   | 'stage_revoke_review'
@@ -388,6 +471,8 @@ function computeNextRotationWindow(
       nextRotationWindowStartsAt: null as string | null,
       nextRotationWindowEndsAt: null as string | null,
       dueInHours: null as number | null,
+      windowOpen: false,
+      hoursUntilWindowStarts: null as number | null,
       reviewState: 'scheduled' as OpenClawHostRotationReviewState,
     }
   }
@@ -402,10 +487,11 @@ function computeNextRotationWindow(
   }
   const windowEnd = new Date(windowStart.getTime() + (windowDurationHours * 60 * 60 * 1000))
   const dueInHours = hoursUntil(dueAt.toISOString())
+  const now = Date.now()
   const reviewState: OpenClawHostRotationReviewState =
-    dueMs <= Date.now()
+    dueMs <= now
       ? 'overdue'
-      : dueMs <= (Date.now() + (OPENCLAW_ROTATION_DUE_SOON_HOURS * 60 * 60 * 1000))
+      : dueMs <= (now + (OPENCLAW_ROTATION_DUE_SOON_HOURS * 60 * 60 * 1000))
         ? 'due_soon'
         : 'scheduled'
 
@@ -414,6 +500,8 @@ function computeNextRotationWindow(
     nextRotationWindowStartsAt: windowStart.toISOString(),
     nextRotationWindowEndsAt: windowEnd.toISOString(),
     dueInHours,
+    windowOpen: now >= windowStart.getTime() && now <= windowEnd.getTime(),
+    hoursUntilWindowStarts: hoursUntil(windowStart.toISOString()),
     reviewState,
   }
 }
@@ -477,9 +565,24 @@ function serializeOpenClawHostPolicy(host: OpenClawHostRow) {
   const recoveryStatus: OpenClawHostRecoveryRunbookState =
     host.credential_state === 'recovery_pending'
       ? 'cutover_pending'
-      : host.recovery_completed_at
-        ? 'completed'
-        : (rawRecoveryStatus ?? 'idle')
+      : rawRecoveryStatus === 'idle'
+        ? 'idle'
+        : host.recovery_completed_at
+          ? 'completed'
+          : (rawRecoveryStatus ?? 'idle')
+  const recoveryNotes = normalizeOptionalString(recoveryRunbook.notes)
+  const replacementHostLabel = normalizeOptionalString(recoveryRunbook.replacementHostLabel)
+  const recoveryWindowStartsAt = normalizeIsoDateTime(recoveryRunbook.windowStartsAt)
+  const recoveryWindowEndsAt = normalizeIsoDateTime(recoveryRunbook.windowEndsAt)
+  const cleanupRecommended =
+    recoveryStatus === 'completed'
+    && Boolean(
+      recoveryNotes
+      || replacementHostLabel
+      || recoveryWindowStartsAt
+      || recoveryWindowEndsAt
+      || rawRecoveryStatus === 'completed',
+    )
 
   return {
     rotation: {
@@ -490,16 +593,19 @@ function serializeOpenClawHostPolicy(host: OpenClawHostRow) {
       nextRotationWindowStartsAt: nextRotation.nextRotationWindowStartsAt,
       nextRotationWindowEndsAt: nextRotation.nextRotationWindowEndsAt,
       dueInHours: nextRotation.dueInHours,
+      windowOpen: nextRotation.windowOpen,
+      hoursUntilWindowStarts: nextRotation.hoursUntilWindowStarts,
       reviewState: nextRotation.reviewState,
     },
     recovery: {
       owner: normalizeOptionalString(recoveryRunbook.owner),
       status: recoveryStatus,
-      notes: normalizeOptionalString(recoveryRunbook.notes),
-      replacementHostLabel: normalizeOptionalString(recoveryRunbook.replacementHostLabel),
-      windowStartsAt: normalizeIsoDateTime(recoveryRunbook.windowStartsAt),
-      windowEndsAt: normalizeIsoDateTime(recoveryRunbook.windowEndsAt),
+      notes: recoveryNotes,
+      replacementHostLabel,
+      windowStartsAt: recoveryWindowStartsAt,
+      windowEndsAt: recoveryWindowEndsAt,
       updatedAt: normalizeIsoDateTime(recoveryRunbook.updatedAt) ?? host.recovery_completed_at,
+      cleanupRecommended,
     },
   }
 }
@@ -1229,6 +1335,206 @@ function summarizeOpenClawFleetGroups(hosts: Array<ReturnType<typeof serializeHo
     .sort((left, right) => left.label.localeCompare(right.label))
 }
 
+function severityWeight(severity: OpenClawFleetDigestSeverity): number {
+  return severity === 'critical' ? 0 : 1
+}
+
+function buildOpenClawFleetCredentialPolicySummary(
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): OpenClawFleetCredentialPolicySummary {
+  const counts: OpenClawFleetCredentialPolicySummary['counts'] = {
+    overdue: 0,
+    dueSoon: 0,
+    windowOpen: 0,
+    rotationPending: 0,
+    recoveryPrepared: 0,
+    recoveryCutover: 0,
+    recoveryCompleted: 0,
+    cleanupRecommended: 0,
+    missingRecoveryOwner: 0,
+  }
+  const attentionHosts: OpenClawFleetCredentialPolicyAttentionHost[] = []
+
+  for (const host of hosts) {
+    const reasons: string[] = []
+    let severity: OpenClawFleetDigestSeverity = 'warning'
+    if (host.policy.rotation.reviewState === 'overdue') {
+      counts.overdue += 1
+      reasons.push('credential rotation overdue')
+      severity = 'critical'
+    } else if (host.policy.rotation.reviewState === 'due_soon') {
+      counts.dueSoon += 1
+      reasons.push('credential rotation due soon')
+    }
+
+    if (host.policy.rotation.windowOpen) {
+      counts.windowOpen += 1
+      reasons.push('rotation window open')
+    }
+
+    if (host.credentialState === 'rotation_pending') {
+      counts.rotationPending += 1
+      reasons.push('rotated credential not yet active')
+    }
+
+    if (host.policy.recovery.status === 'prepared') {
+      counts.recoveryPrepared += 1
+      reasons.push('recovery runbook prepared')
+    } else if (host.policy.recovery.status === 'cutover_pending') {
+      counts.recoveryCutover += 1
+      reasons.push('recovery cutover pending')
+      severity = 'critical'
+    } else if (host.policy.recovery.status === 'completed') {
+      counts.recoveryCompleted += 1
+    }
+
+    if (host.policy.recovery.cleanupRecommended) {
+      counts.cleanupRecommended += 1
+      reasons.push('post-recovery cleanup recommended')
+    }
+
+    if (host.policy.recovery.status !== 'idle' && !host.policy.recovery.owner) {
+      counts.missingRecoveryOwner += 1
+      reasons.push('recovery owner missing')
+    }
+
+    if (reasons.length === 0) {
+      continue
+    }
+
+    attentionHosts.push({
+      hostId: host.id,
+      hostLabel: host.label,
+      workspaceSlug: host.workspaceSlug,
+      healthStatus: host.healthStatus,
+      credentialState: host.credentialState,
+      credentialAgeHours: host.credentialAgeHours,
+      rotationReviewState: host.policy.rotation.reviewState,
+      nextRotationDueAt: host.policy.rotation.nextRotationDueAt,
+      nextRotationWindowStartsAt: host.policy.rotation.nextRotationWindowStartsAt,
+      nextRotationWindowEndsAt: host.policy.rotation.nextRotationWindowEndsAt,
+      dueInHours: host.policy.rotation.dueInHours,
+      windowOpen: host.policy.rotation.windowOpen,
+      recoveryStatus: host.policy.recovery.status,
+      recoveryOwner: host.policy.recovery.owner,
+      cleanupRecommended: host.policy.recovery.cleanupRecommended,
+      reasons,
+      severity,
+      href: buildOpenClawFleetHref(host.id),
+      workspaceHref: buildWorkspaceHref(host.workspaceSlug),
+    })
+  }
+
+  attentionHosts.sort((left, right) =>
+    severityWeight(left.severity) - severityWeight(right.severity)
+      || (left.dueInHours ?? Number.POSITIVE_INFINITY) - (right.dueInHours ?? Number.POSITIVE_INFINITY)
+      || (right.credentialAgeHours ?? 0) - (left.credentialAgeHours ?? 0)
+      || left.hostId - right.hostId)
+
+  return {
+    counts,
+    attentionHosts,
+  }
+}
+
+function buildOpenClawFleetRouteHealthSummary(
+  db: Database,
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): OpenClawFleetRouteHealthSummary {
+  const targetBeamIds = hosts.flatMap((host) => listOpenClawResolvedRoutesForHost(db, host.id).map((route) => route.beam_id))
+  const recentLogs = listRecentIntentLogsByTargets(db, targetBeamIds)
+  const ackLatencies = recentLogs
+    .filter((log) => log.status === 'acked' && typeof log.round_trip_latency_ms === 'number')
+    .map((log) => log.round_trip_latency_ms as number)
+  const totalLatency = ackLatencies.reduce((sum, value) => sum + value, 0)
+  const overTarget = ackLatencies.filter((value) => value > OPENCLAW_ROUTE_LATENCY_SLO_MS)
+  const overDoubleTarget = ackLatencies.filter((value) => value > OPENCLAW_ROUTE_LATENCY_SLO_MS * 2)
+  const attentionHosts: OpenClawFleetRouteHealthAttentionHost[] = []
+
+  for (const host of hosts) {
+    const reasons: string[] = []
+    let severity: OpenClawFleetDigestSeverity = 'warning'
+    if (host.healthStatus === 'stale') {
+      reasons.push('host stale')
+      severity = 'critical'
+    }
+    if (host.summary.delivery.failed > 0) {
+      reasons.push('failed receipts')
+      severity = 'critical'
+    }
+    if (host.summary.delivery.coverage.missingReceipts > 0) {
+      reasons.push('missing receipts')
+    }
+    if (host.summary.delivery.latency.overSlo > 0) {
+      reasons.push('latency above target')
+      if ((host.summary.delivery.latency.p95Ms ?? 0) > OPENCLAW_ROUTE_LATENCY_SLO_MS * 2) {
+        severity = 'critical'
+      }
+    }
+    if (reasons.length === 0) {
+      continue
+    }
+    attentionHosts.push({
+      hostId: host.id,
+      hostLabel: host.label,
+      workspaceSlug: host.workspaceSlug,
+      healthStatus: host.healthStatus,
+      receiptCoverageRatio: host.summary.delivery.coverage.ratio,
+      missingReceipts: host.summary.delivery.coverage.missingReceipts,
+      failedReceipts: host.summary.delivery.failed,
+      activeRoutes: host.summary.delivery.coverage.activeRoutes,
+      p95LatencyMs: host.summary.delivery.latency.p95Ms,
+      overSlo: host.summary.delivery.latency.overSlo,
+      reasons,
+      severity,
+      href: buildOpenClawFleetHref(host.id),
+      workspaceHref: buildWorkspaceHref(host.workspaceSlug),
+      traceHref: host.summary.delivery.lastHref,
+    })
+  }
+
+  attentionHosts.sort((left, right) =>
+    severityWeight(left.severity) - severityWeight(right.severity)
+      || right.failedReceipts - left.failedReceipts
+      || right.missingReceipts - left.missingReceipts
+      || (right.p95LatencyMs ?? 0) - (left.p95LatencyMs ?? 0)
+      || left.hostId - right.hostId)
+
+  const activeRoutes = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.activeRoutes, 0)
+  const routesWithReceipts = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.routesWithReceipts, 0)
+  const routesMissingReceipts = hosts.reduce((sum, host) => sum + host.summary.delivery.coverage.missingReceipts, 0)
+  const failedReceipts = hosts.reduce((sum, host) => sum + host.summary.delivery.failed, 0)
+  const degradedHosts = hosts.filter((host) => host.summary.delivery.latency.degraded).length
+
+  return {
+    summary: {
+      targetLatencyMs: OPENCLAW_ROUTE_LATENCY_SLO_MS,
+      activeRoutes,
+      routesWithReceipts,
+      routesMissingReceipts,
+      receiptCoverageRatio: activeRoutes > 0 ? Number((routesWithReceipts / activeRoutes).toFixed(3)) : null,
+      failedReceipts,
+      degradedHosts,
+      hostsWithMissingReceipts: hosts.filter((host) => host.summary.delivery.coverage.missingReceipts > 0).length,
+      hostsWithFailedReceipts: hosts.filter((host) => host.summary.delivery.failed > 0).length,
+    },
+    latency: {
+      samples: ackLatencies.length,
+      avgMs: ackLatencies.length > 0 ? Math.round(totalLatency / ackLatencies.length) : null,
+      p50Ms: percentile(ackLatencies, 0.5),
+      p95Ms: percentile(ackLatencies, 0.95),
+      overSlo: overTarget.length,
+      overDoubleSlo: overDoubleTarget.length,
+      buckets: {
+        withinTarget: ackLatencies.filter((value) => value <= OPENCLAW_ROUTE_LATENCY_SLO_MS).length,
+        overTarget: overTarget.length,
+        overDoubleTarget: overDoubleTarget.length,
+      },
+    },
+    attentionHosts,
+  }
+}
+
 function buildOpenClawFleetEscalations(actionItems: OpenClawFleetDigestItem[]): OpenClawFleetEscalation[] {
   return actionItems.filter((item) => item.severity === 'critical')
 }
@@ -1468,6 +1774,22 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         nextAction: host.policy.recovery.status === 'cutover_pending'
           ? 'Complete the recovery cutover, confirm fresh routes on the replacement host, then close the runbook state.'
           : 'Review the recovery notes and schedule the replacement window before the next operator handoff.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.policy.recovery.cleanupRecommended) {
+      actionItems.push({
+        id: `recovery-cleanup:${host.id}`,
+        severity: 'warning',
+        category: 'credential',
+        title: `${hostTitleForDigest(host)} has recovery cleanup pending`,
+        detail: `${baseDetail} already completed recovery cutover, but the runbook still carries recovery-specific window or replacement metadata.`,
+        nextAction: 'Review the replacement host state and then complete recovery cleanup so the host returns to the normal credential review queue.',
         hostId: host.id,
         hostLabel: host.label,
         workspaceSlug: host.workspaceSlug,
@@ -1920,6 +2242,8 @@ export function openClawAdminRouter(db: Database) {
     const digest = buildOpenClawFleetDigest(db, new URL(c.req.url).origin)
     const environments = summarizeOpenClawFleetEnvironments(hosts)
     const hostGroups = summarizeOpenClawFleetGroups(hosts)
+    const credentialPolicy = buildOpenClawFleetCredentialPolicySummary(hosts)
+    const routeHealth = buildOpenClawFleetRouteHealthSummary(db, hosts)
     const summary = hosts.reduce((acc, host) => {
       acc.totalHosts += 1
       if (host.status === 'pending') acc.pendingHosts += 1
@@ -1974,6 +2298,8 @@ export function openClawAdminRouter(db: Database) {
       },
       hosts,
       conflicts,
+      credentialPolicy,
+      routeHealth,
       environments,
       hostGroups,
     })
@@ -3002,6 +3328,64 @@ export function openClawAdminRouter(db: Database) {
         directoryUrl: new URL(c.req.url).origin,
         credential: recovered.credential,
       }),
+    })
+  })
+
+  router.post('/hosts/:id/recovery/cleanup', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const policy = serializeOpenClawHostPolicy(host)
+    if (!policy.recovery.cleanupRecommended) {
+      return c.json({ error: 'Recovery cleanup is not currently required', errorCode: 'RECOVERY_CLEANUP_NOT_REQUIRED' }, 409)
+    }
+
+    const metadata = parseOpenClawHostMetadata(host.metadata_json)
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: serializeOpenClawHostMetadata({
+        ...metadata,
+        recoveryRunbook: {
+          ...(metadata.recoveryRunbook ?? {}),
+          owner: normalizeOptionalString(metadata.recoveryRunbook?.owner),
+          status: 'idle',
+          notes: null,
+          replacementHostLabel: null,
+          windowStartsAt: null,
+          windowEndsAt: null,
+          updatedAt: new Date().toISOString(),
+        },
+      }),
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.recovery_cleanup_completed',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        owner: serializeOpenClawHostPolicy(updated).recovery.owner,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, updated),
     })
   })
 

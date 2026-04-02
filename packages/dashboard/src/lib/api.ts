@@ -346,6 +346,8 @@ export interface OpenClawHostSummary {
       nextRotationWindowStartsAt: string | null
       nextRotationWindowEndsAt: string | null
       dueInHours: number | null
+      windowOpen: boolean
+      hoursUntilWindowStarts: number | null
       reviewState: OpenClawHostRotationReviewState
     }
     recovery: {
@@ -356,6 +358,7 @@ export interface OpenClawHostSummary {
       windowStartsAt: string | null
       windowEndsAt: string | null
       updatedAt: string | null
+      cleanupRecommended: boolean
     }
   }
   placement: {
@@ -493,6 +496,83 @@ export interface OpenClawFleetOverviewResponse {
     pendingCredentialActions: number
     actionItems: number
     criticalItems: number
+  }
+  credentialPolicy: {
+    counts: {
+      overdue: number
+      dueSoon: number
+      windowOpen: number
+      rotationPending: number
+      recoveryPrepared: number
+      recoveryCutover: number
+      recoveryCompleted: number
+      cleanupRecommended: number
+      missingRecoveryOwner: number
+    }
+    attentionHosts: Array<{
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      healthStatus: OpenClawHostHealth
+      credentialState: OpenClawHostCredentialState
+      credentialAgeHours: number | null
+      rotationReviewState: OpenClawHostRotationReviewState
+      nextRotationDueAt: string | null
+      nextRotationWindowStartsAt: string | null
+      nextRotationWindowEndsAt: string | null
+      dueInHours: number | null
+      windowOpen: boolean
+      recoveryStatus: OpenClawHostRecoveryRunbookState
+      recoveryOwner: string | null
+      cleanupRecommended: boolean
+      reasons: string[]
+      severity: 'warning' | 'critical'
+      href: string
+      workspaceHref: string | null
+    }>
+  }
+  routeHealth: {
+    summary: {
+      targetLatencyMs: number
+      activeRoutes: number
+      routesWithReceipts: number
+      routesMissingReceipts: number
+      receiptCoverageRatio: number | null
+      failedReceipts: number
+      degradedHosts: number
+      hostsWithMissingReceipts: number
+      hostsWithFailedReceipts: number
+    }
+    latency: {
+      samples: number
+      avgMs: number | null
+      p50Ms: number | null
+      p95Ms: number | null
+      overSlo: number
+      overDoubleSlo: number
+      buckets: {
+        withinTarget: number
+        overTarget: number
+        overDoubleTarget: number
+      }
+    }
+    attentionHosts: Array<{
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      healthStatus: OpenClawHostHealth
+      receiptCoverageRatio: number | null
+      missingReceipts: number
+      failedReceipts: number
+      activeRoutes: number
+      p95LatencyMs: number | null
+      overSlo: number
+      reasons: string[]
+      severity: 'warning' | 'critical'
+      href: string
+      workspaceHref: string | null
+      traceHref: string | null
+    }>
   }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
@@ -738,6 +818,10 @@ export interface OpenClawHostPolicyPatchInput {
 }
 
 export interface OpenClawHostPolicyActionResponse {
+  host: OpenClawHostSummary
+}
+
+export interface OpenClawHostRecoveryCleanupResponse {
   host: OpenClawHostSummary
 }
 
@@ -2540,6 +2624,9 @@ export const directoryApi = {
     method: 'POST',
   }, { admin: true }),
   recoverOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/recover`, {
+    method: 'POST',
+  }, { admin: true }),
+  completeOpenClawHostRecoveryCleanup: (id: number) => request<OpenClawHostRecoveryCleanupResponse>(`/admin/openclaw/hosts/${id}/recovery/cleanup`, {
     method: 'POST',
   }, { admin: true }),
   updateOpenClawHostPolicy: (id: number, input: OpenClawHostPolicyPatchInput) => request<OpenClawHostPolicyActionResponse>(`/admin/openclaw/hosts/${id}/policy`, {
