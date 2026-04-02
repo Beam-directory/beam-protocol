@@ -326,14 +326,18 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         latencySloBreaches: number
         rotationDueHosts: number
         recoveryRunbooksOpen: number
-        duplicateIdentityConflicts: number
-        pendingCredentialActions: number
-        actionItems: number
-        criticalItems: number
-        templateDriftedWorkspaces: number
-        suggestedRemediations: number
-        criticalRemediations: number
-      }
+      duplicateIdentityConflicts: number
+      pendingCredentialActions: number
+      actionItems: number
+      criticalItems: number
+      templateDriftedWorkspaces: number
+      suggestedRemediations: number
+      criticalRemediations: number
+      driftedHosts: number
+      reconciliationCleanupRequiredHosts: number
+      orphanedRoutes: number
+      garbageCollectableRoutes: number
+    }
       hosts: Array<{
         id: number
         healthStatus: string
@@ -366,6 +370,10 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
       templateDriftedWorkspaces: 0,
       suggestedRemediations: 1,
       criticalRemediations: 0,
+      driftedHosts: 0,
+      reconciliationCleanupRequiredHosts: 0,
+      orphanedRoutes: 0,
+      garbageCollectableRoutes: 0,
     })
     assert.equal(overviewBody.hosts[0]?.workspaceSlug, 'openclaw-local')
     assert.equal(overviewBody.hosts[0]?.healthStatus, 'healthy')
@@ -2109,8 +2117,9 @@ test('guided fleet remediations align rollout, drain missing receipts, and end s
       hostname: 'bravo-remediation.local',
       beamId: bravo.beamId,
       routeKey: 'bravo-remediation-route',
+      routeSource: 'subagent-run',
       workspaceSlug: 'openclaw-local',
-      heartbeatAt: new Date(Date.now() - (20 * 60 * 1000)).toISOString(),
+      heartbeatAt: new Date(Date.now() - (45 * 60 * 1000)).toISOString(),
     })
 
     const rolloutResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${alphaHost.host.id}/rollout`, {
@@ -2237,6 +2246,101 @@ test('guided fleet remediations align rollout, drain missing receipts, and end s
     assert.ok(!overviewAfterBody.remediation.suggested.some((item) =>
       item.kind === 'end_stale_routes' && item.hostId === bravoHost.host.id,
     ))
+  } finally {
+    db.close()
+  }
+})
+
+test('fleet reconciliation summarizes stale route drift and garbage-collects eligible stale subagent routes', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    const agent = createFixtureAgent('reconcile@openclaw.beam.directory')
+    registerFixtureAgent(db, agent, 'Reconcile Agent')
+
+    const host = createApprovedHostWithRoute(db, {
+      label: 'Reconciliation Host',
+      hostname: 'reconciliation.local',
+      beamId: agent.beamId,
+      routeKey: 'reconciliation-route',
+      routeSource: 'subagent-run',
+      workspaceSlug: 'openclaw-local',
+      heartbeatAt: new Date(Date.now() - (45 * 60 * 1000)).toISOString(),
+    })
+
+    const app = createApp(db)
+    const viewerHeaders = createAdminHeaders(db, 'viewer@example.com', 'viewer')
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const reconciliationBeforeResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/reconciliation', {
+      headers: viewerHeaders,
+    }))
+    assert.equal(reconciliationBeforeResponse.status, 200)
+    const reconciliationBeforeBody = await reconciliationBeforeResponse.json() as {
+      summary: {
+        driftedHosts: number
+        staleRoutes: number
+        garbageCollectableRoutes: number
+      }
+      attentionHosts: Array<{
+        hostId: number
+        state: string
+      }>
+      attentionRoutes: Array<{
+        routeId: number
+        classification: string
+        garbageCollectable: boolean
+      }>
+    }
+    assert.equal(reconciliationBeforeBody.summary.driftedHosts, 1)
+    assert.equal(reconciliationBeforeBody.summary.staleRoutes, 1)
+    assert.equal(reconciliationBeforeBody.summary.garbageCollectableRoutes, 1)
+    assert.equal(reconciliationBeforeBody.attentionHosts[0]?.hostId, host.host.id)
+    assert.equal(reconciliationBeforeBody.attentionHosts[0]?.state, 'cleanup_required')
+
+    const routeBefore = listOpenClawResolvedRoutesByBeamId(db, agent.beamId)[0]
+    assert.ok(routeBefore)
+    assert.equal(reconciliationBeforeBody.attentionRoutes[0]?.routeId, routeBefore.id)
+    assert.equal(reconciliationBeforeBody.attentionRoutes[0]?.classification, 'stale')
+    assert.equal(reconciliationBeforeBody.attentionRoutes[0]?.garbageCollectable, true)
+
+    const runResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/reconciliation/run', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        hostId: host.host.id,
+        staleGraceMinutes: 0,
+        orphanedGraceMinutes: 0,
+        note: 'Force reconciliation cleanup during test',
+      }),
+    }))
+    assert.equal(runResponse.status, 200)
+    const runBody = await runResponse.json() as {
+      ok: boolean
+      hostId: number | null
+      endedRouteIds: number[]
+      deletedRouteIds: number[]
+      deletedCount: number
+      reconciliation: {
+        summary: {
+          staleRoutes: number
+          garbageCollectableRoutes: number
+        }
+      }
+    }
+    assert.equal(runBody.ok, true)
+    assert.equal(runBody.hostId, host.host.id)
+    assert.deepEqual(runBody.endedRouteIds, [routeBefore.id])
+    assert.deepEqual(runBody.deletedRouteIds, [routeBefore.id])
+    assert.equal(runBody.deletedCount, 1)
+    assert.equal(runBody.reconciliation.summary.staleRoutes, 0)
+    assert.equal(runBody.reconciliation.summary.garbageCollectableRoutes, 0)
+
+    const routeAfter = listOpenClawResolvedRoutesByBeamId(db, agent.beamId)[0]
+    assert.equal(routeAfter, undefined)
   } finally {
     db.close()
   }

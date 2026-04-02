@@ -4353,7 +4353,8 @@ export function listOpenClawResolvedRoutesByBeamId(db: DB, beamId: string): Open
       h.health_status AS host_health_status,
       h.credential_state AS host_credential_state,
       h.workspace_slug AS host_workspace_slug,
-      h.last_heartbeat_at AS host_last_heartbeat_at
+      h.last_heartbeat_at AS host_last_heartbeat_at,
+      h.last_inventory_at AS host_last_inventory_at
     FROM openclaw_host_routes r
     JOIN openclaw_hosts h ON h.id = r.host_id
     WHERE r.beam_id = ?
@@ -4384,7 +4385,8 @@ export function listOpenClawResolvedRoutesForHost(db: DB, hostId: number): OpenC
       h.health_status AS host_health_status,
       h.credential_state AS host_credential_state,
       h.workspace_slug AS host_workspace_slug,
-      h.last_heartbeat_at AS host_last_heartbeat_at
+      h.last_heartbeat_at AS host_last_heartbeat_at,
+      h.last_inventory_at AS host_last_inventory_at
     FROM openclaw_host_routes r
     JOIN openclaw_hosts h ON h.id = r.host_id
     WHERE r.host_id = ?
@@ -5125,6 +5127,106 @@ export function markOpenClawHostRoutesEnded(
   updateOpenClawHostRouteCount(db, input.hostId)
   recalculateOpenClawRouteStates(db)
   return listOpenClawHostRoutes(db, input.hostId)
+}
+
+export function markOpenClawRoutesEndedByIds(
+  db: DB,
+  input: {
+    routeIds: number[]
+  },
+): OpenClawHostRouteRow[] {
+  const routeIds = [...new Set(input.routeIds.filter((value) => Number.isFinite(value) && value > 0))]
+  if (routeIds.length === 0) {
+    return []
+  }
+
+  const existing = routeIds
+    .map((routeId) => getOpenClawHostRouteById(db, routeId))
+    .filter((route): route is OpenClawHostRouteRow => Boolean(route))
+  if (existing.length === 0) {
+    return []
+  }
+
+  const endedAt = nowIso()
+  const placeholders = existing.map(() => '?').join(', ')
+  db.prepare(`
+    UPDATE openclaw_host_routes
+    SET reported_state = 'ended',
+        runtime_session_state = 'ended',
+        ended_at = ?,
+        updated_at = ?
+    WHERE id IN (${placeholders})
+  `).run(endedAt, endedAt, ...existing.map((route) => route.id))
+
+  const affectedHostIds = [...new Set(existing.map((route) => route.host_id))]
+  const affectedBeamIds = [...new Set(existing.map((route) => route.beam_id))]
+  for (const hostId of affectedHostIds) {
+    updateOpenClawHost(db, {
+      id: hostId,
+      lastRouteEventAt: endedAt,
+    })
+    updateOpenClawHostRouteCount(db, hostId)
+  }
+  recalculateOpenClawRouteStates(db, affectedBeamIds)
+
+  return existing
+    .map((route) => getOpenClawHostRouteById(db, route.id))
+    .filter((route): route is OpenClawHostRouteRow => Boolean(route))
+}
+
+export function deleteOpenClawHostRoutesByIds(
+  db: DB,
+  input: {
+    routeIds: number[]
+  },
+): {
+  deletedCount: number
+  affectedHostIds: number[]
+  affectedBeamIds: string[]
+} {
+  const routeIds = [...new Set(input.routeIds.filter((value) => Number.isFinite(value) && value > 0))]
+  if (routeIds.length === 0) {
+    return {
+      deletedCount: 0,
+      affectedHostIds: [],
+      affectedBeamIds: [],
+    }
+  }
+
+  const existing = routeIds
+    .map((routeId) => getOpenClawHostRouteById(db, routeId))
+    .filter((route): route is OpenClawHostRouteRow => Boolean(route))
+  if (existing.length === 0) {
+    return {
+      deletedCount: 0,
+      affectedHostIds: [],
+      affectedBeamIds: [],
+    }
+  }
+
+  const updatedAt = nowIso()
+  const placeholders = existing.map(() => '?').join(', ')
+  db.prepare(`
+    DELETE FROM openclaw_host_routes
+    WHERE id IN (${placeholders})
+  `).run(...existing.map((route) => route.id))
+
+  const affectedHostIds = [...new Set(existing.map((route) => route.host_id))]
+  const affectedBeamIds = [...new Set(existing.map((route) => route.beam_id))]
+  for (const hostId of affectedHostIds) {
+    updateOpenClawHost(db, {
+      id: hostId,
+      lastRouteEventAt: updatedAt,
+    })
+    updateOpenClawHostRouteCount(db, hostId)
+  }
+  recalculateOpenClawRouteStates(db, affectedBeamIds)
+
+  return {
+    deletedCount: existing.length,
+    affectedHostIds,
+    affectedBeamIds,
+  }
 }
 
 export function approveOpenClawHost(

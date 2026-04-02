@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.5.0 (2026-04-02)
+
+### OpenClaw Fleet Autonomy
+- add host maintenance mode, drain, and resume controls that block delivery with a clear operator-visible reason
+- add connector version inventory, rollout rings, and canary visibility so rollout lag is visible at fleet scope
+- add fleet policy packs and workspace templates with drift detection and remediation paths
+- add desired-state reconciliation and stale route garbage collection for ended or orphaned subagent routes
+- add recurring rollout and maintenance digests with persisted schedule, run, and delivery history
+- commit buyer, operator, and fleet autonomy reports before cutting the release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.5.0` remains on `beam/1`.
+
 ## v1.4.0 (2026-04-02)
 
 ### OpenClaw Fleet Automation

@@ -25,6 +25,53 @@ async function main() {
       throw new Error('Expected all workspace fleet bindings to expose a healthy host badge and live runtime session state.')
     }
 
+    const rolloutUpdate = await fleet.updateRollout('alpha', {
+      ring: 'canary',
+      desiredConnectorVersion: '1.5.0-test',
+      notes: 'Operator dry run canary ring',
+    })
+    if (rolloutUpdate.host.rollout.ring !== 'canary') {
+      throw new Error(`Expected alpha rollout ring canary, received ${rolloutUpdate.host.rollout.ring}`)
+    }
+    const rolloutOverview = await fleet.fetchFleetOverview()
+    if (rolloutOverview.rollout.summary.canaryHosts < 1) {
+      throw new Error('Expected at least one canary host after rollout update.')
+    }
+
+    const maintenanceUpdate = await fleet.enableMaintenance('alpha', {
+      owner: 'ops@example.com',
+      reason: 'maintenance drill',
+    })
+    if (maintenanceUpdate.host.maintenance.state !== 'maintenance') {
+      throw new Error(`Expected alpha host to enter maintenance, received ${maintenanceUpdate.host.maintenance.state}`)
+    }
+    const maintenanceOverview = await fleet.fetchFleetOverview()
+    if (maintenanceOverview.maintenance.counts.blocked < 1) {
+      throw new Error('Expected maintenance mode to block at least one host in the fleet overview.')
+    }
+    await fleet.resumeHost('alpha')
+    const resumedAlpha = await fleet.fetchHost(fleet.hosts.alpha.id)
+    if (resumedAlpha.host.maintenance.state !== 'serving') {
+      throw new Error(`Expected alpha host to resume serving, received ${resumedAlpha.host.maintenance.state}`)
+    }
+
+    await fleet.markHostStale('gamma', 45, { ageRoutes: true })
+    const reconciliationBefore = await fleet.fetchFleetReconciliation()
+    if (reconciliationBefore.summary.driftedHosts < 1 || reconciliationBefore.summary.garbageCollectableRoutes < 1) {
+      throw new Error('Expected reconciliation to surface at least one drifted host and garbage-collectable route.')
+    }
+    const reconciliationRun = await fleet.runFleetReconciliation({
+      hostId: fleet.hosts.gamma.id,
+      staleGraceMinutes: 0,
+      orphanedGraceMinutes: 0,
+      note: 'Operator dry run reconciliation',
+    })
+    if (reconciliationRun.deletedCount < 1) {
+      throw new Error('Expected reconciliation to delete at least one garbage-collectable route.')
+    }
+    await fleet.syncHost('gamma', null, { stage: 'reconciliation-remediation' })
+    await fleet.reconnectHostClient('gamma')
+
     const betaHost = await fleet.fetchHost(fleet.hosts.beta.id)
     if (betaHost.host.status !== 'active' || betaHost.host.healthStatus !== 'healthy') {
       throw new Error('Expected the selected fleet host to be active and healthy.')
@@ -130,6 +177,23 @@ async function main() {
         identityCount: betaHost.identities.length,
         heartbeatCount: betaHost.heartbeats.length,
       },
+      rollout: {
+        hostId: rolloutUpdate.host.id,
+        ring: rolloutUpdate.host.rollout.ring,
+        desiredConnectorVersion: rolloutUpdate.host.rollout.desiredConnectorVersion,
+        canaryHosts: rolloutOverview.rollout.summary.canaryHosts,
+      },
+      maintenance: {
+        hostId: maintenanceUpdate.host.id,
+        state: maintenanceUpdate.host.maintenance.state,
+        blockedHosts: maintenanceOverview.maintenance.counts.blocked,
+        resumedState: resumedAlpha.host.maintenance.state,
+      },
+      reconciliation: {
+        driftedHosts: reconciliationBefore.summary.driftedHosts,
+        garbageCollectableRoutes: reconciliationBefore.summary.garbageCollectableRoutes,
+        deletedCount: reconciliationRun.deletedCount,
+      },
       stale: {
         staleHosts: staleOverview.summary.staleHosts,
       },
@@ -182,15 +246,21 @@ async function main() {
 
 1. Bootstrap three approved OpenClaw hosts into one central Beam control plane.
 2. Verify the fleet overview, selected host detail, and workspace host badges.
-3. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
-4. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
-5. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
+3. Put one host into a canary rollout ring and another into maintenance mode, then resume it cleanly.
+4. Force reconciliation drift on a subagent route, run reconciliation, and confirm garbage collection removes the stale historical state.
+5. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
+6. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
+7. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
 
 ## Verification
 
 - Approved active hosts: \`${overview.summary.activeHosts}\`
 - Live routes: \`${overview.summary.liveRoutes}\`
 - Selected host identities: \`${betaHost.identities.length}\`
+- Canary hosts after rollout update: \`${rolloutOverview.rollout.summary.canaryHosts}\`
+- Maintenance-blocked hosts: \`${maintenanceOverview.maintenance.counts.blocked}\`
+- Garbage-collectable routes before reconciliation: \`${reconciliationBefore.summary.garbageCollectableRoutes}\`
+- Deleted routes during reconciliation: \`${reconciliationRun.deletedCount}\`
 - Stale hosts before remediation: \`${staleOverview.summary.staleHosts}\`
 - Pending credential actions in digest: \`${digest.summary.pendingCredentialActions}\`
 - Duplicate conflicts after injection: \`${conflictOverview.summary.duplicateIdentityConflicts}\`
