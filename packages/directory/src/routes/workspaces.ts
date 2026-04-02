@@ -282,6 +282,39 @@ type WorkspaceDigestActionItem = {
   nextAction: string
 }
 
+type WorkspaceApprovalQueueBindingItem = {
+  id: string
+  kind: 'binding'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
+  binding: SerializedWorkspaceIdentityBinding
+  suggestedAllowedPartners: string[]
+}
+
+type WorkspaceApprovalQueueThreadItem = {
+  id: string
+  kind: 'thread'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
+  thread: SerializedWorkspaceThread
+  senderBinding: SerializedWorkspaceIdentityBinding | null
+  partnerChannel: SerializedWorkspacePartnerChannel | null
+  policyPreview: SerializedWorkspacePolicyPreview | null
+  suggestedAllowedPartners: string[]
+  dispatchReady: boolean
+  blockedReason: string | null
+}
+
+type WorkspaceApprovalQueueItem = WorkspaceApprovalQueueBindingItem | WorkspaceApprovalQueueThreadItem
+
 type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -1780,6 +1813,139 @@ function buildWorkspaceOverview(db: Database, workspace: WorkspaceRow) {
   }
 }
 
+function buildWorkspaceApprovalQueue(db: Database, workspace: WorkspaceRow) {
+  const generatedAt = new Date().toISOString()
+  const overview = buildWorkspaceOverview(db, workspace)
+  const bindings = listWorkspaceIdentityBindings(db, workspace.id)
+  const localBeamIds = bindings
+    .filter((binding) => binding.binding_type !== 'partner')
+    .map((binding) => binding.beam_id)
+  const channels = listWorkspacePartnerChannels(db, workspace.id).map((row) => serializeWorkspacePartnerChannel(db, row, localBeamIds))
+  const channelByBeamId = new Map(channels.map((channel) => [channel.partnerBeamId, channel]))
+  const policy = getWorkspacePolicyDocument(db, workspace.id).policy
+  const threads = listWorkspaceThreads(db, workspace.id)
+  const items: WorkspaceApprovalQueueItem[] = []
+  const knownPartnerBeamIds = channels
+    .filter((channel) => channel.status !== 'blocked')
+    .map((channel) => channel.partnerBeamId)
+
+  for (const item of overview.blockedExternalMotion) {
+    if (item.reasonCode !== 'manual_review_required') {
+      continue
+    }
+
+    items.push({
+      id: `binding-${item.binding.id}`,
+      kind: 'binding',
+      severity: 'warning',
+      title: `${item.binding.beamId} is waiting for outbound approval`,
+      detail: item.reason,
+      owner: item.binding.owner,
+      href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`,
+      nextAction: knownPartnerBeamIds.length > 0
+        ? 'Approve outbound motion directly or save a partner-scoped default for the current fleet lanes.'
+        : 'Approve outbound motion directly or attach a partner channel before enabling external sends.',
+      binding: item.binding,
+      suggestedAllowedPartners: knownPartnerBeamIds,
+    })
+  }
+
+  for (const row of threads) {
+    if (row.kind !== 'handoff' || row.status !== 'blocked') {
+      continue
+    }
+
+    const participants = listWorkspaceThreadParticipants(db, row.id)
+    const thread = serializeWorkspaceThread(db, row, participants)
+    const senderParticipant = participants.find((participant) => (
+      participant.workspace_binding_id != null
+      && participant.principal_type !== 'partner'
+      && typeof participant.beam_id === 'string'
+      && participant.beam_id.length > 0
+    ))
+    const partnerParticipant = participants.find((participant) => (
+      participant.principal_type === 'partner'
+      && typeof participant.beam_id === 'string'
+      && participant.beam_id.length > 0
+    ))
+
+    const senderBindingRow = senderParticipant?.workspace_binding_id
+      ? getWorkspaceIdentityBindingById(db, senderParticipant.workspace_binding_id)
+      : null
+    const senderBinding = senderBindingRow && senderBindingRow.workspace_id === workspace.id
+      ? serializeWorkspaceIdentityBinding(db, senderBindingRow)
+      : null
+
+    const partnerChannel = partnerParticipant?.beam_id
+      ? channelByBeamId.get(partnerParticipant.beam_id) ?? null
+      : null
+    const policyPreview = senderBindingRow && senderBindingRow.workspace_id === workspace.id
+      ? buildWorkspacePolicyPreview(policy, senderBindingRow, row.workflow_type)
+      : null
+
+    let blockedReason: string | null = null
+    if (workspace.external_handoffs_enabled !== 1) {
+      blockedReason = 'Workspace external handoffs are disabled.'
+    } else if (!senderBindingRow || senderBindingRow.workspace_id !== workspace.id) {
+      blockedReason = 'The thread is missing a local sender binding.'
+    } else if (!partnerChannel) {
+      blockedReason = 'No partner channel is attached to the partner participant yet.'
+    } else if (partnerChannel.status === 'blocked') {
+      blockedReason = 'The attached partner channel is blocked.'
+    } else if (policyPreview?.externalInitiation !== 'allow') {
+      blockedReason = 'The current outbound policy still denies this handoff.'
+    }
+
+    items.push({
+      id: `thread-${thread.id}`,
+      kind: 'thread',
+      severity: blockedReason ? 'critical' : 'warning',
+      title: `${thread.title} is waiting for approval`,
+      detail: blockedReason
+        ?? 'This blocked handoff already has enough context to be approved and sent directly from Beam.',
+      owner: thread.owner,
+      href: `/workspaces?workspace=${encodeURIComponent(workspace.slug)}&thread=${encodeURIComponent(String(thread.id))}`,
+      nextAction: blockedReason
+        ? 'Review the sender, partner channel, and policy preview, then approve and send or keep the thread blocked.'
+        : 'Approve and send now, or save the partner-scoped default before dispatching.',
+      thread,
+      senderBinding,
+      partnerChannel,
+      policyPreview,
+      suggestedAllowedPartners: partnerChannel ? [partnerChannel.partnerBeamId] : [],
+      dispatchReady: blockedReason === null,
+      blockedReason,
+    })
+  }
+
+  items.sort((left, right) => {
+    const severityRank = (value: WorkspaceApprovalQueueItem['severity']) => value === 'critical' ? 0 : 1
+    const leftSeverity = severityRank(left.severity)
+    const rightSeverity = severityRank(right.severity)
+    if (leftSeverity !== rightSeverity) {
+      return leftSeverity - rightSeverity
+    }
+
+    if (left.kind !== right.kind) {
+      return left.kind === 'thread' ? -1 : 1
+    }
+
+    return left.title.localeCompare(right.title)
+  })
+
+  return {
+    workspace: serializeWorkspace(db, workspace),
+    generatedAt,
+    summary: {
+      total: items.length,
+      bindingApprovals: items.filter((item) => item.kind === 'binding').length,
+      threadApprovals: items.filter((item) => item.kind === 'thread').length,
+      critical: items.filter((item) => item.severity === 'critical').length,
+    },
+    items,
+  }
+}
+
 function isUniqueConstraintError(err: unknown, target: string): boolean {
   return err instanceof Error && err.message.includes(`UNIQUE constraint failed: ${target}`)
 }
@@ -1920,6 +2086,21 @@ export function workspacesRouter(db: Database): Hono {
       workspace: serializeWorkspace(db, workspace),
       ...buildWorkspaceOverview(db, workspace),
     })
+  })
+
+  router.get('/:slug/approval-queue', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
+    if (!workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json(buildWorkspaceApprovalQueue(db, workspace))
   })
 
   router.get('/:slug/partner-channels', (c) => {

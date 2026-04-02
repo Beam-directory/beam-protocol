@@ -743,6 +743,51 @@ export interface WorkspaceOverviewResponse {
   recentExternalHandoffs: WorkspaceOverviewHandoff[]
 }
 
+export interface WorkspaceApprovalQueueBindingItem {
+  id: string
+  kind: 'binding'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
+  binding: WorkspaceIdentityBinding
+  suggestedAllowedPartners: string[]
+}
+
+export interface WorkspaceApprovalQueueThreadItem {
+  id: string
+  kind: 'thread'
+  severity: 'warning' | 'critical'
+  title: string
+  detail: string
+  owner: string | null
+  href: string | null
+  nextAction: string
+  thread: WorkspaceThread
+  senderBinding: WorkspaceIdentityBinding | null
+  partnerChannel: WorkspacePartnerChannel | null
+  policyPreview: WorkspacePolicyPreview | null
+  suggestedAllowedPartners: string[]
+  dispatchReady: boolean
+  blockedReason: string | null
+}
+
+export type WorkspaceApprovalQueueItem = WorkspaceApprovalQueueBindingItem | WorkspaceApprovalQueueThreadItem
+
+export interface WorkspaceApprovalQueueResponse {
+  workspace: WorkspaceRecord
+  generatedAt: string
+  summary: {
+    total: number
+    bindingApprovals: number
+    threadApprovals: number
+    critical: number
+  }
+  items: WorkspaceApprovalQueueItem[]
+}
+
 export interface WorkspaceThreadTrace {
   nonce: string
   status: IntentLifecycleStatus
@@ -2312,6 +2357,7 @@ export const directoryApi = {
   }, { admin: true }),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
+  getWorkspaceApprovalQueue: (slug: string) => request<WorkspaceApprovalQueueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/approval-queue`, undefined, { admin: true }),
   listWorkspaceIdentities: (slug: string) => request<WorkspaceIdentitiesResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities`, undefined, { admin: true }),
   updateWorkspaceIdentity: (slug: string, id: number, input: WorkspaceIdentityPatchInput) => request<{ binding: WorkspaceIdentityBinding }>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}`, {
     method: 'PATCH',

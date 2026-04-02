@@ -6,6 +6,10 @@ import {
   directoryApi,
   type IntentCatalogItem,
   type IntentLifecycleStatus,
+  type WorkspaceApprovalQueueBindingItem,
+  type WorkspaceApprovalQueueItem,
+  type WorkspaceApprovalQueueResponse,
+  type WorkspaceApprovalQueueThreadItem,
   type WorkspaceBindingStatus,
   type WorkspaceDigestActionItem,
   type WorkspaceDigestResponse,
@@ -157,6 +161,10 @@ function threadStatusTone(status: WorkspaceThreadStatus): 'default' | 'success' 
 }
 
 function digestSeverityTone(severity: WorkspaceDigestActionItem['severity']): 'default' | 'warning' | 'critical' {
+  return severity === 'critical' ? 'critical' : 'warning'
+}
+
+function approvalSeverityTone(severity: WorkspaceApprovalQueueItem['severity']): 'default' | 'warning' | 'critical' {
   return severity === 'critical' ? 'critical' : 'warning'
 }
 
@@ -473,6 +481,14 @@ function sortPartnerChannelsForComposer(channels: WorkspacePartnerChannel[]): Wo
   })
 }
 
+function isBindingApprovalItem(item: WorkspaceApprovalQueueItem): item is WorkspaceApprovalQueueBindingItem {
+  return item.kind === 'binding'
+}
+
+function isThreadApprovalItem(item: WorkspaceApprovalQueueItem): item is WorkspaceApprovalQueueThreadItem {
+  return item.kind === 'thread'
+}
+
 function buildPolicyDefaultsState(policy: WorkspacePolicyResponse | null) {
   return {
     externalInitiation: policy?.policy.defaults.externalInitiation ?? 'binding',
@@ -485,6 +501,7 @@ export default function WorkspacesPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const [workspaces, setWorkspaces] = useState<WorkspaceRecord[]>([])
   const [overview, setOverview] = useState<WorkspaceOverviewResponse | null>(null)
+  const [approvalQueue, setApprovalQueue] = useState<WorkspaceApprovalQueueResponse | null>(null)
   const [bindings, setBindings] = useState<WorkspaceIdentityBinding[]>([])
   const [channels, setChannels] = useState<WorkspacePartnerChannel[]>([])
   const [threads, setThreads] = useState<WorkspaceThread[]>([])
@@ -534,6 +551,7 @@ export default function WorkspacesPage() {
     bindingId: number
     bundle: WorkspaceIdentityCredentialBundle
   } | null>(null)
+  const [selectedApprovalBindingIds, setSelectedApprovalBindingIds] = useState<number[]>([])
 
   const selectedSlug = searchParams.get('workspace') ?? ''
   const selectedThreadId = useMemo(() => {
@@ -609,6 +627,14 @@ export default function WorkspacesPage() {
     () => channels.find((channel) => channel.id === Number.parseInt(threadForm.partnerChannelId, 10)) ?? null,
     [channels, threadForm.partnerChannelId],
   )
+  const approvalBindingItems = useMemo(
+    () => approvalQueue?.items.filter(isBindingApprovalItem) ?? [],
+    [approvalQueue],
+  )
+  const selectedApprovalBindingItems = useMemo(
+    () => approvalBindingItems.filter((item) => selectedApprovalBindingIds.includes(item.binding.id)),
+    [approvalBindingItems, selectedApprovalBindingIds],
+  )
   const threadDetailWorkspaceRoute = useMemo(() => {
     if (!threadDetail) {
       return null
@@ -646,6 +672,7 @@ export default function WorkspacesPage() {
   async function loadWorkspaceSurface(slug: string) {
     const [
       overviewResponse,
+      approvalQueueResponse,
       identitiesResponse,
       partnerChannelsResponse,
       threadsResponse,
@@ -654,6 +681,7 @@ export default function WorkspacesPage() {
       digestResponse,
     ] = await Promise.all([
       directoryApi.getWorkspaceOverview(slug),
+      directoryApi.getWorkspaceApprovalQueue(slug),
       directoryApi.listWorkspaceIdentities(slug),
       directoryApi.listWorkspacePartnerChannels(slug),
       directoryApi.listWorkspaceThreads(slug),
@@ -663,6 +691,7 @@ export default function WorkspacesPage() {
     ])
 
     setOverview(overviewResponse)
+    setApprovalQueue(approvalQueueResponse)
     setBindings(identitiesResponse.bindings)
     setChannels(partnerChannelsResponse.channels)
     setThreads(threadsResponse.threads)
@@ -761,6 +790,7 @@ export default function WorkspacesPage() {
   useEffect(() => {
     if (!selectedWorkspace) {
       setOverview(null)
+      setApprovalQueue(null)
       setBindings([])
       setChannels([])
       setThreads([])
@@ -768,6 +798,7 @@ export default function WorkspacesPage() {
       setPolicy(null)
       setTimeline([])
       setDigest(null)
+      setSelectedApprovalBindingIds([])
       return
     }
 
@@ -782,6 +813,10 @@ export default function WorkspacesPage() {
         setSurfaceLoading(false)
       }
     })()
+  }, [selectedWorkspace?.slug])
+
+  useEffect(() => {
+    setSelectedApprovalBindingIds([])
   }, [selectedWorkspace?.slug])
 
   useEffect(() => {
@@ -1158,6 +1193,115 @@ export default function WorkspacesPage() {
     }
   }
 
+  function toggleApprovalBindingSelection(bindingId: number) {
+    setSelectedApprovalBindingIds((current) => (
+      current.includes(bindingId)
+        ? current.filter((value) => value !== bindingId)
+        : [...current, bindingId]
+    ))
+  }
+
+  async function approveBindingExternalMotion(
+    item: WorkspaceApprovalQueueBindingItem,
+    options: {
+      saveDefault?: boolean
+      pauseInstead?: boolean
+    } = {},
+  ) {
+    if (!selectedWorkspace) return
+
+    const allowPartners = options.saveDefault ? item.suggestedAllowedPartners : []
+    await runAction(`approval-binding-${item.binding.id}`, async () => {
+      await directoryApi.updateWorkspaceIdentity(selectedWorkspace.slug, item.binding.id, {
+        status: options.pauseInstead ? 'paused' : 'active',
+        canInitiateExternal: options.pauseInstead ? false : true,
+      })
+
+      if (!options.pauseInstead && options.saveDefault) {
+        await directoryApi.updateWorkspaceIdentityPolicy(selectedWorkspace.slug, item.binding.id, {
+          externalInitiation: 'allow',
+          allowedPartners: allowPartners,
+        })
+      }
+
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+      setSelectedApprovalBindingIds((current) => current.filter((value) => value !== item.binding.id))
+    }, options.pauseInstead
+      ? `${item.binding.beamId} paused and removed from outbound approval.`
+      : options.saveDefault
+        ? `${item.binding.beamId} approved with partner-scoped defaults.`
+        : `${item.binding.beamId} approved for outbound motion.`)
+  }
+
+  async function handleBulkBindingApproval(options: {
+    saveDefault?: boolean
+    pauseInstead?: boolean
+  } = {}) {
+    if (!selectedWorkspace || selectedApprovalBindingItems.length === 0) {
+      return
+    }
+
+    await runAction(
+      options.pauseInstead ? 'approval-bulk-pause' : options.saveDefault ? 'approval-bulk-default' : 'approval-bulk-approve',
+      async () => {
+        for (const item of selectedApprovalBindingItems) {
+          await directoryApi.updateWorkspaceIdentity(selectedWorkspace.slug, item.binding.id, {
+            status: options.pauseInstead ? 'paused' : 'active',
+            canInitiateExternal: options.pauseInstead ? false : true,
+          })
+          if (!options.pauseInstead && options.saveDefault) {
+            await directoryApi.updateWorkspaceIdentityPolicy(selectedWorkspace.slug, item.binding.id, {
+              externalInitiation: 'allow',
+              allowedPartners: item.suggestedAllowedPartners,
+            })
+          }
+        }
+        await loadWorkspaceSurface(selectedWorkspace.slug)
+        setSelectedApprovalBindingIds([])
+      },
+      options.pauseInstead
+        ? `${selectedApprovalBindingItems.length} bindings paused.`
+        : options.saveDefault
+          ? `${selectedApprovalBindingItems.length} bindings approved with known-channel defaults.`
+          : `${selectedApprovalBindingItems.length} bindings approved for outbound motion.`,
+    )
+  }
+
+  async function handleApprovalThreadDispatch(
+    item: WorkspaceApprovalQueueThreadItem,
+    options: {
+      saveDefault?: boolean
+    } = {},
+  ) {
+    if (!selectedWorkspace) return
+
+    await runAction(`approval-thread-${item.thread.id}-${options.saveDefault ? 'default' : 'dispatch'}`, async () => {
+      if (item.senderBinding) {
+        await directoryApi.updateWorkspaceIdentity(selectedWorkspace.slug, item.senderBinding.id, {
+          status: 'active',
+          canInitiateExternal: true,
+        })
+        if (options.saveDefault) {
+          await directoryApi.updateWorkspaceIdentityPolicy(selectedWorkspace.slug, item.senderBinding.id, {
+            externalInitiation: 'allow',
+            allowedPartners: item.suggestedAllowedPartners,
+          })
+        }
+      }
+
+      const response = await directoryApi.dispatchWorkspaceThread(selectedWorkspace.slug, item.thread.id, {})
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+      await loadThreadDetail(selectedWorkspace.slug, item.thread.id)
+      setNotice(
+        response.workspaceSync
+          ? `Workspace handoff dispatched and synced to ${response.workspaceSync.workspaceName}.`
+          : 'Workspace handoff dispatched through Beam.',
+      )
+    }, options.saveDefault
+      ? `${item.thread.title} approved, default saved, and dispatched.`
+      : `${item.thread.title} approved and dispatched.`)
+  }
+
   async function handleDeliverDigest() {
     if (!selectedWorkspace) return
 
@@ -1244,6 +1388,200 @@ export default function WorkspacesPage() {
             <MetricCard label="Manual review" value={!overview ? '—' : formatNumber(overview.summary.pendingApprovals)} tone={(overview?.summary.pendingApprovals ?? 0) > 0 ? 'warning' : 'default'} />
             <MetricCard label="Partner channels" value={formatNumber(channels.length)} tone={channels.some((channel) => channel.healthStatus === 'critical') ? 'critical' : channels.some((channel) => channel.healthStatus === 'watch') ? 'warning' : 'success'} />
             <MetricCard label="Digest escalations" value={!digest ? '—' : formatNumber(digest.summary.escalations)} tone={(digest?.summary.escalations ?? 0) > 0 ? 'critical' : 'default'} />
+          </section>
+
+          <section className="panel">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <div className="panel-title">Approval queue</div>
+                <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                  Manual-review identities and blocked handoff threads in one place, with direct approve, dispatch, and save-default actions.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  type="button"
+                  disabled={selectedApprovalBindingItems.length === 0 || actionBusy === 'approval-bulk-approve'}
+                  onClick={() => { void handleBulkBindingApproval() }}
+                >
+                  {actionBusy === 'approval-bulk-approve' ? 'Approving…' : 'Approve selected'}
+                </button>
+                <button
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  type="button"
+                  disabled={selectedApprovalBindingItems.length === 0 || actionBusy === 'approval-bulk-default'}
+                  onClick={() => { void handleBulkBindingApproval({ saveDefault: true }) }}
+                >
+                  {actionBusy === 'approval-bulk-default' ? 'Saving…' : 'Approve for known channels'}
+                </button>
+                <button
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  type="button"
+                  disabled={selectedApprovalBindingItems.length === 0 || actionBusy === 'approval-bulk-pause'}
+                  onClick={() => { void handleBulkBindingApproval({ pauseInstead: true }) }}
+                >
+                  {actionBusy === 'approval-bulk-pause' ? 'Pausing…' : 'Pause selected'}
+                </button>
+              </div>
+            </div>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-4">
+              <MetricCard label="Queue items" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.total)} tone={(approvalQueue?.summary.total ?? 0) > 0 ? 'warning' : 'default'} />
+              <MetricCard label="Binding approvals" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.bindingApprovals)} tone={(approvalQueue?.summary.bindingApprovals ?? 0) > 0 ? 'warning' : 'default'} />
+              <MetricCard label="Thread approvals" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.threadApprovals)} tone={(approvalQueue?.summary.threadApprovals ?? 0) > 0 ? 'critical' : 'default'} />
+              <MetricCard label="Critical blockers" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.critical)} tone={(approvalQueue?.summary.critical ?? 0) > 0 ? 'critical' : 'default'} />
+            </div>
+
+            <div className="mt-4 space-y-3">
+              {!approvalQueue || approvalQueue.items.length === 0 ? (
+                <EmptyPanel label="No approval work is waiting right now." />
+              ) : (
+                approvalQueue.items.map((item) => (
+                  <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                          {item.owner ? `Owner ${item.owner}` : 'No owner'} · {item.nextAction}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <StatusPill label={item.kind} />
+                        <StatusPill label={item.severity} tone={approvalSeverityTone(item.severity)} />
+                        {isThreadApprovalItem(item) ? (
+                          <StatusPill
+                            label={item.dispatchReady ? 'Dispatch ready' : 'Needs unblock'}
+                            tone={item.dispatchReady ? 'success' : 'warning'}
+                          />
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 text-sm text-slate-600 dark:text-slate-300">{item.detail}</div>
+
+                    {isBindingApprovalItem(item) ? (
+                      <>
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Binding</div>
+                            <div>{displayName(item.binding.identity.displayName, item.binding.beamId)}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Lifecycle</div>
+                            <div>{item.binding.lifecycleStatus}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Runtime</div>
+                            <div>{renderBindingRuntime(item.binding)}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Suggested partners</div>
+                            <div>{summarizeList(item.suggestedAllowedPartners, 'No known channels yet')}</div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <label className="inline-flex items-center gap-2 rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 dark:border-slate-800 dark:text-slate-200">
+                            <input
+                              checked={selectedApprovalBindingIds.includes(item.binding.id)}
+                              onChange={() => { toggleApprovalBindingSelection(item.binding.id) }}
+                              type="checkbox"
+                            />
+                            Select for bulk actions
+                          </label>
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={actionBusy === `approval-binding-${item.binding.id}`}
+                            onClick={() => { void approveBindingExternalMotion(item) }}
+                          >
+                            {actionBusy === `approval-binding-${item.binding.id}` ? 'Approving…' : 'Approve binding'}
+                          </button>
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={item.suggestedAllowedPartners.length === 0 || actionBusy === `approval-binding-${item.binding.id}`}
+                            onClick={() => { void approveBindingExternalMotion(item, { saveDefault: true }) }}
+                          >
+                            Save default
+                          </button>
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={actionBusy === `approval-binding-${item.binding.id}`}
+                            onClick={() => { void approveBindingExternalMotion(item, { pauseInstead: true }) }}
+                          >
+                            Pause binding
+                          </button>
+                          {item.href ? (
+                            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to={item.href}>
+                              Open workspace
+                            </Link>
+                          ) : null}
+                        </div>
+                      </>
+                    ) : (
+                      <>
+                        <div className="mt-3 grid gap-2 text-sm text-slate-600 dark:text-slate-300 md:grid-cols-2 xl:grid-cols-4">
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Sender</div>
+                            <div>{item.senderBinding ? displayName(item.senderBinding.identity.displayName, item.senderBinding.beamId) : 'Missing local sender'}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Partner lane</div>
+                            <div>{item.partnerChannel ? renderPartnerChannelOptionLabel(item.partnerChannel) : 'No partner channel'}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Workflow</div>
+                            <div>{item.thread.workflowType || item.thread.draftIntentType || 'Unspecified'}</div>
+                          </div>
+                          <div>
+                            <div className="text-xs uppercase tracking-wide text-slate-400">Policy</div>
+                            <div>{item.policyPreview ? `${item.policyPreview.externalInitiation} · ${item.policyPreview.approvalRequired ? 'approval path' : 'direct path'}` : 'No preview available'}</div>
+                          </div>
+                        </div>
+
+                        {item.blockedReason ? (
+                          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+                            {item.blockedReason}
+                          </div>
+                        ) : null}
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={!item.senderBinding || !item.partnerChannel || item.partnerChannel.status === 'blocked' || actionBusy === `approval-thread-${item.thread.id}-dispatch`}
+                            onClick={() => { void handleApprovalThreadDispatch(item) }}
+                          >
+                            {actionBusy === `approval-thread-${item.thread.id}-dispatch` ? 'Sending…' : 'Approve and send'}
+                          </button>
+                          <button
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            type="button"
+                            disabled={!item.senderBinding || item.suggestedAllowedPartners.length === 0 || actionBusy === `approval-thread-${item.thread.id}-default`}
+                            onClick={() => { void handleApprovalThreadDispatch(item, { saveDefault: true }) }}
+                          >
+                            {actionBusy === `approval-thread-${item.thread.id}-default` ? 'Saving…' : 'Save default and send'}
+                          </button>
+                          {item.href ? (
+                            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to={item.href}>
+                              Open thread
+                            </Link>
+                          ) : null}
+                          {item.thread.trace?.href ? (
+                            <Link className="text-sm text-orange-600 hover:text-orange-700 dark:text-orange-300" to={item.thread.trace.href}>
+                              Open trace
+                            </Link>
+                          ) : null}
+                        </div>
+                      </>
+                    )}
+                  </div>
+                ))
+              )}
+            </div>
           </section>
 
           <section className="grid gap-6 xl:grid-cols-[0.74fr,1.26fr]">
