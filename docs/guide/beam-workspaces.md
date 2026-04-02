@@ -196,6 +196,9 @@ The fleet surface also gives operators explicit day-2 actions:
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
 - configure one daily digest schedule with a separate escalation mailbox for critical fleet items
 - inspect persistent digest run history and delivery history directly in the fleet surface
+- work a dedicated credential review queue that highlights overdue rotations, open rotation windows, recovery ownership gaps, and post-recovery cleanup
+- complete recovery cleanup after a successful cutover so the host drops back into the normal credential review loop
+- inspect a route-health and SLO summary that rolls up missing receipts, failed receipts, latency buckets, and the exact hosts currently degrading fleet delivery
 - label hosts with environment and group metadata such as `prod`, `staging`, `lab`, `edge`, or team ownership
 - stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
 - clear staged revoke reviews again when a maintenance plan changes
@@ -203,9 +206,9 @@ The fleet surface also gives operators explicit day-2 actions:
 The host detail and fleet summary now also expose the operational thresholds behind those actions:
 
 - credential rotation interval, next due time, and the next allowed rotation window
-- recovery owner, replacement host label, and cutover window notes
+- recovery owner, replacement host label, cutover window notes, and a cleanup-ready state after recovery completes
 - receipt coverage across active routes
-- p50 / p95 latency and latency SLO breaches for recent host-backed deliveries
+- p50 / p95 latency, SLO bucket counts, and direct links back to the host, workspace, and latest trace that caused the warning
 
 That means operators can treat the fleet page as the source of truth for both host health and the next required maintenance action, instead of jumping between traces and local host logs.
 

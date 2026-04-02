@@ -692,6 +692,7 @@ test('openclaw host policy patch surfaces rotation windows and recovery runbook 
             windowDurationHours: number
             reviewState: string
             nextRotationDueAt: string | null
+            windowOpen: boolean
           }
           recovery: {
             owner: string | null
@@ -700,6 +701,7 @@ test('openclaw host policy patch surfaces rotation windows and recovery runbook 
             replacementHostLabel: string | null
             windowStartsAt: string | null
             windowEndsAt: string | null
+            cleanupRecommended: boolean
           }
         }
       }
@@ -709,12 +711,44 @@ test('openclaw host policy patch surfaces rotation windows and recovery runbook 
     assert.equal(policyBody.host.policy.rotation.windowDurationHours, 2)
     assert.equal(policyBody.host.policy.rotation.reviewState, 'overdue')
     assert.ok(policyBody.host.policy.rotation.nextRotationDueAt)
+    assert.equal(typeof policyBody.host.policy.rotation.windowOpen, 'boolean')
     assert.equal(policyBody.host.policy.recovery.owner, 'ops@example.com')
     assert.equal(policyBody.host.policy.recovery.status, 'prepared')
     assert.equal(policyBody.host.policy.recovery.notes, 'Replace chassis during the next window')
     assert.equal(policyBody.host.policy.recovery.replacementHostLabel, 'policy-replacement')
     assert.equal(policyBody.host.policy.recovery.windowStartsAt, '2026-04-02T08:00:00.000Z')
     assert.equal(policyBody.host.policy.recovery.windowEndsAt, '2026-04-02T10:00:00.000Z')
+    assert.equal(policyBody.host.policy.recovery.cleanupRecommended, false)
+
+    const overviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewResponse.status, 200)
+    const overviewBody = await overviewResponse.json() as {
+      credentialPolicy: {
+        counts: {
+          overdue: number
+          dueSoon: number
+          recoveryPrepared: number
+          cleanupRecommended: number
+          missingRecoveryOwner: number
+        }
+        attentionHosts: Array<{
+          hostId: number
+          recoveryStatus: string
+          reasons: string[]
+        }>
+      }
+    }
+    assert.equal(overviewBody.credentialPolicy.counts.overdue, 1)
+    assert.equal(overviewBody.credentialPolicy.counts.dueSoon, 0)
+    assert.equal(overviewBody.credentialPolicy.counts.recoveryPrepared, 1)
+    assert.equal(overviewBody.credentialPolicy.counts.cleanupRecommended, 0)
+    assert.equal(overviewBody.credentialPolicy.counts.missingRecoveryOwner, 0)
+    assert.equal(overviewBody.credentialPolicy.attentionHosts[0]?.hostId, host.host.id)
+    assert.equal(overviewBody.credentialPolicy.attentionHosts[0]?.recoveryStatus, 'prepared')
+    assert.ok(overviewBody.credentialPolicy.attentionHosts[0]?.reasons.includes('credential rotation overdue'))
+    assert.ok(overviewBody.credentialPolicy.attentionHosts[0]?.reasons.includes('recovery runbook prepared'))
 
     const digestResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest', {
       headers: createAdminHeaders(db, 'ops@example.com', 'operator'),
@@ -734,6 +768,52 @@ test('openclaw host policy patch surfaces rotation windows and recovery runbook 
     assert.equal(digestBody.summary.recoveryRunbooksOpen, 1)
     assert.ok(digestBody.actionItems.some((item) => item.title.includes('due for credential rotation')))
     assert.ok(digestBody.actionItems.some((item) => item.detail.includes('policy-replacement')))
+
+    updateOpenClawHost(db, {
+      id: host.host.id,
+      recoveryCompletedAt: new Date().toISOString(),
+    })
+
+    const completedHostResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(completedHostResponse.status, 200)
+    const completedHostBody = await completedHostResponse.json() as {
+      host: {
+        policy: {
+          recovery: {
+            status: string
+            cleanupRecommended: boolean
+          }
+        }
+      }
+    }
+    assert.equal(completedHostBody.host.policy.recovery.status, 'completed')
+    assert.equal(completedHostBody.host.policy.recovery.cleanupRecommended, true)
+
+    const cleanupResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/recovery/cleanup`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(cleanupResponse.status, 200)
+    const cleanupBody = await cleanupResponse.json() as {
+      host: {
+        policy: {
+          recovery: {
+            owner: string | null
+            status: string
+            notes: string | null
+            replacementHostLabel: string | null
+            cleanupRecommended: boolean
+          }
+        }
+      }
+    }
+    assert.equal(cleanupBody.host.policy.recovery.owner, 'ops@example.com')
+    assert.equal(cleanupBody.host.policy.recovery.status, 'idle')
+    assert.equal(cleanupBody.host.policy.recovery.notes, null)
+    assert.equal(cleanupBody.host.policy.recovery.replacementHostLabel, null)
+    assert.equal(cleanupBody.host.policy.recovery.cleanupRecommended, false)
   } finally {
     db.close()
   }
@@ -1348,11 +1428,66 @@ test('openclaw fleet overview surfaces receipt coverage and latency summaries', 
         degradedHosts: number
         latencySloBreaches: number
       }
+      routeHealth: {
+        summary: {
+          targetLatencyMs: number
+          activeRoutes: number
+          routesWithReceipts: number
+          routesMissingReceipts: number
+          receiptCoverageRatio: number | null
+          failedReceipts: number
+          degradedHosts: number
+          hostsWithMissingReceipts: number
+          hostsWithFailedReceipts: number
+        }
+        latency: {
+          samples: number
+          avgMs: number | null
+          p50Ms: number | null
+          p95Ms: number | null
+          overSlo: number
+          overDoubleSlo: number
+          buckets: {
+            withinTarget: number
+            overTarget: number
+            overDoubleTarget: number
+          }
+        }
+        attentionHosts: Array<{
+          hostId: number
+          traceHref: string | null
+          workspaceHref: string | null
+          reasons: string[]
+        }>
+      }
     }
     assert.equal(overviewBody.summary.routesMissingReceipts, 1)
     assert.equal(overviewBody.summary.receiptCoverageRatio, 0.5)
     assert.equal(overviewBody.summary.degradedHosts, 1)
     assert.equal(overviewBody.summary.latencySloBreaches, 1)
+    assert.equal(overviewBody.routeHealth.summary.targetLatencyMs, 5000)
+    assert.equal(overviewBody.routeHealth.summary.activeRoutes, 2)
+    assert.equal(overviewBody.routeHealth.summary.routesWithReceipts, 1)
+    assert.equal(overviewBody.routeHealth.summary.routesMissingReceipts, 1)
+    assert.equal(overviewBody.routeHealth.summary.receiptCoverageRatio, 0.5)
+    assert.equal(overviewBody.routeHealth.summary.failedReceipts, 0)
+    assert.equal(overviewBody.routeHealth.summary.degradedHosts, 1)
+    assert.equal(overviewBody.routeHealth.summary.hostsWithMissingReceipts, 1)
+    assert.equal(overviewBody.routeHealth.summary.hostsWithFailedReceipts, 0)
+    assert.equal(overviewBody.routeHealth.latency.samples, 3)
+    assert.equal(overviewBody.routeHealth.latency.avgMs, 4400)
+    assert.equal(overviewBody.routeHealth.latency.p50Ms, 4200)
+    assert.equal(overviewBody.routeHealth.latency.p95Ms, 7200)
+    assert.equal(overviewBody.routeHealth.latency.overSlo, 1)
+    assert.equal(overviewBody.routeHealth.latency.overDoubleSlo, 0)
+    assert.equal(overviewBody.routeHealth.latency.buckets.withinTarget, 2)
+    assert.equal(overviewBody.routeHealth.latency.buckets.overTarget, 1)
+    assert.equal(overviewBody.routeHealth.latency.buckets.overDoubleTarget, 0)
+    assert.equal(overviewBody.routeHealth.attentionHosts[0]?.hostId, host.host.id)
+    assert.equal(overviewBody.routeHealth.attentionHosts[0]?.workspaceHref, '/workspaces?workspace=openclaw-local')
+    assert.ok(overviewBody.routeHealth.attentionHosts[0]?.traceHref?.startsWith('/intents/'))
+    assert.ok(overviewBody.routeHealth.attentionHosts[0]?.reasons.includes('missing receipts'))
+    assert.ok(overviewBody.routeHealth.attentionHosts[0]?.reasons.includes('latency above target'))
   } finally {
     db.close()
   }
