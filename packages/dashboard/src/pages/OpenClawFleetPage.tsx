@@ -20,9 +20,11 @@ import {
   type OpenClawHostSummary,
   type OpenClawHostStatus,
   type OpenClawHostCredentialState,
+  type OpenClawHostMaintenanceState,
   type OpenClawHostProfilePatchInput,
   type OpenClawHostPolicyPatchInput,
   type OpenClawHostRecoveryRunbookState,
+  type OpenClawHostRolloutRing,
   type OpenClawRouteRuntimeState,
   type OpenClawRouteOwnerResolutionState,
   type OpenClawRouteSource,
@@ -83,6 +85,32 @@ function credentialStateTone(status: OpenClawHostCredentialState): 'default' | '
       return 'warning'
     case 'revoked':
       return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function maintenanceStateTone(status: OpenClawHostMaintenanceState): 'default' | 'warning' | 'critical' | 'success' {
+  switch (status) {
+    case 'serving':
+      return 'success'
+    case 'maintenance':
+      return 'warning'
+    case 'draining':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function rolloutRingTone(ring: OpenClawHostRolloutRing): 'default' | 'warning' | 'critical' | 'success' {
+  switch (ring) {
+    case 'canary':
+      return 'warning'
+    case 'pinned':
+      return 'critical'
+    case 'stable':
+      return 'success'
     default:
       return 'default'
   }
@@ -209,6 +237,17 @@ type HostPlacementFormState = {
   owner: string
 }
 
+type HostMaintenanceFormState = {
+  owner: string
+  reason: string
+}
+
+type HostRolloutFormState = {
+  ring: OpenClawHostRolloutRing
+  desiredConnectorVersion: string
+  notes: string
+}
+
 type DigestScheduleFormState = {
   enabled: boolean
   deliveryEmail: string
@@ -268,6 +307,15 @@ export default function OpenClawFleetPage() {
     environmentLabel: '',
     groupLabels: '',
     owner: '',
+  })
+  const [maintenanceForm, setMaintenanceForm] = useState<HostMaintenanceFormState>({
+    owner: '',
+    reason: '',
+  })
+  const [rolloutForm, setRolloutForm] = useState<HostRolloutFormState>({
+    ring: 'stable',
+    desiredConnectorVersion: '',
+    notes: '',
   })
   const [digestScheduleForm, setDigestScheduleForm] = useState<DigestScheduleFormState>({
     enabled: true,
@@ -478,6 +526,15 @@ export default function OpenClawFleetPage() {
       groupLabels: hostGroupLabels(selectedHost).join(', '),
       owner: selectedHost.placement.owner ?? '',
     })
+    setMaintenanceForm({
+      owner: selectedHost.maintenance.owner ?? '',
+      reason: selectedHost.maintenance.reason ?? '',
+    })
+    setRolloutForm({
+      ring: selectedHost.rollout.ring,
+      desiredConnectorVersion: selectedHost.rollout.desiredConnectorVersion ?? '',
+      notes: selectedHost.rollout.notes ?? '',
+    })
   }, [selectedHost?.id, selectedHost?.updatedAt])
 
   useEffect(() => {
@@ -641,6 +698,44 @@ export default function OpenClawFleetPage() {
       await Promise.all([loadOverview(), loadDigest()])
       await loadHost(host.id)
     }, `Policy for ${hostTitle(host)} updated.`)
+  }
+
+  async function handleEnterMaintenance(host: OpenClawHostSummary) {
+    await runAction(`maintenance-${host.id}`, async () => {
+      await directoryApi.enableOpenClawHostMaintenance(host.id, {
+        owner: maintenanceForm.owner.trim() || null,
+        reason: maintenanceForm.reason.trim() || null,
+      })
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Maintenance enabled for ${hostTitle(host)}.`)
+  }
+
+  async function handleDrainHost(host: OpenClawHostSummary) {
+    await runAction(`drain-${host.id}`, async () => {
+      await directoryApi.drainOpenClawHost(host.id, {
+        owner: maintenanceForm.owner.trim() || null,
+        reason: maintenanceForm.reason.trim() || null,
+      })
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Drain started for ${hostTitle(host)}.`)
+  }
+
+  async function handleResumeHost(host: OpenClawHostSummary) {
+    await runAction(`resume-${host.id}`, async () => {
+      await directoryApi.resumeOpenClawHost(host.id)
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `${hostTitle(host)} resumed.`)
+  }
+
+  async function handleSaveRollout(host: OpenClawHostSummary) {
+    await runAction(`rollout-${host.id}`, async () => {
+      await directoryApi.updateOpenClawHostRollout(host.id, {
+        ring: rolloutForm.ring,
+        desiredConnectorVersion: rolloutForm.desiredConnectorVersion.trim() || null,
+        notes: rolloutForm.notes.trim() || null,
+      })
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Rollout settings updated for ${hostTitle(host)}.`)
   }
 
   async function handleRevoke(host: OpenClawHostSummary) {
@@ -815,6 +910,7 @@ export default function OpenClawFleetPage() {
         <MetricCard label="Live routes" value={!overview ? '—' : formatNumber(overview.summary.liveRoutes)} tone={(overview?.summary.liveRoutes ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Receipt coverage" value={!overview ? '—' : formatPercent(overview.summary.receiptCoverageRatio)} tone={(overview?.summary.receiptCoverageRatio ?? 1) < 0.8 ? 'warning' : 'success'} />
         <MetricCard label="Latency watch" value={!overview ? '—' : formatNumber(overview.summary.degradedHosts)} tone={(overview?.summary.degradedHosts ?? 0) > 0 ? 'warning' : 'default'} />
+        <MetricCard label="Maint. blocked" value={!overview ? '—' : formatNumber(overview.maintenance.counts.blocked)} tone={(overview?.maintenance.counts.blocked ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Rotation due" value={!overview ? '—' : formatNumber(overview.summary.rotationDueHosts)} tone={(overview?.summary.rotationDueHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Duplicate conflicts" value={!overview ? '—' : formatNumber(overview.summary.duplicateIdentityConflicts)} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
       </section>
@@ -1644,6 +1740,13 @@ export default function OpenClawFleetPage() {
                       {host.placement.revokeReviewRequestedAt ? (
                         <StatusPill label="revoke review" tone="warning" />
                       ) : null}
+                      {host.maintenance.state !== 'serving' ? (
+                        <StatusPill label={host.maintenance.state} tone={maintenanceStateTone(host.maintenance.state)} />
+                      ) : null}
+                      <StatusPill label={`ring:${host.rollout.ring}`} tone={rolloutRingTone(host.rollout.ring)} />
+                      {host.rollout.versionState === 'drifted' ? (
+                        <StatusPill label="rollout drift" tone="warning" />
+                      ) : null}
                       {host.policy.rotation.windowOpen ? (
                         <StatusPill label="rotation window open" tone="warning" />
                       ) : null}
@@ -1661,6 +1764,8 @@ export default function OpenClawFleetPage() {
                       <div>{host.approvedAt ? `Approved ${formatRelativeTime(host.approvedAt)}` : 'Waiting for approval'}</div>
                       <div>{host.revokedAt ? `Revoked ${formatRelativeTime(host.revokedAt)}` : 'Credential active or pending'}</div>
                       <div>{host.credentialIssuedAt ? `Credential age ${host.credentialAgeHours ?? 0}h` : 'No credential issued yet'}</div>
+                      <div>{host.maintenance.state === 'serving' ? 'Serving traffic' : `${host.maintenance.state} · ${host.maintenance.owner ?? 'no owner'}${host.maintenance.reason ? ` · ${host.maintenance.reason}` : ''}`}</div>
+                      <div>{host.rollout.desiredConnectorVersion ? `Rollout ${host.rollout.ring} · want ${host.rollout.desiredConnectorVersion} · ${host.rollout.versionState}` : `Rollout ${host.rollout.ring} · ${host.rollout.versionState}`}</div>
                       <div>{host.policy.rotation.nextRotationDueAt ? `Rotation ${host.policy.rotation.reviewState === 'overdue' ? 'overdue' : 'due'} ${formatRelativeTime(host.policy.rotation.nextRotationDueAt)}` : 'No rotation schedule yet'}</div>
                       <div>{host.summary.delivery.latency.samples > 0 ? `p95 ${formatLatency(host.summary.delivery.latency.p95Ms)} · ${formatNumber(host.summary.delivery.latency.overSlo)} breach` : 'No latency samples yet'}</div>
                       <div>{host.policy.recovery.status !== 'idle' ? `Recovery ${host.policy.recovery.status}${host.policy.recovery.owner ? ` · ${host.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
@@ -1705,6 +1810,45 @@ export default function OpenClawFleetPage() {
                           }}
                         >
                           {actionBusy === `rotate-${host.id}` ? 'Rotating…' : 'Rotate credential'}
+                        </button>
+                      ) : null}
+                      {host.status === 'active' && host.maintenance.state === 'serving' ? (
+                        <>
+                          <button
+                            type="button"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            disabled={actionBusy === `maintenance-${host.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleEnterMaintenance(host)
+                            }}
+                          >
+                            {actionBusy === `maintenance-${host.id}` ? 'Applying…' : 'Enter maintenance'}
+                          </button>
+                          <button
+                            type="button"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            disabled={actionBusy === `drain-${host.id}`}
+                            onClick={(event) => {
+                              event.stopPropagation()
+                              void handleDrainHost(host)
+                            }}
+                          >
+                            {actionBusy === `drain-${host.id}` ? 'Draining…' : 'Drain host'}
+                          </button>
+                        </>
+                      ) : null}
+                      {host.maintenance.state !== 'serving' ? (
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={actionBusy === `resume-${host.id}`}
+                          onClick={(event) => {
+                            event.stopPropagation()
+                            void handleResumeHost(host)
+                          }}
+                        >
+                          {actionBusy === `resume-${host.id}` ? 'Resuming…' : 'Resume host'}
                         </button>
                       ) : null}
                       {host.status === 'revoked' || host.healthStatus === 'stale' ? (
@@ -2163,6 +2307,162 @@ export default function OpenClawFleetPage() {
         </div>
       </section>
 
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Maintenance</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Hosts intentionally blocked for maintenance or drain. Beam delivery is blocked until the host resumes serving.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.maintenance.attentionHosts.length)} hosts` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3">
+            <MetricCard label="Maintenance" value={!overview ? '—' : formatNumber(overview.maintenance.counts.maintenance)} tone={(overview?.maintenance.counts.maintenance ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Draining" value={!overview ? '—' : formatNumber(overview.maintenance.counts.draining)} tone={(overview?.maintenance.counts.draining ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="Blocked delivery" value={!overview ? '—' : formatNumber(overview.maintenance.counts.blocked)} tone={(overview?.maintenance.counts.blocked ?? 0) > 0 ? 'warning' : 'default'} />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.maintenance.attentionHosts.length > 0 ? (
+              overview.maintenance.attentionHosts.map((item) => (
+                <div key={`maintenance-${item.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.hostLabel || `Host ${item.hostId}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {item.reason || 'No operator reason recorded'}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label={item.state} tone={maintenanceStateTone(item.state)} />
+                      {item.state !== 'serving' ? <StatusPill label="delivery blocked" tone="warning" /> : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
+                    <div>{item.owner ? `Owner ${item.owner}` : 'No maintenance owner assigned'}</div>
+                    <div>{item.startedAt ? `Started ${formatRelativeTime(item.startedAt)}` : 'No start time recorded'}</div>
+                    <div>{item.state !== 'serving' ? 'Outbound Beam delivery is blocked' : 'No delivery block recorded'}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      onClick={() => focusHost(item.hostId)}
+                    >
+                      Open host
+                    </button>
+                    {item.workspaceHref ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.workspaceHref}>
+                        Open workspace
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No hosts are currently in maintenance or drain." />
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Connector rollout</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Version inventory, rollout rings, and canary/drift visibility across the approved host fleet.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.rollout.summary.versions)} versions` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+            <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.hosts.length)} />
+            <MetricCard label="Canary" value={!overview ? '—' : formatNumber(overview.rollout.summary.canaryHosts)} tone={(overview?.rollout.summary.canaryHosts ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Pinned" value={!overview ? '—' : formatNumber(overview.rollout.rings.find((ring) => ring.ring === 'pinned')?.hostCount ?? 0)} tone={(overview?.rollout.rings.find((ring) => ring.ring === 'pinned')?.hostCount ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="Drift" value={!overview ? '—' : formatNumber(overview.rollout.summary.driftHosts)} tone={(overview?.rollout.summary.driftHosts ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Unmanaged" value={!overview ? '—' : formatNumber(overview.rollout.summary.unmanagedHosts)} tone={(overview?.rollout.summary.unmanagedHosts ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Versions" value={!overview ? '—' : formatNumber(overview.rollout.summary.versions)} />
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Version inventory</div>
+              <div className="mt-3 space-y-3">
+                {overview && overview.rollout.versions.length > 0 ? overview.rollout.versions.map((item) => (
+                  <div key={`version-${item.version}`} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <div className="font-medium text-slate-900 dark:text-slate-100">{item.version}</div>
+                    <div className="mt-1">{`${formatNumber(item.hostCount)} hosts · ${formatNumber(item.canaryHosts)} canary · ${formatNumber(item.driftHosts)} drifted · ${formatNumber(item.staleHosts)} stale`}</div>
+                  </div>
+                )) : <EmptyPanel label="No rollout versions recorded yet." />}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Rollout rings</div>
+              <div className="mt-3 space-y-3">
+                {overview && overview.rollout.rings.length > 0 ? overview.rollout.rings.map((item) => (
+                  <div key={`ring-${item.ring}`} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <div className="flex items-center gap-2">
+                      <StatusPill label={item.ring} tone={rolloutRingTone(item.ring)} />
+                      <span>{`${formatNumber(item.hostCount)} hosts`}</span>
+                    </div>
+                    <div className="mt-1">{`${formatNumber(item.canaryHosts)} canary · ${formatNumber(item.driftHosts)} drifted · ${formatNumber(item.versions.length)} versions`}</div>
+                  </div>
+                )) : <EmptyPanel label="No rollout ring data recorded yet." />}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.rollout.attentionHosts.length > 0 ? (
+              overview.rollout.attentionHosts.map((item) => (
+                <div key={`rollout-${item.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.hostLabel || `Host ${item.hostId}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.reasons.join(' · ')}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label={item.ring} tone={rolloutRingTone(item.ring)} />
+                      <StatusPill label={item.versionState} tone={item.versionState === 'drifted' ? 'warning' : item.versionState === 'current' ? 'success' : 'default'} />
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
+                    <div>{`Current ${item.connectorVersion}${item.desiredConnectorVersion ? ` · desired ${item.desiredConnectorVersion}` : ''}`}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      onClick={() => focusHost(item.hostId)}
+                    >
+                      Open host
+                    </button>
+                    {item.workspaceHref ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.workspaceHref}>
+                        Open workspace
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No rollout drift or canary attention hosts." />
+            )}
+          </div>
+        </div>
+      </section>
+
       <section className="grid gap-6 xl:grid-cols-[1.1fr,0.9fr]">
         <div className="panel">
           <div className="flex items-start justify-between gap-3">
@@ -2194,6 +2494,11 @@ export default function OpenClawFleetPage() {
                   {hostGroupLabels(selectedHost).map((group) => (
                     <StatusPill key={`${selectedHost.id}-${group}`} label={`group:${group}`} />
                   ))}
+                  <StatusPill label={selectedHost.maintenance.state} tone={maintenanceStateTone(selectedHost.maintenance.state)} />
+                  <StatusPill label={`ring:${selectedHost.rollout.ring}`} tone={rolloutRingTone(selectedHost.rollout.ring)} />
+                  {selectedHost.rollout.versionState === 'drifted' ? (
+                    <StatusPill label="rollout drift" tone="warning" />
+                  ) : null}
                   {selectedHost.placement.revokeReviewRequestedAt ? (
                     <StatusPill label="revoke review" tone="warning" />
                   ) : null}
@@ -2213,6 +2518,10 @@ export default function OpenClawFleetPage() {
                   <div>{selectedHost.policy.rotation.windowOpen ? 'Rotation window is open now' : selectedHost.policy.rotation.nextRotationWindowStartsAt ? `Rotation window ${formatDateTime(selectedHost.policy.rotation.nextRotationWindowStartsAt)}` : 'No rotation window scheduled'}</div>
                   <div>{selectedHost.policy.recovery.status !== 'idle' ? `Recovery ${selectedHost.policy.recovery.status}${selectedHost.policy.recovery.owner ? ` · ${selectedHost.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
                   <div>{selectedHost.policy.recovery.cleanupRecommended ? 'Recovery cleanup ready' : 'No recovery cleanup pending'}</div>
+                  <div>{selectedHost.maintenance.state === 'serving' ? 'Host is serving traffic' : `${selectedHost.maintenance.state} since ${selectedHost.maintenance.startedAt ? formatRelativeTime(selectedHost.maintenance.startedAt) : 'unknown'}${selectedHost.maintenance.owner ? ` · ${selectedHost.maintenance.owner}` : ''}`}</div>
+                  <div>{selectedHost.maintenance.deliveryBlocked ? 'Beam delivery is blocked by host maintenance state' : 'No maintenance delivery block active'}</div>
+                  <div>{selectedHost.rollout.desiredConnectorVersion ? `Desired connector ${selectedHost.rollout.desiredConnectorVersion}` : 'No desired connector version pinned'}</div>
+                  <div>{`Connector ${selectedHost.connectorVersion} · rollout ${selectedHost.rollout.versionState}`}</div>
                 </div>
               </div>
 
@@ -2432,6 +2741,148 @@ export default function OpenClawFleetPage() {
                       {actionBusy === `cleanup-${selectedHost.id}` ? 'Cleaning…' : 'Complete recovery cleanup'}
                     </button>
                   ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Maintenance and drain</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Pause or drain one host intentionally. Beam blocks outbound delivery for maintenance and drain until the host resumes serving.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill label={selectedHost.maintenance.state} tone={maintenanceStateTone(selectedHost.maintenance.state)} />
+                    {selectedHost.maintenance.deliveryBlocked ? <StatusPill label="delivery blocked" tone="warning" /> : null}
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-2">
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Maintenance owner</span>
+                    <input
+                      className="input-field"
+                      placeholder="ops@example.com"
+                      value={maintenanceForm.owner}
+                      onChange={(event) => setMaintenanceForm((current) => ({ ...current, owner: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-2">
+                    <span>Reason</span>
+                    <textarea
+                      className="input-field min-h-[96px]"
+                      placeholder="Kernel update, host migration, connector canary rollback..."
+                      value={maintenanceForm.reason}
+                      onChange={(event) => setMaintenanceForm((current) => ({ ...current, reason: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{selectedHost.maintenance.startedAt ? `Started ${formatDateTime(selectedHost.maintenance.startedAt)}` : 'No maintenance window recorded'}</div>
+                  <div>{selectedHost.maintenance.updatedAt ? `Last updated ${formatDateTime(selectedHost.maintenance.updatedAt)}` : 'No maintenance updates yet'}</div>
+                  <div>{selectedHost.maintenance.owner ? `Owner ${selectedHost.maintenance.owner}` : 'No maintenance owner assigned'}</div>
+                  <div>{selectedHost.maintenance.reason ? `Reason: ${selectedHost.maintenance.reason}` : 'No maintenance reason recorded'}</div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {selectedHost.status === 'active' && selectedHost.maintenance.state === 'serving' ? (
+                    <>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        disabled={actionBusy === `maintenance-${selectedHost.id}`}
+                        onClick={() => { void handleEnterMaintenance(selectedHost) }}
+                      >
+                        {actionBusy === `maintenance-${selectedHost.id}` ? 'Applying…' : 'Enter maintenance'}
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        disabled={actionBusy === `drain-${selectedHost.id}`}
+                        onClick={() => { void handleDrainHost(selectedHost) }}
+                      >
+                        {actionBusy === `drain-${selectedHost.id}` ? 'Draining…' : 'Drain host'}
+                      </button>
+                    </>
+                  ) : null}
+                  {selectedHost.maintenance.state !== 'serving' ? (
+                    <button
+                      type="button"
+                      className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                      disabled={actionBusy === `resume-${selectedHost.id}`}
+                      onClick={() => { void handleResumeHost(selectedHost) }}
+                    >
+                      {actionBusy === `resume-${selectedHost.id}` ? 'Resuming…' : 'Resume host'}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+
+              <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Connector rollout</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                      Track rollout rings, desired connector version, and version drift without leaving the fleet surface.
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <StatusPill label={`ring:${selectedHost.rollout.ring}`} tone={rolloutRingTone(selectedHost.rollout.ring)} />
+                    <StatusPill label={selectedHost.rollout.versionState} tone={selectedHost.rollout.versionState === 'drifted' ? 'warning' : selectedHost.rollout.versionState === 'current' ? 'success' : 'default'} />
+                  </div>
+                </div>
+
+                <div className="mt-4 grid gap-3 md:grid-cols-3">
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                    <span>Rollout ring</span>
+                    <select
+                      className="input-field"
+                      value={rolloutForm.ring}
+                      onChange={(event) => setRolloutForm((current) => ({ ...current, ring: event.target.value as OpenClawHostRolloutRing }))}
+                    >
+                      <option value="stable">stable</option>
+                      <option value="canary">canary</option>
+                      <option value="pinned">pinned</option>
+                    </select>
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-2">
+                    <span>Desired connector version</span>
+                    <input
+                      className="input-field"
+                      placeholder="1.5.0"
+                      value={rolloutForm.desiredConnectorVersion}
+                      onChange={(event) => setRolloutForm((current) => ({ ...current, desiredConnectorVersion: event.target.value }))}
+                    />
+                  </label>
+                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
+                    <span>Notes</span>
+                    <textarea
+                      className="input-field min-h-[96px]"
+                      placeholder="Canary cohort, change ticket, rollout guardrails..."
+                      value={rolloutForm.notes}
+                      onChange={(event) => setRolloutForm((current) => ({ ...current, notes: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{`Current connector ${selectedHost.connectorVersion}`}</div>
+                  <div>{selectedHost.rollout.updatedAt ? `Last rollout update ${formatDateTime(selectedHost.rollout.updatedAt)}` : 'No rollout update yet'}</div>
+                  <div>{selectedHost.rollout.desiredConnectorVersion ? `Desired version ${selectedHost.rollout.desiredConnectorVersion}` : 'No desired version configured'}</div>
+                  <div>{selectedHost.rollout.canary ? 'Canary visibility enabled for this host' : 'Not marked as canary'}</div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                    disabled={actionBusy === `rollout-${selectedHost.id}`}
+                    onClick={() => { void handleSaveRollout(selectedHost) }}
+                  >
+                    {actionBusy === `rollout-${selectedHost.id}` ? 'Saving…' : 'Save rollout'}
+                  </button>
                 </div>
               </div>
 

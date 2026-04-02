@@ -1627,6 +1627,124 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
   }
 })
 
+test('openclaw host maintenance and drain block delivery until resume', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const sender = createFixtureAgent('sender@openclaw.beam.directory')
+    const receiver = createFixtureAgent('maint@openclaw.beam.directory')
+    registerFixtureAgent(db, sender, 'Sender')
+    registerFixtureAgent(db, receiver, 'Maintenance Receiver')
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: 'conversation.message',
+      allowedFrom: sender.beamId,
+    })
+
+    const host = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Maintenance',
+      hostname: 'maint.local',
+      beamId: receiver.beamId,
+      routeKey: 'maint-route',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const maintenanceResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/maintenance`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        owner: 'ops@example.com',
+        reason: 'kernel update',
+      }),
+    }))
+    assert.equal(maintenanceResponse.status, 200)
+    const maintenanceBody = await maintenanceResponse.json() as {
+      host: {
+        maintenance: {
+          state: string
+          owner: string | null
+          reason: string | null
+          deliveryBlocked: boolean
+        }
+      }
+    }
+    assert.equal(maintenanceBody.host.maintenance.state, 'maintenance')
+    assert.equal(maintenanceBody.host.maintenance.owner, 'ops@example.com')
+    assert.equal(maintenanceBody.host.maintenance.reason, 'kernel update')
+    assert.equal(maintenanceBody.host.maintenance.deliveryBlocked, true)
+
+    const maintenanceNonce = randomUUID()
+    await assert.rejects(
+      relayIntentFromHttp(db, createSignedConversationIntent(sender, receiver.beamId, maintenanceNonce), 250),
+      (error: unknown) => error instanceof RelayError && error.code === 'FORBIDDEN' && error.message.includes('maintenance mode'),
+    )
+    assert.equal(getIntentLogByNonce(db, maintenanceNonce)?.error_code, 'HOST_MAINTENANCE')
+
+    const drainResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/drain`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        owner: 'ops@example.com',
+        reason: 'drain connections',
+      }),
+    }))
+    assert.equal(drainResponse.status, 200)
+    const drainBody = await drainResponse.json() as {
+      host: {
+        maintenance: {
+          state: string
+          reason: string | null
+        }
+      }
+    }
+    assert.equal(drainBody.host.maintenance.state, 'draining')
+    assert.equal(drainBody.host.maintenance.reason, 'drain connections')
+
+    const drainNonce = randomUUID()
+    await assert.rejects(
+      relayIntentFromHttp(db, createSignedConversationIntent(sender, receiver.beamId, drainNonce), 250),
+      (error: unknown) => error instanceof RelayError && error.code === 'FORBIDDEN' && error.message.includes('draining OpenClaw host'),
+    )
+    assert.equal(getIntentLogByNonce(db, drainNonce)?.error_code, 'HOST_DRAINING')
+
+    const resumeResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/resume`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(resumeResponse.status, 200)
+    const resumeBody = await resumeResponse.json() as {
+      host: {
+        maintenance: {
+          state: string
+          reason: string | null
+          deliveryBlocked: boolean
+        }
+      }
+    }
+    assert.equal(resumeBody.host.maintenance.state, 'serving')
+    assert.equal(resumeBody.host.maintenance.reason, null)
+    assert.equal(resumeBody.host.maintenance.deliveryBlocked, false)
+
+    const resumedNonce = randomUUID()
+    await assert.rejects(
+      relayIntentFromHttp(db, createSignedConversationIntent(sender, receiver.beamId, resumedNonce), 250),
+      (error: unknown) => error instanceof RelayError && error.code !== 'FORBIDDEN',
+    )
+    const resumedLog = getIntentLogByNonce(db, resumedNonce)
+    assert.notEqual(resumedLog?.error_code, 'HOST_MAINTENANCE')
+    assert.notEqual(resumedLog?.error_code, 'HOST_DRAINING')
+  } finally {
+    db.close()
+  }
+})
+
 test('revoked openclaw host routes block Beam delivery immediately', async () => {
   const db = createDatabase(':memory:')
 
@@ -1803,6 +1921,159 @@ test('fleet digest summarizes stale hosts, duplicate conflicts, and failed deliv
       body: JSON.stringify({}),
     }))
     assert.equal(deliverUnavailable.status, 503)
+  } finally {
+    db.close()
+  }
+})
+
+test('fleet overview surfaces maintenance counts and rollout inventory', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    const alpha = createFixtureAgent('atlas@openclaw.beam.directory')
+    const beta = createFixtureAgent('bravo@openclaw.beam.directory')
+    const gamma = createFixtureAgent('charlie@openclaw.beam.directory')
+    registerFixtureAgent(db, alpha, 'Atlas')
+    registerFixtureAgent(db, beta, 'Bravo')
+    registerFixtureAgent(db, gamma, 'Charlie')
+
+    const hostAlpha = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Alpha',
+      hostname: 'alpha.local',
+      beamId: alpha.beamId,
+      routeKey: 'alpha-route',
+      workspaceSlug: 'openclaw-local',
+    })
+    const hostBravo = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Bravo',
+      hostname: 'bravo.local',
+      beamId: beta.beamId,
+      routeKey: 'bravo-route',
+      workspaceSlug: 'openclaw-local',
+    })
+    const hostCharlie = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Charlie',
+      hostname: 'charlie.local',
+      beamId: gamma.beamId,
+      routeKey: 'charlie-route',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const maintenanceResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostBravo.host.id}/maintenance`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        owner: 'ops@example.com',
+        reason: 'planned maintenance',
+      }),
+    }))
+    assert.equal(maintenanceResponse.status, 200)
+
+    const canaryResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostAlpha.host.id}/rollout`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        ring: 'canary',
+        desiredConnectorVersion: '1.2.0-test',
+        notes: 'canary cohort',
+      }),
+    }))
+    assert.equal(canaryResponse.status, 200)
+
+    const driftResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostCharlie.host.id}/rollout`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        ring: 'pinned',
+        desiredConnectorVersion: '9.9.9-test',
+        notes: 'hold back rollout',
+      }),
+    }))
+    assert.equal(driftResponse.status, 200)
+    const driftBody = await driftResponse.json() as {
+      host: {
+        rollout: {
+          ring: string
+          desiredConnectorVersion: string | null
+          versionState: string
+        }
+      }
+    }
+    assert.equal(driftBody.host.rollout.ring, 'pinned')
+    assert.equal(driftBody.host.rollout.desiredConnectorVersion, '9.9.9-test')
+    assert.equal(driftBody.host.rollout.versionState, 'drifted')
+
+    const overviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewResponse.status, 200)
+    const overviewBody = await overviewResponse.json() as {
+      maintenance: {
+        counts: {
+          maintenance: number
+          draining: number
+          blocked: number
+        }
+        attentionHosts: Array<{
+          hostId: number
+          state: string
+          reasons: string[]
+        }>
+      }
+      rollout: {
+        summary: {
+          versions: number
+          canaryHosts: number
+          driftHosts: number
+          unmanagedHosts: number
+        }
+        versions: Array<{
+          version: string
+          hostCount: number
+          canaryHosts: number
+          driftHosts: number
+        }>
+        rings: Array<{
+          ring: string
+          hostCount: number
+          canaryHosts: number
+          driftHosts: number
+        }>
+        attentionHosts: Array<{
+          hostId: number
+          ring: string
+          versionState: string
+          reasons: string[]
+        }>
+      }
+    }
+
+    assert.equal(overviewBody.maintenance.counts.maintenance, 1)
+    assert.equal(overviewBody.maintenance.counts.draining, 0)
+    assert.equal(overviewBody.maintenance.counts.blocked, 1)
+    assert.equal(overviewBody.maintenance.attentionHosts[0]?.hostId, hostBravo.host.id)
+    assert.equal(overviewBody.maintenance.attentionHosts[0]?.state, 'maintenance')
+    assert.ok(overviewBody.maintenance.attentionHosts[0]?.reasons.includes('planned maintenance'))
+
+    assert.equal(overviewBody.rollout.summary.versions, 1)
+    assert.equal(overviewBody.rollout.summary.canaryHosts, 1)
+    assert.equal(overviewBody.rollout.summary.driftHosts, 1)
+    assert.equal(overviewBody.rollout.summary.unmanagedHosts, 1)
+    assert.equal(overviewBody.rollout.versions[0]?.version, '1.2.0-test')
+    assert.equal(overviewBody.rollout.versions[0]?.hostCount, 3)
+    assert.equal(overviewBody.rollout.versions[0]?.canaryHosts, 1)
+    assert.equal(overviewBody.rollout.versions[0]?.driftHosts, 1)
+    assert.equal(overviewBody.rollout.rings.find((entry) => entry.ring === 'canary')?.hostCount, 1)
+    assert.equal(overviewBody.rollout.rings.find((entry) => entry.ring === 'pinned')?.hostCount, 1)
+    assert.equal(overviewBody.rollout.attentionHosts.find((entry) => entry.hostId === hostAlpha.host.id)?.ring, 'canary')
+    assert.equal(overviewBody.rollout.attentionHosts.find((entry) => entry.hostId === hostCharlie.host.id)?.versionState, 'drifted')
+    assert.ok(overviewBody.rollout.attentionHosts.find((entry) => entry.hostId === hostCharlie.host.id)?.reasons.some((reason) => reason.includes('expected 9.9.9-test')))
   } finally {
     db.close()
   }
