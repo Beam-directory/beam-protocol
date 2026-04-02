@@ -337,6 +337,11 @@ export async function startOpenClawFleetHarness() {
         headers: { Authorization: `Bearer ${token}` },
       })
     },
+    async fetchFleetReconciliation() {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/reconciliation`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+    },
     async fetchFleetDigest(params = {}) {
       const query = new URLSearchParams()
       if (params.format) {
@@ -372,6 +377,13 @@ export async function startOpenClawFleetHarness() {
     },
     async deliverFleetDigest(input = {}) {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/deliver`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
+    async runFleetReconciliation(input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/reconciliation/run`, {
         method: 'POST',
         headers: createAdminHeaders(token),
         body: JSON.stringify(input),
@@ -433,6 +445,33 @@ export async function startOpenClawFleetHarness() {
         body: JSON.stringify({ reason }),
       })
     },
+    async enableMaintenance(hostKey, input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/maintenance`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
+    async drainHost(hostKey, input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/drain`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
+    async resumeHost(hostKey) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/resume`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+      })
+    },
+    async updateRollout(hostKey, input) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/rollout`, {
+        method: 'PATCH',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify(input),
+      })
+    },
     async syncHost(hostKey, routes = null, details = {}) {
       const host = hosts[hostKey]
       const inventoryRoutes = routes ?? [buildRoute(host, host.agent, host.routeSource)]
@@ -476,7 +515,7 @@ export async function startOpenClawFleetHarness() {
         body: JSON.stringify({ note }),
       })
     },
-    async markHostStale(hostKey, minutesAgo = 10) {
+    async markHostStale(hostKey, minutesAgo = 10, options = {}) {
       const dbApi = await loadDirectoryDbModule()
       const db = dbApi.createDatabase(harness.directoryDbPath)
       try {
@@ -486,6 +525,13 @@ export async function startOpenClawFleetHarness() {
           SET last_heartbeat_at = ?, health_status = 'watch'
           WHERE id = ?
         `).run(staleAt, hosts[hostKey].id)
+        if (options.ageRoutes) {
+          db.prepare(`
+            UPDATE openclaw_host_routes
+            SET last_seen_at = ?, updated_at = ?
+            WHERE host_id = ? AND reported_state != 'ended'
+          `).run(staleAt, staleAt, hosts[hostKey].id)
+        }
         return staleAt
       } finally {
         db.close()

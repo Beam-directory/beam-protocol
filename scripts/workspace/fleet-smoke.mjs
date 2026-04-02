@@ -90,6 +90,33 @@ async function main() {
     ring.push(await sendAndExpect(fleet, fleet.agents.beta, fleet.agents.gamma, 'fleet beta -> gamma', fleet.clients.gamma))
     ring.push(await sendAndExpect(fleet, fleet.agents.gamma, fleet.agents.alpha, 'fleet gamma -> alpha', fleet.clients.alpha))
 
+    const rollout = await fleet.updateRollout('alpha', {
+      ring: 'canary',
+      desiredConnectorVersion: '1.5.0-test',
+      notes: 'Fleet drill canary visibility',
+    })
+    const rolloutOverview = await fleet.fetchFleetOverview()
+    if (rollout.host.rollout.ring !== 'canary' || rolloutOverview.rollout.summary.canaryHosts < 1) {
+      throw new Error('Expected the fleet drill to surface at least one canary rollout host.')
+    }
+
+    await fleet.markHostStale('gamma', 45, { ageRoutes: true })
+    const reconciliationBefore = await fleet.fetchFleetReconciliation()
+    if (reconciliationBefore.summary.garbageCollectableRoutes < 1) {
+      throw new Error('Expected the fleet drill to surface at least one garbage-collectable route.')
+    }
+    const reconciliationRun = await fleet.runFleetReconciliation({
+      hostId: fleet.hosts.gamma.id,
+      staleGraceMinutes: 0,
+      orphanedGraceMinutes: 0,
+      note: 'Fleet drill reconciliation',
+    })
+    if (reconciliationRun.deletedCount < 1) {
+      throw new Error('Expected the fleet drill reconciliation to delete at least one stale route.')
+    }
+    await fleet.syncHost('gamma', null, { stage: 'fleet-reconciliation-remediation' })
+    await fleet.reconnectHostClient('gamma')
+
     await fleet.createConflict()
     const conflictOverview = await fleet.fetchFleetOverview()
     if (conflictOverview.summary.duplicateIdentityConflicts !== 1) {
@@ -174,6 +201,16 @@ async function main() {
         hostname: host.hostname,
       })),
       ring,
+      rollout: {
+        ring: rollout.host.rollout.ring,
+        desiredConnectorVersion: rollout.host.rollout.desiredConnectorVersion,
+        canaryHosts: rolloutOverview.rollout.summary.canaryHosts,
+      },
+      reconciliation: {
+        driftedHosts: reconciliationBefore.summary.driftedHosts,
+        garbageCollectableRoutes: reconciliationBefore.summary.garbageCollectableRoutes,
+        deletedCount: reconciliationRun.deletedCount,
+      },
       conflict: {
         duplicateIdentityConflicts: conflictOverview.summary.duplicateIdentityConflicts,
         response: conflictFailure,
@@ -214,14 +251,18 @@ async function main() {
 1. Bootstrap three approved OpenClaw hosts into one central Beam directory.
 2. Connect one live Beam route per host over WebSocket.
 3. Send a real ring of host-to-host messages so every host sends and receives at least once.
-4. Inject a duplicate Beam identity conflict and confirm delivery is blocked until one explicit route owner is preferred and the duplicate route is disabled.
-5. Rotate one host credential and confirm the host returns with the rotated secret.
-6. Revoke a host, confirm delivery is blocked, then recover the host and confirm delivery resumes on the same Beam trace model.
+4. Mark one host stale, run fleet reconciliation, and confirm stale route history is cleaned before the host rejoins the fleet.
+5. Inject a duplicate Beam identity conflict and confirm delivery is blocked until one explicit route owner is preferred and the duplicate route is disabled.
+6. Rotate one host credential and confirm the host returns with the rotated secret.
+7. Revoke a host, confirm delivery is blocked, then recover the host and confirm delivery resumes on the same Beam trace model.
 
 ## Verification
 
 - Approved hosts visible: \`${Object.keys(fleet.hosts).length}\`
 - Ring messages delivered: \`${ring.length}\`
+- Canary hosts after rollout update: \`${rolloutOverview.rollout.summary.canaryHosts}\`
+- Garbage-collectable routes before reconciliation: \`${reconciliationBefore.summary.garbageCollectableRoutes}\`
+- Deleted routes during reconciliation: \`${reconciliationRun.deletedCount}\`
 - Duplicate conflict count: \`${conflictOverview.summary.duplicateIdentityConflicts}\`
 - Duplicate conflicts after owner resolution: \`${resolvedOverview.summary.duplicateIdentityConflicts}\`
 - Revoked hosts after remediation: \`${postRevokeOverview.summary.revokedHosts}\`

@@ -36,6 +36,7 @@ export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
 export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
 export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
+export type OpenClawRouteReconciliationClassification = 'live' | 'stale' | 'orphaned' | 'conflict'
 export type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
 export type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
 export type OpenClawFleetBulkAction = 'apply_labels' | 'stage_revoke_review' | 'clear_revoke_review'
@@ -297,6 +298,16 @@ export interface OpenClawHostRoute {
   hostLabel: string | null
   hostHealth: OpenClawHostHealth
   hostCredentialState: OpenClawHostCredentialState
+  reconciliation: {
+    classification: OpenClawRouteReconciliationClassification
+    desiredState: 'deliverable' | 'historical'
+    reason: string
+    garbageCollectable: boolean
+    hostLastHeartbeatAt: string | null
+    hostLastInventoryAt: string | null
+    lastSeenAgeHours: number | null
+    endedAgeHours: number | null
+  }
   metadata: Record<string, unknown> | null
   lastSeenAt: string | null
   endedAt: string | null
@@ -387,6 +398,19 @@ export interface OpenClawHostSummary {
     updatedAt: string | null
     versionState: OpenClawHostRolloutVersionState
     canary: boolean
+  }
+  reconciliation: {
+    state: 'steady' | 'attention' | 'cleanup_required'
+    deliverableRoutes: number
+    liveRoutes: number
+    staleRoutes: number
+    orphanedRoutes: number
+    conflictRoutes: number
+    garbageCollectableRoutes: number
+    reason: string | null
+    nextAction: string | null
+    lastHeartbeatAt: string | null
+    lastInventoryAt: string | null
   }
   enrollment: OpenClawEnrollmentRequest | null
   summary: {
@@ -615,6 +639,10 @@ export interface OpenClawFleetOverviewResponse {
     templateDriftedWorkspaces: number
     suggestedRemediations: number
     criticalRemediations: number
+    driftedHosts: number
+    reconciliationCleanupRequiredHosts: number
+    orphanedRoutes: number
+    garbageCollectableRoutes: number
   }
   credentialPolicy: {
     counts: {
@@ -753,6 +781,52 @@ export interface OpenClawFleetOverviewResponse {
       workspaceHref: string | null
     }>
   }
+  reconciliation: {
+    summary: {
+      driftedHosts: number
+      cleanupRequiredHosts: number
+      liveRoutes: number
+      staleRoutes: number
+      orphanedRoutes: number
+      conflictRoutes: number
+      garbageCollectableRoutes: number
+      lastRunAt: string | null
+    }
+    attentionHosts: Array<{
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      healthStatus: OpenClawHostHealth
+      state: 'steady' | 'attention' | 'cleanup_required'
+      deliverableRoutes: number
+      staleRoutes: number
+      orphanedRoutes: number
+      conflictRoutes: number
+      garbageCollectableRoutes: number
+      reason: string | null
+      nextAction: string | null
+      href: string
+      workspaceHref: string | null
+    }>
+    attentionRoutes: Array<{
+      routeId: number
+      beamId: string
+      hostId: number
+      hostLabel: string | null
+      workspaceSlug: string | null
+      classification: OpenClawRouteReconciliationClassification
+      desiredState: 'deliverable' | 'historical'
+      garbageCollectable: boolean
+      routeSource: OpenClawRouteSource
+      connectionMode: 'websocket' | 'http' | 'hybrid' | 'unavailable' | null
+      reason: string
+      lastSeenAt: string | null
+      endedAt: string | null
+      href: string
+      workspaceHref: string | null
+      traceHref: string | null
+    }>
+  }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
   templates: OpenClawFleetTemplateSummary
@@ -760,6 +834,8 @@ export interface OpenClawFleetOverviewResponse {
   environments: OpenClawFleetEnvironmentSummary[]
   hostGroups: OpenClawFleetHostGroupSummary[]
 }
+
+export type OpenClawFleetReconciliationResponse = OpenClawFleetOverviewResponse['reconciliation']
 
 export interface OpenClawFleetDigestItem {
   id: string
@@ -883,6 +959,18 @@ export interface OpenClawHostRoutesResponse {
   host: OpenClawHostSummary
   routes: OpenClawHostRoute[]
   total: number
+}
+
+export interface OpenClawFleetReconciliationRunResponse {
+  ok: true
+  hostId: number | null
+  staleGraceMinutes: number
+  orphanedGraceMinutes: number
+  endedRouteIds: number[]
+  deletedRouteIds: number[]
+  deletedCount: number
+  reconciliation: OpenClawFleetReconciliationResponse
+  hosts: OpenClawHostSummary[]
 }
 
 export interface OpenClawHostIdentitiesResponse {
@@ -2816,6 +2904,7 @@ export const directoryApi = {
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
+  getOpenClawFleetReconciliation: () => request<OpenClawFleetReconciliationResponse>('/admin/openclaw/fleet/reconciliation', undefined, { admin: true }),
   listOpenClawPolicyPacks: () => request<{ total: number; policyPacks: OpenClawPolicyPack[] }>('/admin/openclaw/fleet/policy-packs', undefined, { admin: true }),
   upsertOpenClawPolicyPack: (key: string, input: OpenClawPolicyPackUpsertInput) => request<{ policyPack: OpenClawPolicyPack }>(`/admin/openclaw/fleet/policy-packs/${encodeURIComponent(key)}`, {
     method: 'PUT',
@@ -2844,9 +2933,19 @@ export const directoryApi = {
     updatedAt?: string | null
     updatedBy?: string | null
     routes?: OpenClawHostRoute[]
+    reconciliation?: OpenClawFleetReconciliationResponse
   }>('/admin/openclaw/fleet/remediations/apply', {
     method: 'POST',
     body: JSON.stringify(input),
+  }, { admin: true }),
+  runOpenClawFleetReconciliation: (input?: {
+    hostId?: number | null
+    staleGraceMinutes?: number | null
+    orphanedGraceMinutes?: number | null
+    note?: string | null
+  }) => request<OpenClawFleetReconciliationRunResponse>('/admin/openclaw/fleet/reconciliation/run', {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   getOpenClawFleetDigest: (params?: { format?: 'json' | 'markdown' }) => request<OpenClawFleetDigestResponse>(`/admin/openclaw/fleet/digest${buildQuery({ format: params?.format })}`, undefined, { admin: true }),
   updateOpenClawFleetDigestSchedule: (input: OpenClawFleetDigestSchedulePatchInput) => request<OpenClawFleetDigestSchedulePatchResponse>('/admin/openclaw/fleet/digest/schedule', {

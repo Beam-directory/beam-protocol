@@ -352,6 +352,7 @@ export interface OpenClawResolvedRouteRow extends OpenClawHostRouteRow {
   host_credential_state: OpenClawHostCredentialState
   host_workspace_slug: string | null
   host_last_heartbeat_at: string | null
+  host_last_inventory_at: string | null
 }
 
 export interface OpenClawHostHeartbeatRow {

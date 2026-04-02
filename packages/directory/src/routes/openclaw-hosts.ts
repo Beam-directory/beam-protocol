@@ -37,7 +37,7 @@ import {
   listWorkspaceIdentityBindings,
   listWorkspaceIdentityBindingsByBeamId,
   logAuditEvent,
-  markOpenClawHostRoutesEnded,
+  markOpenClawRoutesEndedByIds,
   recordOpenClawHostHeartbeat,
   recalculateOpenClawRouteStates,
   recoverOpenClawHost,
@@ -48,6 +48,7 @@ import {
   recordOpenClawFleetDigestDelivery,
   setOpenClawRouteOwnerResolution,
   syncOpenClawHostRoutes,
+  deleteOpenClawHostRoutesByIds,
   updateWorkspace,
   updateWorkspacePolicyDocument,
   updateOpenClawEnrollmentRequest,
@@ -483,6 +484,84 @@ type OpenClawFleetRolloutSummary = {
   attentionHosts: OpenClawFleetRolloutAttentionHost[]
 }
 
+type OpenClawRouteReconciliationClassification = 'live' | 'stale' | 'orphaned' | 'conflict'
+
+type SerializedOpenClawRouteReconciliation = {
+  classification: OpenClawRouteReconciliationClassification
+  desiredState: 'deliverable' | 'historical'
+  reason: string
+  garbageCollectable: boolean
+  hostLastHeartbeatAt: string | null
+  hostLastInventoryAt: string | null
+  lastSeenAgeHours: number | null
+  endedAgeHours: number | null
+}
+
+type SerializedOpenClawHostReconciliation = {
+  state: 'steady' | 'attention' | 'cleanup_required'
+  deliverableRoutes: number
+  liveRoutes: number
+  staleRoutes: number
+  orphanedRoutes: number
+  conflictRoutes: number
+  garbageCollectableRoutes: number
+  reason: string | null
+  nextAction: string | null
+  lastHeartbeatAt: string | null
+  lastInventoryAt: string | null
+}
+
+type OpenClawFleetReconciliationAttentionHost = {
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  healthStatus: OpenClawHostHealth
+  state: SerializedOpenClawHostReconciliation['state']
+  deliverableRoutes: number
+  staleRoutes: number
+  orphanedRoutes: number
+  conflictRoutes: number
+  garbageCollectableRoutes: number
+  reason: string | null
+  nextAction: string | null
+  href: string
+  workspaceHref: string | null
+}
+
+type OpenClawFleetReconciliationAttentionRoute = {
+  routeId: number
+  beamId: string
+  hostId: number
+  hostLabel: string | null
+  workspaceSlug: string | null
+  classification: OpenClawRouteReconciliationClassification
+  desiredState: 'deliverable' | 'historical'
+  garbageCollectable: boolean
+  routeSource: OpenClawRouteSource
+  connectionMode: OpenClawHostRouteRow['connection_mode']
+  reason: string
+  lastSeenAt: string | null
+  endedAt: string | null
+  href: string
+  workspaceHref: string | null
+  traceHref: string | null
+}
+
+type OpenClawFleetReconciliationSummary = {
+  summary: {
+    driftedHosts: number
+    cleanupRequiredHosts: number
+    liveRoutes: number
+    staleRoutes: number
+    orphanedRoutes: number
+    conflictRoutes: number
+    garbageCollectableRoutes: number
+    lastRunAt: string | null
+  }
+  attentionHosts: OpenClawFleetReconciliationAttentionHost[]
+  attentionRoutes: OpenClawFleetReconciliationAttentionRoute[]
+}
+
 type OpenClawFleetBulkAction =
   | 'apply_labels'
   | 'stage_revoke_review'
@@ -533,6 +612,8 @@ const OPENCLAW_ROTATION_DUE_SOON_HOURS = 72
 const OPENCLAW_ROUTE_LATENCY_SLO_MS = 5_000
 const OPENCLAW_ROUTE_LATENCY_LOOKBACK_HOURS = 24 * 7
 const OPENCLAW_ROUTE_LATENCY_LOG_LIMIT = 500
+const OPENCLAW_ROUTE_RECONCILIATION_STALE_GRACE_MINUTES = 30
+const OPENCLAW_ROUTE_RECONCILIATION_ORPHANED_GRACE_MINUTES = 30
 
 function normalizeOptionalString(value: unknown): string | null {
   if (typeof value !== 'string') {
@@ -1202,11 +1283,125 @@ function serializeLatestRouteDelivery(log: IntentLogRow | null) {
   }
 }
 
+function evaluateOpenClawRouteReconciliation(
+  row: OpenClawResolvedRouteRow,
+  input?: {
+    staleGraceMinutes?: number
+    orphanedGraceMinutes?: number
+  },
+): SerializedOpenClawRouteReconciliation {
+  const staleGraceMinutes = Math.max(0, Math.trunc(input?.staleGraceMinutes ?? OPENCLAW_ROUTE_RECONCILIATION_STALE_GRACE_MINUTES))
+  const orphanedGraceMinutes = Math.max(0, Math.trunc(input?.orphanedGraceMinutes ?? OPENCLAW_ROUTE_RECONCILIATION_ORPHANED_GRACE_MINUTES))
+  const nowMs = Date.now()
+  const lastSeenMs = row.last_seen_at ? Date.parse(row.last_seen_at) : Number.NaN
+  const endedMs = row.ended_at ? Date.parse(row.ended_at) : Number.NaN
+  const hostInventoryMs = row.host_last_inventory_at ? Date.parse(row.host_last_inventory_at) : Number.NaN
+  const inventoryPastRoute = Number.isFinite(hostInventoryMs)
+    && Number.isFinite(lastSeenMs)
+    && (hostInventoryMs - lastSeenMs) >= 60_000
+    && (row.reported_state !== 'live' || row.runtime_session_state !== 'live')
+  const staleTooOld = Number.isFinite(lastSeenMs)
+    && (nowMs - lastSeenMs) >= (staleGraceMinutes * 60_000)
+  const orphanedAgeReferenceMs = Number.isFinite(endedMs)
+    ? endedMs
+    : (Number.isFinite(hostInventoryMs) ? hostInventoryMs : lastSeenMs)
+  const orphanedTooOld = Number.isFinite(orphanedAgeReferenceMs)
+    && (nowMs - orphanedAgeReferenceMs) >= (orphanedGraceMinutes * 60_000)
+
+  let classification: OpenClawRouteReconciliationClassification = 'live'
+  let reason = 'Route matches the latest healthy host inventory.'
+  let garbageCollectable = false
+
+  if (row.runtime_session_state === 'conflict') {
+    classification = 'conflict'
+    reason = 'Duplicate route ownership blocks delivery until one host is selected.'
+  } else if (row.runtime_session_state === 'stale') {
+    classification = 'stale'
+    reason = row.host_health_status === 'stale'
+      ? 'Host heartbeat is stale, so Beam no longer treats the route as deliverable.'
+      : row.host_credential_state === 'rotation_pending' || row.host_credential_state === 'recovery_pending'
+        ? 'Host credential work is pending, so Beam temporarily demotes the route.'
+        : 'Route has not refreshed recently and needs either a new heartbeat or reconciliation.'
+    garbageCollectable = row.route_source === 'subagent-run' && staleTooOld
+  } else if (
+    row.owner_resolution_state === 'disabled'
+    || row.reported_state === 'ended'
+    || row.runtime_session_state === 'ended'
+    || inventoryPastRoute
+  ) {
+    classification = 'orphaned'
+    reason = row.owner_resolution_state === 'disabled'
+      ? 'Route was explicitly disabled and remains only as historical state.'
+      : row.reported_state === 'ended' || row.runtime_session_state === 'ended'
+        ? 'Route already ended and can be pruned after the reconciliation grace window.'
+        : 'Host inventory moved past this route, so it should remain historical only.'
+    garbageCollectable = orphanedTooOld
+  }
+
+  return {
+    classification,
+    desiredState: classification === 'orphaned' ? 'historical' : 'deliverable',
+    reason,
+    garbageCollectable,
+    hostLastHeartbeatAt: row.host_last_heartbeat_at,
+    hostLastInventoryAt: row.host_last_inventory_at,
+    lastSeenAgeHours: hoursSince(row.last_seen_at),
+    endedAgeHours: hoursSince(row.ended_at),
+  }
+}
+
+function summarizeOpenClawHostReconciliation(routes: OpenClawResolvedRouteRow[]): SerializedOpenClawHostReconciliation {
+  const evaluated = routes.map((route) => evaluateOpenClawRouteReconciliation(route))
+  const deliverableRoutes = evaluated.filter((entry) => entry.desiredState === 'deliverable').length
+  const liveRoutes = evaluated.filter((entry) => entry.classification === 'live').length
+  const staleRoutes = evaluated.filter((entry) => entry.classification === 'stale').length
+  const orphanedRoutes = evaluated.filter((entry) => entry.classification === 'orphaned').length
+  const conflictRoutes = evaluated.filter((entry) => entry.classification === 'conflict').length
+  const garbageCollectableRoutes = evaluated.filter((entry) => entry.garbageCollectable).length
+
+  let state: SerializedOpenClawHostReconciliation['state'] = 'steady'
+  let reason: string | null = null
+  let nextAction: string | null = null
+
+  if (garbageCollectableRoutes > 0) {
+    state = 'cleanup_required'
+    reason = `${garbageCollectableRoutes} stale or orphaned route(s) are ready for garbage collection.`
+    nextAction = 'Run fleet reconciliation to end stale subagent routes and remove orphaned history.'
+  } else if (conflictRoutes > 0) {
+    state = 'attention'
+    reason = `${conflictRoutes} route conflict(s) still block delivery.`
+    nextAction = 'Resolve route ownership before Beam resumes one canonical path.'
+  } else if (staleRoutes > 0) {
+    state = 'attention'
+    reason = `${staleRoutes} route(s) are stale and need either a new heartbeat or an inventory refresh.`
+    nextAction = 'Wait for a healthy host refresh or re-run reconciliation if the route should become historical.'
+  } else if (orphanedRoutes > 0) {
+    state = 'attention'
+    reason = `${orphanedRoutes} orphaned historical route(s) remain visible inside the grace window.`
+    nextAction = 'Allow the grace window to expire or run reconciliation later to prune them.'
+  }
+
+  return {
+    state,
+    deliverableRoutes,
+    liveRoutes,
+    staleRoutes,
+    orphanedRoutes,
+    conflictRoutes,
+    garbageCollectableRoutes,
+    reason,
+    nextAction,
+    lastHeartbeatAt: routes[0]?.host_last_heartbeat_at ?? null,
+    lastInventoryAt: routes[0]?.host_last_inventory_at ?? null,
+  }
+}
+
 function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
   const workspace = row.workspace_slug ? getWorkspaceBySlug(db, row.workspace_slug) : null
   const bindings = listWorkspaceIdentityBindingsByBeamId(db, row.beam_id)
   const displayName = getAgent(db, row.beam_id)?.display_name ?? null
   const latestDelivery = serializeLatestRouteDelivery(getLatestIntentLogByTarget(db, row.beam_id))
+  const reconciliation = evaluateOpenClawRouteReconciliation(row)
 
   return {
     id: row.id,
@@ -1235,6 +1430,7 @@ function serializeRoute(db: Database, row: OpenClawResolvedRouteRow) {
     hostLabel: row.host_label,
     hostHealth: row.host_health_status,
     hostCredentialState: row.host_credential_state,
+    reconciliation,
     metadata: row.metadata_json ? JSON.parse(row.metadata_json) as Record<string, unknown> : null,
     lastSeenAt: row.last_seen_at,
     endedAt: row.ended_at,
@@ -1638,6 +1834,7 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
   const placement = serializeOpenClawHostPlacement(host)
   const maintenance = serializeOpenClawHostMaintenance(host)
   const rollout = serializeOpenClawHostRollout(host)
+  const reconciliation = summarizeOpenClawHostReconciliation(routes)
 
   return {
     id: host.id,
@@ -1670,8 +1867,189 @@ function serializeHost(db: Database, host: OpenClawHostRow) {
     placement,
     maintenance,
     rollout,
+    reconciliation,
     enrollment: serializeEnrollment(enrollment),
     summary,
+  }
+}
+
+function buildOpenClawFleetReconciliationSummary(
+  db: Database,
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): OpenClawFleetReconciliationSummary {
+  const attentionHosts: OpenClawFleetReconciliationAttentionHost[] = []
+  const attentionRoutes: OpenClawFleetReconciliationAttentionRoute[] = []
+  const latestRun = listAuditLog(db, {
+    limit: 1,
+    target: 'openclaw-fleet:reconciliation',
+  })[0] ?? null
+
+  let driftedHosts = 0
+  let cleanupRequiredHosts = 0
+  let liveRoutes = 0
+  let staleRoutes = 0
+  let orphanedRoutes = 0
+  let conflictRoutes = 0
+  let garbageCollectableRoutes = 0
+
+  for (const host of hosts) {
+    liveRoutes += host.reconciliation.liveRoutes
+    staleRoutes += host.reconciliation.staleRoutes
+    orphanedRoutes += host.reconciliation.orphanedRoutes
+    conflictRoutes += host.reconciliation.conflictRoutes
+    garbageCollectableRoutes += host.reconciliation.garbageCollectableRoutes
+
+    if (host.reconciliation.state !== 'steady') {
+      driftedHosts += 1
+      if (host.reconciliation.state === 'cleanup_required') {
+        cleanupRequiredHosts += 1
+      }
+      attentionHosts.push({
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        healthStatus: host.healthStatus,
+        state: host.reconciliation.state,
+        deliverableRoutes: host.reconciliation.deliverableRoutes,
+        staleRoutes: host.reconciliation.staleRoutes,
+        orphanedRoutes: host.reconciliation.orphanedRoutes,
+        conflictRoutes: host.reconciliation.conflictRoutes,
+        garbageCollectableRoutes: host.reconciliation.garbageCollectableRoutes,
+        reason: host.reconciliation.reason,
+        nextAction: host.reconciliation.nextAction,
+        href: buildOpenClawFleetHref(host.id),
+        workspaceHref: buildWorkspaceHref(host.workspaceSlug),
+      })
+    }
+
+    const routes = listOpenClawResolvedRoutesForHost(db, host.id)
+    for (const row of routes) {
+      const serialized = serializeRoute(db, row)
+      if (serialized.reconciliation.classification === 'live') {
+        continue
+      }
+      attentionRoutes.push({
+        routeId: serialized.id,
+        beamId: serialized.beamId,
+        hostId: serialized.hostId,
+        hostLabel: serialized.hostLabel,
+        workspaceSlug: serialized.workspaceSlug,
+        classification: serialized.reconciliation.classification,
+        desiredState: serialized.reconciliation.desiredState,
+        garbageCollectable: serialized.reconciliation.garbageCollectable,
+        routeSource: serialized.routeSource,
+        connectionMode: serialized.connectionMode,
+        reason: serialized.reconciliation.reason,
+        lastSeenAt: serialized.lastSeenAt,
+        endedAt: serialized.endedAt,
+        href: buildOpenClawFleetHref(serialized.hostId),
+        workspaceHref: serialized.workspace ? buildWorkspaceHref(serialized.workspace.slug) : buildWorkspaceHref(serialized.workspaceSlug),
+        traceHref: serialized.lastDelivery?.href ?? null,
+      })
+    }
+  }
+
+  attentionRoutes.sort((left, right) => {
+    const leftRank = left.garbageCollectable ? 0 : (left.classification === 'conflict' ? 1 : left.classification === 'stale' ? 2 : 3)
+    const rightRank = right.garbageCollectable ? 0 : (right.classification === 'conflict' ? 1 : right.classification === 'stale' ? 2 : 3)
+    if (leftRank !== rightRank) {
+      return leftRank - rightRank
+    }
+    return (Date.parse(right.lastSeenAt ?? '') || 0) - (Date.parse(left.lastSeenAt ?? '') || 0)
+  })
+
+  return {
+    summary: {
+      driftedHosts,
+      cleanupRequiredHosts,
+      liveRoutes,
+      staleRoutes,
+      orphanedRoutes,
+      conflictRoutes,
+      garbageCollectableRoutes,
+      lastRunAt: latestRun?.timestamp ?? null,
+    },
+    attentionHosts,
+    attentionRoutes: attentionRoutes.slice(0, 24),
+  }
+}
+
+function runOpenClawFleetReconciliation(
+  db: Database,
+  input?: {
+    hostId?: number | null
+    staleGraceMinutes?: number
+    orphanedGraceMinutes?: number
+  },
+) {
+  const staleGraceMinutes = Math.max(0, Math.trunc(input?.staleGraceMinutes ?? OPENCLAW_ROUTE_RECONCILIATION_STALE_GRACE_MINUTES))
+  const orphanedGraceMinutes = Math.max(0, Math.trunc(input?.orphanedGraceMinutes ?? OPENCLAW_ROUTE_RECONCILIATION_ORPHANED_GRACE_MINUTES))
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db)
+
+  const targetHosts = input?.hostId
+    ? listOpenClawHosts(db).filter((host) => host.id === input.hostId)
+    : listOpenClawHosts(db)
+  const staleRouteIdsToEnd = new Set<number>()
+
+  for (const host of targetHosts) {
+    const routes = listOpenClawResolvedRoutesForHost(db, host.id)
+    for (const route of routes) {
+      const reconciliation = evaluateOpenClawRouteReconciliation(route, {
+        staleGraceMinutes,
+        orphanedGraceMinutes,
+      })
+      if (
+        reconciliation.garbageCollectable
+        && reconciliation.classification === 'stale'
+        && route.route_source === 'subagent-run'
+      ) {
+        staleRouteIdsToEnd.add(route.id)
+      }
+    }
+  }
+
+  const endedRoutes = markOpenClawRoutesEndedByIds(db, {
+    routeIds: [...staleRouteIdsToEnd],
+  })
+
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db)
+
+  const orphanedRouteIdsToDelete = new Set<number>()
+  for (const host of targetHosts) {
+    const routes = listOpenClawResolvedRoutesForHost(db, host.id)
+    for (const route of routes) {
+      const reconciliation = evaluateOpenClawRouteReconciliation(route, {
+        staleGraceMinutes,
+        orphanedGraceMinutes,
+      })
+      if (reconciliation.garbageCollectable && reconciliation.classification === 'orphaned') {
+        orphanedRouteIdsToDelete.add(route.id)
+      }
+    }
+  }
+
+  const deleted = deleteOpenClawHostRoutesByIds(db, {
+    routeIds: [...orphanedRouteIdsToDelete],
+  })
+
+  refreshOpenClawHostHealth(db)
+  recalculateOpenClawRouteStates(db)
+
+  const serializedHosts = listOpenClawHosts(db)
+    .filter((host) => (input?.hostId ? host.id === input.hostId : true))
+    .map((host) => serializeHost(db, host))
+  const reconciliation = buildOpenClawFleetReconciliationSummary(db, serializedHosts)
+
+  return {
+    staleGraceMinutes,
+    orphanedGraceMinutes,
+    endedRouteIds: endedRoutes.map((route) => route.id),
+    deletedRouteIds: [...orphanedRouteIdsToDelete],
+    deletedCount: deleted.deletedCount,
+    hosts: serializedHosts,
+    reconciliation,
   }
 }
 
@@ -2012,14 +2390,14 @@ function buildOpenClawFleetRemediationSummary(
       })
     }
 
-    if (host.summary.stale > 0) {
+    if (host.reconciliation.garbageCollectableRoutes > 0) {
       suggested.push({
         id: `end-stale-routes:${host.id}`,
         kind: 'end_stale_routes',
         severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
-        title: `${hostTitleForDigest(host)} still advertises stale routes`,
-        detail: `${host.summary.stale} stale route(s) remain visible and should be ended before they linger as deliverable history.`,
-        nextAction: 'End only the stale routes on this host and wait for the next inventory sync to republish live routes.',
+        title: `${hostTitleForDigest(host)} needs reconciliation cleanup`,
+        detail: `${host.reconciliation.garbageCollectableRoutes} stale or orphaned route(s) are now safe to garbage collect.`,
+        nextAction: 'Run reconciliation cleanup for this host and let the next inventory sync republish only the desired live routes.',
         safe: true,
         requiresConfirmation: false,
         hostId: host.id,
@@ -3278,6 +3656,7 @@ export function openClawAdminRouter(db: Database) {
     const routeHealth = buildOpenClawFleetRouteHealthSummary(db, hosts)
     const templates = buildOpenClawFleetTemplateSummary(db, hosts)
     const remediation = buildOpenClawFleetRemediationSummary(db, hosts, rollout, routeHealth, templates)
+    const reconciliation = buildOpenClawFleetReconciliationSummary(db, hosts)
     const summary = hosts.reduce((acc, host) => {
       acc.totalHosts += 1
       if (host.status === 'pending') acc.pendingHosts += 1
@@ -3332,6 +3711,10 @@ export function openClawAdminRouter(db: Database) {
         templateDriftedWorkspaces: templates.summary.driftedWorkspaces,
         suggestedRemediations: remediation.summary.suggested,
         criticalRemediations: remediation.summary.critical,
+        driftedHosts: reconciliation.summary.driftedHosts,
+        reconciliationCleanupRequiredHosts: reconciliation.summary.cleanupRequiredHosts,
+        orphanedRoutes: reconciliation.summary.orphanedRoutes,
+        garbageCollectableRoutes: reconciliation.summary.garbageCollectableRoutes,
       },
       hosts,
       conflicts,
@@ -3339,11 +3722,26 @@ export function openClawAdminRouter(db: Database) {
       rollout,
       credentialPolicy,
       routeHealth,
+      reconciliation,
       templates,
       remediation,
       environments,
       hostGroups,
     })
+  })
+
+  router.get('/fleet/reconciliation', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    refreshOpenClawHostHealth(db)
+    recalculateOpenClawRouteStates(db)
+    const hosts = listOpenClawHosts(db).map((host) => serializeHost(db, host))
+
+    c.header('Cache-Control', 'no-store')
+    return c.json(buildOpenClawFleetReconciliationSummary(db, hosts))
   })
 
   router.get('/fleet/policy-packs', (c) => {
@@ -3619,9 +4017,8 @@ export function openClawAdminRouter(db: Database) {
         return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
       }
 
-      const routes = markOpenClawHostRoutesEnded(db, {
+      const result = runOpenClawFleetReconciliation(db, {
         hostId,
-        runtimeSessionState: 'stale',
       })
 
       logAuditEvent(db, {
@@ -3632,7 +4029,9 @@ export function openClawAdminRouter(db: Database) {
           role: auth.session.role,
           kind: kindRaw,
           note: note ?? null,
-          routeCount: routes.filter((route) => route.runtime_session_state === 'ended').length,
+          endedRouteIds: result.endedRouteIds,
+          deletedRouteIds: result.deletedRouteIds,
+          deletedCount: result.deletedCount,
         },
       })
 
@@ -3642,6 +4041,7 @@ export function openClawAdminRouter(db: Database) {
         kind: kindRaw,
         host: serializeHost(db, getOpenClawHostById(db, hostId) as OpenClawHostRow),
         routes: listOpenClawResolvedRoutesForHost(db, hostId).map((route) => serializeRoute(db, route)),
+        reconciliation: result.reconciliation,
       })
     }
 
@@ -3745,6 +4145,61 @@ export function openClawAdminRouter(db: Database) {
       policy: applied.policy,
       updatedAt: applied.updatedAt,
       updatedBy: applied.updatedBy,
+    })
+  })
+
+  router.post('/fleet/reconciliation/run', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const hostId = normalizePositiveInteger(body.hostId)
+    const staleGraceMinutes = normalizeBoundedInteger(body.staleGraceMinutes, 0, 24 * 60)
+      ?? OPENCLAW_ROUTE_RECONCILIATION_STALE_GRACE_MINUTES
+    const orphanedGraceMinutes = normalizeBoundedInteger(body.orphanedGraceMinutes, 0, 24 * 60)
+      ?? OPENCLAW_ROUTE_RECONCILIATION_ORPHANED_GRACE_MINUTES
+    const note = normalizeOptionalString(body.note)
+    const result = runOpenClawFleetReconciliation(db, {
+      hostId,
+      staleGraceMinutes,
+      orphanedGraceMinutes,
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_reconciliation.run',
+      actor: auth.session.email,
+      target: 'openclaw-fleet:reconciliation',
+      details: {
+        role: auth.session.role,
+        hostId: hostId ?? null,
+        staleGraceMinutes,
+        orphanedGraceMinutes,
+        endedRouteIds: result.endedRouteIds,
+        deletedRouteIds: result.deletedRouteIds,
+        deletedCount: result.deletedCount,
+        note: note ?? null,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      hostId: hostId ?? null,
+      staleGraceMinutes,
+      orphanedGraceMinutes,
+      endedRouteIds: result.endedRouteIds,
+      deletedRouteIds: result.deletedRouteIds,
+      deletedCount: result.deletedCount,
+      reconciliation: result.reconciliation,
+      hosts: result.hosts,
     })
   })
 

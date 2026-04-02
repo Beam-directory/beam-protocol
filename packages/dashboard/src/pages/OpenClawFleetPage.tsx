@@ -26,6 +26,7 @@ import {
   type OpenClawHostPolicyPatchInput,
   type OpenClawHostRecoveryRunbookState,
   type OpenClawHostRolloutRing,
+  type OpenClawRouteReconciliationClassification,
   type OpenClawRouteRuntimeState,
   type OpenClawRouteOwnerResolutionState,
   type OpenClawRouteSource,
@@ -71,6 +72,20 @@ function routeStateTone(status: OpenClawRouteRuntimeState): 'default' | 'success
     case 'ended':
     case 'conflict':
     case 'revoked':
+      return 'critical'
+    default:
+      return 'default'
+  }
+}
+
+function reconciliationTone(status: OpenClawRouteReconciliationClassification): 'default' | 'success' | 'warning' | 'critical' {
+  switch (status) {
+    case 'live':
+      return 'success'
+    case 'stale':
+      return 'warning'
+    case 'orphaned':
+    case 'conflict':
       return 'critical'
     default:
       return 'default'
@@ -847,6 +862,17 @@ export default function OpenClawFleetPage() {
     }, `${item.title} remediated.`)
   }
 
+  async function handleRunReconciliation(host?: Pick<OpenClawHostSummary, 'id' | 'label' | 'hostname'> | null) {
+    const hostLabel = host ? hostTitle(host as OpenClawHostSummary) : 'fleet'
+    await runAction(`reconciliation-${host?.id ?? 'all'}`, async () => {
+      await directoryApi.runOpenClawFleetReconciliation({
+        hostId: host?.id ?? null,
+        note: host ? `Manual reconciliation for ${hostLabel}` : 'Manual fleet-wide reconciliation',
+      })
+      await refreshAll(host?.id ?? selectedHostId, selectedConflictBeamId)
+    }, host ? `Reconciliation completed for ${hostLabel}.` : 'Fleet reconciliation completed.')
+  }
+
   async function handleSaveDigestSchedule() {
     await runAction('digest-schedule', async () => {
       await directoryApi.updateOpenClawFleetDigestSchedule({
@@ -1123,6 +1149,162 @@ export default function OpenClawFleetPage() {
             ) : (
               <EmptyPanel label="No hosts are currently breaching route-health review thresholds." />
             )}
+          </div>
+        </div>
+      </section>
+
+      <section className="panel">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="panel-title">Reconciliation and garbage collection</div>
+            <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+              Reconcile desired fleet state against observed host routes, classify stale or orphaned state, and clean up ended route drift before it silently degrades delivery.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+              disabled={actionBusy === 'reconciliation-all'}
+              onClick={() => { void handleRunReconciliation(null) }}
+            >
+              {actionBusy === 'reconciliation-all' ? 'Reconciling…' : 'Run fleet reconciliation'}
+            </button>
+            {selectedHost ? (
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === `reconciliation-${selectedHost.id}`}
+                onClick={() => { void handleRunReconciliation(selectedHost) }}
+              >
+                {actionBusy === `reconciliation-${selectedHost.id}` ? 'Reconciling host…' : 'Reconcile selected host'}
+              </button>
+            ) : null}
+          </div>
+        </div>
+
+        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+          <MetricCard label="Drifted hosts" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.driftedHosts)} tone={(overview?.reconciliation.summary.driftedHosts ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Cleanup required" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.cleanupRequiredHosts)} tone={(overview?.reconciliation.summary.cleanupRequiredHosts ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Stale routes" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.staleRoutes)} tone={(overview?.reconciliation.summary.staleRoutes ?? 0) > 0 ? 'warning' : 'default'} />
+          <MetricCard label="Orphaned routes" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.orphanedRoutes)} tone={(overview?.reconciliation.summary.orphanedRoutes ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="Conflicts" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.conflictRoutes)} tone={(overview?.reconciliation.summary.conflictRoutes ?? 0) > 0 ? 'critical' : 'default'} />
+          <MetricCard label="GC candidates" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.garbageCollectableRoutes)} tone={(overview?.reconciliation.summary.garbageCollectableRoutes ?? 0) > 0 ? 'warning' : 'default'} />
+        </div>
+
+        <div className="mt-4 grid gap-4 xl:grid-cols-[1.05fr,0.95fr]">
+          <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Hosts needing reconciliation</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {overview ? `${formatNumber(overview.reconciliation.attentionHosts.length)} hosts` : '—'}
+              </div>
+            </div>
+            <div className="mt-3 space-y-3">
+              {overview && overview.reconciliation.attentionHosts.length > 0 ? (
+                overview.reconciliation.attentionHosts.map((item) => (
+                  <div key={`reconciliation-host-${item.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.hostLabel || `Host ${item.hostId}`}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.reason ?? 'No reconciliation drift detected.'}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <StatusPill label={item.state.replace(/_/g, ' ')} tone={item.state === 'cleanup_required' ? 'critical' : item.state === 'attention' ? 'warning' : 'success'} />
+                        <StatusPill label={item.healthStatus} tone={hostHealthTone(item.healthStatus)} />
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                      <div>{`${formatNumber(item.deliverableRoutes)} deliverable routes`}</div>
+                      <div>{`${formatNumber(item.staleRoutes)} stale · ${formatNumber(item.orphanedRoutes)} orphaned · ${formatNumber(item.conflictRoutes)} conflicts`}</div>
+                      <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
+                      <div>{item.nextAction ?? 'No next action recorded'}</div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        onClick={() => focusHost(item.hostId)}
+                      >
+                        Open host
+                      </button>
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        disabled={actionBusy === `reconciliation-${item.hostId}`}
+                        onClick={() => { void handleRunReconciliation({ id: item.hostId, label: item.hostLabel, hostname: item.hostLabel ?? `Host ${item.hostId}` }) }}
+                      >
+                        {actionBusy === `reconciliation-${item.hostId}` ? 'Reconciling…' : 'Reconcile host'}
+                      </button>
+                      {item.workspaceHref ? (
+                        <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.workspaceHref}>
+                          Open workspace
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyPanel label="No hosts currently need reconciliation review." />
+              )}
+            </div>
+          </div>
+
+          <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div className="flex items-center justify-between gap-3">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Attention routes</div>
+              <div className="text-xs text-slate-500 dark:text-slate-400">
+                {overview?.reconciliation.summary.lastRunAt ? `Last run ${formatRelativeTime(overview.reconciliation.summary.lastRunAt)}` : 'No reconciliation run recorded yet'}
+              </div>
+            </div>
+            <div className="mt-3 space-y-3">
+              {overview && overview.reconciliation.attentionRoutes.length > 0 ? (
+                overview.reconciliation.attentionRoutes.map((item) => (
+                  <div key={`reconciliation-route-${item.routeId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.beamId}</div>
+                        <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.reason}</div>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        <StatusPill label={item.classification} tone={reconciliationTone(item.classification)} />
+                        <StatusPill label={item.desiredState} tone={item.desiredState === 'deliverable' ? 'success' : 'default'} />
+                        {item.garbageCollectable ? <StatusPill label="gc candidate" tone="warning" /> : null}
+                      </div>
+                    </div>
+                    <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                      <div>{item.hostLabel ? `Host ${item.hostLabel}` : `Host ${item.hostId}`}</div>
+                      <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace attached'}</div>
+                      <div>{`Source ${routeSourceLabel(item.routeSource)}`}</div>
+                      <div>{item.connectionMode ? `Transport ${item.connectionMode}` : 'No transport mode'}</div>
+                      <div>{item.lastSeenAt ? `Last seen ${formatRelativeTime(item.lastSeenAt)}` : 'No last-seen timestamp'}</div>
+                      <div>{item.endedAt ? `Ended ${formatRelativeTime(item.endedAt)}` : 'No ended timestamp'}</div>
+                    </div>
+                    <div className="mt-3 flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        onClick={() => focusHost(item.hostId)}
+                      >
+                        Open host
+                      </button>
+                      {item.workspaceHref ? (
+                        <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.workspaceHref}>
+                          Open workspace
+                        </Link>
+                      ) : null}
+                      {item.traceHref ? (
+                        <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.traceHref}>
+                          Open trace
+                        </Link>
+                      ) : null}
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <EmptyPanel label="No route-level reconciliation attention items are open." />
+              )}
+            </div>
           </div>
         </div>
       </section>
@@ -3113,7 +3295,9 @@ export default function OpenClawFleetPage() {
                           <div className="flex flex-wrap gap-2">
                             <StatusPill label={routeSourceLabel(route.routeSource)} />
                             <StatusPill label={route.runtimeSessionState} tone={routeStateTone(route.runtimeSessionState)} />
+                            <StatusPill label={`recon:${route.reconciliation.classification}`} tone={reconciliationTone(route.reconciliation.classification)} />
                             <StatusPill label={route.ownerResolutionState} tone={ownerResolutionTone(route.ownerResolutionState)} />
+                            {route.reconciliation.garbageCollectable ? <StatusPill label="gc candidate" tone="warning" /> : null}
                           </div>
                         </div>
                         <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
@@ -3121,6 +3305,8 @@ export default function OpenClawFleetPage() {
                           <div>{route.connectionMode ? `Transport ${route.connectionMode}` : 'No transport mode'}</div>
                           <div>{route.lastSeenAt ? `Last seen ${formatRelativeTime(route.lastSeenAt)}` : 'No last-seen timestamp'}</div>
                           <div>{route.endedAt ? `Ended ${formatRelativeTime(route.endedAt)}` : 'Still active in inventory'}</div>
+                          <div>{route.reconciliation.reason}</div>
+                          <div>{route.reconciliation.hostLastInventoryAt ? `Host inventory ${formatRelativeTime(route.reconciliation.hostLastInventoryAt)}` : 'No host inventory timestamp'}</div>
                           <div>{route.ownerResolutionAt ? `Owner action ${formatRelativeTime(route.ownerResolutionAt)}${route.ownerResolutionActor ? ` · ${route.ownerResolutionActor}` : ''}` : 'No explicit owner action'}</div>
                           <div>{route.hostCredentialState ? `Host credential ${route.hostCredentialState}` : 'No host credential state'}</div>
                           <div>{route.lastDelivery ? `Last delivery ${formatRelativeTime(route.lastDelivery.requestedAt)} · ${route.lastDelivery.status}` : 'No delivery receipt yet'}</div>

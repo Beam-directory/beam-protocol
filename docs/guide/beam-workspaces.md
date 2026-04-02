@@ -210,6 +210,8 @@ The fleet surface also gives operators explicit day-2 actions:
 - drain a host with missing or failed receipts through a guided remediation flow before deeper repair work begins
 - stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
 - clear staged revoke reviews again when a maintenance plan changes
+- run one fleet-wide reconciliation pass that classifies routes as `live`, `stale`, `orphaned`, or `conflict`
+- garbage-collect stale subagent routes and orphaned route history after the configured grace window
 
 The host detail and fleet summary now also expose the operational thresholds behind those actions:
 
@@ -249,6 +251,37 @@ The guarded remediation actions require explicit confirmation phrases:
 - `REAPPLY_TEMPLATE` before Beam reapplies the expected workspace template
 
 That keeps destructive or policy-resetting actions explicit while still letting one operator complete the full repair flow from the fleet surface instead of jumping into raw database or host state.
+
+For reconciliation and stale route cleanup, the normal operator loop is:
+
+1. open `Reconciliation and garbage collection` in the fleet page
+2. inspect `Hosts needing reconciliation` for stale, orphaned, or conflict-heavy hosts
+3. inspect `Attention routes` for the exact route Beam wants to classify or prune
+4. run `Run fleet reconciliation` fleet-wide or `Reconcile selected host` for one host
+5. confirm that:
+   - stale route counts drop
+   - garbage-collectable routes disappear
+   - the host returns to a `steady` or lower-noise `attention` state
+
+The reconciliation model is intentionally explicit:
+
+- `live`
+  - the route still matches the latest healthy host inventory and Beam can deliver to it
+- `stale`
+  - the host or credential state demotes the route temporarily; Beam will not treat it as fully deliverable
+- `orphaned`
+  - the route is historical only and should no longer win delivery
+- `conflict`
+  - duplicate ownership still blocks one canonical route
+
+Routes marked as `gc candidate` are safe to remove only because Beam has already classified them as historical state.
+
+If you want the same pass from the CLI, use:
+
+```bash
+npm run workspace:fleet-smoke
+npm run workspace:operator-dry-run
+```
 
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
