@@ -871,6 +871,7 @@ export default function WorkspacesPage() {
         },
         metadata: {
           notes: policyDefaults.notes.trim() || null,
+          template: policy?.policy.metadata.template ?? null,
         },
       })
       setPolicy(response)
@@ -2414,6 +2415,26 @@ export default function WorkspacesPage() {
                   Workspace guide
                 </a>
               </div>
+
+              {policy?.policy.metadata.template ? (
+                <div className="mt-4 grid gap-3 rounded-2xl border border-emerald-200 bg-emerald-50/70 p-4 text-sm text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill label={policy.policy.metadata.template.templateLabel ?? policy.policy.metadata.template.templateKey ?? 'template'} tone="success" />
+                    {policy.policy.metadata.template.policyPackLabel ? (
+                      <StatusPill label={`pack:${policy.policy.metadata.template.policyPackLabel}`} tone="default" />
+                    ) : null}
+                    {policy.policy.metadata.template.hostGroupLabel ? (
+                      <StatusPill label={`group:${policy.policy.metadata.template.hostGroupLabel}`} tone="default" />
+                    ) : null}
+                  </div>
+                  <div className="grid gap-2 text-xs text-emerald-900/80 dark:text-emerald-100/80 md:grid-cols-2">
+                    <div>{`Template key ${policy.policy.metadata.template.templateKey ?? '—'}`}</div>
+                    <div>{`Policy pack ${policy.policy.metadata.template.policyPackKey ?? '—'}`}</div>
+                    <div>{policy.policy.metadata.template.appliedAt ? `Applied ${formatDateTime(policy.policy.metadata.template.appliedAt)}` : 'Applied time unavailable'}</div>
+                    <div>{policy.policy.metadata.template.appliedBy ? `Applied by ${policy.policy.metadata.template.appliedBy}` : 'Applied by unknown operator'}</div>
+                  </div>
+                </div>
+              ) : null}
 
               <form className="mt-4 grid gap-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800" onSubmit={(event) => { void handlePolicyDefaultsSubmit(event) }}>
                 <label className="text-xs font-medium uppercase tracking-wide text-slate-400">Default external initiation</label>

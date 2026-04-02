@@ -1696,7 +1696,18 @@ test('workspace policy routes expose normalized policy and enforcement-ready bin
         defaults: { externalInitiation: string; allowedPartners: string[] }
         bindingRules: Array<{ policyProfile: string | null; externalInitiation: string; allowedPartners: string[] }>
         workflowRules: Array<{ workflowType: string; requireApproval: boolean; approvers: string[] }>
-        metadata: { notes: string | null }
+        metadata: {
+          notes: string | null
+          template: {
+            templateKey: string | null
+            templateLabel: string | null
+            policyPackKey: string | null
+            policyPackLabel: string | null
+            hostGroupLabel: string | null
+            appliedAt: string | null
+            appliedBy: string | null
+          } | null
+        }
       }
       previews: {
         bindings: Array<{ beamId: string; externalInitiation: string; allowedPartners: string[] }>
@@ -1717,6 +1728,7 @@ test('workspace policy routes expose normalized policy and enforcement-ready bin
     assert.equal(patchBody.policy.workflowRules[0]?.requireApproval, true)
     assert.deepEqual(patchBody.policy.workflowRules[0]?.approvers, ['ops@example.com', 'approvals@example.com'])
     assert.match(patchBody.policy.metadata.notes ?? '', /named approvers/i)
+    assert.equal(patchBody.policy.metadata.template, null)
     assert.equal(patchBody.previews.bindings[0]?.beamId, 'ops-bot@beam.directory')
     assert.equal(patchBody.previews.bindings[0]?.externalInitiation, 'allow')
     assert.deepEqual(patchBody.previews.bindings[0]?.allowedPartners, ['*@northwind.beam.directory', 'finance@northwind.beam.directory'])

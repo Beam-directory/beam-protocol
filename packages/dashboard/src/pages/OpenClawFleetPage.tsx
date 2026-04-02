@@ -9,6 +9,7 @@ import {
   type OpenClawFleetBulkActionInput,
   type OpenClawFleetDigestResponse,
   type OpenClawFleetEnvironmentSummary,
+  type OpenClawFleetRemediationItem,
   type OpenClawEnrollmentCreateInput,
   type OpenClawFleetOverviewResponse,
   type OpenClawFleetHostGroupSummary,
@@ -174,6 +175,21 @@ function digestSeverityTone(severity: 'warning' | 'critical'): 'warning' | 'crit
 
 function conflictResolutionTone(state: OpenClawConflictDetailResponse['resolutionState']): 'warning' | 'success' {
   return state === 'owner_selected' ? 'success' : 'warning'
+}
+
+function remediationActionLabel(item: OpenClawFleetRemediationItem): string {
+  switch (item.kind) {
+    case 'align_rollout':
+      return 'Align rollout'
+    case 'end_stale_routes':
+      return 'End stale routes'
+    case 'drain_missing_receipts':
+      return 'Drain host'
+    case 'reapply_template':
+      return 'Reapply template'
+    default:
+      return 'Apply'
+  }
 }
 
 function formatPercent(value: number | null): string {
@@ -804,6 +820,31 @@ export default function OpenClawFleetPage() {
       })
       await refreshAll(selectedHostId, selectedConflictBeamId)
     }, `Route ownership reset for ${route.beamId}.`)
+  }
+
+  async function handleApplyRemediation(item: OpenClawFleetRemediationItem) {
+    let confirmPhrase: string | null = null
+    if (item.requiresConfirmation) {
+      const expected = item.kind === 'drain_missing_receipts' ? 'DRAIN_HOST' : 'REAPPLY_TEMPLATE'
+      const entered = window.prompt(`Type ${expected} to confirm ${remediationActionLabel(item).toLowerCase()}.`, expected)
+      if (entered !== expected) {
+        setNotice(`Confirmation skipped for ${item.title}.`)
+        return
+      }
+      confirmPhrase = entered
+    }
+
+    await runAction(`remediation-${item.id}`, async () => {
+      await directoryApi.applyOpenClawFleetRemediation({
+        kind: item.kind,
+        hostId: item.hostId,
+        workspaceSlug: item.workspaceSlug,
+        templateKey: item.templateKey,
+        confirmPhrase,
+        note: `Applied from fleet remediation panel for ${item.id}.`,
+      })
+      await refreshAll(selectedHostId, selectedConflictBeamId)
+    }, `${item.title} remediated.`)
   }
 
   async function handleSaveDigestSchedule() {
@@ -2459,6 +2500,176 @@ export default function OpenClawFleetPage() {
             ) : (
               <EmptyPanel label="No rollout drift or canary attention hosts." />
             )}
+          </div>
+        </div>
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Policy packs and workspace templates</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Fleet-backed workspaces can inherit one approved policy pack and one workspace template per host group.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.templates.summary.workspaceTemplates)} templates` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Policy packs" value={!overview ? '—' : formatNumber(overview.templates.summary.policyPacks)} />
+            <MetricCard label="Templates" value={!overview ? '—' : formatNumber(overview.templates.summary.workspaceTemplates)} />
+            <MetricCard label="Templated workspaces" value={!overview ? '—' : formatNumber(overview.templates.summary.templatedWorkspaces)} tone={(overview?.templates.summary.templatedWorkspaces ?? 0) > 0 ? 'success' : 'default'} />
+            <MetricCard label="Template drift" value={!overview ? '—' : formatNumber(overview.templates.summary.driftedWorkspaces)} tone={(overview?.templates.summary.driftedWorkspaces ?? 0) > 0 ? 'warning' : 'default'} />
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Policy packs</div>
+              <div className="mt-3 space-y-3">
+                {overview && overview.templates.policyPacks.length > 0 ? overview.templates.policyPacks.map((pack) => (
+                  <div key={pack.key} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <div className="flex items-center gap-2">
+                      <StatusPill label={pack.label} tone="default" />
+                      {pack.hostGroupLabel ? <StatusPill label={`group:${pack.hostGroupLabel}`} tone="default" /> : null}
+                    </div>
+                    <div className="mt-2">{pack.description || 'No pack description recorded.'}</div>
+                  </div>
+                )) : <EmptyPanel label="No fleet policy packs are configured yet." />}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Workspace templates</div>
+              <div className="mt-3 space-y-3">
+                {overview && overview.templates.workspaceTemplates.length > 0 ? overview.templates.workspaceTemplates.map((template) => (
+                  <div key={template.key} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <StatusPill label={template.label} tone="default" />
+                      {template.hostGroupLabel ? <StatusPill label={`group:${template.hostGroupLabel}`} tone="default" /> : null}
+                      {template.policyPackLabel ? <StatusPill label={`pack:${template.policyPackLabel}`} tone="default" /> : null}
+                    </div>
+                    <div className="mt-2">{template.description || 'No template description recorded.'}</div>
+                    <div className="mt-2">{`${template.template.defaultThreadScope} threads · ${template.template.externalHandoffsEnabled ? 'external handoffs enabled' : 'external handoffs blocked'}`}</div>
+                  </div>
+                )) : <EmptyPanel label="No workspace templates are configured yet." />}
+              </div>
+            </div>
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.templates.attentionWorkspaces.length > 0 ? (
+              overview.templates.attentionWorkspaces.map((workspace) => (
+                <div key={`template-drift-${workspace.workspaceId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{workspace.workspaceName}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{workspace.reason}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {workspace.templateKey ? <StatusPill label={`current:${workspace.templateKey}`} tone="warning" /> : null}
+                      {workspace.expectedTemplateKey ? <StatusPill label={`expected:${workspace.expectedTemplateKey}`} tone="success" /> : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                    {workspace.hostGroups.length > 0 ? `Host groups ${workspace.hostGroups.join(', ')}` : 'No host groups attached yet'}
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={workspace.href}>
+                      Open workspace
+                    </Link>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No workspace template drift is currently visible." />
+            )}
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Guided remediation</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                One-click operator actions for rollout drift, stale routes, missing receipts, and workspace template drift.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {overview ? `${formatNumber(overview.remediation.summary.suggested)} suggested` : '—'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Suggested" value={!overview ? '—' : formatNumber(overview.remediation.summary.suggested)} tone={(overview?.remediation.summary.suggested ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Critical" value={!overview ? '—' : formatNumber(overview.remediation.summary.critical)} tone={(overview?.remediation.summary.critical ?? 0) > 0 ? 'critical' : 'default'} />
+            <MetricCard label="Needs confirm" value={!overview ? '—' : formatNumber(overview.remediation.summary.requiresConfirmation)} tone={(overview?.remediation.summary.requiresConfirmation ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Applied recently" value={!overview ? '—' : formatNumber(overview.remediation.summary.appliedRecently)} />
+          </div>
+
+          <div className="mt-4 space-y-3">
+            {overview && overview.remediation.suggested.length > 0 ? (
+              overview.remediation.suggested.map((item) => (
+                <div key={item.id} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{item.title}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{item.detail}</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label={item.kind} tone={digestSeverityTone(item.severity)} />
+                      {item.requiresConfirmation ? <StatusPill label="confirm required" tone="warning" /> : <StatusPill label="safe" tone="success" />}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{item.hostLabel ? `Host ${item.hostLabel}` : item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No host or workspace attached'}</div>
+                    <div>{item.nextAction}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      className="rounded-xl bg-slate-900 px-3 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-slate-100 dark:text-slate-900 dark:hover:bg-white"
+                      disabled={actionBusy === `remediation-${item.id}` || (item.kind === 'reapply_template' && !item.templateKey)}
+                      onClick={() => { void handleApplyRemediation(item) }}
+                    >
+                      {actionBusy === `remediation-${item.id}` ? 'Applying…' : remediationActionLabel(item)}
+                    </button>
+                    {item.href ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={item.href}>
+                        Open
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No guided remediation items are currently suggested." />
+            )}
+          </div>
+
+          <div className="mt-4 rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+            <div className="text-sm font-medium text-slate-900 dark:text-slate-100">Recent remediation history</div>
+            <div className="mt-3 space-y-3">
+              {overview && overview.remediation.history.length > 0 ? overview.remediation.history.map((entry) => (
+                <div key={entry.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs text-slate-500 dark:border-slate-800 dark:text-slate-400">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusPill label={entry.kind ?? entry.action} tone={entry.kind === 'drain_missing_receipts' ? 'warning' : 'default'} />
+                    <span>{formatDateTime(entry.timestamp)}</span>
+                  </div>
+                  <div className="mt-2">{entry.note || entry.target}</div>
+                  <div className="mt-2">{entry.actor ? `Actor ${entry.actor}` : 'Actor unknown'}</div>
+                  {entry.href ? (
+                    <div className="mt-2">
+                      <Link className="text-orange-600 hover:text-orange-700 dark:text-orange-300" to={entry.href}>
+                        Open target
+                      </Link>
+                    </div>
+                  ) : null}
+                </div>
+              )) : <EmptyPanel label="No remediation history recorded yet." />}
+            </div>
           </div>
         </div>
       </section>

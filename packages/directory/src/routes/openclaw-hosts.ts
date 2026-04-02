@@ -10,6 +10,8 @@ import {
   createOpenClawHost,
   getAgent,
   getLatestIntentLogByTarget,
+  getOpenClawPolicyPackByKey,
+  getOpenClawWorkspaceTemplateByKey,
   getOpenClawFleetDigestRunById,
   getOpenClawFleetDigestSchedule,
   getOpenClawEnrollmentRequestById,
@@ -18,6 +20,7 @@ import {
   getOpenClawHostById,
   getOpenClawHostByKey,
   getOpenClawHostRouteById,
+  getWorkspacePolicyDocument,
   getWorkspaceById,
   getWorkspaceBySlug,
   listOpenClawEnrollmentRequests,
@@ -25,11 +28,16 @@ import {
   listOpenClawFleetDigestRuns,
   listOpenClawHostHeartbeats,
   listOpenClawHosts,
+  listOpenClawPolicyPacks,
   listOpenClawResolvedRoutesByBeamId,
   listOpenClawResolvedRoutesForHost,
+  listOpenClawWorkspaceTemplates,
   listAuditLog,
+  listWorkspaces,
+  listWorkspaceIdentityBindings,
   listWorkspaceIdentityBindingsByBeamId,
   logAuditEvent,
+  markOpenClawHostRoutesEnded,
   recordOpenClawHostHeartbeat,
   recalculateOpenClawRouteStates,
   recoverOpenClawHost,
@@ -40,11 +48,16 @@ import {
   recordOpenClawFleetDigestDelivery,
   setOpenClawRouteOwnerResolution,
   syncOpenClawHostRoutes,
+  updateWorkspace,
+  updateWorkspacePolicyDocument,
   updateOpenClawEnrollmentRequest,
   updateOpenClawFleetDigestSchedule,
   updateOpenClawHost,
+  upsertOpenClawPolicyPack,
+  upsertOpenClawWorkspaceTemplate,
 } from '../db.js'
 import { getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-key.js'
+import { serializeWorkspace } from './workspaces.js'
 import type {
   IntentLogRow,
   OpenClawFleetDigestDeliveryKind,
@@ -57,6 +70,7 @@ import type {
   OpenClawHostCredentialState,
   OpenClawHostEnrollmentRequestRow,
   OpenClawHostHealth,
+  OpenClawPolicyPackRow,
   OpenClawHostRow,
   OpenClawHostRouteRow,
   OpenClawRouteOwnerResolutionState,
@@ -64,7 +78,10 @@ import type {
   OpenClawRouteReportedState,
   OpenClawRouteRuntimeState,
   OpenClawRouteSource,
+  OpenClawWorkspaceTemplateRow,
+  WorkspacePolicy,
 } from '../types.js'
+import { parseWorkspacePolicy } from '../workspace-policy.js'
 
 type OpenClawFleetDigestSeverity = 'warning' | 'critical'
 
@@ -199,6 +216,118 @@ type OpenClawHostGroupSummary = {
   pendingHosts: number
   environments: string[]
   hostIds: number[]
+}
+
+type OpenClawPolicyPackDefinition = {
+  defaults?: WorkspacePolicy['defaults']
+  bindingRules?: WorkspacePolicy['bindingRules']
+  workflowRules?: WorkspacePolicy['workflowRules']
+  metadata?: {
+    notes?: string | null
+  }
+}
+
+type OpenClawWorkspaceTemplateDefinition = {
+  defaultThreadScope?: 'internal' | 'handoff'
+  externalHandoffsEnabled?: boolean
+  description?: string | null
+}
+
+type SerializedOpenClawPolicyPack = {
+  id: number
+  key: string
+  label: string
+  description: string | null
+  hostGroupLabel: string | null
+  policy: WorkspacePolicy
+  createdAt: string
+  updatedAt: string
+}
+
+type SerializedOpenClawWorkspaceTemplate = {
+  id: number
+  key: string
+  label: string
+  description: string | null
+  hostGroupLabel: string | null
+  policyPackKey: string | null
+  policyPackLabel: string | null
+  template: {
+    defaultThreadScope: 'internal' | 'handoff'
+    externalHandoffsEnabled: boolean
+    description: string | null
+  }
+  createdAt: string
+  updatedAt: string
+}
+
+type SerializedOpenClawFleetTemplateAttentionWorkspace = {
+  workspaceId: number
+  workspaceSlug: string
+  workspaceName: string
+  hostGroups: string[]
+  templateKey: string | null
+  expectedTemplateKey: string | null
+  policyPackKey: string | null
+  drifted: boolean
+  reason: string
+  href: string
+}
+
+type SerializedOpenClawFleetTemplateSummary = {
+  summary: {
+    policyPacks: number
+    workspaceTemplates: number
+    templatedWorkspaces: number
+    driftedWorkspaces: number
+  }
+  policyPacks: SerializedOpenClawPolicyPack[]
+  workspaceTemplates: SerializedOpenClawWorkspaceTemplate[]
+  attentionWorkspaces: SerializedOpenClawFleetTemplateAttentionWorkspace[]
+}
+
+type OpenClawFleetRemediationKind =
+  | 'align_rollout'
+  | 'end_stale_routes'
+  | 'drain_missing_receipts'
+  | 'reapply_template'
+
+type SerializedOpenClawFleetRemediationItem = {
+  id: string
+  kind: OpenClawFleetRemediationKind
+  severity: OpenClawFleetDigestSeverity
+  title: string
+  detail: string
+  nextAction: string
+  safe: boolean
+  requiresConfirmation: boolean
+  hostId: number | null
+  hostLabel: string | null
+  workspaceSlug: string | null
+  templateKey: string | null
+  href: string | null
+}
+
+type SerializedOpenClawFleetRemediationHistoryItem = {
+  id: string
+  action: string
+  actor: string | null
+  timestamp: string
+  target: string
+  kind: OpenClawFleetRemediationKind | null
+  note: string | null
+  href: string | null
+}
+
+type SerializedOpenClawFleetRemediationSummary = {
+  summary: {
+    suggested: number
+    critical: number
+    requiresConfirmation: number
+    appliedRecently: number
+  }
+  suggested: SerializedOpenClawFleetRemediationItem[]
+  history: SerializedOpenClawFleetRemediationHistoryItem[]
 }
 
 type OpenClawFleetCredentialPolicyAttentionHost = {
@@ -551,6 +680,66 @@ function serializeOpenClawHostMetadata(metadata: OpenClawHostMetadataJson): stri
     return null
   }
   return JSON.stringify(cleaned)
+}
+
+function parseOpenClawPolicyPack(raw: string | null): WorkspacePolicy {
+  return parseWorkspacePolicy(raw)
+}
+
+function parseOpenClawWorkspaceTemplate(raw: string | null): OpenClawWorkspaceTemplateDefinition {
+  if (!raw) {
+    return {}
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>
+    return {
+      defaultThreadScope: parsed.defaultThreadScope === 'handoff' ? 'handoff' : 'internal',
+      externalHandoffsEnabled: parsed.externalHandoffsEnabled === undefined
+        ? true
+        : parsed.externalHandoffsEnabled === true,
+      description: normalizeOptionalString(parsed.description),
+    }
+  } catch {
+    return {}
+  }
+}
+
+function serializeOpenClawPolicyPack(row: OpenClawPolicyPackRow): SerializedOpenClawPolicyPack {
+  return {
+    id: row.id,
+    key: row.pack_key,
+    label: row.label,
+    description: row.description,
+    hostGroupLabel: normalizeOptionalString(row.host_group_label),
+    policy: parseOpenClawPolicyPack(row.policy_json),
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function serializeOpenClawWorkspaceTemplate(
+  row: OpenClawWorkspaceTemplateRow,
+  policyPackByKey: Map<string, SerializedOpenClawPolicyPack>,
+): SerializedOpenClawWorkspaceTemplate {
+  const template = parseOpenClawWorkspaceTemplate(row.template_json)
+  const policyPack = row.policy_pack_key ? policyPackByKey.get(row.policy_pack_key) ?? null : null
+  return {
+    id: row.id,
+    key: row.template_key,
+    label: row.label,
+    description: row.description,
+    hostGroupLabel: normalizeOptionalString(row.host_group_label),
+    policyPackKey: row.policy_pack_key,
+    policyPackLabel: policyPack?.label ?? null,
+    template: {
+      defaultThreadScope: template.defaultThreadScope ?? 'internal',
+      externalHandoffsEnabled: template.externalHandoffsEnabled ?? true,
+      description: template.description ?? null,
+    },
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
 }
 
 function computeNextRotationWindow(
@@ -1545,6 +1734,402 @@ function summarizeOpenClawFleetGroups(hosts: Array<ReturnType<typeof serializeHo
       environments: [...group.environments].sort((left, right) => left.localeCompare(right)),
     }))
     .sort((left, right) => left.label.localeCompare(right.label))
+}
+
+function sortUniqueStrings(values: Array<string | null | undefined>): string[] {
+  const seen = new Set<string>()
+  const normalized: string[] = []
+  for (const value of values) {
+    const trimmed = normalizeOptionalString(value)
+    if (!trimmed || seen.has(trimmed)) {
+      continue
+    }
+    seen.add(trimmed)
+    normalized.push(trimmed)
+  }
+  return normalized.sort((left, right) => left.localeCompare(right))
+}
+
+function canonicalizeWorkspacePolicy(policy: WorkspacePolicy) {
+  return {
+    defaults: {
+      externalInitiation: policy.defaults.externalInitiation,
+      allowedPartners: sortUniqueStrings(policy.defaults.allowedPartners),
+    },
+    bindingRules: [...policy.bindingRules]
+      .map((rule) => ({
+        beamId: normalizeOptionalString(rule.beamId),
+        bindingType: rule.bindingType ?? null,
+        policyProfile: normalizeOptionalString(rule.policyProfile),
+        externalInitiation: rule.externalInitiation,
+        allowedPartners: sortUniqueStrings(rule.allowedPartners),
+      }))
+      .sort((left, right) =>
+        (left.beamId ?? '').localeCompare(right.beamId ?? '')
+        || (left.bindingType ?? '').localeCompare(right.bindingType ?? '')
+        || (left.policyProfile ?? '').localeCompare(right.policyProfile ?? '')
+        || left.externalInitiation.localeCompare(right.externalInitiation)),
+    workflowRules: [...policy.workflowRules]
+      .map((rule) => ({
+        workflowType: rule.workflowType,
+        requireApproval: rule.requireApproval === true,
+        allowedPartners: sortUniqueStrings(rule.allowedPartners),
+        approvers: sortUniqueStrings(rule.approvers),
+      }))
+      .sort((left, right) => left.workflowType.localeCompare(right.workflowType)),
+  }
+}
+
+function workspacePoliciesMatch(left: WorkspacePolicy, right: WorkspacePolicy): boolean {
+  return JSON.stringify(canonicalizeWorkspacePolicy(left)) === JSON.stringify(canonicalizeWorkspacePolicy(right))
+}
+
+function collectWorkspaceHostGroups(
+  db: Database,
+  workspaceSlug: string,
+  workspaceId: number,
+  hostsById: Map<number, ReturnType<typeof serializeHost>>,
+): string[] {
+  const groups: string[] = []
+
+  for (const host of hostsById.values()) {
+    if (host.workspaceSlug === workspaceSlug) {
+      groups.push(...host.placement.groupLabels)
+    }
+  }
+
+  for (const binding of listWorkspaceIdentityBindings(db, workspaceId)) {
+    for (const route of listOpenClawResolvedRoutesByBeamId(db, binding.beam_id)) {
+      if (!route.host_id) {
+        continue
+      }
+      const host = hostsById.get(route.host_id)
+      if (!host) {
+        continue
+      }
+      groups.push(...host.placement.groupLabels)
+    }
+  }
+
+  return sortUniqueStrings(groups)
+}
+
+function selectExpectedWorkspaceTemplate(
+  currentTemplate: SerializedOpenClawWorkspaceTemplate | null,
+  matchingTemplates: SerializedOpenClawWorkspaceTemplate[],
+): SerializedOpenClawWorkspaceTemplate | null {
+  if (currentTemplate && matchingTemplates.some((template) => template.key === currentTemplate.key)) {
+    return currentTemplate
+  }
+  return matchingTemplates.length === 1 ? matchingTemplates[0] ?? null : null
+}
+
+function applyOpenClawWorkspaceTemplate(
+  db: Database,
+  input: {
+    workspaceSlug: string
+    template: SerializedOpenClawWorkspaceTemplate
+    actor: string
+    note?: string | null
+  },
+): {
+  workspace: ReturnType<typeof getWorkspaceBySlug>
+  policy: WorkspacePolicy
+  updatedAt: string | null
+  updatedBy: string | null
+} | null {
+  const workspace = getWorkspaceBySlug(db, input.workspaceSlug)
+  if (!workspace) {
+    return null
+  }
+
+  const currentPolicyDocument = getWorkspacePolicyDocument(db, workspace.id)
+  const policyPack = input.template.policyPackKey
+    ? getOpenClawPolicyPackByKey(db, input.template.policyPackKey)
+    : null
+  const packPolicy = policyPack ? parseOpenClawPolicyPack(policyPack.policy_json) : currentPolicyDocument.policy
+  const templateAppliedAt = new Date().toISOString()
+
+  const updatedWorkspace = updateWorkspace(db, {
+    id: workspace.id,
+    description: input.template.template.description,
+    defaultThreadScope: input.template.template.defaultThreadScope,
+    externalHandoffsEnabled: input.template.template.externalHandoffsEnabled,
+  })
+
+  const policyResult = updateWorkspacePolicyDocument(db, workspace.id, {
+    defaults: packPolicy.defaults,
+    bindingRules: packPolicy.bindingRules,
+    workflowRules: packPolicy.workflowRules,
+    metadata: {
+      notes: packPolicy.metadata.notes ?? currentPolicyDocument.policy.metadata.notes,
+      template: {
+        templateKey: input.template.key,
+        templateLabel: input.template.label,
+        policyPackKey: input.template.policyPackKey,
+        policyPackLabel: input.template.policyPackLabel,
+        hostGroupLabel: input.template.hostGroupLabel,
+        appliedAt: templateAppliedAt,
+        appliedBy: input.actor,
+      },
+    },
+  }, input.actor)
+
+  logAuditEvent(db, {
+    action: 'admin.openclaw_workspace_template.applied',
+    actor: input.actor,
+    target: `openclaw-workspace:${workspace.slug}`,
+    details: {
+      templateKey: input.template.key,
+      templateLabel: input.template.label,
+      policyPackKey: input.template.policyPackKey,
+      policyPackLabel: input.template.policyPackLabel,
+      hostGroupLabel: input.template.hostGroupLabel,
+      note: input.note ?? null,
+    },
+  })
+
+  return {
+    workspace: updatedWorkspace,
+    policy: policyResult.policy,
+    updatedAt: policyResult.updatedAt,
+    updatedBy: policyResult.updatedBy,
+  }
+}
+
+function buildOpenClawFleetTemplateSummary(
+  db: Database,
+  hosts: Array<ReturnType<typeof serializeHost>>,
+): SerializedOpenClawFleetTemplateSummary {
+  const serializedPolicyPacks = listOpenClawPolicyPacks(db).map((row) => serializeOpenClawPolicyPack(row))
+  const policyPackByKey = new Map(serializedPolicyPacks.map((pack) => [pack.key, pack]))
+  const serializedWorkspaceTemplates = listOpenClawWorkspaceTemplates(db)
+    .map((row) => serializeOpenClawWorkspaceTemplate(row, policyPackByKey))
+  const workspaceTemplateByKey = new Map(serializedWorkspaceTemplates.map((template) => [template.key, template]))
+  const hostsById = new Map(hosts.map((host) => [host.id, host]))
+  const attentionWorkspaces: SerializedOpenClawFleetTemplateAttentionWorkspace[] = []
+  let templatedWorkspaces = 0
+
+  for (const workspace of listWorkspaces(db)) {
+    const hostGroups = collectWorkspaceHostGroups(db, workspace.slug, workspace.id, hostsById)
+    const currentPolicy = getWorkspacePolicyDocument(db, workspace.id).policy
+    const templateMetadata = currentPolicy.metadata.template ?? null
+    const currentTemplate = templateMetadata?.templateKey
+      ? workspaceTemplateByKey.get(templateMetadata.templateKey) ?? null
+      : null
+    const matchingTemplates = serializedWorkspaceTemplates.filter((template) =>
+      template.hostGroupLabel ? hostGroups.includes(template.hostGroupLabel) : false)
+    const expectedTemplate = selectExpectedWorkspaceTemplate(currentTemplate, matchingTemplates)
+
+    if (currentTemplate) {
+      templatedWorkspaces += 1
+    }
+
+    let driftReason: string | null = null
+    if (templateMetadata?.templateKey && !currentTemplate) {
+      driftReason = `Applied template ${templateMetadata.templateKey} is no longer defined.`
+    } else if (matchingTemplates.length > 1 && !currentTemplate) {
+      driftReason = `Multiple workspace templates match host groups ${hostGroups.join(', ')}.`
+    } else if (expectedTemplate && !currentTemplate) {
+      driftReason = `Expected workspace template ${expectedTemplate.key} for host group ${expectedTemplate.hostGroupLabel}.`
+    } else if (expectedTemplate && currentTemplate && currentTemplate.key !== expectedTemplate.key) {
+      driftReason = `Workspace should use template ${expectedTemplate.key} for host group ${expectedTemplate.hostGroupLabel}.`
+    } else if (currentTemplate) {
+      const descriptionMatches = normalizeOptionalString(workspace.description) === currentTemplate.template.description
+      const threadScopeMatches = workspace.default_thread_scope === currentTemplate.template.defaultThreadScope
+      const handoffMatches = (workspace.external_handoffs_enabled === 1) === currentTemplate.template.externalHandoffsEnabled
+      if (!descriptionMatches || !threadScopeMatches || !handoffMatches) {
+        driftReason = 'Workspace settings drifted from the applied template.'
+      } else if (currentTemplate.policyPackKey) {
+        const policyPack = policyPackByKey.get(currentTemplate.policyPackKey) ?? null
+        if (!policyPack) {
+          driftReason = `Template ${currentTemplate.key} references missing policy pack ${currentTemplate.policyPackKey}.`
+        } else if (!workspacePoliciesMatch(currentPolicy, policyPack.policy)) {
+          driftReason = `Workspace policy drifted from policy pack ${currentTemplate.policyPackKey}.`
+        }
+      }
+    }
+
+    if (!driftReason) {
+      continue
+    }
+
+    attentionWorkspaces.push({
+      workspaceId: workspace.id,
+      workspaceSlug: workspace.slug,
+      workspaceName: workspace.name,
+      hostGroups,
+      templateKey: currentTemplate?.key ?? templateMetadata?.templateKey ?? null,
+      expectedTemplateKey: expectedTemplate?.key ?? null,
+      policyPackKey: currentTemplate?.policyPackKey ?? expectedTemplate?.policyPackKey ?? templateMetadata?.policyPackKey ?? null,
+      drifted: true,
+      reason: driftReason,
+      href: buildWorkspaceHref(workspace.slug) ?? `/workspaces?workspace=${encodeURIComponent(workspace.slug)}`,
+    })
+  }
+
+  attentionWorkspaces.sort((left, right) =>
+    left.workspaceSlug.localeCompare(right.workspaceSlug) || left.workspaceId - right.workspaceId)
+
+  return {
+    summary: {
+      policyPacks: serializedPolicyPacks.length,
+      workspaceTemplates: serializedWorkspaceTemplates.length,
+      templatedWorkspaces,
+      driftedWorkspaces: attentionWorkspaces.length,
+    },
+    policyPacks: serializedPolicyPacks,
+    workspaceTemplates: serializedWorkspaceTemplates,
+    attentionWorkspaces,
+  }
+}
+
+function buildOpenClawFleetRemediationSummary(
+  db: Database,
+  hosts: Array<ReturnType<typeof serializeHost>>,
+  rollout: OpenClawFleetRolloutSummary,
+  routeHealth: OpenClawFleetRouteHealthSummary,
+  templates: SerializedOpenClawFleetTemplateSummary,
+): SerializedOpenClawFleetRemediationSummary {
+  const suggested: SerializedOpenClawFleetRemediationItem[] = []
+
+  for (const host of hosts) {
+    if (host.rollout.versionState === 'drifted' && host.connectorVersion) {
+      suggested.push({
+        id: `align-rollout:${host.id}`,
+        kind: 'align_rollout',
+        severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
+        title: `${hostTitleForDigest(host)} is off the desired connector target`,
+        detail: `${host.connectorVersion} is currently installed while the rollout target is ${host.rollout.desiredConnectorVersion ?? 'unset'}.`,
+        nextAction: 'Adopt the live connector version as the desired target if this host reflects the intended rollout state.',
+        safe: true,
+        requiresConfirmation: false,
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        templateKey: null,
+        href: buildOpenClawFleetHref(host.id),
+      })
+    }
+
+    if (host.summary.stale > 0) {
+      suggested.push({
+        id: `end-stale-routes:${host.id}`,
+        kind: 'end_stale_routes',
+        severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
+        title: `${hostTitleForDigest(host)} still advertises stale routes`,
+        detail: `${host.summary.stale} stale route(s) remain visible and should be ended before they linger as deliverable history.`,
+        nextAction: 'End only the stale routes on this host and wait for the next inventory sync to republish live routes.',
+        safe: true,
+        requiresConfirmation: false,
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        templateKey: null,
+        href: buildOpenClawFleetHref(host.id),
+      })
+    }
+  }
+
+  for (const attentionHost of routeHealth.attentionHosts) {
+    if (attentionHost.failedReceipts === 0 && attentionHost.missingReceipts === 0) {
+      continue
+    }
+    const host = hosts.find((candidate) => candidate.id === attentionHost.hostId) ?? null
+    if (!host || host.maintenance.state !== 'serving') {
+      continue
+    }
+    suggested.push({
+      id: `drain-missing-receipts:${attentionHost.hostId}`,
+      kind: 'drain_missing_receipts',
+      severity: attentionHost.failedReceipts > 0 ? 'critical' : 'warning',
+      title: `${attentionHost.hostLabel || `Host ${attentionHost.hostId}`} is missing receipts or failing delivery`,
+      detail: `${attentionHost.failedReceipts} failed receipt(s) and ${attentionHost.missingReceipts} missing receipt(s) are currently open.`,
+      nextAction: 'Drain the host before debugging or replacing it so Beam stops sending new work to a route that is already degrading.',
+      safe: false,
+      requiresConfirmation: true,
+      hostId: attentionHost.hostId,
+      hostLabel: attentionHost.hostLabel,
+      workspaceSlug: attentionHost.workspaceSlug,
+      templateKey: null,
+      href: buildOpenClawFleetHref(attentionHost.hostId),
+    })
+  }
+
+  for (const workspace of templates.attentionWorkspaces) {
+    const templateKey = workspace.expectedTemplateKey ?? workspace.templateKey
+    if (!templateKey) {
+      continue
+    }
+    suggested.push({
+      id: `reapply-template:${workspace.workspaceSlug}:${templateKey}`,
+      kind: 'reapply_template',
+      severity: 'warning',
+      title: `${workspace.workspaceSlug} drifted from its fleet template`,
+      detail: workspace.reason,
+      nextAction: 'Reapply the expected template to restore policy and workspace defaults from the fleet-backed source of truth.',
+      safe: false,
+      requiresConfirmation: true,
+      hostId: null,
+      hostLabel: null,
+      workspaceSlug: workspace.workspaceSlug,
+      templateKey,
+      href: workspace.href,
+    })
+  }
+
+  const history = listAuditLog(db, { limit: 250 })
+    .filter((entry) =>
+      entry.action === 'admin.openclaw_fleet_remediation.applied'
+      || entry.action === 'admin.openclaw_workspace_template.applied')
+    .map((entry): SerializedOpenClawFleetRemediationHistoryItem => {
+      const details = parseJson<Record<string, unknown>>(entry.details, {})
+      const target = entry.target
+      const hostId = target.startsWith('openclaw-host:') ? normalizePositiveInteger(target.slice('openclaw-host:'.length)) : null
+      const workspaceSlug = target.startsWith('openclaw-workspace:') ? normalizeOptionalString(target.slice('openclaw-workspace:'.length)) : null
+      const kindRaw = normalizeOptionalString(details.kind)
+      const kind: OpenClawFleetRemediationKind | null =
+        kindRaw === 'align_rollout'
+        || kindRaw === 'end_stale_routes'
+        || kindRaw === 'drain_missing_receipts'
+        || kindRaw === 'reapply_template'
+          ? kindRaw
+          : (entry.action === 'admin.openclaw_workspace_template.applied' ? 'reapply_template' : null)
+
+      return {
+        id: `remediation-history:${entry.id}`,
+        action: entry.action,
+        actor: entry.actor,
+        timestamp: entry.timestamp,
+        target,
+        kind,
+        note: normalizeOptionalString(details.note),
+        href: hostId
+          ? buildOpenClawFleetHref(hostId)
+          : (workspaceSlug ? (buildWorkspaceHref(workspaceSlug) ?? null) : null),
+      }
+    })
+    .slice(0, 25)
+
+  suggested.sort((left, right) =>
+    severityWeight(left.severity) - severityWeight(right.severity)
+      || Number(left.requiresConfirmation) - Number(right.requiresConfirmation)
+      || (left.hostLabel ?? left.workspaceSlug ?? '').localeCompare(right.hostLabel ?? right.workspaceSlug ?? '')
+      || left.id.localeCompare(right.id))
+
+  const now = Date.now()
+  const appliedRecently = history.filter((entry) => Number.isFinite(Date.parse(entry.timestamp)) && (now - Date.parse(entry.timestamp)) <= (7 * 24 * 60 * 60 * 1000)).length
+
+  return {
+    summary: {
+      suggested: suggested.length,
+      critical: suggested.filter((item) => item.severity === 'critical').length,
+      requiresConfirmation: suggested.filter((item) => item.requiresConfirmation).length,
+      appliedRecently,
+    },
+    suggested,
+    history,
+  }
 }
 
 function buildOpenClawFleetMaintenanceSummary(
@@ -2691,6 +3276,8 @@ export function openClawAdminRouter(db: Database) {
     const rollout = buildOpenClawFleetRolloutSummary(hosts)
     const credentialPolicy = buildOpenClawFleetCredentialPolicySummary(hosts)
     const routeHealth = buildOpenClawFleetRouteHealthSummary(db, hosts)
+    const templates = buildOpenClawFleetTemplateSummary(db, hosts)
+    const remediation = buildOpenClawFleetRemediationSummary(db, hosts, rollout, routeHealth, templates)
     const summary = hosts.reduce((acc, host) => {
       acc.totalHosts += 1
       if (host.status === 'pending') acc.pendingHosts += 1
@@ -2742,6 +3329,9 @@ export function openClawAdminRouter(db: Database) {
         pendingCredentialActions: digest.summary.pendingCredentialActions,
         actionItems: digest.summary.actionItems,
         criticalItems: digest.summary.criticalItems,
+        templateDriftedWorkspaces: templates.summary.driftedWorkspaces,
+        suggestedRemediations: remediation.summary.suggested,
+        criticalRemediations: remediation.summary.critical,
       },
       hosts,
       conflicts,
@@ -2749,8 +3339,412 @@ export function openClawAdminRouter(db: Database) {
       rollout,
       credentialPolicy,
       routeHealth,
+      templates,
+      remediation,
       environments,
       hostGroups,
+    })
+  })
+
+  router.get('/fleet/policy-packs', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const policyPacks = listOpenClawPolicyPacks(db).map((row) => serializeOpenClawPolicyPack(row))
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      total: policyPacks.length,
+      policyPacks,
+    })
+  })
+
+  router.put('/fleet/policy-packs/:key', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const packKey = normalizeOptionalString(c.req.param('key'))
+    if (!packKey) {
+      return c.json({ error: 'Invalid policy pack key', errorCode: 'INVALID_POLICY_PACK_KEY' }, 400)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const policy = parseOpenClawPolicyPack(
+      typeof body.policy === 'string'
+        ? body.policy
+        : JSON.stringify(body.policy ?? {}),
+    )
+    const saved = upsertOpenClawPolicyPack(db, {
+      packKey,
+      label: normalizeOptionalString(body.label) ?? packKey,
+      description: normalizeOptionalString(body.description),
+      hostGroupLabel: normalizeOptionalString(body.hostGroupLabel),
+      policyJson: JSON.stringify(policy),
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_policy_pack.upserted',
+      actor: auth.session.email,
+      target: `openclaw-policy-pack:${saved.pack_key}`,
+      details: {
+        role: auth.session.role,
+        label: saved.label,
+        hostGroupLabel: saved.host_group_label,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      policyPack: serializeOpenClawPolicyPack(saved),
+    })
+  })
+
+  router.get('/fleet/workspace-templates', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const policyPackByKey = new Map(listOpenClawPolicyPacks(db).map((row) => {
+      const serialized = serializeOpenClawPolicyPack(row)
+      return [serialized.key, serialized] as const
+    }))
+    const workspaceTemplates = listOpenClawWorkspaceTemplates(db)
+      .map((row) => serializeOpenClawWorkspaceTemplate(row, policyPackByKey))
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      total: workspaceTemplates.length,
+      workspaceTemplates,
+    })
+  })
+
+  router.put('/fleet/workspace-templates/:key', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const templateKey = normalizeOptionalString(c.req.param('key'))
+    if (!templateKey) {
+      return c.json({ error: 'Invalid workspace template key', errorCode: 'INVALID_WORKSPACE_TEMPLATE_KEY' }, 400)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const policyPackKey = normalizeOptionalString(body.policyPackKey)
+    if (policyPackKey && !getOpenClawPolicyPackByKey(db, policyPackKey)) {
+      return c.json({ error: 'Unknown policy pack', errorCode: 'POLICY_PACK_NOT_FOUND' }, 404)
+    }
+
+    const template = parseOpenClawWorkspaceTemplate(
+      typeof body.template === 'string'
+        ? body.template
+        : JSON.stringify(body.template ?? {}),
+    )
+    const saved = upsertOpenClawWorkspaceTemplate(db, {
+      templateKey,
+      label: normalizeOptionalString(body.label) ?? templateKey,
+      description: normalizeOptionalString(body.description) ?? template.description ?? null,
+      hostGroupLabel: normalizeOptionalString(body.hostGroupLabel),
+      policyPackKey,
+      templateJson: JSON.stringify(template),
+    })
+    const policyPackByKey = new Map(listOpenClawPolicyPacks(db).map((row) => {
+      const serialized = serializeOpenClawPolicyPack(row)
+      return [serialized.key, serialized] as const
+    }))
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_workspace_template.upserted',
+      actor: auth.session.email,
+      target: `openclaw-workspace-template:${saved.template_key}`,
+      details: {
+        role: auth.session.role,
+        label: saved.label,
+        hostGroupLabel: saved.host_group_label,
+        policyPackKey: saved.policy_pack_key,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspaceTemplate: serializeOpenClawWorkspaceTemplate(saved, policyPackByKey),
+    })
+  })
+
+  router.post('/fleet/workspace-templates/:key/apply', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const templateKey = normalizeOptionalString(c.req.param('key'))
+    if (!templateKey) {
+      return c.json({ error: 'Invalid workspace template key', errorCode: 'INVALID_WORKSPACE_TEMPLATE_KEY' }, 400)
+    }
+
+    const templateRow = getOpenClawWorkspaceTemplateByKey(db, templateKey)
+    if (!templateRow) {
+      return c.json({ error: 'Workspace template not found', errorCode: 'WORKSPACE_TEMPLATE_NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const workspaceSlug = normalizeOptionalString(body.workspaceSlug)
+    if (!workspaceSlug) {
+      return c.json({ error: 'workspaceSlug is required', errorCode: 'WORKSPACE_SLUG_REQUIRED' }, 400)
+    }
+
+    const policyPackByKey = new Map(listOpenClawPolicyPacks(db).map((row) => {
+      const serialized = serializeOpenClawPolicyPack(row)
+      return [serialized.key, serialized] as const
+    }))
+    const template = serializeOpenClawWorkspaceTemplate(templateRow, policyPackByKey)
+    const applied = applyOpenClawWorkspaceTemplate(db, {
+      workspaceSlug,
+      template,
+      actor: auth.session.email,
+      note: normalizeOptionalString(body.note),
+    })
+
+    if (!applied || !applied.workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'WORKSPACE_NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, applied.workspace),
+      policy: applied.policy,
+      updatedAt: applied.updatedAt,
+      updatedBy: applied.updatedBy,
+    })
+  })
+
+  router.post('/fleet/remediations/apply', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const kindRaw = normalizeOptionalString(body.kind)
+    if (
+      kindRaw !== 'align_rollout'
+      && kindRaw !== 'end_stale_routes'
+      && kindRaw !== 'drain_missing_receipts'
+      && kindRaw !== 'reapply_template'
+    ) {
+      return c.json({ error: 'Unknown remediation kind', errorCode: 'INVALID_REMEDIATION_KIND' }, 400)
+    }
+
+    const note = normalizeOptionalString(body.note)
+
+    if (kindRaw === 'align_rollout') {
+      const hostId = normalizePositiveInteger(body.hostId)
+      if (!hostId) {
+        return c.json({ error: 'hostId is required', errorCode: 'HOST_ID_REQUIRED' }, 400)
+      }
+
+      const host = getOpenClawHostById(db, hostId)
+      if (!host) {
+        return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const patch = buildOpenClawHostRolloutPatch(host, {
+        desiredConnectorVersion: host.connector_version,
+        notes: note ?? serializeOpenClawHostRollout(host).notes,
+      })
+      const updated = updateOpenClawHost(db, {
+        id: hostId,
+        metadataJson: patch.metadataJson,
+      })
+      if (!updated) {
+        return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet_remediation.applied',
+        actor: auth.session.email,
+        target: `openclaw-host:${hostId}`,
+        details: {
+          role: auth.session.role,
+          kind: kindRaw,
+          note: note ?? null,
+          desiredConnectorVersion: updated.connector_version,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        kind: kindRaw,
+        host: serializeHost(db, updated),
+      })
+    }
+
+    if (kindRaw === 'end_stale_routes') {
+      const hostId = normalizePositiveInteger(body.hostId)
+      if (!hostId) {
+        return c.json({ error: 'hostId is required', errorCode: 'HOST_ID_REQUIRED' }, 400)
+      }
+
+      const host = getOpenClawHostById(db, hostId)
+      if (!host) {
+        return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const routes = markOpenClawHostRoutesEnded(db, {
+        hostId,
+        runtimeSessionState: 'stale',
+      })
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet_remediation.applied',
+        actor: auth.session.email,
+        target: `openclaw-host:${hostId}`,
+        details: {
+          role: auth.session.role,
+          kind: kindRaw,
+          note: note ?? null,
+          routeCount: routes.filter((route) => route.runtime_session_state === 'ended').length,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        kind: kindRaw,
+        host: serializeHost(db, getOpenClawHostById(db, hostId) as OpenClawHostRow),
+        routes: listOpenClawResolvedRoutesForHost(db, hostId).map((route) => serializeRoute(db, route)),
+      })
+    }
+
+    if (kindRaw === 'drain_missing_receipts') {
+      const hostId = normalizePositiveInteger(body.hostId)
+      if (!hostId) {
+        return c.json({ error: 'hostId is required', errorCode: 'HOST_ID_REQUIRED' }, 400)
+      }
+      if (normalizeOptionalString(body.confirmPhrase) !== 'DRAIN_HOST') {
+        return c.json({ error: 'confirmPhrase DRAIN_HOST is required', errorCode: 'CONFIRMATION_REQUIRED' }, 400)
+      }
+
+      const host = getOpenClawHostById(db, hostId)
+      if (!host) {
+        return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      const patch = buildOpenClawHostMaintenancePatch(host, {
+        state: 'draining',
+        owner: auth.session.email,
+        reason: note ?? 'Guided remediation drain for missing or failed receipts',
+      })
+      const updated = updateOpenClawHost(db, {
+        id: hostId,
+        metadataJson: patch.metadataJson,
+      })
+      if (!updated) {
+        return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.openclaw_fleet_remediation.applied',
+        actor: auth.session.email,
+        target: `openclaw-host:${hostId}`,
+        details: {
+          role: auth.session.role,
+          kind: kindRaw,
+          note: note ?? null,
+          confirmPhrase: 'DRAIN_HOST',
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        ok: true,
+        kind: kindRaw,
+        host: serializeHost(db, updated),
+      })
+    }
+
+    const workspaceSlug = normalizeOptionalString(body.workspaceSlug)
+    const templateKey = normalizeOptionalString(body.templateKey)
+    if (!workspaceSlug) {
+      return c.json({ error: 'workspaceSlug is required', errorCode: 'WORKSPACE_SLUG_REQUIRED' }, 400)
+    }
+    if (!templateKey) {
+      return c.json({ error: 'templateKey is required', errorCode: 'TEMPLATE_KEY_REQUIRED' }, 400)
+    }
+    if (normalizeOptionalString(body.confirmPhrase) !== 'REAPPLY_TEMPLATE') {
+      return c.json({ error: 'confirmPhrase REAPPLY_TEMPLATE is required', errorCode: 'CONFIRMATION_REQUIRED' }, 400)
+    }
+
+    const templateRow = getOpenClawWorkspaceTemplateByKey(db, templateKey)
+    if (!templateRow) {
+      return c.json({ error: 'Workspace template not found', errorCode: 'WORKSPACE_TEMPLATE_NOT_FOUND' }, 404)
+    }
+
+    const policyPackByKey = new Map(listOpenClawPolicyPacks(db).map((row) => {
+      const serialized = serializeOpenClawPolicyPack(row)
+      return [serialized.key, serialized] as const
+    }))
+    const template = serializeOpenClawWorkspaceTemplate(templateRow, policyPackByKey)
+    const applied = applyOpenClawWorkspaceTemplate(db, {
+      workspaceSlug,
+      template,
+      actor: auth.session.email,
+      note,
+    })
+    if (!applied || !applied.workspace) {
+      return c.json({ error: 'Workspace not found', errorCode: 'WORKSPACE_NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_remediation.applied',
+      actor: auth.session.email,
+      target: `openclaw-workspace:${workspaceSlug}`,
+      details: {
+        role: auth.session.role,
+        kind: kindRaw,
+        note: note ?? null,
+        templateKey,
+        confirmPhrase: 'REAPPLY_TEMPLATE',
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: true,
+      kind: kindRaw,
+      workspace: serializeWorkspace(db, applied.workspace),
+      policy: applied.policy,
+      updatedAt: applied.updatedAt,
+      updatedBy: applied.updatedBy,
     })
   })
 

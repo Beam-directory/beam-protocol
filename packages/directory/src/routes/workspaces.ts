@@ -910,7 +910,7 @@ function summarizeWorkspaceAuditAction(action: string, details: Record<string, u
     }
 }
 
-function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspace {
+export function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedWorkspace {
   const summary = getWorkspaceSummary(db, row.id)
   const { policy } = getWorkspacePolicyDocument(db, row.id)
 

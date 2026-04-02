@@ -330,6 +330,9 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         pendingCredentialActions: number
         actionItems: number
         criticalItems: number
+        templateDriftedWorkspaces: number
+        suggestedRemediations: number
+        criticalRemediations: number
       }
       hosts: Array<{
         id: number
@@ -360,6 +363,9 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
       pendingCredentialActions: 0,
       actionItems: 1,
       criticalItems: 0,
+      templateDriftedWorkspaces: 0,
+      suggestedRemediations: 1,
+      criticalRemediations: 0,
     })
     assert.equal(overviewBody.hosts[0]?.workspaceSlug, 'openclaw-local')
     assert.equal(overviewBody.hosts[0]?.healthStatus, 'healthy')
@@ -409,6 +415,281 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
     assert.equal(workspaceIdentitiesBody.bindings[0]?.hostHealth, 'healthy')
     assert.equal(workspaceIdentitiesBody.bindings[0]?.routeSource, 'gateway-agent')
     assert.equal(workspaceIdentitiesBody.bindings[0]?.runtimeSessionState, 'live')
+  } finally {
+    db.close()
+  }
+})
+
+test('fleet policy packs, workspace templates, and guided remediation can restore drifted workspaces', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const atlas = createFixtureAgent('atlas-template@openclaw.beam.directory')
+    registerFixtureAgent(db, atlas, 'Atlas Template')
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const workspaceResponse = await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'OpenClaw Local',
+        slug: 'openclaw-local',
+        description: 'Temporary workspace description',
+        defaultThreadScope: 'internal',
+        externalHandoffsEnabled: false,
+      }),
+    }))
+    assert.equal(workspaceResponse.status, 201)
+
+    const bindingResponse = await app.request(new Request('http://localhost/admin/workspaces/openclaw-local/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: atlas.beamId,
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'openclaw:gateway',
+        policyProfile: 'openclaw-prod',
+        canInitiateExternal: true,
+      }),
+    }))
+    assert.equal(bindingResponse.status, 201)
+
+    const approved = createApprovedHostWithRoute(db, {
+      label: 'Template Alpha',
+      hostname: 'template-alpha.local',
+      beamId: atlas.beamId,
+      routeKey: 'template-alpha-route',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const profileResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${approved.host.id}/profile`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        environmentLabel: 'prod',
+        groupLabels: ['production'],
+      }),
+    }))
+    assert.equal(profileResponse.status, 200)
+
+    const policyPackResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/policy-packs/prod-default', {
+      method: 'PUT',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        label: 'Production default',
+        description: 'Production outbound policy',
+        hostGroupLabel: 'production',
+        policy: {
+          defaults: {
+            externalInitiation: 'deny',
+            allowedPartners: ['finance@northwind.beam.directory'],
+          },
+          bindingRules: [
+            {
+              policyProfile: 'openclaw-prod',
+              externalInitiation: 'allow',
+              allowedPartners: ['finance@northwind.beam.directory'],
+            },
+          ],
+          workflowRules: [
+            {
+              workflowType: 'quote.approval',
+              requireApproval: true,
+              allowedPartners: ['finance@northwind.beam.directory'],
+              approvers: ['ops@example.com'],
+            },
+          ],
+          metadata: {
+            notes: 'Production hosts require named approval.',
+          },
+        },
+      }),
+    }))
+    assert.equal(policyPackResponse.status, 200)
+
+    const templateResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/workspace-templates/prod-workspace', {
+      method: 'PUT',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        label: 'Production workspace',
+        description: 'Production workspace template',
+        hostGroupLabel: 'production',
+        policyPackKey: 'prod-default',
+        template: {
+          defaultThreadScope: 'handoff',
+          externalHandoffsEnabled: true,
+          description: 'Production partner workspace',
+        },
+      }),
+    }))
+    assert.equal(templateResponse.status, 200)
+
+    const listPolicyPacksResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/policy-packs', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(listPolicyPacksResponse.status, 200)
+    const listPolicyPacksBody = await listPolicyPacksResponse.json() as {
+      total: number
+      policyPacks: Array<{
+        key: string
+        policy: {
+          defaults: {
+            externalInitiation: string
+          }
+        }
+      }>
+    }
+    assert.equal(listPolicyPacksBody.total, 1)
+    assert.equal(listPolicyPacksBody.policyPacks[0]?.key, 'prod-default')
+    assert.equal(listPolicyPacksBody.policyPacks[0]?.policy.defaults.externalInitiation, 'deny')
+
+    const listTemplatesResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/workspace-templates', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(listTemplatesResponse.status, 200)
+    const listTemplatesBody = await listTemplatesResponse.json() as {
+      total: number
+      workspaceTemplates: Array<{
+        key: string
+        policyPackKey: string | null
+        template: {
+          defaultThreadScope: string
+          externalHandoffsEnabled: boolean
+        }
+      }>
+    }
+    assert.equal(listTemplatesBody.total, 1)
+    assert.equal(listTemplatesBody.workspaceTemplates[0]?.key, 'prod-workspace')
+    assert.equal(listTemplatesBody.workspaceTemplates[0]?.policyPackKey, 'prod-default')
+
+    const overviewBeforeResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewBeforeResponse.status, 200)
+    const overviewBeforeBody = await overviewBeforeResponse.json() as {
+      templates: {
+        summary: {
+          policyPacks: number
+          workspaceTemplates: number
+          templatedWorkspaces: number
+          driftedWorkspaces: number
+        }
+        attentionWorkspaces: Array<{
+          workspaceSlug: string
+          expectedTemplateKey: string | null
+          reason: string
+        }>
+      }
+      remediation: {
+        suggested: Array<{
+          kind: string
+          workspaceSlug: string | null
+          templateKey: string | null
+          requiresConfirmation: boolean
+        }>
+      }
+    }
+    assert.equal(overviewBeforeBody.templates.summary.policyPacks, 1)
+    assert.equal(overviewBeforeBody.templates.summary.workspaceTemplates, 1)
+    assert.equal(overviewBeforeBody.templates.summary.templatedWorkspaces, 0)
+    assert.equal(overviewBeforeBody.templates.summary.driftedWorkspaces, 1)
+    assert.equal(overviewBeforeBody.templates.attentionWorkspaces[0]?.workspaceSlug, 'openclaw-local')
+    assert.equal(overviewBeforeBody.templates.attentionWorkspaces[0]?.expectedTemplateKey, 'prod-workspace')
+    assert.match(overviewBeforeBody.templates.attentionWorkspaces[0]?.reason ?? '', /expected workspace template/i)
+    assert.ok(overviewBeforeBody.remediation.suggested.some((item) =>
+      item.kind === 'reapply_template'
+      && item.workspaceSlug === 'openclaw-local'
+      && item.templateKey === 'prod-workspace'
+      && item.requiresConfirmation,
+    ))
+
+    const remediationResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/remediations/apply', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'reapply_template',
+        workspaceSlug: 'openclaw-local',
+        templateKey: 'prod-workspace',
+        confirmPhrase: 'REAPPLY_TEMPLATE',
+        note: 'Restore production fleet defaults',
+      }),
+    }))
+    assert.equal(remediationResponse.status, 200)
+    const remediationBody = await remediationResponse.json() as {
+      ok: boolean
+      kind: string
+      workspace: {
+        slug: string
+        description: string | null
+        defaultThreadScope: string
+        externalHandoffsEnabled: boolean
+      }
+      policy: {
+        defaults: {
+          externalInitiation: string
+          allowedPartners: string[]
+        }
+        workflowRules: Array<{
+          workflowType: string
+          requireApproval: boolean
+          approvers: string[]
+        }>
+        metadata: {
+          template: {
+            templateKey: string | null
+            policyPackKey: string | null
+            hostGroupLabel: string | null
+            appliedBy: string | null
+          } | null
+        }
+      }
+    }
+    assert.equal(remediationBody.ok, true)
+    assert.equal(remediationBody.kind, 'reapply_template')
+    assert.equal(remediationBody.workspace.slug, 'openclaw-local')
+    assert.equal(remediationBody.workspace.description, 'Production partner workspace')
+    assert.equal(remediationBody.workspace.defaultThreadScope, 'handoff')
+    assert.equal(remediationBody.workspace.externalHandoffsEnabled, true)
+    assert.equal(remediationBody.policy.defaults.externalInitiation, 'deny')
+    assert.deepEqual(remediationBody.policy.defaults.allowedPartners, ['finance@northwind.beam.directory'])
+    assert.equal(remediationBody.policy.workflowRules[0]?.workflowType, 'quote.approval')
+    assert.equal(remediationBody.policy.workflowRules[0]?.requireApproval, true)
+    assert.deepEqual(remediationBody.policy.workflowRules[0]?.approvers, ['ops@example.com'])
+    assert.equal(remediationBody.policy.metadata.template?.templateKey, 'prod-workspace')
+    assert.equal(remediationBody.policy.metadata.template?.policyPackKey, 'prod-default')
+    assert.equal(remediationBody.policy.metadata.template?.hostGroupLabel, 'production')
+    assert.equal(remediationBody.policy.metadata.template?.appliedBy, 'admin@example.com')
+
+    const overviewAfterResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewAfterResponse.status, 200)
+    const overviewAfterBody = await overviewAfterResponse.json() as {
+      templates: {
+        summary: {
+          templatedWorkspaces: number
+          driftedWorkspaces: number
+        }
+      }
+      remediation: {
+        suggested: Array<{
+          kind: string
+          workspaceSlug: string | null
+        }>
+      }
+    }
+    assert.equal(overviewAfterBody.templates.summary.templatedWorkspaces, 1)
+    assert.equal(overviewAfterBody.templates.summary.driftedWorkspaces, 0)
+    assert.ok(!overviewAfterBody.remediation.suggested.some((item) =>
+      item.kind === 'reapply_template' && item.workspaceSlug === 'openclaw-local',
+    ))
   } finally {
     db.close()
   }
@@ -1784,6 +2065,178 @@ test('revoked openclaw host routes block Beam delivery immediately', async () =>
       (error: unknown) => error instanceof RelayError && error.code === 'FORBIDDEN' && error.message.includes('revoked OpenClaw host'),
     )
     assert.equal(getIntentLogByNonce(db, nonce)?.error_code, 'HOST_REVOKED')
+  } finally {
+    db.close()
+  }
+})
+
+test('guided fleet remediations align rollout, drain missing receipts, and end stale routes', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const alpha = createFixtureAgent('alpha-remediation@openclaw.beam.directory')
+    const bravo = createFixtureAgent('bravo-remediation@openclaw.beam.directory')
+    registerFixtureAgent(db, alpha, 'Alpha Remediation')
+    registerFixtureAgent(db, bravo, 'Bravo Remediation')
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const workspaceResponse = await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'OpenClaw Local',
+        slug: 'openclaw-local',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+    assert.equal(workspaceResponse.status, 201)
+
+    const alphaHost = createApprovedHostWithRoute(db, {
+      label: 'Alpha Remediation Host',
+      hostname: 'alpha-remediation.local',
+      beamId: alpha.beamId,
+      routeKey: 'alpha-remediation-route',
+      workspaceSlug: 'openclaw-local',
+    })
+    const bravoHost = createApprovedHostWithRoute(db, {
+      label: 'Bravo Remediation Host',
+      hostname: 'bravo-remediation.local',
+      beamId: bravo.beamId,
+      routeKey: 'bravo-remediation-route',
+      workspaceSlug: 'openclaw-local',
+      heartbeatAt: new Date(Date.now() - (20 * 60 * 1000)).toISOString(),
+    })
+
+    const rolloutResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${alphaHost.host.id}/rollout`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        ring: 'pinned',
+        desiredConnectorVersion: '9.9.9-test',
+        notes: 'intentional rollout drift',
+      }),
+    }))
+    assert.equal(rolloutResponse.status, 200)
+
+    const overviewBeforeResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewBeforeResponse.status, 200)
+    const overviewBeforeBody = await overviewBeforeResponse.json() as {
+      remediation: {
+        suggested: Array<{
+          kind: string
+          hostId: number | null
+          requiresConfirmation: boolean
+        }>
+      }
+    }
+    assert.ok(overviewBeforeBody.remediation.suggested.some((item) =>
+      item.kind === 'align_rollout' && item.hostId === alphaHost.host.id && item.requiresConfirmation === false,
+    ))
+    assert.ok(overviewBeforeBody.remediation.suggested.some((item) =>
+      item.kind === 'drain_missing_receipts' && item.hostId === alphaHost.host.id && item.requiresConfirmation,
+    ))
+    assert.ok(overviewBeforeBody.remediation.suggested.some((item) =>
+      item.kind === 'end_stale_routes' && item.hostId === bravoHost.host.id && item.requiresConfirmation === false,
+    ))
+
+    const alignResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/remediations/apply', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'align_rollout',
+        hostId: alphaHost.host.id,
+        note: 'Adopt current connector target',
+      }),
+    }))
+    assert.equal(alignResponse.status, 200)
+    const alignBody = await alignResponse.json() as {
+      ok: boolean
+      host: {
+        rollout: {
+          desiredConnectorVersion: string | null
+          versionState: string
+        }
+      }
+    }
+    assert.equal(alignBody.ok, true)
+    assert.equal(alignBody.host.rollout.desiredConnectorVersion, '1.2.0-test')
+    assert.equal(alignBody.host.rollout.versionState, 'current')
+
+    const drainResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/remediations/apply', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'drain_missing_receipts',
+        hostId: alphaHost.host.id,
+        confirmPhrase: 'DRAIN_HOST',
+        note: 'Drain host with missing receipts',
+      }),
+    }))
+    assert.equal(drainResponse.status, 200)
+    const drainBody = await drainResponse.json() as {
+      ok: boolean
+      host: {
+        maintenance: {
+          state: string
+          owner: string | null
+        }
+      }
+    }
+    assert.equal(drainBody.ok, true)
+    assert.equal(drainBody.host.maintenance.state, 'draining')
+    assert.equal(drainBody.host.maintenance.owner, 'admin@example.com')
+
+    const endStaleResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/remediations/apply', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        kind: 'end_stale_routes',
+        hostId: bravoHost.host.id,
+        note: 'End stale routes after heartbeat timeout',
+      }),
+    }))
+    assert.equal(endStaleResponse.status, 200)
+    const endStaleBody = await endStaleResponse.json() as {
+      ok: boolean
+      routes: Array<{
+        beamId: string
+        runtimeSessionState: string
+      }>
+    }
+    assert.equal(endStaleBody.ok, true)
+    assert.equal(endStaleBody.routes[0]?.beamId, bravo.beamId)
+    assert.equal(endStaleBody.routes[0]?.runtimeSessionState, 'ended')
+    assert.equal(listOpenClawResolvedRoutesByBeamId(db, bravo.beamId)[0]?.runtime_session_state, 'ended')
+
+    const overviewAfterResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewAfterResponse.status, 200)
+    const overviewAfterBody = await overviewAfterResponse.json() as {
+      remediation: {
+        suggested: Array<{
+          kind: string
+          hostId: number | null
+        }>
+      }
+    }
+    assert.ok(!overviewAfterBody.remediation.suggested.some((item) =>
+      item.kind === 'align_rollout' && item.hostId === alphaHost.host.id,
+    ))
+    assert.ok(!overviewAfterBody.remediation.suggested.some((item) =>
+      item.kind === 'drain_missing_receipts' && item.hostId === alphaHost.host.id,
+    ))
+    assert.ok(!overviewAfterBody.remediation.suggested.some((item) =>
+      item.kind === 'end_stale_routes' && item.hostId === bravoHost.host.id,
+    ))
   } finally {
     db.close()
   }

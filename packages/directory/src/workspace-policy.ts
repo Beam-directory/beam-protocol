@@ -18,6 +18,7 @@ export const DEFAULT_WORKSPACE_POLICY: WorkspacePolicy = {
   workflowRules: [],
   metadata: {
     notes: null,
+    template: null,
   },
 }
 
@@ -48,6 +49,37 @@ function sanitizeRuleExternalInitiation(value: unknown): WorkspacePolicyRuleExte
   }
 
   return 'inherit'
+}
+
+function parseTemplateMetadata(
+  raw: unknown,
+): WorkspacePolicy['metadata']['template'] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+    return null
+  }
+
+  const input = raw as Record<string, unknown>
+  const templateKey = sanitizeNullableString(input.templateKey)
+  const templateLabel = sanitizeNullableString(input.templateLabel)
+  const policyPackKey = sanitizeNullableString(input.policyPackKey)
+  const policyPackLabel = sanitizeNullableString(input.policyPackLabel)
+  const hostGroupLabel = sanitizeNullableString(input.hostGroupLabel)
+  const appliedAt = sanitizeNullableString(input.appliedAt)
+  const appliedBy = sanitizeNullableString(input.appliedBy)
+
+  if (!templateKey && !policyPackKey && !templateLabel && !policyPackLabel && !hostGroupLabel && !appliedAt && !appliedBy) {
+    return null
+  }
+
+  return {
+    templateKey,
+    templateLabel,
+    policyPackKey,
+    policyPackLabel,
+    hostGroupLabel,
+    appliedAt,
+    appliedBy,
+  }
 }
 
 function parseBindingRule(raw: unknown): WorkspacePolicyBindingRule | null {
@@ -115,6 +147,7 @@ export function parseWorkspacePolicy(raw: string | null | undefined): WorkspaceP
         : [],
       metadata: {
         notes: sanitizeNullableString(parsed.metadata?.notes),
+        template: parseTemplateMetadata(parsed.metadata?.template),
       },
     }
   } catch {
@@ -133,6 +166,7 @@ export function mergeWorkspacePolicy(current: WorkspacePolicy, patch: Partial<Wo
     metadata: {
       ...current.metadata,
       ...patch.metadata,
+      template: patch.metadata?.template === undefined ? current.metadata.template ?? null : patch.metadata.template ?? null,
     },
     bindingRules: patch.bindingRules ?? current.bindingRules,
     workflowRules: patch.workflowRules ?? current.workflowRules,

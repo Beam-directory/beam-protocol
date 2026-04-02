@@ -33,11 +33,13 @@ import type {
   OpenClawHostRow,
   OpenClawHostStatus,
   OpenClawHostRouteRow,
+  OpenClawPolicyPackRow,
   OpenClawResolvedRouteRow,
   OpenClawRouteOwnerResolutionState,
   OpenClawRouteReportedState,
   OpenClawRouteRuntimeState,
   OpenClawRouteSource,
+  OpenClawWorkspaceTemplateRow,
   OrgAgentRow,
   OrgRow,
   ReportRow,
@@ -490,6 +492,35 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_digest_deliveries_run
       ON openclaw_fleet_digest_deliveries(run_id, delivered_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_policy_packs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      pack_key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      description TEXT,
+      host_group_label TEXT,
+      policy_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_policy_packs_group
+      ON openclaw_policy_packs(host_group_label, updated_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_workspace_templates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      template_key TEXT NOT NULL UNIQUE,
+      label TEXT NOT NULL,
+      description TEXT,
+      host_group_label TEXT,
+      policy_pack_key TEXT,
+      template_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_workspace_templates_group
+      ON openclaw_workspace_templates(host_group_label, updated_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS operator_notifications (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1270,6 +1301,41 @@ export function listWorkspaces(db: DB): WorkspaceRow[] {
     FROM workspaces
     ORDER BY datetime(updated_at) DESC, slug ASC
   `).all() as WorkspaceRow[]
+}
+
+export function updateWorkspace(
+  db: DB,
+  input: {
+    id: number
+    description?: string | null
+    status?: WorkspaceRow['status']
+    defaultThreadScope?: WorkspaceRow['default_thread_scope']
+    externalHandoffsEnabled?: boolean
+  },
+): WorkspaceRow | null {
+  const existing = getWorkspaceById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE workspaces
+    SET description = ?,
+        status = ?,
+        default_thread_scope = ?,
+        external_handoffs_enabled = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.description === undefined ? existing.description : input.description,
+    input.status ?? existing.status,
+    input.defaultThreadScope ?? existing.default_thread_scope,
+    input.externalHandoffsEnabled === undefined ? existing.external_handoffs_enabled : (input.externalHandoffsEnabled ? 1 : 0),
+    nowIso(),
+    input.id,
+  )
+
+  return getWorkspaceById(db, input.id)
 }
 
 export function getWorkspaceSummary(
@@ -4035,6 +4101,134 @@ export function listOpenClawHosts(db: DB): OpenClawHostRow[] {
   `).all() as OpenClawHostRow[]
 }
 
+export function listOpenClawPolicyPacks(db: DB): OpenClawPolicyPackRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_policy_packs
+    ORDER BY
+      CASE WHEN host_group_label IS NULL THEN 1 ELSE 0 END ASC,
+      host_group_label ASC,
+      pack_key ASC
+  `).all() as OpenClawPolicyPackRow[]
+}
+
+export function getOpenClawPolicyPackByKey(db: DB, packKey: string): OpenClawPolicyPackRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_policy_packs
+    WHERE pack_key = ?
+    LIMIT 1
+  `).get(packKey) as OpenClawPolicyPackRow | undefined
+
+  return row ?? null
+}
+
+export function upsertOpenClawPolicyPack(
+  db: DB,
+  input: {
+    packKey: string
+    label: string
+    description?: string | null
+    hostGroupLabel?: string | null
+    policyJson: string
+  },
+): OpenClawPolicyPackRow {
+  const now = nowIso()
+  db.prepare(`
+    INSERT INTO openclaw_policy_packs (
+      pack_key,
+      label,
+      description,
+      host_group_label,
+      policy_json,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(pack_key) DO UPDATE SET
+      label = excluded.label,
+      description = excluded.description,
+      host_group_label = excluded.host_group_label,
+      policy_json = excluded.policy_json,
+      updated_at = excluded.updated_at
+  `).run(
+    input.packKey,
+    input.label,
+    input.description ?? null,
+    input.hostGroupLabel ?? null,
+    input.policyJson,
+    now,
+    now,
+  )
+
+  return getOpenClawPolicyPackByKey(db, input.packKey) as OpenClawPolicyPackRow
+}
+
+export function listOpenClawWorkspaceTemplates(db: DB): OpenClawWorkspaceTemplateRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_workspace_templates
+    ORDER BY
+      CASE WHEN host_group_label IS NULL THEN 1 ELSE 0 END ASC,
+      host_group_label ASC,
+      template_key ASC
+  `).all() as OpenClawWorkspaceTemplateRow[]
+}
+
+export function getOpenClawWorkspaceTemplateByKey(db: DB, templateKey: string): OpenClawWorkspaceTemplateRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_workspace_templates
+    WHERE template_key = ?
+    LIMIT 1
+  `).get(templateKey) as OpenClawWorkspaceTemplateRow | undefined
+
+  return row ?? null
+}
+
+export function upsertOpenClawWorkspaceTemplate(
+  db: DB,
+  input: {
+    templateKey: string
+    label: string
+    description?: string | null
+    hostGroupLabel?: string | null
+    policyPackKey?: string | null
+    templateJson: string
+  },
+): OpenClawWorkspaceTemplateRow {
+  const now = nowIso()
+  db.prepare(`
+    INSERT INTO openclaw_workspace_templates (
+      template_key,
+      label,
+      description,
+      host_group_label,
+      policy_pack_key,
+      template_json,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(template_key) DO UPDATE SET
+      label = excluded.label,
+      description = excluded.description,
+      host_group_label = excluded.host_group_label,
+      policy_pack_key = excluded.policy_pack_key,
+      template_json = excluded.template_json,
+      updated_at = excluded.updated_at
+  `).run(
+    input.templateKey,
+    input.label,
+    input.description ?? null,
+    input.hostGroupLabel ?? null,
+    input.policyPackKey ?? null,
+    input.templateJson,
+    now,
+    now,
+  )
+
+  return getOpenClawWorkspaceTemplateByKey(db, input.templateKey) as OpenClawWorkspaceTemplateRow
+}
+
 export function updateOpenClawHost(
   db: DB,
   input: {
@@ -4897,6 +5091,40 @@ export function applyOpenClawHostRouteEvents(
   activateOpenClawHostCredential(db, input.hostId, eventAt)
 
   return updated
+}
+
+export function markOpenClawHostRoutesEnded(
+  db: DB,
+  input: {
+    hostId: number
+    runtimeSessionState?: OpenClawRouteRuntimeState
+  },
+): OpenClawHostRouteRow[] {
+  const endedAt = nowIso()
+  const params: Array<number | string> = [endedAt, endedAt, input.hostId]
+  let sql = `
+    UPDATE openclaw_host_routes
+    SET reported_state = 'ended',
+        runtime_session_state = 'ended',
+        ended_at = ?,
+        updated_at = ?
+    WHERE host_id = ?
+      AND reported_state != 'ended'
+  `
+
+  if (input.runtimeSessionState) {
+    sql += ' AND runtime_session_state = ?'
+    params.push(input.runtimeSessionState)
+  }
+
+  db.prepare(sql).run(...params)
+  updateOpenClawHost(db, {
+    id: input.hostId,
+    lastRouteEventAt: endedAt,
+  })
+  updateOpenClawHostRouteCount(db, input.hostId)
+  recalculateOpenClawRouteStates(db)
+  return listOpenClawHostRoutes(db, input.hostId)
 }
 
 export function approveOpenClawHost(

@@ -203,6 +203,11 @@ The fleet surface also gives operators explicit day-2 actions:
 - label hosts with environment and group metadata such as `prod`, `staging`, `lab`, `edge`, or team ownership
 - track connector rollout rings (`stable`, `canary`, `pinned`), desired connector versions, and drift directly on each host
 - inspect one fleet-wide rollout inventory that shows version buckets, canary coverage, pinned hosts, and drift attention before a connector rollout spreads
+- define reusable policy packs for fleet-backed identities and attach them to workspace templates by host group
+- detect workspace drift when a fleet-backed workspace no longer matches its expected template or policy pack
+- reapply the expected workspace template directly from the fleet remediation surface when Beam finds template drift
+- end only stale routes on one host when old sessions linger after heartbeat expiry
+- drain a host with missing or failed receipts through a guided remediation flow before deeper repair work begins
 - stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
 - clear staged revoke reviews again when a maintenance plan changes
 
@@ -212,6 +217,7 @@ The host detail and fleet summary now also expose the operational thresholds beh
 - recovery owner, replacement host label, cutover window notes, and a cleanup-ready state after recovery completes
 - maintenance owner, maintenance reason, maintenance start time, and whether Beam delivery is intentionally blocked for that host
 - the connector rollout ring, desired connector version, and whether the currently reported connector version has drifted
+- the active workspace template, linked policy pack, host-group match, and template application provenance for fleet-backed workspaces
 - receipt coverage across active routes
 - p50 / p95 latency, SLO bucket counts, and direct links back to the host, workspace, and latest trace that caused the warning
 
@@ -225,6 +231,24 @@ For the new grouping and guarded bulk actions, the normal operator flow is:
 4. verify the staged review directly on the host detail before a real revoke
 
 This keeps labels, host ownership, and revoke-review intent in Beam itself instead of spreading those decisions across local notes or machine-specific scripts.
+
+For policy packs and guided remediation, the normal operator loop is:
+
+1. open the fleet overview and check `Policy packs and workspace templates`
+2. confirm whether the workspace is expected to inherit one fleet template for its host group
+3. inspect `Guided remediation` for rollout drift, stale routes, missing receipts, or template drift
+4. use the lowest-risk action first:
+   - `Align rollout` to adopt the live connector as the desired target
+   - `End stale routes` to remove expired sessions from delivery
+   - `Drain host` when receipts are missing or failing
+   - `Reapply template` when workspace policy or defaults drifted from the expected pack
+
+The guarded remediation actions require explicit confirmation phrases:
+
+- `DRAIN_HOST` before Beam drains a host for missing or failed receipts
+- `REAPPLY_TEMPLATE` before Beam reapplies the expected workspace template
+
+That keeps destructive or policy-resetting actions explicit while still letting one operator complete the full repair flow from the fleet surface instead of jumping into raw database or host state.
 
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
