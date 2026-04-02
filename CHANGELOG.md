@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.3.0 (draft)
+## v1.3.0 (2026-04-02)
 
 ### OpenClaw Fleet Operations
 - rotate and recover OpenClaw host credentials without rebuilding workspace bindings
