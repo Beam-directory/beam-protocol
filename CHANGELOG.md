@@ -1,5 +1,19 @@
 # Changelog
 
+## v1.4.0 (2026-04-02)
+
+### OpenClaw Fleet Automation
+- add a credential review queue with rotation windows, recovery ownership, and explicit post-recovery cleanup
+- add fleet receipt coverage, latency buckets, and route-health summaries with direct host, workspace, and trace links
+- automate approval-heavy outbound motion for fleet-backed workspaces through the workspace approval queue
+- add guided duplicate conflict remediation, route-owner recommendations, and explicit disable/reassign flows
+- group hosts by environment or ownership and add guarded bulk fleet actions
+- schedule fleet digests with persisted run history, delivery history, and escalation delivery evidence
+- commit buyer, operator, fleet, digest, and Linux parity reports before cutting the release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.4.0` remains on `beam/1`.
+
 ## v1.3.0 (2026-04-02)
 
 ### OpenClaw Fleet Operations

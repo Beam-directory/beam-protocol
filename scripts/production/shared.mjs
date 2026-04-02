@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
+import { readFileSync } from 'node:fs'
 import { access, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises'
 import net from 'node:net'
 import path from 'node:path'
@@ -9,6 +10,14 @@ import { fileURLToPath, pathToFileURL } from 'node:url'
 import { setTimeout as sleep } from 'node:timers/promises'
 
 export const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
+export const repoPackageVersion = (() => {
+  try {
+    const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'package.json'), 'utf8'))
+    return typeof packageJson.version === 'string' ? packageJson.version : '0.0.0'
+  } catch {
+    return '0.0.0'
+  }
+})()
 const directoryEntry = path.join(repoRoot, 'packages/directory/dist/index.js')
 const messageBusEntry = path.join(repoRoot, 'packages/message-bus/dist/server.js')
 const directoryDbModule = path.join(repoRoot, 'packages/directory/dist/db.js')
@@ -34,6 +43,14 @@ export function optionalFlag(name, fallback = null) {
   }
 
   return trimmed
+}
+
+export function resolveReleaseLabel(fallback = repoPackageVersion) {
+  const label = optionalFlag('--release', fallback)
+  if (typeof label === 'string' && label.trim().length > 0) {
+    return label.trim()
+  }
+  return fallback
 }
 
 export async function ensureBuiltArtifacts() {

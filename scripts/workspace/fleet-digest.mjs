@@ -1,8 +1,9 @@
 import path from 'node:path'
-import { formatDate, formatDateTime, optionalFlag, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { formatDate, formatDateTime, optionalFlag, resolveReleaseLabel, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
 import { startOpenClawFleetHarness } from './fleet-shared.mjs'
 
-const outputPath = optionalFlag('--output', path.join(process.cwd(), 'reports/1.3.0-fleet-digest.md'))
+const releaseLabel = resolveReleaseLabel()
+const outputPath = optionalFlag('--output', path.join(process.cwd(), `reports/${releaseLabel}-fleet-digest.md`))
 
 async function main() {
   const fleet = await startOpenClawFleetHarness()
@@ -117,7 +118,7 @@ async function main() {
       deliveryOutcome,
     }
 
-    const markdown = `# Beam 1.3.0 Fleet Digest
+    const markdown = `# Beam ${releaseLabel} Fleet Digest
 
 ## Context
 
