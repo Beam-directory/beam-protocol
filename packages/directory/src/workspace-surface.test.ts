@@ -588,6 +588,181 @@ test('workspace overview surfaces stale identities, blocked external motion, and
   }
 })
 
+test('workspace approval queue surfaces manual review bindings and blocked handoff threads with automation hints', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    registerAgent(db, {
+      beamId: 'ops-bot@beam.directory',
+      displayName: 'Ops Bot',
+      capabilities: ['handoff'],
+      publicKey: 'MCowBQYDK2VwAyEAw2QJY0YH7e1L2+2VQ1bH4TqL6wCnC8n9v8m8z4vPsxM=',
+      personal: true,
+    })
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'Acme Approval Workspace',
+        slug: 'acme-approval',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+
+    const bindingResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-approval/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: 'ops-bot@beam.directory',
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'codex:operator',
+        policyProfile: 'ops-default',
+        canInitiateExternal: false,
+      }),
+    }))
+    const bindingBody = await bindingResponse.json() as { binding: { id: number } }
+
+    await app.request(new Request('http://localhost/admin/workspaces/acme-approval/policy', {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        workflowRules: [{
+          workflowType: 'partner.review',
+          requireApproval: true,
+          allowedPartners: ['echo@beam.directory'],
+          approvers: ['ops@example.com'],
+        }],
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces/acme-approval/partner-channels', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        partnerBeamId: 'echo@beam.directory',
+        label: 'Beam Echo',
+        owner: 'ops@example.com',
+        status: 'active',
+      }),
+    }))
+
+    await app.request(new Request('http://localhost/admin/workspaces/acme-approval/threads', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'ops@example.com', 'operator'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        kind: 'handoff',
+        title: 'Approval queue thread',
+        summary: 'Blocked until the sender gets outbound approval.',
+        owner: 'ops@example.com',
+        workflowType: 'partner.review',
+        status: 'blocked',
+        draftIntentType: 'conversation.message',
+        draftPayload: {
+          message: 'Please confirm the approval queue path.',
+          language: 'en',
+        },
+        participants: [
+          {
+            principalId: 'ops-bot@beam.directory',
+            principalType: 'agent',
+            beamId: 'ops-bot@beam.directory',
+            workspaceBindingId: bindingBody.binding.id,
+            role: 'owner',
+          },
+          {
+            principalId: 'echo@beam.directory',
+            principalType: 'partner',
+            beamId: 'echo@beam.directory',
+            role: 'participant',
+          },
+        ],
+      }),
+    }))
+
+    const queueResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-approval/approval-queue', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(queueResponse.status, 200)
+
+    const queueBody = await queueResponse.json() as {
+      summary: {
+        total: number
+        bindingApprovals: number
+        threadApprovals: number
+        critical: number
+      }
+      items: Array<{
+        id: string
+        kind: 'binding' | 'thread'
+        severity: 'warning' | 'critical'
+        title: string
+        suggestedAllowedPartners: string[]
+        binding?: {
+          id: number
+          beamId: string
+        }
+        thread?: {
+          id: number
+          workflowType: string | null
+        }
+        senderBinding?: {
+          beamId: string
+        } | null
+        partnerChannel?: {
+          partnerBeamId: string
+        } | null
+        policyPreview?: {
+          externalInitiation: string
+          approvalRequired: boolean
+        } | null
+        dispatchReady?: boolean
+        blockedReason?: string | null
+      }>
+    }
+
+    assert.deepEqual(queueBody.summary, {
+      total: 2,
+      bindingApprovals: 1,
+      threadApprovals: 1,
+      critical: 1,
+    })
+
+    const bindingItem = queueBody.items.find((item) => item.kind === 'binding')
+    assert.equal(bindingItem?.binding?.beamId, 'ops-bot@beam.directory')
+    assert.deepEqual(bindingItem?.suggestedAllowedPartners, ['echo@beam.directory'])
+    assert.equal(bindingItem?.severity, 'warning')
+
+    const threadItem = queueBody.items.find((item) => item.kind === 'thread')
+    assert.equal(threadItem?.thread?.workflowType, 'partner.review')
+    assert.equal(threadItem?.senderBinding?.beamId, 'ops-bot@beam.directory')
+    assert.equal(threadItem?.partnerChannel?.partnerBeamId, 'echo@beam.directory')
+    assert.equal(threadItem?.policyPreview?.externalInitiation, 'deny')
+    assert.equal(threadItem?.policyPreview?.approvalRequired, true)
+    assert.equal(threadItem?.dispatchReady, false)
+    assert.match(threadItem?.blockedReason ?? '', /policy still denies/i)
+  } finally {
+    db.close()
+  }
+})
+
 test('workspace threads model internal discussion and external handoffs in one timeline', async () => {
   const db = createDatabase(':memory:')
 
