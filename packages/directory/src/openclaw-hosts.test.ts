@@ -207,9 +207,22 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         id: number
         token: string
         status: string
+        installPack: {
+          directoryUrl: string
+          workspaceSlug: string
+          commands: {
+            managedMacos: string
+            status: string
+          }
+        }
       }
     }
     assert.equal(enrollmentBody.enrollment.status, 'issued')
+    assert.equal(enrollmentBody.enrollment.installPack.directoryUrl, 'http://localhost')
+    assert.equal(enrollmentBody.enrollment.installPack.workspaceSlug, 'openclaw-local')
+    assert.match(enrollmentBody.enrollment.installPack.commands.managedMacos, /workspace:openclaw-host:install/)
+    assert.match(enrollmentBody.enrollment.installPack.commands.managedMacos, new RegExp(enrollmentBody.enrollment.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
+    assert.equal(enrollmentBody.enrollment.installPack.commands.status, 'npm run workspace:openclaw-status')
 
     const enrollPendingResponse = await app.request(new Request('http://localhost/openclaw/hosts/enroll', {
       method: 'POST',
@@ -493,11 +506,43 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
       allowedFrom: sender.beamId,
     })
 
-    createApprovedHostWithRoute(db, {
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'ops@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const workspaceResponse = await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        name: 'OpenClaw Local',
+        slug: 'openclaw-local',
+        externalHandoffsEnabled: true,
+      }),
+    }))
+    assert.equal(workspaceResponse.status, 201)
+
+    const bindingResponse = await app.request(new Request('http://localhost/admin/workspaces/openclaw-local/identities', {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        beamId: receiver.beamId,
+        bindingType: 'agent',
+        owner: 'ops@example.com',
+        runtimeType: 'openclaw:gateway',
+        policyProfile: 'openclaw-default',
+        canInitiateExternal: true,
+      }),
+    }))
+    assert.equal(bindingResponse.status, 201)
+
+    const host = createApprovedHostWithRoute(db, {
       label: 'OpenClaw Host Stale',
       hostname: 'stale.local',
       beamId: receiver.beamId,
       routeKey: 'stale-route',
+      workspaceSlug: 'openclaw-local',
       heartbeatAt: '2026-03-01T00:00:00.000Z',
     })
 
@@ -507,6 +552,58 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
       (error: unknown) => error instanceof RelayError && error.code === 'OFFLINE' && error.message.includes('stale OpenClaw host'),
     )
     assert.equal(getIntentLogByNonce(db, nonce)?.error_code, 'HOST_STALE')
+
+    const routesResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/routes`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(routesResponse.status, 200)
+    const routesBody = await routesResponse.json() as {
+      host: {
+        summary: {
+          unavailable: number
+          delivery: {
+            receipts: number
+            failed: number
+            lastErrorCode: string | null
+          }
+        }
+      }
+      routes: Array<{
+        beamId: string
+        lastDelivery: {
+          status: string
+          errorCode: string | null
+          href: string
+        } | null
+      }>
+    }
+    assert.equal(routesBody.host.summary.unavailable, 1)
+    assert.equal(routesBody.host.summary.delivery.receipts, 1)
+    assert.equal(routesBody.host.summary.delivery.failed, 1)
+    assert.equal(routesBody.host.summary.delivery.lastErrorCode, 'HOST_STALE')
+    assert.equal(routesBody.routes[0]?.beamId, receiver.beamId)
+    assert.equal(routesBody.routes[0]?.lastDelivery?.status, 'failed')
+    assert.equal(routesBody.routes[0]?.lastDelivery?.errorCode, 'HOST_STALE')
+    assert.match(routesBody.routes[0]?.lastDelivery?.href ?? '', /\/intents\//)
+
+    const workspaceIdentitiesResponse = await app.request(new Request('http://localhost/admin/workspaces/openclaw-local/identities', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(workspaceIdentitiesResponse.status, 200)
+    const workspaceIdentitiesBody = await workspaceIdentitiesResponse.json() as {
+      bindings: Array<{
+        beamId: string
+        lastDelivery: {
+          status: string
+          errorCode: string | null
+          href: string
+        } | null
+      }>
+    }
+    assert.equal(workspaceIdentitiesBody.bindings[0]?.beamId, receiver.beamId)
+    assert.equal(workspaceIdentitiesBody.bindings[0]?.lastDelivery?.status, 'failed')
+    assert.equal(workspaceIdentitiesBody.bindings[0]?.lastDelivery?.errorCode, 'HOST_STALE')
+    assert.match(workspaceIdentitiesBody.bindings[0]?.lastDelivery?.href ?? '', /\/intents\//)
   } finally {
     db.close()
   }
