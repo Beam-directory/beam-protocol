@@ -8,12 +8,16 @@ import {
   createDatabase,
   createOpenClawEnrollmentRequest,
   createOpenClawHost,
+  finalizeIntentLog,
   getIntentLogByNonce,
   listOpenClawResolvedRoutesByBeamId,
+  logIntentStart,
   recordOpenClawHostHeartbeat,
   registerAgent,
+  setIntentLifecycleStatus,
   syncOpenClawHostRoutes,
   assignDirectoryRole,
+  updateOpenClawHost,
 } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
 import { createApp } from './server.js'
@@ -316,6 +320,12 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         conflictRoutes: number
         endedRoutes: number
         failedReceipts: number
+        routesMissingReceipts: number
+        receiptCoverageRatio: number | null
+        degradedHosts: number
+        latencySloBreaches: number
+        rotationDueHosts: number
+        recoveryRunbooksOpen: number
         duplicateIdentityConflicts: number
         pendingCredentialActions: number
         actionItems: number
@@ -340,6 +350,12 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
       conflictRoutes: 0,
       endedRoutes: 0,
       failedReceipts: 0,
+      routesMissingReceipts: 1,
+      receiptCoverageRatio: 0,
+      degradedHosts: 1,
+      latencySloBreaches: 0,
+      rotationDueHosts: 0,
+      recoveryRunbooksOpen: 0,
       duplicateIdentityConflicts: 0,
       pendingCredentialActions: 0,
       actionItems: 1,
@@ -627,6 +643,102 @@ test('openclaw host credentials rotate and recover without rebuilding workspace 
   }
 })
 
+test('openclaw host policy patch surfaces rotation windows and recovery runbook state', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const receiver = createFixtureAgent('atlas@openclaw.beam.directory')
+    registerFixtureAgent(db, receiver, 'Atlas')
+
+    const host = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Policy',
+      hostname: 'policy.local',
+      beamId: receiver.beamId,
+      routeKey: 'atlas-policy',
+      workspaceSlug: 'openclaw-local',
+    })
+    updateOpenClawHost(db, {
+      id: host.host.id,
+      credentialIssuedAt: new Date(Date.now() - (4 * 60 * 60 * 1000)).toISOString(),
+    })
+
+    const app = createApp(db)
+    const policyResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/policy`, {
+      method: 'PATCH',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        rotationIntervalHours: 1,
+        rotationWindowStartHour: 3,
+        rotationWindowDurationHours: 2,
+        recoveryOwner: 'ops@example.com',
+        recoveryStatus: 'prepared',
+        recoveryNotes: 'Replace chassis during the next window',
+        replacementHostLabel: 'policy-replacement',
+        recoveryWindowStartsAt: '2026-04-02T08:00:00.000Z',
+        recoveryWindowEndsAt: '2026-04-02T10:00:00.000Z',
+      }),
+    }))
+    assert.equal(policyResponse.status, 200)
+    const policyBody = await policyResponse.json() as {
+      host: {
+        policy: {
+          rotation: {
+            intervalHours: number
+            windowStartHour: number
+            windowDurationHours: number
+            reviewState: string
+            nextRotationDueAt: string | null
+          }
+          recovery: {
+            owner: string | null
+            status: string
+            notes: string | null
+            replacementHostLabel: string | null
+            windowStartsAt: string | null
+            windowEndsAt: string | null
+          }
+        }
+      }
+    }
+    assert.equal(policyBody.host.policy.rotation.intervalHours, 1)
+    assert.equal(policyBody.host.policy.rotation.windowStartHour, 3)
+    assert.equal(policyBody.host.policy.rotation.windowDurationHours, 2)
+    assert.equal(policyBody.host.policy.rotation.reviewState, 'overdue')
+    assert.ok(policyBody.host.policy.rotation.nextRotationDueAt)
+    assert.equal(policyBody.host.policy.recovery.owner, 'ops@example.com')
+    assert.equal(policyBody.host.policy.recovery.status, 'prepared')
+    assert.equal(policyBody.host.policy.recovery.notes, 'Replace chassis during the next window')
+    assert.equal(policyBody.host.policy.recovery.replacementHostLabel, 'policy-replacement')
+    assert.equal(policyBody.host.policy.recovery.windowStartsAt, '2026-04-02T08:00:00.000Z')
+    assert.equal(policyBody.host.policy.recovery.windowEndsAt, '2026-04-02T10:00:00.000Z')
+
+    const digestResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest', {
+      headers: createAdminHeaders(db, 'ops@example.com', 'operator'),
+    }))
+    assert.equal(digestResponse.status, 200)
+    const digestBody = await digestResponse.json() as {
+      summary: {
+        rotationDueHosts: number
+        recoveryRunbooksOpen: number
+      }
+      actionItems: Array<{
+        title: string
+        detail: string
+      }>
+    }
+    assert.equal(digestBody.summary.rotationDueHosts, 1)
+    assert.equal(digestBody.summary.recoveryRunbooksOpen, 1)
+    assert.ok(digestBody.actionItems.some((item) => item.title.includes('due for credential rotation')))
+    assert.ok(digestBody.actionItems.some((item) => item.detail.includes('policy-replacement')))
+  } finally {
+    db.close()
+  }
+})
+
 test('duplicate openclaw conflicts can be resolved by preferring one route owner', async () => {
   const db = createDatabase(':memory:')
 
@@ -694,6 +806,144 @@ test('duplicate openclaw conflicts can be resolved by preferring one route owner
       }
     }
     assert.equal(overviewBody.summary.duplicateIdentityConflicts, 0)
+  } finally {
+    db.close()
+  }
+})
+
+test('openclaw fleet overview surfaces receipt coverage and latency summaries', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const sender = createFixtureAgent('sender@openclaw.beam.directory')
+    const atlas = createFixtureAgent('atlas@openclaw.beam.directory')
+    const beta = createFixtureAgent('beta@openclaw.beam.directory')
+    registerFixtureAgent(db, sender, 'Sender')
+    registerFixtureAgent(db, atlas, 'Atlas')
+    registerFixtureAgent(db, beta, 'Beta')
+
+    const host = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Metrics',
+      hostname: 'metrics.local',
+      beamId: atlas.beamId,
+      routeKey: 'atlas-metrics',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    syncOpenClawHostRoutes(db, {
+      hostId: host.host.id,
+      routes: [
+        {
+          beamId: atlas.beamId,
+          workspaceSlug: 'openclaw-local',
+          routeSource: 'gateway-agent',
+          routeKey: 'atlas-metrics',
+          runtimeType: 'openclaw:gateway',
+          label: 'Atlas',
+          connectionMode: 'websocket',
+          sessionKey: 'session-atlas',
+          reportedState: 'live',
+          lastSeenAt: new Date().toISOString(),
+        },
+        {
+          beamId: beta.beamId,
+          workspaceSlug: 'openclaw-local',
+          routeSource: 'gateway-agent',
+          routeKey: 'beta-metrics',
+          runtimeType: 'openclaw:gateway',
+          label: 'Beta',
+          connectionMode: 'websocket',
+          sessionKey: 'session-beta',
+          reportedState: 'live',
+          lastSeenAt: new Date().toISOString(),
+        },
+      ],
+    })
+    recordOpenClawHostHeartbeat(db, {
+      hostId: host.host.id,
+      routeCount: 2,
+      connectorVersion: '1.4.0-test',
+    })
+
+    for (const latency of [1800, 4200, 7200]) {
+      const frame = createSignedConversationIntent(sender, atlas.beamId, randomUUID())
+      logIntentStart(db, frame)
+      setIntentLifecycleStatus(db, {
+        nonce: frame.nonce,
+        status: 'validated',
+      })
+      setIntentLifecycleStatus(db, {
+        nonce: frame.nonce,
+        status: 'dispatched',
+      })
+      setIntentLifecycleStatus(db, {
+        nonce: frame.nonce,
+        status: 'delivered',
+      })
+      finalizeIntentLog(db, {
+        nonce: frame.nonce,
+        fromBeamId: frame.from,
+        toBeamId: frame.to,
+        status: 'acked',
+        latencyMs: latency,
+      })
+    }
+
+    const app = createApp(db)
+    const hostResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(hostResponse.status, 200)
+    const hostBody = await hostResponse.json() as {
+      host: {
+        summary: {
+          delivery: {
+            coverage: {
+              activeRoutes: number
+              routesWithReceipts: number
+              missingReceipts: number
+              ratio: number | null
+            }
+            latency: {
+              samples: number
+              avgMs: number | null
+              p50Ms: number | null
+              p95Ms: number | null
+              overSlo: number
+              degraded: boolean
+            }
+          }
+        }
+      }
+    }
+    assert.equal(hostBody.host.summary.delivery.coverage.activeRoutes, 2)
+    assert.equal(hostBody.host.summary.delivery.coverage.routesWithReceipts, 1)
+    assert.equal(hostBody.host.summary.delivery.coverage.missingReceipts, 1)
+    assert.equal(hostBody.host.summary.delivery.coverage.ratio, 0.5)
+    assert.equal(hostBody.host.summary.delivery.latency.samples, 3)
+    assert.equal(hostBody.host.summary.delivery.latency.avgMs, 4400)
+    assert.equal(hostBody.host.summary.delivery.latency.p50Ms, 4200)
+    assert.equal(hostBody.host.summary.delivery.latency.p95Ms, 7200)
+    assert.equal(hostBody.host.summary.delivery.latency.overSlo, 1)
+    assert.equal(hostBody.host.summary.delivery.latency.degraded, true)
+
+    const overviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(overviewResponse.status, 200)
+    const overviewBody = await overviewResponse.json() as {
+      summary: {
+        routesMissingReceipts: number
+        receiptCoverageRatio: number | null
+        degradedHosts: number
+        latencySloBreaches: number
+      }
+    }
+    assert.equal(overviewBody.summary.routesMissingReceipts, 1)
+    assert.equal(overviewBody.summary.receiptCoverageRatio, 0.5)
+    assert.equal(overviewBody.summary.degradedHosts, 1)
+    assert.equal(overviewBody.summary.latencySloBreaches, 1)
   } finally {
     db.close()
   }
@@ -773,6 +1023,16 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
             receipts: number
             failed: number
             lastErrorCode: string | null
+            coverage: {
+              activeRoutes: number
+              routesWithReceipts: number
+              missingReceipts: number
+              ratio: number | null
+            }
+            latency: {
+              samples: number
+              degraded: boolean
+            }
           }
         }
       }
@@ -789,6 +1049,12 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
     assert.equal(routesBody.host.summary.delivery.receipts, 1)
     assert.equal(routesBody.host.summary.delivery.failed, 1)
     assert.equal(routesBody.host.summary.delivery.lastErrorCode, 'HOST_STALE')
+    assert.equal(routesBody.host.summary.delivery.coverage.activeRoutes, 0)
+    assert.equal(routesBody.host.summary.delivery.coverage.routesWithReceipts, 1)
+    assert.equal(routesBody.host.summary.delivery.coverage.missingReceipts, 0)
+    assert.equal(routesBody.host.summary.delivery.coverage.ratio, null)
+    assert.equal(routesBody.host.summary.delivery.latency.samples, 0)
+    assert.equal(routesBody.host.summary.delivery.latency.degraded, true)
     assert.equal(routesBody.routes[0]?.beamId, receiver.beamId)
     assert.equal(routesBody.routes[0]?.lastDelivery?.status, 'failed')
     assert.equal(routesBody.routes[0]?.lastDelivery?.errorCode, 'HOST_STALE')

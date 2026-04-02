@@ -33,6 +33,8 @@ export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
 export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'conflict' | 'revoked'
 export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
+export type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
+export type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -330,6 +332,27 @@ export interface OpenClawHostSummary {
   lastRouteEventAt: string | null
   createdAt: string
   updatedAt: string
+  policy: {
+    rotation: {
+      intervalHours: number
+      windowStartHour: number
+      windowDurationHours: number
+      nextRotationDueAt: string | null
+      nextRotationWindowStartsAt: string | null
+      nextRotationWindowEndsAt: string | null
+      dueInHours: number | null
+      reviewState: OpenClawHostRotationReviewState
+    }
+    recovery: {
+      owner: string | null
+      status: OpenClawHostRecoveryRunbookState
+      notes: string | null
+      replacementHostLabel: string | null
+      windowStartsAt: string | null
+      windowEndsAt: string | null
+      updatedAt: string | null
+    }
+  }
   enrollment: OpenClawEnrollmentRequest | null
   summary: {
     total: number
@@ -347,6 +370,21 @@ export interface OpenClawHostSummary {
       lastStatus: IntentLifecycleStatus | null
       lastErrorCode: string | null
       lastHref: string | null
+      coverage: {
+        activeRoutes: number
+        routesWithReceipts: number
+        missingReceipts: number
+        ratio: number | null
+      }
+      latency: {
+        targetMs: number
+        samples: number
+        avgMs: number | null
+        p50Ms: number | null
+        p95Ms: number | null
+        overSlo: number
+        degraded: boolean
+      }
     }
   }
 }
@@ -378,6 +416,12 @@ export interface OpenClawFleetOverviewResponse {
     conflictRoutes: number
     endedRoutes: number
     failedReceipts: number
+    routesMissingReceipts: number
+    receiptCoverageRatio: number | null
+    degradedHosts: number
+    latencySloBreaches: number
+    rotationDueHosts: number
+    recoveryRunbooksOpen: number
     duplicateIdentityConflicts: number
     pendingCredentialActions: number
     actionItems: number
@@ -412,6 +456,12 @@ export interface OpenClawFleetDigestResponse {
     liveRoutes: number
     staleRoutes: number
     failedReceipts: number
+    routesMissingReceipts: number
+    receiptCoverageRatio: number | null
+    degradedHosts: number
+    latencySloBreaches: number
+    rotationDueHosts: number
+    recoveryRunbooksOpen: number
     duplicateIdentityConflicts: number
     pendingCredentialActions: number
     actionItems: number
@@ -496,6 +546,22 @@ export interface OpenClawHostCredentialActionResponse {
       foregroundDebug: string
     }
   }
+}
+
+export interface OpenClawHostPolicyPatchInput {
+  rotationIntervalHours?: number | null
+  rotationWindowStartHour?: number | null
+  rotationWindowDurationHours?: number | null
+  recoveryOwner?: string | null
+  recoveryStatus?: OpenClawHostRecoveryRunbookState | null
+  recoveryNotes?: string | null
+  replacementHostLabel?: string | null
+  recoveryWindowStartsAt?: string | null
+  recoveryWindowEndsAt?: string | null
+}
+
+export interface OpenClawHostPolicyActionResponse {
+  host: OpenClawHostSummary
 }
 
 export interface OpenClawRouteActionResponse {
@@ -2223,6 +2289,10 @@ export const directoryApi = {
   }, { admin: true }),
   recoverOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/recover`, {
     method: 'POST',
+  }, { admin: true }),
+  updateOpenClawHostPolicy: (id: number, input: OpenClawHostPolicyPatchInput) => request<OpenClawHostPolicyActionResponse>(`/admin/openclaw/hosts/${id}/policy`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
   }, { admin: true }),
   revokeOpenClawHost: (id: number, input?: { reason?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
     method: 'POST',
