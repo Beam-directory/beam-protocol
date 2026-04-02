@@ -35,6 +35,7 @@ export type OpenClawRouteRuntimeState = 'live' | 'idle' | 'stale' | 'ended' | 'c
 export type OpenClawRouteOwnerResolutionState = 'implicit' | 'preferred' | 'disabled'
 export type OpenClawHostRotationReviewState = 'scheduled' | 'due_soon' | 'overdue'
 export type OpenClawHostRecoveryRunbookState = 'idle' | 'prepared' | 'cutover_pending' | 'completed'
+export type OpenClawFleetBulkAction = 'apply_labels' | 'stage_revoke_review' | 'clear_revoke_review'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -353,6 +354,14 @@ export interface OpenClawHostSummary {
       updatedAt: string | null
     }
   }
+  placement: {
+    environmentLabel: string | null
+    groupLabels: string[]
+    owner: string | null
+    revokeReviewRequestedAt: string | null
+    revokeReviewRequestedBy: string | null
+    revokeReviewReason: string | null
+  }
   enrollment: OpenClawEnrollmentRequest | null
   summary: {
     total: number
@@ -387,6 +396,25 @@ export interface OpenClawHostSummary {
       }
     }
   }
+}
+
+export interface OpenClawFleetEnvironmentSummary {
+  label: string
+  hostCount: number
+  staleHosts: number
+  degradedHosts: number
+  pendingHosts: number
+  hostIds: number[]
+}
+
+export interface OpenClawFleetHostGroupSummary {
+  label: string
+  hostCount: number
+  staleHosts: number
+  degradedHosts: number
+  pendingHosts: number
+  environments: string[]
+  hostIds: number[]
 }
 
 export interface OpenClawConflictGroup {
@@ -464,6 +492,8 @@ export interface OpenClawFleetOverviewResponse {
   }
   hosts: OpenClawHostSummary[]
   conflicts: OpenClawConflictGroup[]
+  environments: OpenClawFleetEnvironmentSummary[]
+  hostGroups: OpenClawFleetHostGroupSummary[]
 }
 
 export interface OpenClawFleetDigestItem {
@@ -581,6 +611,29 @@ export interface OpenClawHostCredentialActionResponse {
       foregroundDebug: string
     }
   }
+}
+
+export interface OpenClawHostProfilePatchInput {
+  environmentLabel?: string | null
+  groupLabels?: string[]
+  owner?: string | null
+  clearRevokeReview?: boolean
+}
+
+export interface OpenClawFleetBulkActionInput {
+  action: OpenClawFleetBulkAction
+  hostIds: number[]
+  environmentLabel?: string | null
+  groupLabels?: string[]
+  owner?: string | null
+  reason?: string | null
+  confirmPhrase?: string | null
+}
+
+export interface OpenClawFleetBulkActionResponse {
+  action: OpenClawFleetBulkAction
+  hostIds: number[]
+  hosts: OpenClawHostSummary[]
 }
 
 export interface OpenClawHostPolicyPatchInput {
@@ -2370,6 +2423,14 @@ export const directoryApi = {
   getOpenClawHost: (id: number) => request<OpenClawHostDetailResponse>(`/admin/openclaw/hosts/${id}`, undefined, { admin: true }),
   getOpenClawHostRoutes: (id: number) => request<OpenClawHostRoutesResponse>(`/admin/openclaw/hosts/${id}/routes`, undefined, { admin: true }),
   getOpenClawHostIdentities: (id: number) => request<OpenClawHostIdentitiesResponse>(`/admin/openclaw/hosts/${id}/identities`, undefined, { admin: true }),
+  updateOpenClawHostProfile: (id: number, input: OpenClawHostProfilePatchInput) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/profile`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  runOpenClawFleetBulkAction: (input: OpenClawFleetBulkActionInput) => request<OpenClawFleetBulkActionResponse>('/admin/openclaw/fleet/bulk-actions', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   createOpenClawEnrollment: (input: OpenClawEnrollmentCreateInput) => request<OpenClawEnrollmentCreateResponse>('/admin/openclaw/hosts/enrollment', {
     method: 'POST',
     body: JSON.stringify(input),

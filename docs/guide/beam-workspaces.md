@@ -186,6 +186,9 @@ The fleet surface also gives operators explicit day-2 actions:
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
 - open a guided remediation view for one duplicated Beam ID, keep the recommended owner route, and optionally disable the competing routes in one step
 - deliver a fleet digest that calls out stale hosts, pending credential work, duplicate conflicts, and missing receipts
+- label hosts with environment and group metadata such as `prod`, `staging`, `lab`, `edge`, or team ownership
+- stage guarded bulk actions across multiple hosts before a real revoke, with an explicit confirm phrase
+- clear staged revoke reviews again when a maintenance plan changes
 
 The host detail and fleet summary now also expose the operational thresholds behind those actions:
 
@@ -195,6 +198,15 @@ The host detail and fleet summary now also expose the operational thresholds beh
 - p50 / p95 latency and latency SLO breaches for recent host-backed deliveries
 
 That means operators can treat the fleet page as the source of truth for both host health and the next required maintenance action, instead of jumping between traces and local host logs.
+
+For the new grouping and guarded bulk actions, the normal operator flow is:
+
+1. filter the fleet by environment or host group
+2. select the affected hosts
+3. apply shared labels or stage a revoke review in one guarded action
+4. verify the staged review directly on the host detail before a real revoke
+
+This keeps labels, host ownership, and revoke-review intent in Beam itself instead of spreading those decisions across local notes or machine-specific scripts.
 
 If you have just pulled new Beam code and want the local containers rebuilt before importing again, run:
 
