@@ -325,6 +325,7 @@ export async function startProductionHarness(options = {}) {
     messageBusDbPath,
     adminEmail,
     busApiKey,
+    jwtSecret,
     createAdminToken: () => createAdminToken(directoryUrl, adminEmail),
     startServices,
     stopServices,

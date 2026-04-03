@@ -28,6 +28,12 @@ async function main() {
   assertIncludes(workspaceGuide, 'rotate host credentials without reinstalling the whole host', 'host credential lifecycle guidance')
   assertIncludes(workspaceGuide, 'managed Linux install command', 'linux install guidance')
   assertIncludes(workspaceGuide, 'fleet digest', 'fleet digest guidance')
+  assertIncludes(workspaceGuide, '`viewer`', 'viewer role guidance')
+  assertIncludes(workspaceGuide, '`operator`', 'operator role guidance')
+  assertIncludes(workspaceGuide, '`admin`', 'admin role guidance')
+  assertIncludes(workspaceGuide, 'external webhooks', 'external webhook alerting guidance')
+  assertIncludes(workspaceGuide, 'Create/update requires admin.', 'admin guard guidance')
+  assertIncludes(workspaceGuide, 'Testing requires operator or admin.', 'operator guard guidance')
   assertIncludes(workspaceGuide, 'Reconciliation and garbage collection', 'reconciliation section')
   assertIncludes(workspaceGuide, 'Run fleet reconciliation', 'reconciliation action guidance')
   assertIncludes(workspaceGuide, 'gc candidate', 'garbage collection guidance')
@@ -44,6 +50,10 @@ async function main() {
   assertIncludes(fleetUi, 'Rotate credential', 'fleet credential rotation action')
   assertIncludes(fleetUi, 'Recover host', 'fleet credential recovery action')
   assertIncludes(fleetUi, 'Fleet operator digest', 'fleet digest surface')
+  assertIncludes(fleetUi, 'External alerting', 'fleet external alerting section')
+  assertIncludes(fleetUi, 'Deliver warning/critical fleet items to email or webhooks', 'fleet alerting copy')
+  assertIncludes(fleetUi, 'Create/update requires admin.', 'fleet admin guard copy')
+  assertIncludes(fleetUi, 'Testing requires operator or admin.', 'fleet operator guard copy')
   assertIncludes(fleetUi, 'Reconciliation and garbage collection', 'fleet reconciliation surface')
   assertIncludes(fleetUi, 'Run fleet reconciliation', 'fleet reconciliation action')
   assertIncludes(fleetUi, 'Disable route', 'fleet route disable action')
@@ -59,6 +69,8 @@ async function main() {
       openClawFleetSurface: true,
       manualHostApproval: true,
       credentialLifecycle: true,
+      roleGuards: true,
+      externalAlerting: true,
       linuxInstallPath: true,
       hostStatusCommands: true,
       reconciliationGuide: true,
@@ -88,7 +100,8 @@ async function main() {
 
 1. The docs home still points operators to Beam Workspaces as the identity and control-plane layer.
 2. The Beam Workspaces guide now explains the OpenClaw fleet model, host approval, credential rotation and recovery, Linux install parity, and fleet digest commands in plain operator language.
-3. The dashboard surface vocabulary matches the guide: host approval, host detail, duplicate identity conflicts, host badges, partner channels, timeline, digest, route-owner actions, reconciliation, and thread composer.
+3. The guide now also makes the role split explicit: \`viewer\`, \`operator\`, and \`admin\`, plus external email/webhook alerting.
+4. The dashboard surface vocabulary matches the guide: host approval, host detail, duplicate identity conflicts, host badges, partner channels, timeline, digest, route-owner actions, external alerting, reconciliation, and thread composer.
 
 ## Evidence
 

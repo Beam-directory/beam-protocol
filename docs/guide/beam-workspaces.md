@@ -216,6 +216,30 @@ It is event-driven now. Beam watches the authoritative OpenClaw files directly i
 
 The fleet and workspace surfaces now also show last-delivery receipts for host-backed routes, including status, error code, requested time, and a direct trace link back into Beam.
 
+For production-ready fleet ops, the role split is explicit:
+
+- `viewer`
+  - can inspect fleet overview, hosts, conflicts, alerts, and delivery history
+  - cannot change alert targets, schedules, or host state
+- `operator`
+  - can run digest schedules, trigger digest delivery, and test external alert targets
+  - cannot rotate, revoke, recover, or otherwise run admin-only destructive host actions
+- `admin`
+  - can create/update external alert targets, rotate credentials, recover hosts, revoke hosts, and apply guarded remediation
+
+The fleet UI reflects those same guards directly:
+
+- `Create/update requires admin.`
+- `Testing requires operator or admin.`
+
+External alerting is first-class now. Fleet items can fan out to:
+
+- operator email mailboxes
+- escalation email mailboxes
+- external webhooks for pager rotations or incident systems
+
+That means stale hosts, failed deliveries, duplicate conflicts, and recovery work can leave Beam and still preserve persisted delivery evidence inside the fleet view.
+
 The fleet surface also gives operators explicit day-2 actions:
 
 - rotate host credentials without reinstalling the whole host

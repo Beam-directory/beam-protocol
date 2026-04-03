@@ -1,15 +1,19 @@
 import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
 import { once } from 'node:events'
+import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
+import { pathToFileURL } from 'node:url'
 import { WebSocket } from 'ws'
 import {
   createAdminHeaders,
   loadDirectoryDbModule,
+  repoRoot,
   requestJson,
   startProductionHarness,
 } from '../production/shared.mjs'
 
 const defaultConnectorVersion = '1.6.0-test'
+const directoryAdminAuthEntry = path.join(repoRoot, 'packages/directory/dist/admin-auth.js')
 
 function createFixtureAgent(beamId, displayName) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
@@ -18,6 +22,31 @@ function createFixtureAgent(beamId, displayName) {
     displayName,
     privateKey,
     publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+  }
+}
+
+async function loadDirectoryAdminAuthModule() {
+  return import(pathToFileURL(directoryAdminAuthEntry).href)
+}
+
+async function createHarnessRoleToken(directoryDbPath, email, role, jwtSecret) {
+  const [dbApi, adminAuthApi] = await Promise.all([
+    loadDirectoryDbModule(),
+    loadDirectoryAdminAuthModule(),
+  ])
+  const db = dbApi.createDatabase(directoryDbPath)
+  const previousJwtSecret = process.env['JWT_SECRET']
+  try {
+    process.env['JWT_SECRET'] = jwtSecret
+    const { token } = adminAuthApi.createAdminSession(db, { email, role })
+    return token
+  } finally {
+    if (typeof previousJwtSecret === 'string') {
+      process.env['JWT_SECRET'] = previousJwtSecret
+    } else {
+      delete process.env['JWT_SECRET']
+    }
+    db.close()
   }
 }
 
@@ -237,6 +266,8 @@ export async function startOpenClawFleetHarness() {
 
   const harness = await startProductionHarness({
     withMessageBus: false,
+    operatorEmails: 'ops@example.com',
+    viewerEmails: 'viewer@example.com',
     seed: {
       directory(db, directoryDbApi) {
         for (const agent of Object.values(agents)) {
@@ -255,6 +286,11 @@ export async function startOpenClawFleetHarness() {
   })
 
   const token = await harness.createAdminToken()
+  const roleTokens = {
+    admin: token,
+    operator: await createHarnessRoleToken(harness.directoryDbPath, 'ops@example.com', 'operator', harness.jwtSecret),
+    viewer: await createHarnessRoleToken(harness.directoryDbPath, 'viewer@example.com', 'viewer', harness.jwtSecret),
+  }
   const adminHeaders = createAdminHeaders(token)
 
   await requestJson(`${harness.directoryUrl}/admin/workspaces`, {
@@ -341,23 +377,48 @@ export async function startOpenClawFleetHarness() {
 
   return {
     harness,
+    directoryUrl: harness.directoryUrl,
     token,
+    roleTokens,
     adminHeaders,
     workspaceSlug,
     agents,
     hosts,
     clients,
-    async fetchFleetOverview() {
+    roleHeaders(role = 'admin') {
+      return createAdminHeaders(roleTokens[role] ?? token)
+    },
+    async requestRole(pathname, {
+      role = 'admin',
+      method = 'GET',
+      body,
+      allowError = false,
+    } = {}) {
+      const url = pathname.startsWith('http')
+        ? pathname
+        : `${harness.directoryUrl}${pathname}`
+      const init = {
+        method,
+        headers: createAdminHeaders(roleTokens[role] ?? token),
+      }
+      if (body !== undefined) {
+        init.body = JSON.stringify(body)
+      }
+      return allowError
+        ? requestJsonAllow(url, init)
+        : requestJson(url, init)
+    },
+    async fetchFleetOverview(role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/overview`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
     },
-    async fetchFleetReconciliation() {
+    async fetchFleetReconciliation(role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/reconciliation`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
     },
-    async fetchFleetDigest(params = {}) {
+    async fetchFleetDigest(params = {}, role = 'admin') {
       const query = new URLSearchParams()
       if (params.format) {
         query.set('format', params.format)
@@ -365,7 +426,7 @@ export async function startOpenClawFleetHarness() {
       const suffix = query.size > 0 ? `?${query.toString()}` : ''
       if (params.format === 'markdown') {
         const response = await fetch(`${harness.directoryUrl}/admin/openclaw/fleet/digest${suffix}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: this.roleHeaders(role),
         })
         if (!response.ok) {
           throw new Error(`Fleet digest request failed with ${response.status}`)
@@ -373,43 +434,71 @@ export async function startOpenClawFleetHarness() {
         return response.text()
       }
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest${suffix}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
     },
-    async updateFleetDigestSchedule(input) {
+    async fetchFleetAlerts(role = 'viewer') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/alerts`, {
+        headers: this.roleHeaders(role),
+      })
+    },
+    async createFleetAlertTarget(input, role = 'admin', allowError = false) {
+      return this.requestRole('/admin/openclaw/fleet/alerts', {
+        role,
+        method: 'POST',
+        body: input,
+        allowError,
+      })
+    },
+    async updateFleetAlertTarget(targetId, input, role = 'admin', allowError = false) {
+      return this.requestRole(`/admin/openclaw/fleet/alerts/${targetId}`, {
+        role,
+        method: 'PATCH',
+        body: input,
+        allowError,
+      })
+    },
+    async testFleetAlertTarget(targetId, role = 'operator', allowError = false) {
+      return this.requestRole(`/admin/openclaw/fleet/alerts/${targetId}/test`, {
+        role,
+        method: 'POST',
+        allowError,
+      })
+    },
+    async updateFleetDigestSchedule(input, role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/schedule`, {
         method: 'PATCH',
-        headers: createAdminHeaders(token),
+        headers: this.roleHeaders(role),
         body: JSON.stringify(input),
       })
     },
-    async runFleetDigest(input = {}) {
+    async runFleetDigest(input = {}, role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/run`, {
         method: 'POST',
-        headers: createAdminHeaders(token),
+        headers: this.roleHeaders(role),
         body: JSON.stringify(input),
       })
     },
-    async deliverFleetDigest(input = {}) {
+    async deliverFleetDigest(input = {}, role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/digest/deliver`, {
         method: 'POST',
-        headers: createAdminHeaders(token),
+        headers: this.roleHeaders(role),
         body: JSON.stringify(input),
       })
     },
-    async runFleetReconciliation(input = {}) {
+    async runFleetReconciliation(input = {}, role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/reconciliation/run`, {
         method: 'POST',
-        headers: createAdminHeaders(token),
+        headers: this.roleHeaders(role),
         body: JSON.stringify(input),
       })
     },
-    async fetchHost(hostId) {
+    async fetchHost(hostId, role = 'admin') {
       const host = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hostId}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
       const identities = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hostId}/identities`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
       return {
         ...host,
@@ -417,14 +506,14 @@ export async function startOpenClawFleetHarness() {
         identitiesTotal: identities.total,
       }
     },
-    async fetchWorkspaceIdentities() {
+    async fetchWorkspaceIdentities(role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/identities`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
     },
-    async fetchTrace(nonce) {
+    async fetchTrace(nonce, role = 'admin') {
       return requestJson(`${harness.directoryUrl}/observability/intents/${encodeURIComponent(nonce)}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: this.roleHeaders(role),
       })
     },
     async createConflict() {
@@ -438,29 +527,38 @@ export async function startOpenClawFleetHarness() {
         stage: 'duplicate-route',
       })
     },
-    async rotateHost(hostKey) {
-      const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/rotate`, {
+    async rotateHost(hostKey, role = 'admin', allowError = false) {
+      const response = await this.requestRole(`/admin/openclaw/hosts/${hosts[hostKey].id}/rotate`, {
+        role,
         method: 'POST',
-        headers: createAdminHeaders(token),
-        body: JSON.stringify({ confirmPhrase: 'ROTATE_HOST' }),
+        body: { confirmPhrase: 'ROTATE_HOST' },
+        allowError,
       })
+      if (allowError) {
+        return response
+      }
       hosts[hostKey].credential = response.credential
       return response
     },
-    async recoverHost(hostKey) {
-      const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/recover`, {
+    async recoverHost(hostKey, role = 'admin', allowError = false) {
+      const response = await this.requestRole(`/admin/openclaw/hosts/${hosts[hostKey].id}/recover`, {
+        role,
         method: 'POST',
-        headers: createAdminHeaders(token),
-        body: JSON.stringify({ confirmPhrase: 'RECOVER_HOST' }),
+        body: { confirmPhrase: 'RECOVER_HOST' },
+        allowError,
       })
+      if (allowError) {
+        return response
+      }
       hosts[hostKey].credential = response.credential
       return response
     },
-    async revokeHost(hostKey, reason) {
-      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/revoke`, {
+    async revokeHost(hostKey, reason, role = 'admin', allowError = false) {
+      return this.requestRole(`/admin/openclaw/hosts/${hosts[hostKey].id}/revoke`, {
+        role,
         method: 'POST',
-        headers: createAdminHeaders(token),
-        body: JSON.stringify({ reason, confirmPhrase: 'REVOKE_HOST' }),
+        body: { reason, confirmPhrase: 'REVOKE_HOST' },
+        allowError,
       })
     },
     async enableMaintenance(hostKey, input = {}) {
