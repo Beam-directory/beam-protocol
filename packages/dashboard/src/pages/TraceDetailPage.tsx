@@ -143,7 +143,7 @@ export default function TraceDetailPage() {
   }
 
   const guidance = getOperatorGuidance(trace.intent.status)
-  const latestStage = trace.stages.at(-1) ?? null
+  const latestStage = trace.stages.length > 0 ? trace.stages[trace.stages.length - 1] ?? null : null
   const deliveryStage = trace.stages.find((stage) => stage.stage === 'delivered' || stage.status === 'delivered') ?? null
   const terminalStage = [...trace.stages].reverse().find((stage) => {
     const lifecycle = classifyIntentLifecycle(stage.status)
