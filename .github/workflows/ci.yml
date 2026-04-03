@@ -108,6 +108,9 @@ jobs:
       - name: Build workspaces
         run: npm run build
 
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
       - name: Prepare quickstart env
         run: cp ops/quickstart/.env.example ops/quickstart/.env
 
@@ -116,6 +119,17 @@ jobs:
 
       - name: Run hosted quickstart smoke path
         run: npm run quickstart:smoke
+
+      - name: Run dashboard UI smoke path
+        run: npm run quickstart:ui-smoke
+
+      - name: Upload quickstart UI smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quickstart-ui-smoke
+          path: tmp/dashboard-ui-smoke
+          if-no-files-found: ignore
 
       - name: Tear down quickstart stack
         if: always()
