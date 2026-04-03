@@ -769,7 +769,7 @@ test('duplicate openclaw routes surface conflicts, block delivery, and clear aft
         ...createAdminHeaders(db, 'admin@example.com', 'admin'),
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ reason: 'duplicate identity conflict' }),
+      body: JSON.stringify({ reason: 'duplicate identity conflict', confirmPhrase: 'REVOKE_HOST' }),
     }))
     assert.equal(revokeResponse.status, 200)
 
@@ -823,7 +823,11 @@ test('openclaw host credentials rotate and recover without rebuilding workspace 
 
     const rotateResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/rotate`, {
       method: 'POST',
-      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ confirmPhrase: 'ROTATE_HOST' }),
     }))
     assert.equal(rotateResponse.status, 200)
     const rotateBody = await rotateResponse.json() as {
@@ -873,13 +877,17 @@ test('openclaw host credentials rotate and recover without rebuilding workspace 
         ...createAdminHeaders(db, 'admin@example.com', 'admin'),
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ reason: 'recovery drill' }),
+      body: JSON.stringify({ reason: 'recovery drill', confirmPhrase: 'REVOKE_HOST' }),
     }))
     assert.equal(revokeResponse.status, 200)
 
     const recoverResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${host.host.id}/recover`, {
       method: 'POST',
-      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ confirmPhrase: 'RECOVER_HOST' }),
     }))
     assert.equal(recoverResponse.status, 200)
     const recoverBody = await recoverResponse.json() as {
@@ -1258,6 +1266,187 @@ test('fleet digest schedule persists scheduled runs and delivery history', async
   }
 })
 
+test('fleet alert targets persist and test webhook deliveries', async () => {
+  const db = createDatabase(':memory:')
+  const originalFetch = globalThis.fetch
+  let deliveredPayload: Record<string, unknown> | null = null
+
+  globalThis.fetch = (async (_input: unknown, init?: RequestInit) => {
+    deliveredPayload = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : null
+    return new Response(JSON.stringify({ ok: true }), {
+      status: 202,
+      headers: { 'content-type': 'application/json' },
+    })
+  }) as typeof fetch
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+
+    const createResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/alerts', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        label: 'Ops webhook',
+        deliveryKind: 'webhook',
+        destination: 'https://hooks.example.com/openclaw',
+        severityThreshold: 'warning',
+        enabled: true,
+        notes: 'Primary fleet webhook',
+        headers: {
+          Authorization: 'Bearer secret-token',
+        },
+      }),
+    }))
+    assert.equal(createResponse.status, 201)
+    const createBody = await createResponse.json() as {
+      target: {
+        id: number
+        label: string
+        deliveryKind: string
+        destination: string
+        metadata: {
+          notes: string | null
+          headerCount: number
+        }
+      }
+    }
+    assert.equal(createBody.target.label, 'Ops webhook')
+    assert.equal(createBody.target.deliveryKind, 'webhook')
+    assert.equal(createBody.target.metadata.notes, 'Primary fleet webhook')
+    assert.equal(createBody.target.metadata.headerCount, 1)
+
+    const testResponse = await app.request(new Request(`http://localhost/admin/openclaw/fleet/alerts/${createBody.target.id}/test`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'ops@example.com', 'operator'),
+    }))
+    assert.equal(testResponse.status, 200)
+    const testBody = await testResponse.json() as {
+      ok: boolean
+      status: string
+      delivery: {
+        targetId: number
+        status: string
+      }
+    }
+    assert.equal(testBody.ok, true)
+    assert.equal(testBody.status, 'delivered')
+    assert.equal(testBody.delivery.targetId, createBody.target.id)
+    assert.equal(testBody.delivery.status, 'delivered')
+    assert.equal(deliveredPayload?.['generatedAt'] ? typeof deliveredPayload?.['generatedAt'] : null, 'string')
+    assert.equal((deliveredPayload?.['target'] as { label?: string } | undefined)?.label, 'Ops webhook')
+
+    const digestResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/digest', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(digestResponse.status, 200)
+    const digestBody = await digestResponse.json() as {
+      alerts: {
+        targets: Array<{ id: number }>
+        deliveries: Array<{ targetId: number; status: string }>
+      }
+    }
+    assert.equal(digestBody.alerts.targets.length, 1)
+    assert.ok(digestBody.alerts.deliveries.some((delivery) => delivery.targetId === createBody.target.id && delivery.status === 'delivered'))
+  } finally {
+    globalThis.fetch = originalFetch
+    db.close()
+  }
+})
+
+test('destructive host and conflict actions require explicit confirmation phrases', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const receiver = createFixtureAgent('guarded@openclaw.beam.directory')
+    registerFixtureAgent(db, receiver, 'Guarded')
+    const app = createApp(db)
+
+    const rotateHost = createApprovedHostWithRoute(db, {
+      label: 'Rotate Guard Host',
+      hostname: 'rotate-guard.local',
+      beamId: receiver.beamId,
+      routeKey: 'rotate-guard',
+    })
+
+    const rotateWithoutConfirm = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${rotateHost.host.id}/rotate`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    }))
+    assert.equal(rotateWithoutConfirm.status, 400)
+    assert.equal((await rotateWithoutConfirm.json() as { errorCode: string }).errorCode, 'CONFIRMATION_REQUIRED')
+
+    const rotateWithConfirm = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${rotateHost.host.id}/rotate`, {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ confirmPhrase: 'ROTATE_HOST' }),
+    }))
+    assert.equal(rotateWithConfirm.status, 200)
+
+    createApprovedHostWithRoute(db, {
+      label: 'Conflict Alpha',
+      hostname: 'conflict-alpha.local',
+      beamId: 'duplicate@openclaw.beam.directory',
+      routeKey: 'duplicate-alpha',
+    })
+    createApprovedHostWithRoute(db, {
+      label: 'Conflict Bravo',
+      hostname: 'conflict-bravo.local',
+      beamId: 'duplicate@openclaw.beam.directory',
+      routeKey: 'duplicate-bravo',
+    })
+
+    const detailResponse = await app.request(new Request('http://localhost/admin/openclaw/conflicts/duplicate%40openclaw.beam.directory', {
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(detailResponse.status, 200)
+    const detailBody = await detailResponse.json() as {
+      recommendedRouteId: number
+    }
+
+    const resolveWithoutConfirm = await app.request(new Request('http://localhost/admin/openclaw/conflicts/duplicate%40openclaw.beam.directory/resolve', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        preferredRouteId: detailBody.recommendedRouteId,
+        disableCompetingRoutes: true,
+      }),
+    }))
+    assert.equal(resolveWithoutConfirm.status, 400)
+    assert.equal((await resolveWithoutConfirm.json() as { errorCode: string }).errorCode, 'CONFIRMATION_REQUIRED')
+
+    const resolveWithConfirm = await app.request(new Request('http://localhost/admin/openclaw/conflicts/duplicate%40openclaw.beam.directory/resolve', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        preferredRouteId: detailBody.recommendedRouteId,
+        disableCompetingRoutes: true,
+        confirmPhrase: 'RESOLVE_CONFLICT',
+      }),
+    }))
+    assert.equal(resolveWithConfirm.status, 200)
+  } finally {
+    db.close()
+  }
+})
+
 test('duplicate openclaw conflicts can be resolved by preferring one route owner', async () => {
   const db = createDatabase(':memory:')
 
@@ -1387,6 +1576,7 @@ test('conflict detail recommends an owner route and guided resolve can disable c
         preferredRouteId: detailBody.recommendedRouteId,
         disableCompetingRoutes: true,
         note: 'Guided remediation smoke test',
+        confirmPhrase: 'RESOLVE_CONFLICT',
       }),
     }))
     assert.equal(resolveResponse.status, 200)
@@ -1951,6 +2141,7 @@ test('openclaw host maintenance and drain block delivery until resume', async ()
       body: JSON.stringify({
         owner: 'ops@example.com',
         reason: 'kernel update',
+        confirmPhrase: 'MAINTENANCE_HOST',
       }),
     }))
     assert.equal(maintenanceResponse.status, 200)
@@ -1982,6 +2173,7 @@ test('openclaw host maintenance and drain block delivery until resume', async ()
       body: JSON.stringify({
         owner: 'ops@example.com',
         reason: 'drain connections',
+        confirmPhrase: 'DRAIN_HOST',
       }),
     }))
     assert.equal(drainResponse.status, 200)
@@ -2063,7 +2255,7 @@ test('revoked openclaw host routes block Beam delivery immediately', async () =>
         ...createAdminHeaders(db, 'admin@example.com', 'admin'),
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ reason: 'host retired' }),
+      body: JSON.stringify({ reason: 'host retired', confirmPhrase: 'REVOKE_HOST' }),
     }))
     assert.equal(revokeResponse.status, 200)
 
@@ -2415,7 +2607,7 @@ test('fleet digest summarizes stale hosts, duplicate conflicts, and failed deliv
     const revokeResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${hostGamma.host.id}/revoke`, {
       method: 'POST',
       headers: adminHeaders,
-      body: JSON.stringify({ reason: 'digest drill revoke' }),
+      body: JSON.stringify({ reason: 'digest drill revoke', confirmPhrase: 'REVOKE_HOST' }),
     }))
     assert.equal(revokeResponse.status, 200)
 
@@ -2528,6 +2720,7 @@ test('fleet overview surfaces maintenance counts and rollout inventory', async (
       body: JSON.stringify({
         owner: 'ops@example.com',
         reason: 'planned maintenance',
+        confirmPhrase: 'MAINTENANCE_HOST',
       }),
     }))
     assert.equal(maintenanceResponse.status, 200)

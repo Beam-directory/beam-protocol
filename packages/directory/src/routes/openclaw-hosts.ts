@@ -6,6 +6,7 @@ import {
   applyOpenClawHostRouteEvents,
   approveOpenClawHost,
   createOpenClawEnrollmentRequest,
+  createOpenClawFleetAlertTarget,
   createOpenClawFleetDigestRun,
   createOpenClawHost,
   getAgent,
@@ -14,6 +15,7 @@ import {
   getOpenClawWorkspaceTemplateByKey,
   getOpenClawFleetDigestRunById,
   getOpenClawFleetDigestSchedule,
+  getOpenClawFleetAlertTargetById,
   getOpenClawEnrollmentRequestById,
   getOpenClawEnrollmentRequestByKey,
   getOpenClawHostByEnrollmentRequestId,
@@ -26,6 +28,8 @@ import {
   listOpenClawEnrollmentRequests,
   listOpenClawFleetDigestDeliveries,
   listOpenClawFleetDigestRuns,
+  listOpenClawFleetAlertDeliveries,
+  listOpenClawFleetAlertTargets,
   listOpenClawHostHeartbeats,
   listOpenClawHosts,
   listOpenClawPolicyPacks,
@@ -42,6 +46,7 @@ import {
   recalculateOpenClawRouteStates,
   recoverOpenClawHost,
   refreshOpenClawHostHealth,
+  recordOpenClawFleetAlertDelivery,
   revokeOpenClawHost,
   resolveOpenClawHostCredential,
   rotateOpenClawHostCredential,
@@ -52,6 +57,7 @@ import {
   updateWorkspace,
   updateWorkspacePolicyDocument,
   updateOpenClawEnrollmentRequest,
+  updateOpenClawFleetAlertTarget,
   updateOpenClawFleetDigestSchedule,
   updateOpenClawHost,
   upsertOpenClawPolicyPack,
@@ -61,6 +67,11 @@ import { getSuppliedApiKey, hostApiKeyMatches, hostKeyFromApiKey } from '../api-
 import { serializeWorkspace } from './workspaces.js'
 import type {
   IntentLogRow,
+  OpenClawFleetAlertDeliveryRow,
+  OpenClawFleetAlertDeliveryStatus,
+  OpenClawFleetAlertSeverityThreshold,
+  OpenClawFleetAlertTargetDeliveryKind,
+  OpenClawFleetAlertTargetRow,
   OpenClawFleetDigestDeliveryKind,
   OpenClawFleetDigestDeliveryRow,
   OpenClawFleetDigestDeliveryStatus,
@@ -150,6 +161,41 @@ type SerializedOpenClawFleetDigestDelivery = {
     criticalItems: number
     escalations: number
   } | null
+}
+
+type SerializedOpenClawFleetAlertTarget = {
+  id: number
+  label: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold: OpenClawFleetAlertSeverityThreshold
+  enabled: boolean
+  lastDeliveryStatus: OpenClawFleetAlertDeliveryStatus | null
+  lastDeliveryAt: string | null
+  lastErrorCode: string | null
+  lastErrorAt: string | null
+  metadata: {
+    notes: string | null
+    headerCount: number
+  }
+}
+
+type SerializedOpenClawFleetAlertDelivery = {
+  id: number
+  targetId: number
+  runId: number | null
+  runGeneratedAt: string | null
+  targetLabel: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold: OpenClawFleetAlertSeverityThreshold
+  severity: OpenClawFleetAlertSeverityThreshold
+  itemCount: number
+  status: OpenClawFleetAlertDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  deliveredAt: string
+  details: Record<string, unknown> | null
 }
 
 type OpenClawConflictGroup = {
@@ -678,6 +724,14 @@ function normalizeConnectionMode(value: unknown): OpenClawHostRouteRow['connecti
     : null
 }
 
+function normalizeOpenClawFleetAlertDeliveryKind(value: unknown): OpenClawFleetAlertTargetDeliveryKind | null {
+  return value === 'email' || value === 'webhook' ? value : null
+}
+
+function normalizeOpenClawFleetAlertSeverityThreshold(value: unknown): OpenClawFleetAlertSeverityThreshold | null {
+  return value === 'critical' || value === 'warning' ? value : null
+}
+
 function normalizeHours(value: unknown, fallback = 72): number {
   const parsed = Number.parseInt(String(value ?? fallback), 10)
   if (!Number.isFinite(parsed) || parsed <= 0) {
@@ -712,6 +766,21 @@ function hoursUntil(value: string | null): number | null {
   return Math.round(((parsed - Date.now()) / 3_600_000) * 10) / 10
 }
 
+function requireConfirmPhrase(
+  body: Record<string, unknown>,
+  expected: string,
+  error: string,
+): Response | null {
+  if (normalizeOptionalString(body.confirmPhrase) === expected) {
+    return null
+  }
+
+  return new Response(JSON.stringify({ error, errorCode: 'CONFIRMATION_REQUIRED' }), {
+    status: 400,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
 function parseOpenClawHostMetadata(raw: string | null): OpenClawHostMetadataJson {
   if (!raw) {
     return {}
@@ -738,6 +807,61 @@ function parseJson<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback
   }
+}
+
+function parseOpenClawFleetAlertTargetMetadata(raw: string | null): {
+  notes: string | null
+  headers: Record<string, string>
+} {
+  const parsed = parseJson<Record<string, unknown>>(raw, {})
+  const rawHeaders = parsed['headers']
+  const headers: Record<string, string> = {}
+  if (rawHeaders && typeof rawHeaders === 'object' && !Array.isArray(rawHeaders)) {
+    for (const [key, value] of Object.entries(rawHeaders)) {
+      const normalizedKey = key.trim()
+      if (!normalizedKey || typeof value !== 'string' || !value.trim()) {
+        continue
+      }
+      headers[normalizedKey] = value.trim()
+    }
+  }
+
+  return {
+    notes: normalizeOptionalString(parsed['notes']),
+    headers,
+  }
+}
+
+function normalizeOpenClawFleetAlertHeaders(value: unknown): Record<string, string> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    return {}
+  }
+
+  const headers: Record<string, string> = {}
+  for (const [key, headerValue] of Object.entries(value)) {
+    const normalizedKey = key.trim()
+    if (!normalizedKey || typeof headerValue !== 'string' || !headerValue.trim()) {
+      continue
+    }
+    headers[normalizedKey] = headerValue.trim()
+  }
+  return headers
+}
+
+function serializeOpenClawFleetAlertTargetMetadata(input: {
+  notes?: string | null
+  headers?: Record<string, string> | null
+}): string | null {
+  const notes = normalizeOptionalString(input.notes)
+  const headers = input.headers ? normalizeOpenClawFleetAlertHeaders(input.headers) : {}
+  if (!notes && Object.keys(headers).length === 0) {
+    return null
+  }
+
+  return JSON.stringify({
+    ...(notes ? { notes } : {}),
+    ...(Object.keys(headers).length > 0 ? { headers } : {}),
+  })
 }
 
 function serializeOpenClawHostMetadata(metadata: OpenClawHostMetadataJson): string | null {
@@ -3010,6 +3134,50 @@ function serializeOpenClawFleetDigestDelivery(
   }
 }
 
+function serializeOpenClawFleetAlertTarget(row: OpenClawFleetAlertTargetRow): SerializedOpenClawFleetAlertTarget {
+  const metadata = parseOpenClawFleetAlertTargetMetadata(row.metadata_json)
+  return {
+    id: row.id,
+    label: row.label,
+    deliveryKind: row.delivery_kind,
+    destination: row.destination,
+    severityThreshold: row.severity_threshold,
+    enabled: row.enabled === 1,
+    lastDeliveryStatus: row.last_delivery_status,
+    lastDeliveryAt: row.last_delivery_at,
+    lastErrorCode: row.last_error_code,
+    lastErrorAt: row.last_error_at,
+    metadata: {
+      notes: metadata.notes,
+      headerCount: Object.keys(metadata.headers).length,
+    },
+  }
+}
+
+function serializeOpenClawFleetAlertDelivery(
+  row: OpenClawFleetAlertDeliveryRow,
+  runsById: Map<number, OpenClawFleetDigestRunRow>,
+): SerializedOpenClawFleetAlertDelivery {
+  const run = row.run_id ? runsById.get(row.run_id) ?? null : null
+  return {
+    id: row.id,
+    targetId: row.target_id,
+    runId: row.run_id,
+    runGeneratedAt: run?.generated_at ?? null,
+    targetLabel: row.target_label,
+    deliveryKind: row.delivery_kind,
+    destination: row.destination,
+    severityThreshold: row.severity_threshold,
+    severity: row.severity,
+    itemCount: row.item_count,
+    status: row.status,
+    errorCode: row.error_code,
+    errorMessage: row.error_message,
+    deliveredAt: row.delivered_at,
+    details: parseJson<Record<string, unknown> | null>(row.details_json, null),
+  }
+}
+
 function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
   refreshOpenClawHostHealth(db)
   recalculateOpenClawRouteStates(db)
@@ -3390,6 +3558,297 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
 
 type BuiltOpenClawFleetDigest = ReturnType<typeof buildOpenClawFleetDigest>
 
+type OpenClawFleetAlertSource = Pick<BuiltOpenClawFleetDigest, 'generatedAt' | 'summary' | 'actionItems' | 'escalations'>
+
+function buildOpenClawFleetAlertSourceFromRun(run: OpenClawFleetDigestRunRow): OpenClawFleetAlertSource {
+  return {
+    generatedAt: run.generated_at,
+    summary: parseJson<BuiltOpenClawFleetDigest['summary']>(run.summary_json, {
+      totalHosts: 0,
+      activeHosts: 0,
+      pendingHosts: 0,
+      revokedHosts: 0,
+      staleHosts: 0,
+      liveRoutes: 0,
+      staleRoutes: 0,
+      failedReceipts: 0,
+      routesMissingReceipts: 0,
+      receiptCoverageRatio: null,
+      degradedHosts: 0,
+      latencySloBreaches: 0,
+      rotationDueHosts: 0,
+      recoveryRunbooksOpen: 0,
+      duplicateIdentityConflicts: 0,
+      pendingCredentialActions: 0,
+      actionItems: 0,
+      criticalItems: 0,
+      escalations: 0,
+      warningItems: 0,
+    }),
+    actionItems: parseJson<OpenClawFleetDigestItem[]>(run.action_items_json, []),
+    escalations: parseJson<OpenClawFleetDigestItem[]>(run.escalation_items_json, []),
+  }
+}
+
+function collectOpenClawFleetAlertItems(
+  source: OpenClawFleetAlertSource,
+  threshold: OpenClawFleetAlertSeverityThreshold,
+): OpenClawFleetDigestItem[] {
+  const items = new Map<string, OpenClawFleetDigestItem>()
+  for (const item of [...source.actionItems, ...source.escalations]) {
+    if (threshold === 'critical' && item.severity !== 'critical') {
+      continue
+    }
+    items.set(item.id, item)
+  }
+  return [...items.values()]
+}
+
+function buildOpenClawFleetAlertMarkdown(
+  source: OpenClawFleetAlertSource,
+  threshold: OpenClawFleetAlertSeverityThreshold,
+  items: OpenClawFleetDigestItem[],
+  baseUrl: string,
+): string {
+  const lines = [
+    `# Beam OpenClaw fleet alert · ${source.generatedAt.slice(0, 10)}`,
+    '',
+    '## Summary',
+    '',
+    `- Threshold: \`${threshold}\``,
+    `- Matching items: \`${items.length}\``,
+    `- Total action items: \`${source.summary.actionItems}\``,
+    `- Critical items: \`${source.summary.criticalItems}\``,
+    '',
+    '## Matching items',
+    '',
+  ]
+
+  if (items.length === 0) {
+    lines.push('- No current fleet items match this threshold.')
+  } else {
+    for (const item of items) {
+      lines.push(`- ${item.title}`)
+      lines.push(`  - Severity: \`${item.severity}\``)
+      lines.push(`  - Detail: ${item.detail}`)
+      lines.push(`  - Next action: ${item.nextAction}`)
+      const href = absoluteHref(baseUrl, item.href)
+      if (href) {
+        lines.push(`  - Host: ${href}`)
+      }
+      const traceHref = absoluteHref(baseUrl, item.traceHref)
+      if (traceHref) {
+        lines.push(`  - Trace: ${traceHref}`)
+      }
+    }
+  }
+
+  return `${lines.join('\n')}\n`
+}
+
+async function deliverOpenClawFleetAlertTarget(
+  db: Database,
+  source: OpenClawFleetAlertSource,
+  target: OpenClawFleetAlertTargetRow,
+  input: {
+    actor: string
+    baseUrl: string
+    runId?: number | null
+    test?: boolean
+  },
+): Promise<{
+  ok: boolean
+  status: OpenClawFleetAlertDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  delivery: OpenClawFleetAlertDeliveryRow
+}> {
+  const items = collectOpenClawFleetAlertItems(source, target.severity_threshold)
+  if (!input.test && items.length === 0) {
+    const delivery = recordOpenClawFleetAlertDelivery(db, {
+      targetId: target.id,
+      runId: input.runId ?? null,
+      targetLabel: target.label,
+      deliveryKind: target.delivery_kind,
+      destination: target.destination,
+      severityThreshold: target.severity_threshold,
+      severity: target.severity_threshold,
+      itemCount: 0,
+      status: 'skipped',
+      errorCode: 'NO_MATCHING_ITEMS',
+      errorMessage: 'No fleet items matched the configured alert threshold.',
+      detailsJson: JSON.stringify({ actor: input.actor, test: false }),
+    })
+    return {
+      ok: false,
+      status: 'skipped',
+      errorCode: 'NO_MATCHING_ITEMS',
+      errorMessage: 'No fleet items matched the configured alert threshold.',
+      delivery,
+    }
+  }
+
+  const metadata = parseOpenClawFleetAlertTargetMetadata(target.metadata_json)
+  const markdown = buildOpenClawFleetAlertMarkdown(source, target.severity_threshold, items, input.baseUrl)
+  const payload = {
+    target: serializeOpenClawFleetAlertTarget(target),
+    generatedAt: source.generatedAt,
+    severityThreshold: target.severity_threshold,
+    matchingItems: items.map((item) => ({
+      ...item,
+      href: absoluteHref(input.baseUrl, item.href),
+      traceHref: absoluteHref(input.baseUrl, item.traceHref),
+    })),
+    summary: {
+      actionItems: source.summary.actionItems,
+      criticalItems: source.summary.criticalItems,
+      matchingItems: items.length,
+    },
+    markdown,
+    actor: input.actor,
+    test: input.test === true,
+  }
+
+  if (target.delivery_kind === 'email') {
+    if (!isEmailDeliveryConfigured()) {
+      const delivery = recordOpenClawFleetAlertDelivery(db, {
+        targetId: target.id,
+        runId: input.runId ?? null,
+        targetLabel: target.label,
+        deliveryKind: target.delivery_kind,
+        destination: target.destination,
+        severityThreshold: target.severity_threshold,
+        severity: target.severity_threshold,
+        itemCount: items.length,
+        status: 'unavailable',
+        errorCode: 'EMAIL_DELIVERY_UNAVAILABLE',
+        errorMessage: 'Email delivery is not configured for OpenClaw fleet alerts.',
+        detailsJson: JSON.stringify({ actor: input.actor, test: input.test === true }),
+      })
+      return {
+        ok: false,
+        status: 'unavailable',
+        errorCode: 'EMAIL_DELIVERY_UNAVAILABLE',
+        errorMessage: 'Email delivery is not configured for OpenClaw fleet alerts.',
+        delivery,
+      }
+    }
+
+    const delivered = await sendOperatorDigestEmail({
+      email: target.destination,
+      subject: `${input.test ? 'Test ' : ''}Beam OpenClaw fleet alert · ${target.label}`,
+      markdown,
+    })
+    const delivery = recordOpenClawFleetAlertDelivery(db, {
+      targetId: target.id,
+      runId: input.runId ?? null,
+      targetLabel: target.label,
+      deliveryKind: target.delivery_kind,
+      destination: target.destination,
+      severityThreshold: target.severity_threshold,
+      severity: target.severity_threshold,
+      itemCount: items.length,
+      status: delivered ? 'delivered' : 'failed',
+      errorCode: delivered ? null : 'EMAIL_DELIVERY_FAILED',
+      errorMessage: delivered ? null : 'Failed to deliver OpenClaw fleet alert email.',
+      detailsJson: JSON.stringify({ actor: input.actor, test: input.test === true }),
+    })
+    return {
+      ok: delivered,
+      status: delivered ? 'delivered' : 'failed',
+      errorCode: delivered ? null : 'EMAIL_DELIVERY_FAILED',
+      errorMessage: delivered ? null : 'Failed to deliver OpenClaw fleet alert email.',
+      delivery,
+    }
+  }
+
+  try {
+    const response = await fetch(target.destination, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        ...metadata.headers,
+      },
+      body: JSON.stringify(payload),
+    })
+
+    const delivered = response.ok
+    const errorMessage = delivered ? null : `Webhook returned ${response.status}`
+    const errorCode = delivered ? null : `WEBHOOK_${response.status}`
+    const delivery = recordOpenClawFleetAlertDelivery(db, {
+      targetId: target.id,
+      runId: input.runId ?? null,
+      targetLabel: target.label,
+      deliveryKind: target.delivery_kind,
+      destination: target.destination,
+      severityThreshold: target.severity_threshold,
+      severity: target.severity_threshold,
+      itemCount: items.length,
+      status: delivered ? 'delivered' : 'failed',
+      errorCode,
+      errorMessage,
+      detailsJson: JSON.stringify({
+        actor: input.actor,
+        test: input.test === true,
+        responseStatus: response.status,
+      }),
+    })
+    return {
+      ok: delivered,
+      status: delivered ? 'delivered' : 'failed',
+      errorCode,
+      errorMessage,
+      delivery,
+    }
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : 'Failed to deliver OpenClaw fleet alert webhook.'
+    const delivery = recordOpenClawFleetAlertDelivery(db, {
+      targetId: target.id,
+      runId: input.runId ?? null,
+      targetLabel: target.label,
+      deliveryKind: target.delivery_kind,
+      destination: target.destination,
+      severityThreshold: target.severity_threshold,
+      severity: target.severity_threshold,
+      itemCount: items.length,
+      status: 'failed',
+      errorCode: 'WEBHOOK_DELIVERY_FAILED',
+      errorMessage,
+      detailsJson: JSON.stringify({ actor: input.actor, test: input.test === true }),
+    })
+    return {
+      ok: false,
+      status: 'failed',
+      errorCode: 'WEBHOOK_DELIVERY_FAILED',
+      errorMessage,
+      delivery,
+    }
+  }
+}
+
+async function deliverOpenClawFleetAlertTargets(
+  db: Database,
+  source: OpenClawFleetAlertSource,
+  input: {
+    actor: string
+    baseUrl: string
+    runId?: number | null
+  },
+): Promise<Array<{
+  ok: boolean
+  status: OpenClawFleetAlertDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  delivery: OpenClawFleetAlertDeliveryRow
+}>> {
+  const targets = listOpenClawFleetAlertTargets(db).filter((target) => target.enabled === 1)
+  const deliveries = []
+  for (const target of targets) {
+    deliveries.push(await deliverOpenClawFleetAlertTarget(db, source, target, input))
+  }
+  return deliveries
+}
+
 function buildPersistedOpenClawFleetDigestRun(
   db: Database,
   baseUrl: string,
@@ -3521,6 +3980,8 @@ function buildOpenClawFleetDigestEnvelope(db: Database, baseUrl: string) {
   const runs = listOpenClawFleetDigestRuns(db, 10)
   const runsById = new Map(runs.map((run) => [run.id, run]))
   const deliveries = listOpenClawFleetDigestDeliveries(db, 20)
+  const alertTargets = listOpenClawFleetAlertTargets(db)
+  const alertDeliveries = listOpenClawFleetAlertDeliveries(db, 20)
 
   return {
     ...digest,
@@ -3528,6 +3989,10 @@ function buildOpenClawFleetDigestEnvelope(db: Database, baseUrl: string) {
     history: {
       runs: runs.map((run) => serializeOpenClawFleetDigestRun(run)),
       deliveries: deliveries.map((delivery) => serializeOpenClawFleetDigestDelivery(delivery, runsById)),
+    },
+    alerts: {
+      targets: alertTargets.map((target) => serializeOpenClawFleetAlertTarget(target)),
+      deliveries: alertDeliveries.map((delivery) => serializeOpenClawFleetAlertDelivery(delivery, runsById)),
     },
   }
 }
@@ -4261,6 +4726,16 @@ export function openClawAdminRouter(db: Database) {
 
     const note = normalizeOptionalString(body.note)
     const disableCompetingRoutes = body.disableCompetingRoutes === true
+    if (disableCompetingRoutes) {
+      const confirmError = requireConfirmPhrase(
+        body,
+        'RESOLVE_CONFLICT',
+        'confirmPhrase RESOLVE_CONFLICT is required when disabling competing routes.',
+      )
+      if (confirmError) {
+        return confirmError
+      }
+    }
 
     setOpenClawRouteOwnerResolution(db, {
       routeId: preferredRouteId,
@@ -4327,6 +4802,214 @@ export function openClawAdminRouter(db: Database) {
 
     c.header('Cache-Control', 'no-store')
     return c.json(digest)
+  })
+
+  router.get('/fleet/alerts', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const runs = listOpenClawFleetDigestRuns(db, 10)
+    const runsById = new Map(runs.map((run) => [run.id, run] as const))
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      targets: listOpenClawFleetAlertTargets(db).map((target) => serializeOpenClawFleetAlertTarget(target)),
+      deliveries: listOpenClawFleetAlertDeliveries(db, 20).map((delivery) => serializeOpenClawFleetAlertDelivery(delivery, runsById)),
+    })
+  })
+
+  router.post('/fleet/alerts', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    const label = normalizeOptionalString(body.label)
+    const deliveryKind = normalizeOpenClawFleetAlertDeliveryKind(body.deliveryKind)
+    const destination = normalizeOptionalString(body.destination)
+    const severityThreshold = normalizeOpenClawFleetAlertSeverityThreshold(body.severityThreshold) ?? 'warning'
+    const enabled = body.enabled === undefined ? true : body.enabled === true
+    const metadataJson = serializeOpenClawFleetAlertTargetMetadata({
+      notes: normalizeOptionalString(body.notes),
+      headers: normalizeOpenClawFleetAlertHeaders(body.headers),
+    })
+
+    if (!label) {
+      return c.json({ error: 'Alert label is required', errorCode: 'ALERT_LABEL_REQUIRED' }, 400)
+    }
+    if (!deliveryKind) {
+      return c.json({ error: 'Invalid alert delivery kind', errorCode: 'INVALID_ALERT_DELIVERY_KIND' }, 400)
+    }
+    if (!destination) {
+      return c.json({ error: 'Alert destination is required', errorCode: 'ALERT_DESTINATION_REQUIRED' }, 400)
+    }
+
+    const target = createOpenClawFleetAlertTarget(db, {
+      label,
+      deliveryKind,
+      destination,
+      severityThreshold,
+      enabled,
+      metadataJson,
+    })
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_alert_target.created',
+      actor: auth.session.email,
+      target: `openclaw-fleet-alert-target:${target.id}`,
+      details: {
+        role: auth.session.role,
+        label: target.label,
+        deliveryKind: target.delivery_kind,
+        destination: target.destination,
+        severityThreshold: target.severity_threshold,
+        enabled: target.enabled === 1,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      target: serializeOpenClawFleetAlertTarget(target),
+    }, 201)
+  })
+
+  router.patch('/fleet/alerts/:id', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const targetId = normalizePositiveInteger(c.req.param('id'))
+    if (!targetId) {
+      return c.json({ error: 'Invalid alert target id', errorCode: 'INVALID_ALERT_TARGET_ID' }, 400)
+    }
+
+    const existing = getOpenClawFleetAlertTargetById(db, targetId)
+    if (!existing) {
+      return c.json({ error: 'Alert target not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+
+    if (Object.prototype.hasOwnProperty.call(body, 'deliveryKind') && !normalizeOpenClawFleetAlertDeliveryKind(body.deliveryKind)) {
+      return c.json({ error: 'Invalid alert delivery kind', errorCode: 'INVALID_ALERT_DELIVERY_KIND' }, 400)
+    }
+    if (Object.prototype.hasOwnProperty.call(body, 'severityThreshold') && !normalizeOpenClawFleetAlertSeverityThreshold(body.severityThreshold)) {
+      return c.json({ error: 'Invalid alert severity threshold', errorCode: 'INVALID_ALERT_SEVERITY_THRESHOLD' }, 400)
+    }
+
+    const currentMetadata = parseOpenClawFleetAlertTargetMetadata(existing.metadata_json)
+    const target = updateOpenClawFleetAlertTarget(db, {
+      id: targetId,
+      label: Object.prototype.hasOwnProperty.call(body, 'label') ? normalizeOptionalString(body.label) ?? existing.label : undefined,
+      deliveryKind: Object.prototype.hasOwnProperty.call(body, 'deliveryKind')
+        ? normalizeOpenClawFleetAlertDeliveryKind(body.deliveryKind) ?? undefined
+        : undefined,
+      destination: Object.prototype.hasOwnProperty.call(body, 'destination')
+        ? normalizeOptionalString(body.destination) ?? existing.destination
+        : undefined,
+      severityThreshold: Object.prototype.hasOwnProperty.call(body, 'severityThreshold')
+        ? normalizeOpenClawFleetAlertSeverityThreshold(body.severityThreshold) ?? undefined
+        : undefined,
+      enabled: body.enabled === undefined ? undefined : body.enabled === true,
+      metadataJson: serializeOpenClawFleetAlertTargetMetadata({
+        notes: Object.prototype.hasOwnProperty.call(body, 'notes')
+          ? normalizeOptionalString(body.notes)
+          : currentMetadata.notes,
+        headers: Object.prototype.hasOwnProperty.call(body, 'headers')
+          ? normalizeOpenClawFleetAlertHeaders(body.headers)
+          : currentMetadata.headers,
+      }),
+    })
+
+    if (!target) {
+      return c.json({ error: 'Alert target not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_fleet_alert_target.updated',
+      actor: auth.session.email,
+      target: `openclaw-fleet-alert-target:${target.id}`,
+      details: {
+        role: auth.session.role,
+        label: target.label,
+        deliveryKind: target.delivery_kind,
+        destination: target.destination,
+        severityThreshold: target.severity_threshold,
+        enabled: target.enabled === 1,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      target: serializeOpenClawFleetAlertTarget(target),
+    })
+  })
+
+  router.post('/fleet/alerts/:id/test', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const targetId = normalizePositiveInteger(c.req.param('id'))
+    if (!targetId) {
+      return c.json({ error: 'Invalid alert target id', errorCode: 'INVALID_ALERT_TARGET_ID' }, 400)
+    }
+
+    const target = getOpenClawFleetAlertTargetById(db, targetId)
+    if (!target) {
+      return c.json({ error: 'Alert target not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const result = await deliverOpenClawFleetAlertTarget(
+      db,
+      buildOpenClawFleetDigest(db, new URL(c.req.url).origin),
+      target,
+      {
+        actor: auth.session.email,
+        baseUrl: new URL(c.req.url).origin,
+        test: true,
+      },
+    )
+
+    logAuditEvent(db, {
+      action: result.ok ? 'admin.openclaw_fleet_alert_target.tested' : 'admin.openclaw_fleet_alert_target.test_failed',
+      actor: auth.session.email,
+      target: `openclaw-fleet-alert-target:${target.id}`,
+      details: {
+        role: auth.session.role,
+        deliveryKind: target.delivery_kind,
+        destination: target.destination,
+        status: result.status,
+        errorCode: result.errorCode,
+      },
+    })
+
+    const runs = listOpenClawFleetDigestRuns(db, 10)
+    const runsById = new Map(runs.map((run) => [run.id, run] as const))
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      ok: result.ok,
+      status: result.status,
+      errorCode: result.errorCode,
+      errorMessage: result.errorMessage,
+      target: serializeOpenClawFleetAlertTarget(getOpenClawFleetAlertTargetById(db, target.id) as OpenClawFleetAlertTargetRow),
+      delivery: serializeOpenClawFleetAlertDelivery(result.delivery, runsById),
+    }, result.ok ? 200 : result.status === 'unavailable' ? 503 : 500)
   })
 
   router.patch('/fleet/digest/schedule', async (c) => {
@@ -4485,6 +5168,17 @@ export function openClawAdminRouter(db: Database) {
             })
           }
         }
+
+        await deliverOpenClawFleetAlertTargets(db, {
+          generatedAt: digest.generatedAt,
+          summary: digest.summary,
+          actionItems: digest.actionItems,
+          escalations: digest.escalations,
+        }, {
+          actor: auth.session.email,
+          baseUrl: new URL(c.req.url).origin,
+          runId: run.id,
+        })
       }
 
       logAuditEvent(db, {
@@ -4545,6 +5239,17 @@ export function openClawAdminRouter(db: Database) {
           delivery: serializeOpenClawFleetDigestDelivery(escalationDelivery.delivery, new Map([[run.id, run]])),
         })
       }
+
+      await deliverOpenClawFleetAlertTargets(db, {
+        generatedAt: digest.generatedAt,
+        summary: digest.summary,
+        actionItems: digest.actionItems,
+        escalations: digest.escalations,
+      }, {
+        actor: auth.session.email,
+        baseUrl: new URL(c.req.url).origin,
+        runId: run.id,
+      })
     }
     logAuditEvent(db, {
       action: 'admin.openclaw_fleet_digest.run',
@@ -4991,6 +5696,17 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
     }
 
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+    const confirmError = requireConfirmPhrase(body, 'ROTATE_HOST', 'confirmPhrase ROTATE_HOST is required')
+    if (confirmError) {
+      return confirmError
+    }
+
     const rotated = rotateOpenClawHostCredential(db, { id: hostId })
     if (!rotated) {
       return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
@@ -5103,6 +5819,10 @@ export function openClawAdminRouter(db: Database) {
     } catch {
       body = {}
     }
+    const confirmError = requireConfirmPhrase(body, 'MAINTENANCE_HOST', 'confirmPhrase MAINTENANCE_HOST is required')
+    if (confirmError) {
+      return confirmError
+    }
 
     const patch = buildOpenClawHostMaintenancePatch(host, {
       state: 'maintenance',
@@ -5153,6 +5873,10 @@ export function openClawAdminRouter(db: Database) {
       body = await c.req.json() as Record<string, unknown>
     } catch {
       body = {}
+    }
+    const confirmError = requireConfirmPhrase(body, 'DRAIN_HOST', 'confirmPhrase DRAIN_HOST is required')
+    if (confirmError) {
+      return confirmError
     }
 
     const patch = buildOpenClawHostMaintenancePatch(host, {
@@ -5387,6 +6111,17 @@ export function openClawAdminRouter(db: Database) {
       return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
     }
 
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+    const confirmError = requireConfirmPhrase(body, 'RECOVER_HOST', 'confirmPhrase RECOVER_HOST is required')
+    if (confirmError) {
+      return confirmError
+    }
+
     const recovered = recoverOpenClawHost(db, {
       id: hostId,
       recoveredBy: auth.session.email,
@@ -5506,6 +6241,10 @@ export function openClawAdminRouter(db: Database) {
     } catch {
       body = {}
     }
+    const confirmError = requireConfirmPhrase(body, 'REVOKE_HOST', 'confirmPhrase REVOKE_HOST is required')
+    if (confirmError) {
+      return confirmError
+    }
 
     const revoked = revokeOpenClawHost(db, {
       id: hostId,
@@ -5548,7 +6287,6 @@ export function openClawAdminRouter(db: Database) {
     } catch {
       body = {}
     }
-
     const updated = setOpenClawRouteOwnerResolution(db, {
       routeId,
       resolutionState: 'preferred',
