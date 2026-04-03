@@ -42,6 +42,7 @@ const dockerPath = fs.existsSync('/opt/homebrew/bin/docker')
   : fs.existsSync('/usr/local/bin/docker')
     ? '/usr/local/bin/docker'
     : 'docker'
+const inventoryPayloadSoftLimitBytes = 48 * 1024
 
 function log(message) {
   console.log(`[beam-openclaw-host] ${message}`)
@@ -108,6 +109,34 @@ async function isHealthy(url) {
   }
 }
 
+async function getDirectoryReleaseVersion(directoryUrl) {
+  try {
+    const response = await fetch(`${directoryUrl}/release`)
+    if (!response.ok) {
+      return null
+    }
+    const payload = await response.json()
+    const version = payload?.release?.version
+    return typeof version === 'string' && version.length > 0 ? version : null
+  } catch {
+    return null
+  }
+}
+
+async function hasOpenClawFleetApi(directoryUrl) {
+  try {
+    const response = await fetch(`${directoryUrl}/admin/openclaw/hosts`)
+    return response.status !== 404
+  } catch {
+    return false
+  }
+}
+
+async function rebuildLocalStack() {
+  log('rebuilding the local Beam quickstart stack with docker compose')
+  run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
+}
+
 async function ensureLocalStack(config) {
   if (!isLocalDirectory(config.directoryUrl)) {
     return
@@ -116,8 +145,7 @@ async function ensureLocalStack(config) {
   await ensureQuickstartEnv()
 
   if (rebuildStack) {
-    log('rebuilding the local Beam quickstart stack with docker compose')
-    run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
+    await rebuildLocalStack()
     return
   }
 
@@ -127,12 +155,30 @@ async function ensureLocalStack(config) {
   ])
 
   if (directoryOk && dashboardOk) {
-    log('local Beam stack already looks healthy')
+    const [releaseVersion, hasFleetApi] = await Promise.all([
+      getDirectoryReleaseVersion(config.directoryUrl),
+      hasOpenClawFleetApi(config.directoryUrl),
+    ])
+    const localVersion = readPackageVersion()
+
+    if (!hasFleetApi) {
+      log('local Beam stack is healthy but missing OpenClaw fleet APIs; rebuilding to the current repo state')
+      await rebuildLocalStack()
+      return
+    }
+
+    if (releaseVersion && releaseVersion !== localVersion) {
+      log(`local Beam stack reports version ${releaseVersion}, but the repo is ${localVersion}; rebuilding to the current repo state`)
+      await rebuildLocalStack()
+      return
+    }
+
+    log('local Beam stack already looks healthy and up to date')
     return
   }
 
   log('starting the local Beam quickstart stack with docker compose')
-  run(dockerPath, ['compose', '-f', composeFile, '--env-file', envPath, 'up', '-d', '--build'])
+  await rebuildLocalStack()
 }
 
 async function requestJsonAllow(url, init, allowedStatuses = []) {
@@ -216,6 +262,20 @@ function buildHostMetadata(state = {}) {
       workspaceSlug: config.workspaceSlug,
     },
   }
+}
+
+function truncateText(value, maxLength) {
+  if (typeof value !== 'string') {
+    return value ?? null
+  }
+  if (value.length <= maxLength) {
+    return value
+  }
+  return `${value.slice(0, Math.max(0, maxLength - 1))}…`
+}
+
+function compactObjectEntries(entries) {
+  return Object.fromEntries(entries.filter(([, value]) => value !== null && value !== undefined))
 }
 
 async function persistHostState(nextState) {
@@ -309,6 +369,7 @@ async function approveHost(state, adminSession) {
   return persistHostState({
     ...state,
     credential: response.credential,
+    enrollmentStatus: response.host.status === 'approved' ? 'approved' : state.enrollmentStatus,
     status: response.host.status,
     healthStatus: response.host.healthStatus,
     approvedAt: response.host.approvedAt,
@@ -354,20 +415,34 @@ async function ensureHostCredential(initialState, { allowBootstrapAdmin = false,
   return state
 }
 
-function mapRouteToInventoryEntry(route, config) {
+function mapRouteToInventoryEntry(route, config, strategy = 'full') {
   const routeSource = route.source
   const routeKey = openClawRouteKeyForDescriptor(route)
-
-  const metadata = {
-    identityKey: route.identityKey,
-    agentName: route.agentName,
-    source: route.source,
-    role: route.role ?? null,
-    controllerAgent: route.controllerAgent ?? null,
-    label: route.label ?? null,
-    runId: route.runId ?? null,
-    taskPreview: route.taskPreview ?? null,
-  }
+  const metadata =
+    strategy === 'minimal'
+      ? compactObjectEntries([
+          ['agentName', truncateText(route.agentName, 96)],
+          ['source', route.source],
+        ])
+      : strategy === 'compact'
+        ? compactObjectEntries([
+            ['identityKey', truncateText(route.identityKey, 96)],
+            ['agentName', truncateText(route.agentName, 96)],
+            ['source', route.source],
+            ['role', truncateText(route.role ?? null, 64)],
+            ['runId', truncateText(route.runId ?? null, 96)],
+            ['taskPreview', truncateText(route.taskPreview ?? null, 120)],
+          ])
+        : compactObjectEntries([
+            ['identityKey', truncateText(route.identityKey, 120)],
+            ['agentName', truncateText(route.agentName, 120)],
+            ['source', route.source],
+            ['role', truncateText(route.role ?? null, 80)],
+            ['controllerAgent', truncateText(route.controllerAgent ?? null, 120)],
+            ['label', truncateText(route.label ?? null, 140)],
+            ['runId', truncateText(route.runId ?? null, 120)],
+            ['taskPreview', truncateText(route.taskPreview ?? null, 240)],
+          ])
 
   return {
     beamId: route.beamId,
@@ -386,6 +461,18 @@ function mapRouteToInventoryEntry(route, config) {
   }
 }
 
+function buildInventoryPayload(config, routes) {
+  return {
+    connectorVersion: readPackageVersion(),
+    beamDirectoryUrl: config.directoryUrl,
+    workspaceSlug: config.workspaceSlug,
+    label: buildHostMetadata(config).label,
+    hostname: os.hostname(),
+    os: `${process.platform} ${os.release()}`,
+    routes,
+  }
+}
+
 async function syncHostInventory(state) {
   if (!state.credential) {
     return { routeCount: 0, runtime: null }
@@ -395,25 +482,36 @@ async function syncHostInventory(state) {
   const runtime = await loadOpenClawRuntimeState({
     includeEndedSubagents: true,
   })
-  const routes = runtime.routes.map((route) => mapRouteToInventoryEntry(route, config))
+  const routeStrategies = ['full', 'compact', 'minimal']
+  let routes = []
+  let payload = null
+  let selectedStrategy = 'full'
+
+  for (const strategy of routeStrategies) {
+    const candidateRoutes = runtime.routes.map((route) => mapRouteToInventoryEntry(route, config, strategy))
+    const candidatePayload = buildInventoryPayload(config, candidateRoutes)
+    const serializedSize = Buffer.byteLength(JSON.stringify(candidatePayload), 'utf8')
+    routes = candidateRoutes
+    payload = candidatePayload
+    selectedStrategy = strategy
+    if (serializedSize <= inventoryPayloadSoftLimitBytes || strategy === 'minimal') {
+      if (strategy !== 'full') {
+        log(`inventory payload exceeded the soft limit; using ${strategy} inventory metadata for ${candidateRoutes.length} routes`)
+      }
+      break
+    }
+  }
 
   await requestJson(`${config.directoryUrl}/openclaw/hosts/inventory`, {
     method: 'POST',
     headers: createHostHeaders(state.credential),
-    body: JSON.stringify({
-      connectorVersion: readPackageVersion(),
-      beamDirectoryUrl: config.directoryUrl,
-      workspaceSlug: config.workspaceSlug,
-      label: buildHostMetadata(state).label,
-      hostname: os.hostname(),
-      os: `${process.platform} ${os.release()}`,
-      routes,
-    }),
+    body: JSON.stringify(payload),
   })
 
   return {
     routeCount: routes.length,
     runtime,
+    inventoryStrategy: selectedStrategy,
   }
 }
 
@@ -518,10 +616,31 @@ async function setupCommand() {
     enrollmentToken: config.enrollmentToken,
     updatedAt: new Date().toISOString(),
   })
-  state = await ensureHostCredential(state, {
-    allowBootstrapAdmin: true,
-    allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
-  })
+  try {
+    state = await ensureHostCredential(state, {
+      allowBootstrapAdmin: true,
+      allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    const shouldRetryLocalSetup =
+      isLocalDirectory(config.directoryUrl) &&
+      /admin\/openclaw\/hosts\/enrollment/u.test(message) &&
+      /404/u.test(message)
+
+    if (!shouldRetryLocalSetup) {
+      throw error
+    }
+
+    log('local Beam stack answered without the OpenClaw enrollment route; rebuilding once and retrying setup')
+    await rebuildLocalStack()
+    log('rerunning local quickstart smoke after the rebuild')
+    run(nodePath, [path.join(repoRoot, 'scripts/quickstart/smoke.mjs')])
+    state = await ensureHostCredential(state, {
+      allowBootstrapAdmin: true,
+      allowAutoApprove: autoApprove || isLocalDirectory(config.directoryUrl),
+    })
+  }
 
   log('installing managed Beam OpenClaw host service')
   installManagedService()
@@ -597,7 +716,7 @@ async function statusCommand() {
   console.log(`- label:            ${state.label ?? buildHostMetadata(state).label}`)
   console.log(`- credential:       ${state.credential ? 'present' : 'missing'}`)
   console.log(`- credential store: ${state.credentialStorage ?? 'unknown'}`)
-  console.log(`- enrollment:       ${state.enrollmentStatus ?? 'none'}`)
+  console.log(`- enrollment:       ${fleetHost?.status ?? state.status ?? state.enrollmentStatus ?? 'none'}`)
   console.log(`- approved at:      ${state.approvedAt ?? 'pending'}`)
   console.log(`- revoked at:       ${state.revokedAt ?? 'no'}`)
   if (fleetHost) {
