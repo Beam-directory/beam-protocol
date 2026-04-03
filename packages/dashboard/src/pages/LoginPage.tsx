@@ -29,7 +29,7 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="relative min-h-screen overflow-hidden bg-transparent text-slate-950 dark:text-slate-50">
+    <div data-ui-page="login" className="relative min-h-screen overflow-hidden bg-transparent text-slate-950 dark:text-slate-50">
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
         <div className="absolute -left-24 top-0 h-80 w-80 rounded-full bg-orange-500/14 blur-3xl" style={{ animation: 'beam-float 12s ease-in-out infinite' }} />
         <div className="absolute right-[-5rem] top-12 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" style={{ animation: 'beam-float 16s ease-in-out infinite' }} />

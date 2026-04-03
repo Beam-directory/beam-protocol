@@ -179,7 +179,7 @@ export default function TraceDetailPage() {
   }, [deliveryStage, firstErrorStage, highRiskShield, shieldFlagCount, terminalStage, trace.intent.status])
 
   return (
-    <div className="space-y-8">
+    <div data-ui-page="trace-detail" className="space-y-8">
       <PageHeader
         eyebrow="Intent Trace"
         title="Trace"
@@ -192,7 +192,7 @@ export default function TraceDetailPage() {
           </>
         )}
         aside={(
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Latency</div>
               <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{formatLatency(trace.intent.roundTripLatencyMs)}</div>

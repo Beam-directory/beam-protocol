@@ -21,6 +21,8 @@
     "production:operator-dry-run": "node scripts/production/operator-dry-run.mjs",
     "production:partner-dry-run": "node scripts/production/production-partner-dry-run.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
+    "quickstart:ui-smoke": "node scripts/quickstart/dashboard-ui-smoke.mjs",
+    "quickstart:ui-smoke:install": "playwright install chromium",
     "release:admin-auth": "node scripts/release/live-admin-auth-smoke.mjs",
     "release:smoke": "node scripts/release/release-smoke.mjs",
     "test": "npm run test:workspaces && npm run test:scripts",
@@ -33,6 +35,7 @@
     "workspace:fleet-digest:tick": "node scripts/workspace/fleet-digest-tick.mjs",
     "workspace:fleet-drill": "node scripts/workspace/fleet-smoke.mjs",
     "workspace:fleet-smoke": "node scripts/workspace/fleet-smoke.mjs",
+    "workspace:openclaw": "node scripts/workspace/openclaw-onboarding.mjs",
     "workspace:import-openclaw": "node scripts/workspace/import-openclaw.mjs",
     "workspace:openclaw-beam-send:install": "node scripts/workspace/install-openclaw-beam-send-shim.mjs",
     "workspace:openclaw-beam-send:uninstall": "node scripts/workspace/install-openclaw-beam-send-shim.mjs --uninstall",
@@ -75,5 +78,8 @@
   "repository": {
     "type": "git",
     "url": "https://github.com/beam-directory/beam-protocol"
+  },
+  "devDependencies": {
+    "playwright": "^1.54.2"
   }
 }

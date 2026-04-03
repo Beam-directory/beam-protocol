@@ -933,7 +933,7 @@ export default function OpenClawFleetPage() {
   const identities = hostIdentities?.identities ?? []
 
   return (
-    <div className="space-y-8">
+    <div data-ui-page="openclaw-fleet" className="space-y-8">
       <PageHeader
         eyebrow="Fleet Autonomy"
         title="OpenClaw Fleet"
@@ -946,7 +946,7 @@ export default function OpenClawFleetPage() {
           </>
         )}
         aside={(
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Receipt coverage</div>
               <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!overview ? '—' : formatPercent(overview.summary.receiptCoverageRatio)}</div>
@@ -1009,7 +1009,7 @@ export default function OpenClawFleetPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-9">
+      <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-9">
         <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.summary.totalHosts)} />
         <MetricCard label="Active hosts" value={!overview ? '—' : formatNumber(overview.summary.activeHosts)} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Pending hosts" value={!overview ? '—' : formatNumber(overview.summary.pendingHosts)} tone={(overview?.summary.pendingHosts ?? 0) > 0 ? 'warning' : 'default'} />
@@ -1035,7 +1035,7 @@ export default function OpenClawFleetPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-3 xl:grid-cols-5">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
             <MetricCard label="Overdue" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.overdue)} tone={(overview?.credentialPolicy.counts.overdue ?? 0) > 0 ? 'critical' : 'default'} />
             <MetricCard label="Due soon" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.dueSoon)} tone={(overview?.credentialPolicy.counts.dueSoon ?? 0) > 0 ? 'warning' : 'default'} />
             <MetricCard label="Window open" value={!overview ? '—' : formatNumber(overview.credentialPolicy.counts.windowOpen)} tone={(overview?.credentialPolicy.counts.windowOpen ?? 0) > 0 ? 'warning' : 'default'} />
@@ -1131,7 +1131,7 @@ export default function OpenClawFleetPage() {
             </div>
           </div>
 
-          <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
             <MetricCard label="Coverage" value={!overview ? '—' : formatPercent(overview.routeHealth.summary.receiptCoverageRatio)} tone={(overview?.routeHealth.summary.receiptCoverageRatio ?? 1) < 0.8 ? 'warning' : 'success'} />
             <MetricCard label="Missing receipts" value={!overview ? '—' : formatNumber(overview.routeHealth.summary.routesMissingReceipts)} tone={(overview?.routeHealth.summary.routesMissingReceipts ?? 0) > 0 ? 'warning' : 'default'} />
             <MetricCard label="Failed receipts" value={!overview ? '—' : formatNumber(overview.routeHealth.summary.failedReceipts)} tone={(overview?.routeHealth.summary.failedReceipts ?? 0) > 0 ? 'critical' : 'default'} />
@@ -1222,7 +1222,7 @@ export default function OpenClawFleetPage() {
           </div>
         </div>
 
-        <div className="mt-4 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+        <div className="mt-4 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
           <MetricCard label="Drifted hosts" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.driftedHosts)} tone={(overview?.reconciliation.summary.driftedHosts ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Cleanup required" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.cleanupRequiredHosts)} tone={(overview?.reconciliation.summary.cleanupRequiredHosts ?? 0) > 0 ? 'warning' : 'default'} />
           <MetricCard label="Stale routes" value={!overview ? '—' : formatNumber(overview.reconciliation.summary.staleRoutes)} tone={(overview?.reconciliation.summary.staleRoutes ?? 0) > 0 ? 'warning' : 'default'} />

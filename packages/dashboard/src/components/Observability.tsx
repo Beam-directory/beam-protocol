@@ -61,7 +61,7 @@ export function MetricCard({
 }) {
   return (
     <div className={cn(
-      'panel beam-reveal-soft min-h-[148px]',
+      'panel beam-reveal-soft min-h-[132px] md:min-h-[148px]',
       tone === 'warning' && 'border-amber-200 dark:border-amber-500/30',
       tone === 'critical' && 'border-red-200 dark:border-red-500/30',
       tone === 'success' && 'border-emerald-200 dark:border-emerald-500/30',

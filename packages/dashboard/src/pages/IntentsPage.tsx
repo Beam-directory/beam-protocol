@@ -237,7 +237,7 @@ export default function IntentsPage() {
   }, [hours, query, status])
 
   return (
-    <div className="space-y-8">
+    <div data-ui-page="intents" className="space-y-8">
       <PageHeader
         eyebrow="Live Intent Feed"
         title="Intents"
@@ -255,7 +255,7 @@ export default function IntentsPage() {
           </>
         )}
         aside={(
-          <div className="grid gap-3 sm:grid-cols-4">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Visible</div>
               <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{summary.total}</div>

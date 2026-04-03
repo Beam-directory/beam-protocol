@@ -61,7 +61,7 @@
 
 @layer components {
   .panel {
-    @apply relative overflow-hidden rounded-[28px] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl;
+    @apply relative overflow-hidden rounded-[28px] border p-4 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl sm:p-5;
     background:
       linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(255, 255, 255, 0.74) 100%),
       radial-gradient(circle at top right, rgba(251, 146, 60, 0.12), transparent 36%);
@@ -106,13 +106,13 @@
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex min-h-11 items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60;
     background: linear-gradient(135deg, rgb(249 115 22) 0%, rgb(234 88 12) 100%);
     box-shadow: 0 18px 44px rgba(249, 115, 22, 0.28);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-2xl border border-white/70 bg-white/[0.72] px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900;
+    @apply inline-flex min-h-11 items-center justify-center rounded-2xl border border-white/70 bg-white/[0.72] px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900;
   }
 
   .table-head {

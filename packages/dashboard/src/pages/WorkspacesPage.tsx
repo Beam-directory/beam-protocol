@@ -1323,7 +1323,7 @@ export default function WorkspacesPage() {
   }
 
   return (
-    <div className="space-y-8">
+    <div data-ui-page="workspaces" className="space-y-8">
       <PageHeader
         eyebrow="Identity Control Plane"
         title="Workspaces"
@@ -1339,7 +1339,7 @@ export default function WorkspacesPage() {
           </>
         ) : undefined}
         aside={selectedWorkspace ? (
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 md:grid-cols-3">
             <div>
               <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Local identities</div>
               <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!overview ? '—' : formatNumber(overview.summary.localIdentities)}</div>
@@ -1411,7 +1411,7 @@ export default function WorkspacesPage() {
 
       {selectedWorkspace ? (
         <>
-          <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-6">
+          <section className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
             <MetricCard label="Active identities" value={!overview ? '—' : formatNumber(overview.summary.activeIdentities)} hint={`${overview ? formatNumber(overview.summary.totalIdentities) : '—'} total`} />
             <MetricCard label="External ready" value={!overview ? '—' : formatNumber(overview.summary.externalReadyIdentities)} tone={(overview?.summary.externalReadyIdentities ?? 0) > 0 ? 'success' : 'default'} />
             <MetricCard label="Stale identities" value={!overview ? '—' : formatNumber(overview.summary.staleIdentities)} tone={(overview?.summary.staleIdentities ?? 0) > 0 ? 'warning' : 'default'} />
@@ -1456,7 +1456,7 @@ export default function WorkspacesPage() {
               </div>
             </div>
 
-            <div className="mt-4 grid gap-4 md:grid-cols-4">
+            <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
               <MetricCard label="Queue items" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.total)} tone={(approvalQueue?.summary.total ?? 0) > 0 ? 'warning' : 'default'} />
               <MetricCard label="Binding approvals" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.bindingApprovals)} tone={(approvalQueue?.summary.bindingApprovals ?? 0) > 0 ? 'warning' : 'default'} />
               <MetricCard label="Thread approvals" value={!approvalQueue ? '—' : formatNumber(approvalQueue.summary.threadApprovals)} tone={(approvalQueue?.summary.threadApprovals ?? 0) > 0 ? 'critical' : 'default'} />
@@ -1676,7 +1676,7 @@ export default function WorkspacesPage() {
                 </div>
               </div>
 
-              <div className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-6">
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-6">
                 <MetricCard label="Local identities" value={!overview ? '—' : formatNumber(overview.summary.localIdentities)} />
                 <MetricCard label="Partner identities" value={!overview ? '—' : formatNumber(overview.summary.partnerIdentities)} />
                 <MetricCard label="OpenClaw identities" value={formatNumber(openClawBindings.length)} tone={openClawBindings.length > 0 ? 'success' : 'default'} />

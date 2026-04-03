@@ -31,6 +31,7 @@ const syncIntervalMs = Number.parseInt(optionalFlag('--sync-interval-ms', '10000
 const heartbeatIntervalMs = Number.parseInt(optionalFlag('--heartbeat-interval-ms', '10000'), 10)
 const autoApprove = process.argv.includes('--auto-approve')
 const rebuildStack = process.argv.includes('--rebuild')
+const jsonOutput = process.argv.includes('--json')
 const statePath = optionalFlag('--state-path', path.join(os.homedir(), '.openclaw/workspace/secrets/beam-openclaw-host.json'))
 const sessionCachePath = optionalFlag('--admin-session-cache', path.join(os.homedir(), '.openclaw/workspace/secrets/beam-admin-session.json'))
 const credentialOverrideFlag = optionalFlag('--credential', null)
@@ -117,10 +118,28 @@ async function getDirectoryReleaseVersion(directoryUrl) {
     }
     const payload = await response.json()
     const version = payload?.release?.version
-    return typeof version === 'string' && version.length > 0 ? version : null
+    const gitSha = payload?.release?.gitSha
+    return {
+      version: typeof version === 'string' && version.length > 0 ? version : null,
+      gitSha: typeof gitSha === 'string' && gitSha.length > 0 ? gitSha : null,
+    }
   } catch {
     return null
   }
+}
+
+function readLocalGitSha() {
+  const result = spawnSync('git', ['-C', repoRoot, 'rev-parse', 'HEAD'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: process.env,
+  })
+  if (result.status !== 0) {
+    return null
+  }
+
+  const sha = result.stdout.trim()
+  return /^[0-9a-f]{7,40}$/iu.test(sha) ? sha : null
 }
 
 async function hasOpenClawFleetApi(directoryUrl) {
@@ -160,6 +179,7 @@ async function ensureLocalStack(config) {
       hasOpenClawFleetApi(config.directoryUrl),
     ])
     const localVersion = readPackageVersion()
+    const localGitSha = readLocalGitSha()
 
     if (!hasFleetApi) {
       log('local Beam stack is healthy but missing OpenClaw fleet APIs; rebuilding to the current repo state')
@@ -167,8 +187,14 @@ async function ensureLocalStack(config) {
       return
     }
 
-    if (releaseVersion && releaseVersion !== localVersion) {
-      log(`local Beam stack reports version ${releaseVersion}, but the repo is ${localVersion}; rebuilding to the current repo state`)
+    if (releaseVersion?.version && releaseVersion.version !== localVersion) {
+      log(`local Beam stack reports version ${releaseVersion.version}, but the repo is ${localVersion}; rebuilding to the current repo state`)
+      await rebuildLocalStack()
+      return
+    }
+
+    if (releaseVersion?.gitSha && localGitSha && releaseVersion.gitSha !== localGitSha) {
+      log(`local Beam stack reports git sha ${releaseVersion.gitSha.slice(0, 7)}, but the repo is ${localGitSha.slice(0, 7)}; rebuilding to the current repo state`)
       await rebuildLocalStack()
       return
     }
@@ -700,6 +726,48 @@ async function statusCommand() {
     serviceStatus = readManagedServiceStatus()
   } catch {
     serviceStatus = null
+  }
+
+  if (jsonOutput) {
+    const payload = {
+      loginUrl: adminSession?.url ?? null,
+      workspaceUrl: `${config.dashboardUrl}/workspaces?workspace=${encodeURIComponent(config.workspaceSlug)}`,
+      fleetUrl: `${config.dashboardUrl}/openclaw-fleet${state.hostId ? `?host=${state.hostId}` : ''}`,
+      host: {
+        hostId: state.hostId ?? null,
+        hostKey: state.hostKey ?? null,
+        label: state.label ?? buildHostMetadata(state).label,
+        credentialPresent: Boolean(state.credential),
+        credentialStore: state.credentialStorage ?? 'unknown',
+        enrollment: fleetHost?.status ?? state.status ?? state.enrollmentStatus ?? 'none',
+        approvedAt: state.approvedAt ?? null,
+        revokedAt: state.revokedAt ?? null,
+        fleetHealth: fleetHost?.healthStatus ?? null,
+        routeCount: fleetHost?.routeCount ?? null,
+        lastHeartbeatAt: fleetHost?.lastHeartbeatAt ?? null,
+      },
+      service: serviceStatus
+        ? {
+            label: serviceStatus.serviceLabel ?? 'beam-openclaw-host',
+            installed: Boolean(serviceStatus.installed),
+            running: Boolean(serviceStatus.running),
+            enabled: typeof serviceStatus.enabled === 'boolean' ? serviceStatus.enabled : null,
+            activeState: typeof serviceStatus.activeState === 'string' ? serviceStatus.activeState : null,
+            subState: typeof serviceStatus.subState === 'string' ? serviceStatus.subState : null,
+          }
+        : null,
+      runtime: {
+        persistent: runtime.counts.persistentAgents,
+        workspaceAgents: runtime.counts.workspaceAgents,
+        gatewayAgents: runtime.counts.gatewayAgents,
+        subagents: runtime.counts.subagents,
+        totalRoutes: runtime.routes.length,
+      },
+      ready: Boolean(state.credential) && (fleetHost?.healthStatus ?? state.healthStatus ?? null) === 'healthy',
+    }
+
+    console.log(JSON.stringify(payload, null, 2))
+    return
   }
 
   console.log('')

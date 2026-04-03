@@ -70,7 +70,7 @@ Beam can now scan the local OpenClaw installation on this Mac and bind persisten
 The shortest local install path is:
 
 ```bash
-npm run workspace:openclaw-setup
+npm run workspace:openclaw
 ```
 
 If you want the shortest human-friendly health check after setup, run:
@@ -90,7 +90,7 @@ That prints:
 - which routes are currently live over Beam
 - the next copy-paste command to send a local proof
 
-That command will:
+The onboarding command will:
 
 1. create `ops/quickstart/.env` if needed
 2. start the local Beam quickstart stack if it is not already running
@@ -100,6 +100,21 @@ That command will:
 6. install a managed `beam-send.js` shim so OpenClaw uses the merged Beam identity file automatically
 7. install the inbound Beam receiver so imported agents can receive Beam intents directly
 8. install a direct `subagent_spawned` hook so fresh OpenClaw subagents sync into Beam immediately
+9. capture a repo-owned dashboard proof set for Login, Fleet, Workspace, Intents, and Trace
+
+For advanced or scriptable flows you can still use:
+
+```bash
+npm run workspace:openclaw-setup
+npm run workspace:openclaw-status
+npm run quickstart:ui-smoke
+```
+
+If the UI smoke cannot launch a browser on this machine, install the bundled Chromium once:
+
+```bash
+npm run quickstart:ui-smoke:install
+```
 
 The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.
 It also installs the local OpenClaw receiver service, which keeps Beam WebSocket connections open for imported identities and forwards incoming intents into the matching OpenClaw runtime session.
