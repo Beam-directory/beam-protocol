@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.6.0 (draft)
+## v1.6.0 (2026-04-03)
 
 ### Fleet Production Readiness
 - add external fleet alerting with persisted webhook delivery evidence and escalation history
