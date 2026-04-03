@@ -208,6 +208,20 @@ The fleet enrollment response now also includes a copy-paste install pack with:
 That keeps the operator path explicit: issue enrollment, hand off one command, approve the host, and then watch receipts and health in the fleet view.
 The same fleet surface now also exposes the guided enrollment link, the recent enrollment queue, a fleet analytics summary, and support-bundle export for the host/workspace/trace slice you want to hand to another operator.
 
+If you want to hand the full adoption packet to an external tester, generate it with:
+
+```bash
+npm run workspace:external-dogfood-pack -- --tester-name "Jane Example" --tester-email "jane@example.com" --host-label "Jane MacBook"
+```
+
+That writes:
+
+- a host-install packet with the guided enrollment URL and copy-paste install commands
+- an operator runbook for approval and support handoff
+- a separate feedback template you can send back to the tester
+
+For `localhost`, Beam auto-mints a local admin session. For a non-local control plane, pass `--token` or set `BEAM_ADMIN_TOKEN`.
+
 The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
 
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:

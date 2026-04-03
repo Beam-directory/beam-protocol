@@ -34,6 +34,7 @@
     "test:e2e": "node scripts/e2e/run.mjs",
     "workspace:buyer-dry-run": "node scripts/workspace/buyer-dry-run.mjs",
     "workspace:digest": "node scripts/workspace/operator-digest.mjs",
+    "workspace:external-dogfood-pack": "node scripts/workspace/external-dogfood-pack.mjs",
     "workspace:fleet-digest": "node scripts/workspace/fleet-digest.mjs",
     "workspace:fleet-digest:tick": "node scripts/workspace/fleet-digest-tick.mjs",
     "workspace:fleet-drill": "node scripts/workspace/fleet-smoke.mjs",
