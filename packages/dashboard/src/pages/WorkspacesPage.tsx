@@ -1323,10 +1323,39 @@ export default function WorkspacesPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
+        eyebrow="Identity Control Plane"
         title="Workspaces"
         description="Identity home, policy control, outbound approvals, partner channels, thread drafts, and audit proof for Beam workspaces."
+        badges={selectedWorkspace ? (
+          <>
+            <StatusPill label={selectedWorkspace.status} tone={workspaceStatusTone(selectedWorkspace.status)} />
+            <StatusPill
+              label={selectedWorkspace.externalHandoffsEnabled ? 'External handoffs enabled' : 'External handoffs disabled'}
+              tone={selectedWorkspace.externalHandoffsEnabled ? 'success' : 'warning'}
+            />
+            <StatusPill label={`${formatNumber(openClawLiveBindings.length)} live OpenClaw routes`} tone={openClawLiveBindings.length > 0 ? 'success' : 'default'} />
+          </>
+        ) : undefined}
+        aside={selectedWorkspace ? (
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Local identities</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!overview ? '—' : formatNumber(overview.summary.localIdentities)}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Partner channels</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{formatNumber(channels.length)}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">policy-aware external lanes</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Manual review</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!approvalQueue ? '—' : formatNumber(approvalQueue.summary.total)}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">queue items in this workspace</div>
+            </div>
+          </div>
+        ) : undefined}
         actions={(
           <div className="flex flex-wrap items-center gap-2">
             {workspaces.length > 0 ? (
@@ -1347,11 +1376,11 @@ export default function WorkspacesPage() {
                 ))}
               </select>
             ) : null}
-            <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to="/partner-ops">
+            <Link className="btn-secondary" to="/partner-ops">
               Partner ops
             </Link>
             <button
-              className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+              className="btn-secondary"
               type="button"
               disabled={surfaceLoading}
               onClick={() => {
@@ -1656,7 +1685,7 @@ export default function WorkspacesPage() {
                 <MetricCard label="Updated" value={formatRelativeTime(selectedWorkspace.updatedAt)} hint={formatDateTime(selectedWorkspace.updatedAt)} />
               </div>
 
-              <div className="mt-5 rounded-2xl border border-slate-200 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+              <div className="panel mt-5 border-orange-200/70 bg-white/60 px-4 py-4 text-sm text-slate-600 dark:border-orange-500/20 dark:bg-slate-950/50 dark:text-slate-300">
                 <div className="font-medium text-slate-900 dark:text-slate-100">What changed in this control plane</div>
                 <div className="mt-1">
                   Operators can now execute approval-path decisions directly from one surface: resume or pause bindings, grant or remove outbound rights, manage partner channels,

@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
 import { ApiError, directoryApi, type IntentTraceResponse } from '../lib/api'
-import { EmptyPanel, PageHeader, StatusPill } from '../components/Observability'
-import { alertSeverityColor, cn, formatDateTime, formatLatency, intentStatusColor, truncateBeamId } from '../lib/utils'
+import { EmptyPanel, MetricCard, PageHeader, StatusPill } from '../components/Observability'
+import { alertSeverityColor, cn, formatDateTime, formatLatency, formatRelativeTime, intentStatusColor, truncateBeamId } from '../lib/utils'
 import { formatIntentLifecycleLabel, intentLifecycleDotColor, intentLifecycleTone } from '../lib/intent-lifecycle'
 
 function getOperatorGuidance(status: string): {
@@ -118,10 +118,38 @@ export default function TraceDetailPage() {
   const guidance = getOperatorGuidance(trace.intent.status)
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
+        eyebrow="Intent Trace"
         title="Trace"
         description={`Nonce ${trace.intent.nonce}`}
+        badges={(
+          <>
+            <StatusPill label={formatIntentLifecycleLabel(trace.intent.status)} tone={intentLifecycleTone(trace.intent.status)} />
+            {trace.intent.errorCode ? <StatusPill label={trace.intent.errorCode} tone="critical" /> : null}
+            {alertId ? <StatusPill label={`Alert ${alertId}`} tone="warning" /> : null}
+          </>
+        )}
+        aside={(
+          <div className="grid gap-3 sm:grid-cols-4">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Latency</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{formatLatency(trace.intent.roundTripLatencyMs)}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Stages</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{trace.stages.length}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Audit hits</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{trace.audit.length}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Shield hits</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{trace.shield.length}</div>
+            </div>
+          </div>
+        )}
         actions={(
           <div className="flex flex-wrap gap-2">
             <Link className="btn-secondary" to="/intents">Back to intents</Link>
@@ -132,13 +160,20 @@ export default function TraceDetailPage() {
         )}
       />
 
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        <MetricCard label="Trace state" value={formatIntentLifecycleLabel(trace.intent.status)} tone={intentLifecycleTone(trace.intent.status)} className="xl:col-span-2" />
+        <MetricCard label="From" value={truncateBeamId(trace.intent.from, 20)} hint={trace.intent.from} className="xl:col-span-1" />
+        <MetricCard label="To" value={truncateBeamId(trace.intent.to, 20)} hint={trace.intent.to} className="xl:col-span-1" />
+        <MetricCard label="Completed" value={trace.intent.completedAt ? formatRelativeTime(trace.intent.completedAt) : 'In flight'} hint={formatDateTime(trace.intent.completedAt)} className="xl:col-span-1" />
+      </section>
+
       {alertId ? (
-        <div className="rounded-xl border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-300">
+        <div className="panel border-slate-200/70 bg-white/55 px-4 py-3 text-sm text-slate-600 dark:border-white/10 dark:bg-slate-950/45 dark:text-slate-300">
           This trace was opened from alert <span className="font-mono">{alertId}</span>. Use the audit button above for the matching control-plane history.
         </div>
       ) : null}
 
-      <section className="rounded-2xl border border-slate-200 bg-white/80 px-4 py-4 text-sm text-slate-600 dark:border-slate-800 dark:bg-slate-950/80 dark:text-slate-300">
+      <section className="panel border-amber-200/70 bg-white/60 px-4 py-4 text-sm text-slate-600 dark:border-amber-500/20 dark:bg-slate-950/50 dark:text-slate-300">
         <div className="font-medium text-slate-900 dark:text-slate-100">{guidance.title}</div>
         <div className="mt-1">{guidance.body}</div>
         <div className="mt-3 flex flex-wrap gap-2">

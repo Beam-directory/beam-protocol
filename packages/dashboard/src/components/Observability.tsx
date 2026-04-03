@@ -3,21 +3,45 @@ import { ResponsiveContainer, AreaChart, Area, CartesianGrid, Tooltip, XAxis, YA
 import { cn, formatChartTime } from '../lib/utils'
 
 export function PageHeader({
+  eyebrow = 'Beam Control Plane',
   title,
   description,
+  badges,
+  aside,
   actions,
 }: {
+  eyebrow?: string
   title: string
   description: string
+  badges?: ReactNode
+  aside?: ReactNode
   actions?: ReactNode
 }) {
   return (
-    <section className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">{title}</h1>
-        <p className="text-sm text-slate-500 dark:text-slate-400">{description}</p>
+    <section className="panel beam-page-enter overflow-hidden px-6 py-6 sm:px-7 sm:py-7 lg:px-8 lg:py-8">
+      <div className="pointer-events-none absolute inset-0">
+        <div className="absolute -left-16 top-0 h-40 w-40 rounded-full bg-orange-500/10 blur-3xl dark:bg-orange-400/10" />
+        <div className="absolute right-0 top-0 h-52 w-52 rounded-full bg-cyan-400/10 blur-3xl dark:bg-cyan-300/10" />
+        <div className="beam-grid-lines absolute inset-0 opacity-40 dark:opacity-20" />
       </div>
-      {actions}
+      <div className="relative flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+        <div className="max-w-3xl">
+          <div className="text-[11px] font-semibold uppercase tracking-[0.34em] text-orange-600 dark:text-orange-300">{eyebrow}</div>
+          <h1 className="mt-4 text-3xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white sm:text-4xl xl:text-5xl">{title}</h1>
+          <p className="mt-3 max-w-2xl text-sm leading-6 text-slate-600 dark:text-slate-300 sm:text-base sm:leading-7">{description}</p>
+          {badges ? <div className="mt-5 flex flex-wrap gap-2">{badges}</div> : null}
+        </div>
+        {(aside || actions) ? (
+          <div className="flex w-full flex-col gap-3 lg:max-w-md lg:items-end">
+            {aside ? (
+              <div className="w-full rounded-[24px] border border-white/60 bg-white/[0.72] p-4 text-sm text-slate-600 shadow-[0_18px_50px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-300">
+                {aside}
+              </div>
+            ) : null}
+            {actions ? <div className="flex flex-wrap gap-2 lg:justify-end">{actions}</div> : null}
+          </div>
+        ) : null}
+      </div>
     </section>
   )
 }
@@ -27,22 +51,36 @@ export function MetricCard({
   value,
   hint,
   tone = 'default',
+  className,
 }: {
   label: string
   value: string
   hint?: string
   tone?: 'default' | 'warning' | 'critical' | 'success'
+  className?: string
 }) {
   return (
     <div className={cn(
-      'panel',
+      'panel beam-reveal-soft min-h-[148px]',
       tone === 'warning' && 'border-amber-200 dark:border-amber-500/30',
       tone === 'critical' && 'border-red-200 dark:border-red-500/30',
       tone === 'success' && 'border-emerald-200 dark:border-emerald-500/30',
+      className,
     )}>
-      <div className="text-sm text-slate-500 dark:text-slate-400">{label}</div>
-      <div className="mt-2 text-3xl font-semibold tracking-tight">{value}</div>
-      {hint ? <div className="mt-2 text-xs text-slate-500 dark:text-slate-400">{hint}</div> : null}
+      <div className="flex items-start justify-between gap-3">
+        <div className="text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400 dark:text-slate-500">{label}</div>
+        <span
+          className={cn(
+            'beam-status-dot inline-flex h-2.5 w-2.5 rounded-full',
+            tone === 'warning' && 'bg-amber-400',
+            tone === 'critical' && 'bg-red-400',
+            tone === 'success' && 'bg-emerald-400',
+            tone === 'default' && 'bg-slate-300 dark:bg-slate-600',
+          )}
+        />
+      </div>
+      <div className="mt-6 text-3xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{value}</div>
+      {hint ? <div className="mt-3 max-w-[24ch] text-xs leading-5 text-slate-500 dark:text-slate-400">{hint}</div> : null}
     </div>
   )
 }
@@ -56,11 +94,11 @@ export function StatusPill({
 }) {
   return (
     <span className={cn(
-      'inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium capitalize',
-      tone === 'success' && 'bg-emerald-100 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300',
-      tone === 'warning' && 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300',
-      tone === 'critical' && 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300',
-      tone === 'default' && 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+      'inline-flex items-center rounded-full border px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.2em]',
+      tone === 'success' && 'border-emerald-200 bg-emerald-100/80 text-emerald-700 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-300',
+      tone === 'warning' && 'border-amber-200 bg-amber-100/80 text-amber-700 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-300',
+      tone === 'critical' && 'border-red-200 bg-red-100/80 text-red-700 dark:border-red-500/20 dark:bg-red-500/10 dark:text-red-300',
+      tone === 'default' && 'border-slate-200 bg-white/70 text-slate-600 dark:border-white/10 dark:bg-white/5 dark:text-slate-300',
     )}>
       {label}
     </span>
@@ -69,7 +107,7 @@ export function StatusPill({
 
 export function EmptyPanel({ label }: { label: string }) {
   return (
-    <div className="rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500 dark:border-slate-800 dark:text-slate-400">
+    <div className="rounded-[24px] border border-dashed border-slate-300/80 bg-white/35 p-6 text-sm text-slate-500 dark:border-white/10 dark:bg-white/5 dark:text-slate-400">
       {label}
     </div>
   )

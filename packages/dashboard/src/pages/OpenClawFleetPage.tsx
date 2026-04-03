@@ -933,10 +933,49 @@ export default function OpenClawFleetPage() {
   const identities = hostIdentities?.identities ?? []
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-8">
       <PageHeader
+        eyebrow="Fleet Autonomy"
         title="OpenClaw Fleet"
         description="One central Beam control plane for host approval, route health, duplicate identity conflicts, and multi-host OpenClaw delivery."
+        badges={(
+          <>
+            <StatusPill label={!overview ? 'Loading hosts' : `${formatNumber(overview.summary.activeHosts)} active hosts`} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
+            <StatusPill label={!overview ? 'Checking conflicts' : `${formatNumber(overview.summary.duplicateIdentityConflicts)} duplicate conflicts`} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
+            <StatusPill label={!overview ? 'Rollout pending' : `${formatNumber(overview.rollout.summary.canaryHosts)} canary hosts`} tone={(overview?.rollout.summary.canaryHosts ?? 0) > 0 ? 'warning' : 'default'} />
+          </>
+        )}
+        aside={(
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Receipt coverage</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!overview ? '—' : formatPercent(overview.summary.receiptCoverageRatio)}</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Route pressure</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!overview ? '—' : formatNumber(overview.summary.liveRoutes)}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">live fleet routes</div>
+            </div>
+            <div>
+              <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Operators waiting</div>
+              <div className="mt-2 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">{!digest ? '—' : formatNumber(digest.summary.actionItems)}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">actionable digest items</div>
+            </div>
+          </div>
+        )}
+        actions={(
+          <>
+            <button
+              type="button"
+              className="btn-secondary"
+              disabled={loading}
+              onClick={() => { void refreshAll(selectedHost?.id ?? null, selectedConflictBeamId) }}
+            >
+              {loading ? 'Refreshing…' : 'Refresh fleet'}
+            </button>
+            <Link className="btn-secondary" to="/workspaces?workspace=openclaw-local">Open workspace</Link>
+          </>
+        )}
       />
 
       {error ? (
@@ -970,7 +1009,7 @@ export default function OpenClawFleetPage() {
         </div>
       ) : null}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-8">
+      <section className="grid gap-4 md:grid-cols-3 xl:grid-cols-9">
         <MetricCard label="Hosts" value={!overview ? '—' : formatNumber(overview.summary.totalHosts)} />
         <MetricCard label="Active hosts" value={!overview ? '—' : formatNumber(overview.summary.activeHosts)} tone={(overview?.summary.activeHosts ?? 0) > 0 ? 'success' : 'default'} />
         <MetricCard label="Pending hosts" value={!overview ? '—' : formatNumber(overview.summary.pendingHosts)} tone={(overview?.summary.pendingHosts ?? 0) > 0 ? 'warning' : 'default'} />

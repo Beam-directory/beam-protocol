@@ -1,11 +1,14 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;700&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   html {
-    @apply bg-slate-50 text-slate-950;
+    @apply bg-stone-100 text-slate-950;
     font-size: 14px;
+    font-family: 'Space Grotesk', 'Avenir Next', Inter, system-ui, sans-serif;
   }
 
   html.dark {
@@ -13,12 +16,29 @@
   }
 
   body {
-    @apply min-h-screen bg-slate-50 text-slate-950 antialiased dark:bg-slate-950 dark:text-slate-50;
+    @apply min-h-screen text-slate-950 antialiased dark:text-slate-50;
     font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    background:
+      radial-gradient(circle at top left, rgba(249, 115, 22, 0.18), transparent 28%),
+      radial-gradient(circle at 85% 12%, rgba(56, 189, 248, 0.12), transparent 24%),
+      linear-gradient(180deg, #f8f4ea 0%, #eef2f7 48%, #f7f4ed 100%);
+  }
+
+  html.dark body {
+    background:
+      radial-gradient(circle at top left, rgba(251, 146, 60, 0.15), transparent 28%),
+      radial-gradient(circle at 85% 12%, rgba(34, 211, 238, 0.1), transparent 22%),
+      linear-gradient(180deg, #050816 0%, #09111f 52%, #050816 100%);
   }
 
   * {
     @apply border-slate-200 dark:border-slate-800;
+  }
+
+  code,
+  pre,
+  .font-mono {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
   }
 
   ::selection {
@@ -41,23 +61,58 @@
 
 @layer components {
   .panel {
-    @apply rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900;
+    @apply relative overflow-hidden rounded-[28px] border p-5 shadow-[0_24px_80px_rgba(15,23,42,0.08)] backdrop-blur-xl;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.84) 0%, rgba(255, 255, 255, 0.74) 100%),
+      radial-gradient(circle at top right, rgba(251, 146, 60, 0.12), transparent 36%);
+  }
+
+  html.dark .panel {
+    background:
+      linear-gradient(180deg, rgba(7, 12, 24, 0.88) 0%, rgba(8, 16, 31, 0.78) 100%),
+      radial-gradient(circle at top right, rgba(251, 146, 60, 0.1), transparent 36%);
+    box-shadow: 0 24px 90px rgba(2, 6, 23, 0.38);
+  }
+
+  .panel::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background:
+      linear-gradient(120deg, rgba(255, 255, 255, 0.28), transparent 35%),
+      linear-gradient(180deg, transparent, rgba(15, 23, 42, 0.02));
+    pointer-events: none;
+  }
+
+  html.dark .panel::before {
+    background:
+      linear-gradient(120deg, rgba(255, 255, 255, 0.06), transparent 38%),
+      linear-gradient(180deg, transparent, rgba(148, 163, 184, 0.03));
+  }
+
+  .panel > * {
+    position: relative;
+    z-index: 1;
   }
 
   .panel-title {
-    @apply text-sm font-semibold uppercase tracking-[0.18em] text-slate-500 dark:text-slate-400;
+    @apply text-[11px] font-semibold uppercase tracking-[0.34em] text-slate-400 dark:text-slate-500;
   }
 
   .input-field {
-    @apply w-full rounded-xl border border-slate-200 bg-white px-3.5 py-2.5 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20 dark:border-slate-800 dark:bg-slate-950 dark:text-slate-50 dark:placeholder:text-slate-500 dark:focus:border-orange-500;
+    @apply w-full rounded-2xl border border-white/70 bg-white/80 px-4 py-3 text-sm text-slate-950 outline-none transition placeholder:text-slate-400 focus:border-orange-400 focus:ring-2 focus:ring-orange-500/20 dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-50 dark:placeholder:text-slate-500 dark:focus:border-orange-500;
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45);
   }
 
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-xl bg-orange-500 px-4 py-2.5 text-sm font-medium text-white transition hover:bg-orange-600 disabled:cursor-not-allowed disabled:opacity-60;
+    @apply inline-flex items-center justify-center rounded-2xl px-4 py-2.5 text-sm font-medium text-white transition disabled:cursor-not-allowed disabled:opacity-60;
+    background: linear-gradient(135deg, rgb(249 115 22) 0%, rgb(234 88 12) 100%);
+    box-shadow: 0 18px 44px rgba(249, 115, 22, 0.28);
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800;
+    @apply inline-flex items-center justify-center rounded-2xl border border-white/70 bg-white/[0.72] px-4 py-2.5 text-sm font-medium text-slate-700 transition hover:-translate-y-0.5 hover:bg-white dark:border-white/10 dark:bg-slate-950/70 dark:text-slate-200 dark:hover:bg-slate-900;
   }
 
   .table-head {
@@ -66,5 +121,69 @@
 
   .table-cell {
     @apply px-4 py-3 text-sm text-slate-700 dark:text-slate-300;
+  }
+}
+
+@layer utilities {
+  .beam-page-enter {
+    animation: beam-fade-up 520ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .beam-reveal-soft {
+    animation: beam-fade-up 680ms cubic-bezier(0.22, 1, 0.36, 1);
+  }
+
+  .beam-glow-ring {
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.35),
+      0 18px 50px rgba(15, 23, 42, 0.08);
+  }
+
+  .beam-status-dot {
+    animation: beam-pulse 2.8s ease-in-out infinite;
+  }
+
+  .beam-grid-lines {
+    background-image:
+      linear-gradient(rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+    background-size: 72px 72px;
+    mask-image: radial-gradient(circle at center, black 0%, transparent 80%);
+  }
+}
+
+@keyframes beam-fade-up {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 18px, 0) scale(0.985);
+  }
+
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+@keyframes beam-pulse {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.85;
+  }
+
+  50% {
+    transform: scale(1.45);
+    opacity: 0.35;
+  }
+}
+
+@keyframes beam-float {
+  0%,
+  100% {
+    transform: translate3d(0, 0, 0);
+  }
+
+  50% {
+    transform: translate3d(0, -10px, 0);
   }
 }

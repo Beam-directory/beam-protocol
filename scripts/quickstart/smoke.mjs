@@ -104,7 +104,7 @@ async function main() {
   await waitForHealth(`${runtime.demoAgentUrl}/health`, 'hosted demo agents')
   const dashboardResponse = await waitForHealth(`${runtime.dashboardUrl}/`, 'dashboard')
   const dashboardHtml = await dashboardResponse.text()
-  assert.match(dashboardHtml, /Beam Dashboard/u, 'dashboard root did not return the dashboard HTML shell')
+  assert.match(dashboardHtml, /Beam (Control Plane|Dashboard)/u, 'dashboard root did not return the dashboard HTML shell')
 
   logStep('requesting a local admin magic link')
   const authConfig = await requestJson(`${runtime.directoryUrl}/admin/auth/config`)
