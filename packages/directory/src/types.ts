@@ -186,6 +186,9 @@ export type OpenClawFleetDigestRunTriggerKind = 'manual' | 'scheduled'
 export type OpenClawFleetDigestDeliveryKind = 'digest' | 'escalation'
 export type OpenClawFleetDigestDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
 export type OpenClawFleetDigestRunDeliveryState = 'pending' | 'delivered' | 'partial' | 'failed' | 'unavailable'
+export type OpenClawFleetAlertTargetDeliveryKind = 'email' | 'webhook'
+export type OpenClawFleetAlertSeverityThreshold = 'warning' | 'critical'
+export type OpenClawFleetAlertDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
 
 export interface WorkspaceRow {
   id: number
@@ -401,6 +404,39 @@ export interface OpenClawFleetDigestDeliveryRow {
   delivery_kind: OpenClawFleetDigestDeliveryKind
   recipient_email: string
   status: OpenClawFleetDigestDeliveryStatus
+  error_code: string | null
+  error_message: string | null
+  delivered_at: string
+  details_json: string | null
+}
+
+export interface OpenClawFleetAlertTargetRow {
+  id: number
+  label: string
+  delivery_kind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severity_threshold: OpenClawFleetAlertSeverityThreshold
+  enabled: number
+  metadata_json: string | null
+  last_delivery_status: OpenClawFleetAlertDeliveryStatus | null
+  last_delivery_at: string | null
+  last_error_code: string | null
+  last_error_at: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface OpenClawFleetAlertDeliveryRow {
+  id: number
+  target_id: number
+  run_id: number | null
+  target_label: string
+  delivery_kind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severity_threshold: OpenClawFleetAlertSeverityThreshold
+  severity: OpenClawFleetAlertSeverityThreshold
+  item_count: number
+  status: OpenClawFleetAlertDeliveryStatus
   error_code: string | null
   error_message: string | null
   delivered_at: string

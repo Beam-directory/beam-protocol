@@ -44,6 +44,9 @@ export type OpenClawFleetDigestRunTriggerKind = 'manual' | 'scheduled'
 export type OpenClawFleetDigestDeliveryKind = 'digest' | 'escalation'
 export type OpenClawFleetDigestDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
 export type OpenClawFleetDigestRunDeliveryState = 'pending' | 'delivered' | 'partial' | 'failed' | 'unavailable'
+export type OpenClawFleetAlertTargetDeliveryKind = 'email' | 'webhook'
+export type OpenClawFleetAlertSeverityThreshold = 'warning' | 'critical'
+export type OpenClawFleetAlertDeliveryStatus = 'delivered' | 'failed' | 'unavailable' | 'skipped'
 export type WorkspaceOverviewAttentionCode =
   | 'identity_missing'
   | 'stale_check_in'
@@ -899,6 +902,41 @@ export interface OpenClawFleetDigestDelivery {
   } | null
 }
 
+export interface OpenClawFleetAlertTarget {
+  id: number
+  label: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold: OpenClawFleetAlertSeverityThreshold
+  enabled: boolean
+  lastDeliveryStatus: OpenClawFleetAlertDeliveryStatus | null
+  lastDeliveryAt: string | null
+  lastErrorCode: string | null
+  lastErrorAt: string | null
+  metadata: {
+    notes: string | null
+    headerCount: number
+  }
+}
+
+export interface OpenClawFleetAlertDelivery {
+  id: number
+  targetId: number
+  runId: number | null
+  runGeneratedAt: string | null
+  targetLabel: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold: OpenClawFleetAlertSeverityThreshold
+  severity: OpenClawFleetAlertSeverityThreshold
+  itemCount: number
+  status: OpenClawFleetAlertDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  deliveredAt: string
+  details: Record<string, unknown> | null
+}
+
 export interface OpenClawFleetDigestResponse {
   generatedAt: string
   summary: {
@@ -929,6 +967,10 @@ export interface OpenClawFleetDigestResponse {
   history: {
     runs: OpenClawFleetDigestRun[]
     deliveries: OpenClawFleetDigestDelivery[]
+  }
+  alerts: {
+    targets: OpenClawFleetAlertTarget[]
+    deliveries: OpenClawFleetAlertDelivery[]
   }
   markdown: string
 }
@@ -1048,6 +1090,7 @@ export interface OpenClawHostProfilePatchInput {
 export interface OpenClawHostMaintenanceActionInput {
   owner?: string | null
   reason?: string | null
+  confirmPhrase?: string | null
 }
 
 export interface OpenClawFleetBulkActionInput {
@@ -1113,6 +1156,7 @@ export interface OpenClawConflictResolveInput {
   preferredRouteId: number
   disableCompetingRoutes?: boolean
   note?: string | null
+  confirmPhrase?: string | null
 }
 
 export interface OpenClawConflictResolveResponse {
@@ -1127,6 +1171,44 @@ export interface OpenClawFleetDigestDeliveryResponse {
   kind: OpenClawFleetDigestDeliveryKind
   deliveredAt: string
   summary: OpenClawFleetDigestResponse['summary']
+}
+
+export interface OpenClawFleetAlertsResponse {
+  targets: OpenClawFleetAlertTarget[]
+  deliveries: OpenClawFleetAlertDelivery[]
+}
+
+export interface OpenClawFleetAlertTargetInput {
+  label: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold?: OpenClawFleetAlertSeverityThreshold
+  enabled?: boolean
+  notes?: string | null
+  headers?: Record<string, string>
+}
+
+export interface OpenClawFleetAlertTargetPatchInput {
+  label?: string
+  deliveryKind?: OpenClawFleetAlertTargetDeliveryKind
+  destination?: string
+  severityThreshold?: OpenClawFleetAlertSeverityThreshold
+  enabled?: boolean
+  notes?: string | null
+  headers?: Record<string, string>
+}
+
+export interface OpenClawFleetAlertTargetResponse {
+  target: OpenClawFleetAlertTarget
+}
+
+export interface OpenClawFleetAlertTestResponse {
+  ok: boolean
+  status: OpenClawFleetAlertDeliveryStatus
+  errorCode: string | null
+  errorMessage: string | null
+  target: OpenClawFleetAlertTarget
+  delivery: OpenClawFleetAlertDelivery
 }
 
 export interface WorkspaceIdentitiesResponse {
@@ -2948,6 +3030,18 @@ export const directoryApi = {
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   getOpenClawFleetDigest: (params?: { format?: 'json' | 'markdown' }) => request<OpenClawFleetDigestResponse>(`/admin/openclaw/fleet/digest${buildQuery({ format: params?.format })}`, undefined, { admin: true }),
+  getOpenClawFleetAlerts: () => request<OpenClawFleetAlertsResponse>('/admin/openclaw/fleet/alerts', undefined, { admin: true }),
+  createOpenClawFleetAlertTarget: (input: OpenClawFleetAlertTargetInput) => request<OpenClawFleetAlertTargetResponse>('/admin/openclaw/fleet/alerts', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  updateOpenClawFleetAlertTarget: (id: number, input: OpenClawFleetAlertTargetPatchInput) => request<OpenClawFleetAlertTargetResponse>(`/admin/openclaw/fleet/alerts/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  testOpenClawFleetAlertTarget: (id: number) => request<OpenClawFleetAlertTestResponse>(`/admin/openclaw/fleet/alerts/${id}/test`, {
+    method: 'POST',
+  }, { admin: true }),
   updateOpenClawFleetDigestSchedule: (input: OpenClawFleetDigestSchedulePatchInput) => request<OpenClawFleetDigestSchedulePatchResponse>('/admin/openclaw/fleet/digest/schedule', {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -2991,11 +3085,13 @@ export const directoryApi = {
   approveOpenClawHost: (id: number) => request<OpenClawHostApproveResponse>(`/admin/openclaw/hosts/${id}/approve`, {
     method: 'POST',
   }, { admin: true }),
-  rotateOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/rotate`, {
+  rotateOpenClawHost: (id: number, input?: { confirmPhrase?: string | null }) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/rotate`, {
     method: 'POST',
+    body: JSON.stringify(input ?? {}),
   }, { admin: true }),
-  recoverOpenClawHost: (id: number) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/recover`, {
+  recoverOpenClawHost: (id: number, input?: { confirmPhrase?: string | null }) => request<OpenClawHostCredentialActionResponse>(`/admin/openclaw/hosts/${id}/recover`, {
     method: 'POST',
+    body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   completeOpenClawHostRecoveryCleanup: (id: number) => request<OpenClawHostRecoveryCleanupResponse>(`/admin/openclaw/hosts/${id}/recovery/cleanup`, {
     method: 'POST',
@@ -3008,7 +3104,7 @@ export const directoryApi = {
     method: 'PATCH',
     body: JSON.stringify(input),
   }, { admin: true }),
-  revokeOpenClawHost: (id: number, input?: { reason?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
+  revokeOpenClawHost: (id: number, input?: { reason?: string | null; confirmPhrase?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
@@ -3020,7 +3116,7 @@ export const directoryApi = {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
-  disableOpenClawRoute: (id: number, input?: { note?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/disable`, {
+  disableOpenClawRoute: (id: number, input?: { note?: string | null; confirmPhrase?: string | null }) => request<OpenClawRouteActionResponse>(`/admin/openclaw/routes/${id}/disable`, {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),

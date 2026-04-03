@@ -5,6 +5,9 @@ import {
   ApiError,
   type OpenClawConflictDetailResponse,
   directoryApi,
+  type OpenClawFleetAlertTarget,
+  type OpenClawFleetAlertTargetDeliveryKind,
+  type OpenClawFleetAlertSeverityThreshold,
   type OpenClawConflictGroup,
   type OpenClawFleetBulkActionInput,
   type OpenClawFleetDigestResponse,
@@ -31,6 +34,7 @@ import {
   type OpenClawRouteOwnerResolutionState,
   type OpenClawRouteSource,
 } from '../lib/api'
+import { useAdminAuth } from '../lib/admin-auth'
 import { formatDateTime, formatNumber, formatRelativeTime } from '../lib/utils'
 
 function hostStatusTone(status: OpenClawHostStatus): 'default' | 'success' | 'warning' | 'critical' {
@@ -288,9 +292,20 @@ type DigestScheduleFormState = {
   escalateOnCritical: boolean
 }
 
+type AlertTargetFormState = {
+  label: string
+  deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+  destination: string
+  severityThreshold: OpenClawFleetAlertSeverityThreshold
+  enabled: boolean
+  notes: string
+  headers: string
+}
+
 type FleetBulkMode = 'labels' | 'stage_revoke_review' | 'clear_revoke_review' | null
 
 export default function OpenClawFleetPage() {
+  const { session } = useAdminAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<OpenClawFleetOverviewResponse | null>(null)
   const [digest, setDigest] = useState<OpenClawFleetDigestResponse | null>(null)
@@ -356,6 +371,16 @@ export default function OpenClawFleetPage() {
     runMinuteUtc: '0',
     escalateOnCritical: true,
   })
+  const [alertTargetForm, setAlertTargetForm] = useState<AlertTargetFormState>({
+    label: '',
+    deliveryKind: 'email',
+    destination: '',
+    severityThreshold: 'warning',
+    enabled: true,
+    notes: '',
+    headers: '',
+  })
+  const [editingAlertTargetId, setEditingAlertTargetId] = useState<number | null>(null)
   const [selectedHostIds, setSelectedHostIds] = useState<number[]>([])
   const [bulkMode, setBulkMode] = useState<FleetBulkMode>(null)
   const [bulkForm, setBulkForm] = useState({
@@ -366,6 +391,81 @@ export default function OpenClawFleetPage() {
     confirmPhrase: '',
   })
   const [selectedConflictRouteId, setSelectedConflictRouteId] = useState<number | null>(null)
+
+  const isAdmin = session?.role === 'admin'
+  const canOperate = session?.role === 'admin' || session?.role === 'operator'
+
+  function resetAlertTargetForm() {
+    setEditingAlertTargetId(null)
+    setAlertTargetForm({
+      label: '',
+      deliveryKind: 'email',
+      destination: '',
+      severityThreshold: 'warning',
+      enabled: true,
+      notes: '',
+      headers: '',
+    })
+  }
+
+  function startEditingAlertTarget(target: OpenClawFleetAlertTarget) {
+    setEditingAlertTargetId(target.id)
+    setAlertTargetForm({
+      label: target.label,
+      deliveryKind: target.deliveryKind,
+      destination: target.destination,
+      severityThreshold: target.severityThreshold,
+      enabled: target.enabled,
+      notes: target.metadata.notes ?? '',
+      headers: '',
+    })
+  }
+
+  function parseAlertHeaders(value: string): Record<string, string> {
+    const headers: Record<string, string> = {}
+    for (const line of value.split('\n')) {
+      const trimmed = line.trim()
+      if (!trimmed) {
+        continue
+      }
+      const separator = trimmed.indexOf(':')
+      if (separator <= 0) {
+        continue
+      }
+      const key = trimmed.slice(0, separator).trim()
+      const headerValue = trimmed.slice(separator + 1).trim()
+      if (!key || !headerValue) {
+        continue
+      }
+      headers[key] = headerValue
+    }
+    return headers
+  }
+
+  function ensureAdminAction(label: string) {
+    if (isAdmin) {
+      return true
+    }
+    setNotice(`${label} requires an admin session.`)
+    return false
+  }
+
+  function ensureOperatorAction(label: string) {
+    if (canOperate) {
+      return true
+    }
+    setNotice(`${label} requires at least an operator session.`)
+    return false
+  }
+
+  function promptConfirmPhrase(expected: string, label: string): string | null {
+    const entered = window.prompt(`Type ${expected} to confirm ${label}.`, expected)
+    if (entered !== expected) {
+      setNotice(`${label} skipped.`)
+      return null
+    }
+    return entered
+  }
 
   const selectedHostId = useMemo(() => {
     const raw = searchParams.get('host')
@@ -629,6 +729,9 @@ export default function OpenClawFleetPage() {
 
   async function handleCreateEnrollment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!ensureAdminAction('Enrollment creation')) {
+      return
+    }
     await runAction('create-enrollment', async () => {
       const response = await directoryApi.createOpenClawEnrollment({
         label: typeof enrollmentForm.label === 'string' && enrollmentForm.label.trim() ? enrollmentForm.label.trim() : null,
@@ -648,6 +751,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleApprove(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Host approval')) {
+      return
+    }
     await runAction(`approve-${host.id}`, async () => {
       const response = await directoryApi.approveOpenClawHost(host.id)
       setCredentialResult(null)
@@ -658,8 +764,15 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleRotate(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Credential rotation')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('ROTATE_HOST', `rotating ${hostTitle(host)}`)
+    if (!confirmPhrase) {
+      return
+    }
     await runAction(`rotate-${host.id}`, async () => {
-      const response = await directoryApi.rotateOpenClawHost(host.id)
+      const response = await directoryApi.rotateOpenClawHost(host.id, { confirmPhrase })
       setCredentialResult({
         hostLabel: hostTitle(response.host),
         credential: response.credential,
@@ -671,8 +784,15 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleRecover(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Host recovery')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('RECOVER_HOST', `recovering ${hostTitle(host)}`)
+    if (!confirmPhrase) {
+      return
+    }
     await runAction(`recover-${host.id}`, async () => {
-      const response = await directoryApi.recoverOpenClawHost(host.id)
+      const response = await directoryApi.recoverOpenClawHost(host.id, { confirmPhrase })
       setCredentialResult({
         hostLabel: hostTitle(response.host),
         credential: response.credential,
@@ -684,6 +804,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleCompleteRecoveryCleanup(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Recovery cleanup')) {
+      return
+    }
     await runAction(`cleanup-${host.id}`, async () => {
       await directoryApi.completeOpenClawHostRecoveryCleanup(host.id)
       await Promise.all([loadOverview(), loadDigest()])
@@ -692,6 +815,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleSavePlacement(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Placement changes')) {
+      return
+    }
     const input: OpenClawHostProfilePatchInput = {
       environmentLabel: placementForm.environmentLabel.trim() || null,
       groupLabels: parseCommaSeparatedLabels(placementForm.groupLabels),
@@ -705,6 +831,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleClearPlacementRevokeReview(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Revoke review clear')) {
+      return
+    }
     await runAction(`placement-clear-revoke-${host.id}`, async () => {
       await directoryApi.updateOpenClawHostProfile(host.id, { clearRevokeReview: true })
       await refreshAll(host.id, selectedConflictBeamId)
@@ -712,6 +841,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleSavePolicy(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Policy changes')) {
+      return
+    }
     const input: OpenClawHostPolicyPatchInput = {
       rotationIntervalHours: Number.parseInt(policyForm.rotationIntervalHours, 10) || host.policy.rotation.intervalHours,
       rotationWindowStartHour: Number.parseInt(policyForm.rotationWindowStartHour, 10) || 0,
@@ -732,26 +864,45 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleEnterMaintenance(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Maintenance mode')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('MAINTENANCE_HOST', `putting ${hostTitle(host)} into maintenance`)
+    if (!confirmPhrase) {
+      return
+    }
     await runAction(`maintenance-${host.id}`, async () => {
       await directoryApi.enableOpenClawHostMaintenance(host.id, {
         owner: maintenanceForm.owner.trim() || null,
         reason: maintenanceForm.reason.trim() || null,
+        confirmPhrase,
       })
       await refreshAll(host.id, selectedConflictBeamId)
     }, `Maintenance enabled for ${hostTitle(host)}.`)
   }
 
   async function handleDrainHost(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Host drain')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('DRAIN_HOST', `draining ${hostTitle(host)}`)
+    if (!confirmPhrase) {
+      return
+    }
     await runAction(`drain-${host.id}`, async () => {
       await directoryApi.drainOpenClawHost(host.id, {
         owner: maintenanceForm.owner.trim() || null,
         reason: maintenanceForm.reason.trim() || null,
+        confirmPhrase,
       })
       await refreshAll(host.id, selectedConflictBeamId)
     }, `Drain started for ${hostTitle(host)}.`)
   }
 
   async function handleResumeHost(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Host resume')) {
+      return
+    }
     await runAction(`resume-${host.id}`, async () => {
       await directoryApi.resumeOpenClawHost(host.id)
       await refreshAll(host.id, selectedConflictBeamId)
@@ -759,6 +910,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleSaveRollout(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Rollout changes')) {
+      return
+    }
     await runAction(`rollout-${host.id}`, async () => {
       await directoryApi.updateOpenClawHostRollout(host.id, {
         ring: rolloutForm.ring,
@@ -770,16 +924,26 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleRevoke(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Host revoke')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('REVOKE_HOST', `revoking ${hostTitle(host)}`)
+    if (!confirmPhrase) {
+      return
+    }
     const reason = host.status === 'revoked'
       ? host.revocationReason ?? 'Host revoked'
       : `Revoked by operator on ${new Date().toISOString()}`
     await runAction(`revoke-${host.id}`, async () => {
-      await directoryApi.revokeOpenClawHost(host.id, { reason })
+      await directoryApi.revokeOpenClawHost(host.id, { reason, confirmPhrase })
       await refreshAll(host.id, selectedConflictBeamId)
     }, `Host ${hostTitle(host)} revoked.`)
   }
 
   async function handleBulkAction(input: OpenClawFleetBulkActionInput, successMessage: string, nextMode: FleetBulkMode = null) {
+    if (!ensureAdminAction('Bulk fleet action')) {
+      return
+    }
     await runAction(`bulk-${input.action}`, async () => {
       await directoryApi.runOpenClawFleetBulkAction(input)
       await refreshAll(selectedHostId, selectedConflictBeamId)
@@ -799,11 +963,21 @@ export default function OpenClawFleetPage() {
     disableCompetingRoutes?: boolean
     note?: string | null
   }) {
+    if (!ensureAdminAction('Conflict resolution')) {
+      return
+    }
+    const confirmPhrase = options.disableCompetingRoutes
+      ? promptConfirmPhrase('RESOLVE_CONFLICT', `resolving the conflict for ${options.beamId} and disabling competing routes`)
+      : null
+    if (options.disableCompetingRoutes && !confirmPhrase) {
+      return
+    }
     await runAction(`resolve-conflict-${options.beamId}`, async () => {
       const response = await directoryApi.resolveOpenClawConflict(options.beamId, {
         preferredRouteId: options.preferredRouteId,
         disableCompetingRoutes: options.disableCompetingRoutes,
         note: options.note,
+        confirmPhrase,
       })
       setConflictDetail(response.conflict)
       await refreshAll(selectedHostId, options.beamId)
@@ -811,6 +985,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handlePreferRoute(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    if (!ensureAdminAction('Route ownership preference')) {
+      return
+    }
     await runAction(`prefer-route-${route.id}`, async () => {
       await directoryApi.preferOpenClawRoute(route.id, {
         note: `Preferred by operator for ${route.beamId}`,
@@ -820,15 +997,26 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleDisableRoute(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    if (!ensureAdminAction('Route disable')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('DISABLE_ROUTE', `disabling the route for ${route.beamId}`)
+    if (!confirmPhrase) {
+      return
+    }
     await runAction(`disable-route-${route.id}`, async () => {
       await directoryApi.disableOpenClawRoute(route.id, {
         note: `Disabled by operator for ${route.beamId}`,
+        confirmPhrase,
       })
       await refreshAll(selectedHostId, selectedConflictBeamId)
     }, `Route disabled for ${route.beamId}.`)
   }
 
   async function handleClearRouteOwner(route: Pick<OpenClawHostRoute, 'id' | 'beamId'>) {
+    if (!ensureAdminAction('Route owner reset')) {
+      return
+    }
     await runAction(`clear-route-${route.id}`, async () => {
       await directoryApi.clearOpenClawRouteOwner(route.id, {
         note: `Ownership reset by operator for ${route.beamId}`,
@@ -838,6 +1026,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleApplyRemediation(item: OpenClawFleetRemediationItem) {
+    if (!ensureAdminAction('Fleet remediation')) {
+      return
+    }
     let confirmPhrase: string | null = null
     if (item.requiresConfirmation) {
       const expected = item.kind === 'drain_missing_receipts' ? 'DRAIN_HOST' : 'REAPPLY_TEMPLATE'
@@ -863,6 +1054,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleRunReconciliation(host?: Pick<OpenClawHostSummary, 'id' | 'label' | 'hostname'> | null) {
+    if (!ensureAdminAction('Fleet reconciliation')) {
+      return
+    }
     const hostLabel = host ? hostTitle(host as OpenClawHostSummary) : 'fleet'
     await runAction(`reconciliation-${host?.id ?? 'all'}`, async () => {
       await directoryApi.runOpenClawFleetReconciliation({
@@ -874,6 +1068,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleSaveDigestSchedule() {
+    if (!ensureOperatorAction('Digest schedule update')) {
+      return
+    }
     await runAction('digest-schedule', async () => {
       await directoryApi.updateOpenClawFleetDigestSchedule({
         enabled: digestScheduleForm.enabled,
@@ -892,6 +1089,9 @@ export default function OpenClawFleetPage() {
     deliver?: boolean
     respectSchedule?: boolean
   }) {
+    if (!ensureOperatorAction('Digest run')) {
+      return
+    }
     const triggerKind = options?.triggerKind ?? 'manual'
     const actionKey = `run-digest-${triggerKind}${options?.deliver ? '-deliver' : ''}${options?.respectSchedule ? '-respect' : ''}`
     let nextNotice: string | null = null
@@ -914,6 +1114,9 @@ export default function OpenClawFleetPage() {
   }
 
   async function handleDeliverDigest(input?: { kind?: 'digest' | 'escalation'; runId?: number | null }) {
+    if (!ensureOperatorAction('Digest delivery')) {
+      return
+    }
     const deliveryKind = input?.kind ?? 'digest'
     let nextNotice: string | null = null
     await runAction(`deliver-${deliveryKind}`, async () => {
@@ -931,6 +1134,47 @@ export default function OpenClawFleetPage() {
 
   const hostRoutes = hostDetail?.routes ?? []
   const identities = hostIdentities?.identities ?? []
+
+  async function handleSaveAlertTarget() {
+    if (!ensureAdminAction('Fleet alert target changes')) {
+      return
+    }
+
+    const payload = {
+      label: alertTargetForm.label.trim(),
+      deliveryKind: alertTargetForm.deliveryKind,
+      destination: alertTargetForm.destination.trim(),
+      severityThreshold: alertTargetForm.severityThreshold,
+      enabled: alertTargetForm.enabled,
+      notes: alertTargetForm.notes.trim() || null,
+      headers: parseAlertHeaders(alertTargetForm.headers),
+    }
+
+    if (!payload.label || !payload.destination) {
+      setNotice('Alert target needs a label and destination.')
+      return
+    }
+
+    await runAction(`alert-target-${editingAlertTargetId ?? 'new'}`, async () => {
+      if (editingAlertTargetId) {
+        await directoryApi.updateOpenClawFleetAlertTarget(editingAlertTargetId, payload)
+      } else {
+        await directoryApi.createOpenClawFleetAlertTarget(payload)
+      }
+      await loadDigest()
+      resetAlertTargetForm()
+    }, editingAlertTargetId ? 'Alert target updated.' : 'Alert target created.')
+  }
+
+  async function handleTestAlertTarget(target: OpenClawFleetAlertTarget) {
+    if (!ensureOperatorAction('Fleet alert test')) {
+      return
+    }
+    await runAction(`alert-test-${target.id}`, async () => {
+      await directoryApi.testOpenClawFleetAlertTarget(target.id)
+      await loadDigest()
+    }, `Alert target ${target.label} tested.`)
+  }
 
   return (
     <div data-ui-page="openclaw-fleet" className="space-y-8">
@@ -1565,6 +1809,207 @@ export default function OpenClawFleetPage() {
                 ) : (
                   <EmptyPanel label="No digest deliveries recorded yet." />
                 )}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-xs font-medium uppercase tracking-wide text-slate-400">External alerting</div>
+                  <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                    Deliver warning/critical fleet items to email or webhooks, with persisted delivery evidence.
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <StatusPill label={session?.role ?? 'viewer'} tone={isAdmin ? 'success' : canOperate ? 'warning' : 'default'} />
+                  <StatusPill label={digest ? `${formatNumber(digest.alerts.targets.length)} targets` : '0 targets'} tone={(digest?.alerts.targets.length ?? 0) > 0 ? 'success' : 'default'} />
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Label</span>
+                  <input
+                    className="input-field"
+                    placeholder="Ops mailbox"
+                    value={alertTargetForm.label}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, label: event.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Destination</span>
+                  <input
+                    className="input-field"
+                    placeholder={alertTargetForm.deliveryKind === 'email' ? 'ops@example.com' : 'https://hooks.example.com/fleet'}
+                    value={alertTargetForm.destination}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, destination: event.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Delivery kind</span>
+                  <select
+                    className="input-field"
+                    value={alertTargetForm.deliveryKind}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, deliveryKind: event.target.value as OpenClawFleetAlertTargetDeliveryKind }))}
+                  >
+                    <option value="email">Email</option>
+                    <option value="webhook">Webhook</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Severity threshold</span>
+                  <select
+                    className="input-field"
+                    value={alertTargetForm.severityThreshold}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, severityThreshold: event.target.value as OpenClawFleetAlertSeverityThreshold }))}
+                  >
+                    <option value="warning">warning</option>
+                    <option value="critical">critical</option>
+                  </select>
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-2">
+                  <span>Notes</span>
+                  <input
+                    className="input-field"
+                    placeholder="Pager rotation, team mailbox, escalation webhook..."
+                    value={alertTargetForm.notes}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, notes: event.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-2">
+                  <span>Webhook headers (optional, one `Header: value` per line)</span>
+                  <textarea
+                    className="input-field min-h-24"
+                    placeholder="Authorization: Bearer token"
+                    value={alertTargetForm.headers}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, headers: event.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-500 dark:text-slate-400">
+                <label className="inline-flex items-center gap-2">
+                  <input
+                    type="checkbox"
+                    checked={alertTargetForm.enabled}
+                    onChange={(event) => setAlertTargetForm((current) => ({ ...current, enabled: event.target.checked }))}
+                  />
+                  <span>Target enabled</span>
+                </label>
+                {!isAdmin ? <span>Create/update requires admin.</span> : null}
+                {!canOperate ? <span>Testing requires operator or admin.</span> : null}
+              </div>
+
+              <div className="mt-4 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  className="rounded-xl bg-slate-950 px-4 py-2 text-sm font-medium text-white transition hover:bg-slate-800 disabled:opacity-60 dark:bg-orange-500 dark:text-slate-950 dark:hover:bg-orange-400"
+                  disabled={!isAdmin || actionBusy === `alert-target-${editingAlertTargetId ?? 'new'}`}
+                  onClick={() => { void handleSaveAlertTarget() }}
+                >
+                  {actionBusy === `alert-target-${editingAlertTargetId ?? 'new'}`
+                    ? 'Saving…'
+                    : editingAlertTargetId ? 'Update target' : 'Create target'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  disabled={editingAlertTargetId === null}
+                  onClick={() => resetAlertTargetForm()}
+                >
+                  Clear form
+                </button>
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {digest && digest.alerts.targets.length > 0 ? (
+                  digest.alerts.targets.map((target) => (
+                    <div key={target.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs dark:border-slate-800">
+                      <div className="flex flex-wrap items-start justify-between gap-2">
+                        <div>
+                          <div className="font-medium text-slate-900 dark:text-slate-100">{target.label}</div>
+                          <div className="mt-1 text-slate-500 dark:text-slate-400">{target.destination}</div>
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          <StatusPill label={target.deliveryKind} />
+                          <StatusPill label={target.severityThreshold} tone={target.severityThreshold === 'critical' ? 'critical' : 'warning'} />
+                          <StatusPill label={target.enabled ? 'enabled' : 'disabled'} tone={target.enabled ? 'success' : 'default'} />
+                        </div>
+                      </div>
+                      <div className="mt-2 grid gap-2 text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                        <div>{target.metadata.notes ?? 'No operator notes'}</div>
+                        <div>{target.metadata.headerCount > 0 ? `${formatNumber(target.metadata.headerCount)} header(s)` : 'No custom headers'}</div>
+                        <div>{target.lastDeliveryAt ? `Last delivery ${formatRelativeTime(target.lastDeliveryAt)}` : 'No delivery yet'}</div>
+                        <div>{target.lastDeliveryStatus ? `Status ${target.lastDeliveryStatus}` : 'No delivery status yet'}</div>
+                      </div>
+                      {target.lastErrorCode ? (
+                        <div className="mt-2 text-[11px] text-red-600 dark:text-red-300">
+                          {target.lastErrorCode} · {target.lastErrorAt ? formatRelativeTime(target.lastErrorAt) : 'recent'}
+                        </div>
+                      ) : null}
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={!isAdmin}
+                          onClick={() => startEditingAlertTarget(target)}
+                        >
+                          Edit
+                        </button>
+                        <button
+                          type="button"
+                          className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                          disabled={!canOperate || actionBusy === `alert-test-${target.id}`}
+                          onClick={() => { void handleTestAlertTarget(target) }}
+                        >
+                          {actionBusy === `alert-test-${target.id}` ? 'Testing…' : 'Send test'}
+                        </button>
+                      </div>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyPanel label="No external alert targets configured yet." />
+                )}
+              </div>
+
+              <div className="mt-4 rounded-xl border border-slate-200 p-3 dark:border-slate-800">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Recent alert deliveries</div>
+                    <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Persisted email/webhook evidence for external fleet alert fanout.</div>
+                  </div>
+                  <div className="text-xs text-slate-500 dark:text-slate-400">
+                    {digest ? `${formatNumber(digest.alerts.deliveries.length)} deliveries` : '—'}
+                  </div>
+                </div>
+                <div className="mt-3 space-y-2">
+                  {digest && digest.alerts.deliveries.length > 0 ? (
+                    digest.alerts.deliveries.map((delivery) => (
+                      <div key={delivery.id} className="rounded-xl border border-slate-200 px-3 py-3 text-xs dark:border-slate-800">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div className="font-medium text-slate-900 dark:text-slate-100">{delivery.targetLabel}</div>
+                          <div className="flex flex-wrap gap-2">
+                            <StatusPill label={delivery.deliveryKind} />
+                            <StatusPill label={delivery.status} tone={delivery.status === 'delivered' ? 'success' : delivery.status === 'skipped' ? 'warning' : 'critical'} />
+                          </div>
+                        </div>
+                        <div className="mt-2 grid gap-2 text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                          <div>{delivery.destination}</div>
+                          <div>{delivery.runGeneratedAt ? `Run ${formatRelativeTime(delivery.runGeneratedAt)}` : 'Manual test delivery'}</div>
+                          <div>{formatRelativeTime(delivery.deliveredAt)}</div>
+                          <div>{formatNumber(delivery.itemCount)} matching item(s) · threshold {delivery.severityThreshold}</div>
+                        </div>
+                        {delivery.errorCode ? (
+                          <div className="mt-2 text-[11px] text-red-600 dark:text-red-300">
+                            {delivery.errorCode}: {delivery.errorMessage ?? 'Alert delivery failed'}
+                          </div>
+                        ) : null}
+                      </div>
+                    ))
+                  ) : (
+                    <EmptyPanel label="No alert deliveries recorded yet." />
+                  )}
+                </div>
               </div>
             </div>
           </div>

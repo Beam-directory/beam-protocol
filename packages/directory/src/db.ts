@@ -18,6 +18,11 @@ import type {
   IntentLogRow,
   IntentTraceEventRow,
   OperatorNotificationRow,
+  OpenClawFleetAlertDeliveryRow,
+  OpenClawFleetAlertDeliveryStatus,
+  OpenClawFleetAlertSeverityThreshold,
+  OpenClawFleetAlertTargetDeliveryKind,
+  OpenClawFleetAlertTargetRow,
   OpenClawFleetDigestDeliveryKind,
   OpenClawFleetDigestDeliveryRow,
   OpenClawFleetDigestDeliveryStatus,
@@ -492,6 +497,50 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_digest_deliveries_run
       ON openclaw_fleet_digest_deliveries(run_id, delivered_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_fleet_alert_targets (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      label TEXT NOT NULL,
+      delivery_kind TEXT NOT NULL CHECK(delivery_kind IN ('email', 'webhook')),
+      destination TEXT NOT NULL,
+      severity_threshold TEXT NOT NULL DEFAULT 'warning' CHECK(severity_threshold IN ('warning', 'critical')),
+      enabled INTEGER NOT NULL DEFAULT 1,
+      metadata_json TEXT,
+      last_delivery_status TEXT CHECK(last_delivery_status IN ('delivered', 'failed', 'unavailable', 'skipped')),
+      last_delivery_at TEXT,
+      last_error_code TEXT,
+      last_error_at TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_alert_targets_enabled
+      ON openclaw_fleet_alert_targets(enabled, severity_threshold, updated_at DESC, id DESC);
+
+    CREATE TABLE IF NOT EXISTS openclaw_fleet_alert_deliveries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      target_id INTEGER NOT NULL,
+      run_id INTEGER,
+      target_label TEXT NOT NULL,
+      delivery_kind TEXT NOT NULL CHECK(delivery_kind IN ('email', 'webhook')),
+      destination TEXT NOT NULL,
+      severity_threshold TEXT NOT NULL CHECK(severity_threshold IN ('warning', 'critical')),
+      severity TEXT NOT NULL CHECK(severity IN ('warning', 'critical')),
+      item_count INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL CHECK(status IN ('delivered', 'failed', 'unavailable', 'skipped')),
+      error_code TEXT,
+      error_message TEXT,
+      delivered_at TEXT NOT NULL,
+      details_json TEXT,
+      FOREIGN KEY (target_id) REFERENCES openclaw_fleet_alert_targets(id) ON DELETE CASCADE,
+      FOREIGN KEY (run_id) REFERENCES openclaw_fleet_digest_runs(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_alert_deliveries_target
+      ON openclaw_fleet_alert_deliveries(target_id, delivered_at DESC, id DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_openclaw_fleet_alert_deliveries_run
+      ON openclaw_fleet_alert_deliveries(run_id, delivered_at DESC, id DESC);
 
     CREATE TABLE IF NOT EXISTS openclaw_policy_packs (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -4696,6 +4745,195 @@ export function listOpenClawFleetDigestDeliveries(db: DB, limit = 20): OpenClawF
     ORDER BY datetime(delivered_at) DESC, id DESC
     LIMIT ?
   `).all(Math.max(1, Math.trunc(limit))) as OpenClawFleetDigestDeliveryRow[]
+}
+
+export function listOpenClawFleetAlertTargets(db: DB): OpenClawFleetAlertTargetRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_alert_targets
+    ORDER BY enabled DESC, updated_at DESC, id DESC
+  `).all() as OpenClawFleetAlertTargetRow[]
+}
+
+export function getOpenClawFleetAlertTargetById(db: DB, id: number): OpenClawFleetAlertTargetRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_alert_targets
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as OpenClawFleetAlertTargetRow | undefined
+
+  return row ?? null
+}
+
+export function createOpenClawFleetAlertTarget(
+  db: DB,
+  input: {
+    label: string
+    deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+    destination: string
+    severityThreshold?: OpenClawFleetAlertSeverityThreshold
+    enabled?: boolean
+    metadataJson?: string | null
+  },
+): OpenClawFleetAlertTargetRow {
+  const now = nowIso()
+  const result = db.prepare(`
+    INSERT INTO openclaw_fleet_alert_targets (
+      label,
+      delivery_kind,
+      destination,
+      severity_threshold,
+      enabled,
+      metadata_json,
+      last_delivery_status,
+      last_delivery_at,
+      last_error_code,
+      last_error_at,
+      created_at,
+      updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+  `).run(
+    input.label,
+    input.deliveryKind,
+    input.destination,
+    input.severityThreshold ?? 'warning',
+    input.enabled === false ? 0 : 1,
+    input.metadataJson ?? null,
+    now,
+    now,
+  )
+
+  return getOpenClawFleetAlertTargetById(db, Number(result.lastInsertRowid)) as OpenClawFleetAlertTargetRow
+}
+
+export function updateOpenClawFleetAlertTarget(
+  db: DB,
+  input: {
+    id: number
+    label?: string
+    deliveryKind?: OpenClawFleetAlertTargetDeliveryKind
+    destination?: string
+    severityThreshold?: OpenClawFleetAlertSeverityThreshold
+    enabled?: boolean
+    metadataJson?: string | null
+    lastDeliveryStatus?: OpenClawFleetAlertDeliveryStatus | null
+    lastDeliveryAt?: string | null
+    lastErrorCode?: string | null
+    lastErrorAt?: string | null
+  },
+): OpenClawFleetAlertTargetRow | null {
+  const existing = getOpenClawFleetAlertTargetById(db, input.id)
+  if (!existing) {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE openclaw_fleet_alert_targets
+    SET label = ?,
+        delivery_kind = ?,
+        destination = ?,
+        severity_threshold = ?,
+        enabled = ?,
+        metadata_json = ?,
+        last_delivery_status = ?,
+        last_delivery_at = ?,
+        last_error_code = ?,
+        last_error_at = ?,
+        updated_at = ?
+    WHERE id = ?
+  `).run(
+    input.label ?? existing.label,
+    input.deliveryKind ?? existing.delivery_kind,
+    input.destination ?? existing.destination,
+    input.severityThreshold ?? existing.severity_threshold,
+    input.enabled === undefined ? existing.enabled : (input.enabled ? 1 : 0),
+    input.metadataJson === undefined ? existing.metadata_json : input.metadataJson,
+    input.lastDeliveryStatus === undefined ? existing.last_delivery_status : input.lastDeliveryStatus,
+    input.lastDeliveryAt === undefined ? existing.last_delivery_at : input.lastDeliveryAt,
+    input.lastErrorCode === undefined ? existing.last_error_code : input.lastErrorCode,
+    input.lastErrorAt === undefined ? existing.last_error_at : input.lastErrorAt,
+    nowIso(),
+    input.id,
+  )
+
+  return getOpenClawFleetAlertTargetById(db, input.id)
+}
+
+export function recordOpenClawFleetAlertDelivery(
+  db: DB,
+  input: {
+    targetId: number
+    runId?: number | null
+    targetLabel: string
+    deliveryKind: OpenClawFleetAlertTargetDeliveryKind
+    destination: string
+    severityThreshold: OpenClawFleetAlertSeverityThreshold
+    severity: OpenClawFleetAlertSeverityThreshold
+    itemCount?: number
+    status: OpenClawFleetAlertDeliveryStatus
+    errorCode?: string | null
+    errorMessage?: string | null
+    deliveredAt?: string
+    detailsJson?: string | null
+  },
+): OpenClawFleetAlertDeliveryRow {
+  const deliveredAt = input.deliveredAt ?? nowIso()
+  const result = db.prepare(`
+    INSERT INTO openclaw_fleet_alert_deliveries (
+      target_id,
+      run_id,
+      target_label,
+      delivery_kind,
+      destination,
+      severity_threshold,
+      severity,
+      item_count,
+      status,
+      error_code,
+      error_message,
+      delivered_at,
+      details_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    input.targetId,
+    input.runId ?? null,
+    input.targetLabel,
+    input.deliveryKind,
+    input.destination,
+    input.severityThreshold,
+    input.severity,
+    input.itemCount ?? 0,
+    input.status,
+    input.errorCode ?? null,
+    input.errorMessage ?? null,
+    deliveredAt,
+    input.detailsJson ?? null,
+  )
+
+  updateOpenClawFleetAlertTarget(db, {
+    id: input.targetId,
+    lastDeliveryStatus: input.status,
+    lastDeliveryAt: deliveredAt,
+    lastErrorCode: input.errorCode ?? null,
+    lastErrorAt: input.errorCode ? deliveredAt : null,
+  })
+
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_alert_deliveries
+    WHERE id = ?
+    LIMIT 1
+  `).get(Number(result.lastInsertRowid)) as OpenClawFleetAlertDeliveryRow
+}
+
+export function listOpenClawFleetAlertDeliveries(db: DB, limit = 20): OpenClawFleetAlertDeliveryRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM openclaw_fleet_alert_deliveries
+    ORDER BY datetime(delivered_at) DESC, id DESC
+    LIMIT ?
+  `).all(Math.max(1, Math.trunc(limit))) as OpenClawFleetAlertDeliveryRow[]
 }
 
 function updateOpenClawHostRouteCount(db: DB, hostId: number): void {
