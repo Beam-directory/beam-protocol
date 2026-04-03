@@ -16,6 +16,10 @@ async function main() {
   const workspaceGuide = await readFile(path.join(repoRoot, 'docs/guide/beam-workspaces.md'), 'utf8')
   const workspaceUi = await readFile(path.join(repoRoot, 'packages/dashboard/src/pages/WorkspacesPage.tsx'), 'utf8')
   const fleetUi = await readFile(path.join(repoRoot, 'packages/dashboard/src/pages/OpenClawFleetPage.tsx'), 'utf8')
+  const settingsUi = await readFile(path.join(repoRoot, 'packages/dashboard/src/pages/SettingsPage.tsx'), 'utf8')
+  const onboardingScript = await readFile(path.join(repoRoot, 'scripts/workspace/openclaw-onboarding.mjs'), 'utf8')
+  const bootstrapScript = await readFile(path.join(repoRoot, 'scripts/workspace/beam-openclaw-host-bootstrap.sh'), 'utf8')
+  const ciWorkflow = await readFile(path.join(repoRoot, '.github/workflows/ci.yml'), 'utf8')
 
   assertIncludes(docsHome, 'Beam Workspaces', 'docs home workspace entry')
   assertIncludes(docsHome, 'Beam Workspaces guide', 'docs home workspace guide link')
@@ -37,8 +41,15 @@ async function main() {
   assertIncludes(workspaceGuide, 'Reconciliation and garbage collection', 'reconciliation section')
   assertIncludes(workspaceGuide, 'Run fleet reconciliation', 'reconciliation action guidance')
   assertIncludes(workspaceGuide, 'gc candidate', 'garbage collection guidance')
+  assertIncludes(workspaceGuide, 'npm run workspace:openclaw', 'guided onboarding command')
   assertIncludes(workspaceGuide, 'npm run workspace:openclaw-setup', 'openclaw setup command')
   assertIncludes(workspaceGuide, 'npm run workspace:openclaw-status', 'openclaw status command')
+  assertIncludes(workspaceGuide, 'npm run quickstart:ui-baseline', 'visual baseline command')
+  assertIncludes(workspaceGuide, 'npm run quickstart:ui-compare', 'visual regression compare command')
+  assertIncludes(workspaceGuide, 'guided enrollment', 'guided enrollment docs copy')
+  assertIncludes(workspaceGuide, 'copy-paste install pack', 'install pack guidance')
+  assertIncludes(workspaceGuide, 'support-bundle export', 'support bundle guidance')
+  assertIncludes(workspaceGuide, 'Settings page', 'settings role-management guidance')
   assertIncludes(workspaceUi, 'Partner channels', 'workspace UI partner channels section')
   assertIncludes(workspaceUi, 'Workspace digest', 'workspace UI digest section')
   assertIncludes(workspaceUi, 'Workspace timeline', 'workspace UI timeline section')
@@ -50,6 +61,10 @@ async function main() {
   assertIncludes(fleetUi, 'Rotate credential', 'fleet credential rotation action')
   assertIncludes(fleetUi, 'Recover host', 'fleet credential recovery action')
   assertIncludes(fleetUi, 'Fleet operator digest', 'fleet digest surface')
+  assertIncludes(fleetUi, 'Recent enrollment requests', 'fleet enrollment queue')
+  assertIncludes(fleetUi, 'Open guided enrollment flow', 'guided enrollment CTA')
+  assertIncludes(fleetUi, 'Download support bundle', 'support bundle action')
+  assertIncludes(fleetUi, 'Fleet analytics', 'fleet analytics panel')
   assertIncludes(fleetUi, 'External alerting', 'fleet external alerting section')
   assertIncludes(fleetUi, 'Deliver warning/critical fleet items to email or webhooks', 'fleet alerting copy')
   assertIncludes(fleetUi, 'Create/update requires admin.', 'fleet admin guard copy')
@@ -58,6 +73,17 @@ async function main() {
   assertIncludes(fleetUi, 'Run fleet reconciliation', 'fleet reconciliation action')
   assertIncludes(fleetUi, 'Disable route', 'fleet route disable action')
   assertIncludes(fleetUi, 'Reset owner', 'fleet route owner reset action')
+  assertIncludes(settingsUi, 'Operators and members', 'settings operator/member surface')
+  assertIncludes(settingsUi, 'Role management', 'settings role management section')
+  assertIncludes(settingsUi, 'Latest sign-in link', 'settings magic link surface')
+  assertIncludes(onboardingScript, 'installing Chromium because the dashboard proof browser is not available yet', 'onboarding self-healing browser install')
+  assertIncludes(onboardingScript, 'Beam OpenClaw onboarding finished.', 'onboarding completion copy')
+  assertIncludes(bootstrapScript, 'BEAM_OPENCLAW_REPO_URL', 'bootstrap repo override')
+  assertIncludes(bootstrapScript, 'BEAM_OPENCLAW_REF', 'bootstrap ref override')
+  assertIncludes(bootstrapScript, 'openclaw-onboarding.mjs', 'bootstrap onboarding entrypoint')
+  assertIncludes(ciWorkflow, 'npm run quickstart:ui-compare -- --latest', 'ui compare CI gate')
+  assertIncludes(ciWorkflow, 'npm run quickstart:ui-report -- --latest --output tmp/dashboard-ui-smoke/report.md', 'ui report CI evidence')
+  assertIncludes(ciWorkflow, 'quickstart-ui-smoke', 'ui smoke artifact upload')
 
   const result = {
     ok: true,
@@ -81,6 +107,14 @@ async function main() {
       hostBadges: true,
       reconciliationSurface: true,
       routeOwnerActions: true,
+      packagedInstaller: true,
+      guidedEnrollment: true,
+      operatorOnboarding: true,
+      memberManagement: true,
+      supportBundleExport: true,
+      fleetAnalytics: true,
+      visualRegressionGate: true,
+      selfHealingOnboarding: true,
     },
   }
 
@@ -99,9 +133,10 @@ async function main() {
 ## Path
 
 1. The docs home still points operators to Beam Workspaces as the identity and control-plane layer.
-2. The Beam Workspaces guide now explains the OpenClaw fleet model, host approval, credential rotation and recovery, Linux install parity, and fleet digest commands in plain operator language.
-3. The guide now also makes the role split explicit: \`viewer\`, \`operator\`, and \`admin\`, plus external email/webhook alerting.
-4. The dashboard surface vocabulary matches the guide: host approval, host detail, duplicate identity conflicts, host badges, partner channels, timeline, digest, route-owner actions, external alerting, reconciliation, and thread composer.
+2. The Beam Workspaces guide now explains the OpenClaw fleet model, guided host enrollment, packaged install commands, support-bundle export, role administration, and the visual-regression proof path in plain operator language.
+3. The fleet surface now exposes guided enrollment links, recent enrollment requests, fleet analytics, and support-bundle export directly in the dashboard.
+4. The Settings page now gives hosted-fleet operators one place for \`viewer\` / \`operator\` / \`admin\` administration and magic-link issuance.
+5. The onboarding and CI paths are now adoption-friendly: one human-friendly \`workspace:openclaw\` command, self-healing Chromium install for the UI proof, committed visual baselines, CI diffing, and a readable UI report artifact.
 
 ## Evidence
 

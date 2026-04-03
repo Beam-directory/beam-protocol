@@ -123,6 +123,9 @@ jobs:
       - name: Run dashboard UI smoke path
         run: npm run quickstart:ui-smoke
 
+      - name: Compare dashboard UI against baselines
+        run: npm run quickstart:ui-compare -- --latest
+
       - name: Write dashboard UI smoke report
         run: npm run quickstart:ui-report -- --latest --output tmp/dashboard-ui-smoke/report.md
 

@@ -8,10 +8,12 @@ import {
   type OpenClawFleetAlertTarget,
   type OpenClawFleetAlertTargetDeliveryKind,
   type OpenClawFleetAlertSeverityThreshold,
+  type OpenClawFleetAnalyticsResponse,
   type OpenClawConflictGroup,
   type OpenClawFleetBulkActionInput,
   type OpenClawFleetDigestResponse,
   type OpenClawFleetEnvironmentSummary,
+  type OpenClawEnrollmentRequest,
   type OpenClawFleetRemediationItem,
   type OpenClawEnrollmentCreateInput,
   type OpenClawFleetOverviewResponse,
@@ -233,6 +235,19 @@ function formatLatency(value: number | null): string {
   return value === null ? '—' : `${formatNumber(value)} ms`
 }
 
+function installPackCommandSections(installPack: OpenClawInstallPack): Array<{ label: string; command: string }> {
+  return [
+    { label: 'Guided onboarding', command: installPack.commands.guidedOnboarding },
+    { label: 'Bootstrap macOS', command: installPack.commands.bootstrapMacos },
+    { label: 'Bootstrap Linux', command: installPack.commands.bootstrapLinux },
+    { label: 'Managed macOS', command: installPack.commands.managedMacos },
+    { label: 'Managed Linux', command: installPack.commands.managedLinux },
+    { label: 'Foreground debug', command: installPack.commands.foregroundDebug },
+    { label: 'Status', command: installPack.commands.status },
+    { label: 'Uninstall', command: installPack.commands.uninstall },
+  ]
+}
+
 function toDateTimeLocalValue(value: string | null): string {
   if (!value) {
     return ''
@@ -320,14 +335,23 @@ type AlertTargetFormState = {
 
 type FleetBulkMode = 'labels' | 'stage_revoke_review' | 'clear_revoke_review' | null
 
+type SupportBundleFormState = {
+  hostId: string
+  workspaceSlug: string
+  traceNonce: string
+  hours: string
+}
+
 export default function OpenClawFleetPage() {
   const { session } = useAdminAuth()
   const [searchParams, setSearchParams] = useSearchParams()
   const [overview, setOverview] = useState<OpenClawFleetOverviewResponse | null>(null)
+  const [analytics, setAnalytics] = useState<OpenClawFleetAnalyticsResponse | null>(null)
   const [digest, setDigest] = useState<OpenClawFleetDigestResponse | null>(null)
   const [conflictDetail, setConflictDetail] = useState<OpenClawConflictDetailResponse | null>(null)
   const [hostDetail, setHostDetail] = useState<OpenClawHostDetailResponse | null>(null)
   const [hostIdentities, setHostIdentities] = useState<OpenClawHostIdentitiesResponse | null>(null)
+  const [enrollments, setEnrollments] = useState<OpenClawEnrollmentRequest[]>([])
   const [loading, setLoading] = useState(true)
   const [detailLoading, setDetailLoading] = useState(false)
   const [actionBusy, setActionBusy] = useState<string | null>(null)
@@ -341,13 +365,7 @@ export default function OpenClawFleetPage() {
       foregroundDebug: string
     }
   } | null>(null)
-  const [enrollmentResult, setEnrollmentResult] = useState<{
-    token: string
-    label: string | null
-    workspaceSlug: string | null
-    expiresAt: string | null
-    installPack: OpenClawInstallPack | null
-  } | null>(null)
+  const [enrollmentResult, setEnrollmentResult] = useState<OpenClawEnrollmentRequest | null>(null)
   const [enrollmentForm, setEnrollmentForm] = useState<OpenClawEnrollmentCreateInput>({
     label: '',
     workspaceSlug: '',
@@ -409,6 +427,12 @@ export default function OpenClawFleetPage() {
     confirmPhrase: '',
   })
   const [selectedConflictRouteId, setSelectedConflictRouteId] = useState<number | null>(null)
+  const [supportBundleForm, setSupportBundleForm] = useState<SupportBundleFormState>({
+    hostId: '',
+    workspaceSlug: '',
+    traceNonce: '',
+    hours: '24',
+  })
 
   const isAdmin = session?.role === 'admin'
   const canOperate = session?.role === 'admin' || session?.role === 'operator'
@@ -507,6 +531,13 @@ export default function OpenClawFleetPage() {
     return raw ? raw.trim() || null : null
   }, [searchParams])
 
+  const selectedEnrollmentId = useMemo(() => {
+    const raw = searchParams.get('enrollment')
+    if (!raw) return null
+    const parsed = Number.parseInt(raw, 10)
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null
+  }, [searchParams])
+
   const visibleHosts = useMemo(() => {
     const hosts = overview?.hosts ?? []
     return hosts.filter((host) => {
@@ -544,9 +575,19 @@ export default function OpenClawFleetPage() {
     setOverview(response)
   }
 
+  async function loadAnalytics() {
+    const response = await directoryApi.getOpenClawFleetAnalytics()
+    setAnalytics(response)
+  }
+
   async function loadDigest() {
     const response = await directoryApi.getOpenClawFleetDigest()
     setDigest(response)
+  }
+
+  async function loadEnrollments() {
+    const response = await directoryApi.listOpenClawEnrollments()
+    setEnrollments(response.enrollments)
   }
 
   async function loadConflict(beamId: string) {
@@ -567,7 +608,7 @@ export default function OpenClawFleetPage() {
     try {
       setLoading(true)
       setError(null)
-      await Promise.all([loadOverview(), loadDigest()])
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
       const hostId = nextHostId ?? selectedHostId
       const conflictBeamId = nextConflictBeamId ?? selectedConflictBeamId
       if (hostId) {
@@ -703,6 +744,15 @@ export default function OpenClawFleetPage() {
     })
   }, [digest?.schedule.enabled, digest?.schedule.deliveryEmail, digest?.schedule.escalationEmail, digest?.schedule.runHourUtc, digest?.schedule.runMinuteUtc, digest?.schedule.escalateOnCritical])
 
+  useEffect(() => {
+    setSupportBundleForm((current) => ({
+      hostId: selectedHost ? String(selectedHost.id) : current.hostId,
+      workspaceSlug: selectedHost?.workspaceSlug ?? current.workspaceSlug,
+      traceNonce: conflictDetail?.routes[0]?.lastDelivery?.nonce ?? current.traceNonce,
+      hours: current.hours,
+    }))
+  }, [selectedHost?.id, selectedHost?.workspaceSlug, conflictDetail?.beamId])
+
   async function runAction(actionKey: string, fn: () => Promise<void>, successMessage: string) {
     try {
       setActionBusy(actionKey)
@@ -749,7 +799,7 @@ export default function OpenClawFleetPage() {
 
   async function handleCreateEnrollment(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!ensureAdminAction('Enrollment creation')) {
+    if (!ensureOperatorAction('Enrollment creation')) {
       return
     }
     await runAction('create-enrollment', async () => {
@@ -759,26 +809,20 @@ export default function OpenClawFleetPage() {
         notes: typeof enrollmentForm.notes === 'string' && enrollmentForm.notes.trim() ? enrollmentForm.notes.trim() : null,
         expiresInHours: typeof enrollmentForm.expiresInHours === 'number' ? enrollmentForm.expiresInHours : 72,
       })
-      setEnrollmentResult({
-        token: response.enrollment.token ?? '',
-        label: response.enrollment.label,
-        workspaceSlug: response.enrollment.workspaceSlug,
-        expiresAt: response.enrollment.expiresAt,
-        installPack: response.enrollment.installPack ?? null,
-      })
-      await Promise.all([loadOverview(), loadDigest()])
+      setEnrollmentResult(response.enrollment)
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
     }, 'Enrollment token issued.')
   }
 
   async function handleApprove(host: OpenClawHostSummary) {
-    if (!ensureAdminAction('Host approval')) {
+    if (!ensureOperatorAction('Host approval')) {
       return
     }
     await runAction(`approve-${host.id}`, async () => {
       const response = await directoryApi.approveOpenClawHost(host.id)
       setCredentialResult(null)
       setNotice(`Host ${hostTitle(response.host)} approved. Credential issued.`)
-      await Promise.all([loadOverview(), loadDigest()])
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
       await loadHost(host.id)
     }, `Host ${hostTitle(host)} approved.`)
   }
@@ -798,7 +842,7 @@ export default function OpenClawFleetPage() {
         credential: response.credential,
         commands: response.installPack.commands,
       })
-      await Promise.all([loadOverview(), loadDigest()])
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
       await loadHost(host.id)
     }, `Credential for ${hostTitle(host)} rotated.`)
   }
@@ -818,7 +862,7 @@ export default function OpenClawFleetPage() {
         credential: response.credential,
         commands: response.installPack.commands,
       })
-      await Promise.all([loadOverview(), loadDigest()])
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
       await loadHost(host.id)
     }, `Recovery credential for ${hostTitle(host)} issued.`)
   }
@@ -829,9 +873,32 @@ export default function OpenClawFleetPage() {
     }
     await runAction(`cleanup-${host.id}`, async () => {
       await directoryApi.completeOpenClawHostRecoveryCleanup(host.id)
-      await Promise.all([loadOverview(), loadDigest()])
+      await Promise.all([loadOverview(), loadAnalytics(), loadDigest(), loadEnrollments()])
       await loadHost(host.id)
     }, `Recovery cleanup completed for ${hostTitle(host)}.`)
+  }
+
+  async function handleDownloadSupportBundle() {
+    if (!ensureOperatorAction('Support bundle export')) {
+      return
+    }
+
+    await runAction('support-bundle', async () => {
+      const download = await directoryApi.downloadOpenClawFleetSupportBundle({
+        hostId: supportBundleForm.hostId.trim() ? Number.parseInt(supportBundleForm.hostId, 10) || null : null,
+        workspaceSlug: supportBundleForm.workspaceSlug.trim() || null,
+        traceNonce: supportBundleForm.traceNonce.trim() || null,
+        hours: Number.parseInt(supportBundleForm.hours, 10) || 24,
+      })
+      const objectUrl = URL.createObjectURL(download.blob)
+      const anchor = document.createElement('a')
+      anchor.href = objectUrl
+      anchor.download = download.filename
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      setTimeout(() => URL.revokeObjectURL(objectUrl), 0)
+    }, 'Support bundle exported.')
   }
 
   async function handleSavePlacement(host: OpenClawHostSummary) {
@@ -1303,6 +1370,191 @@ export default function OpenClawFleetPage() {
         <MetricCard label="Maint. blocked" value={!overview ? '—' : formatNumber(overview.maintenance.counts.blocked)} tone={(overview?.maintenance.counts.blocked ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Rotation due" value={!overview ? '—' : formatNumber(overview.summary.rotationDueHosts)} tone={(overview?.summary.rotationDueHosts ?? 0) > 0 ? 'warning' : 'default'} />
         <MetricCard label="Duplicate conflicts" value={!overview ? '—' : formatNumber(overview.summary.duplicateIdentityConflicts)} tone={(overview?.summary.duplicateIdentityConflicts ?? 0) > 0 ? 'critical' : 'default'} />
+      </section>
+
+      <section className="grid gap-6 xl:grid-cols-[1.08fr,0.92fr]">
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Fleet analytics</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Delivery posture, receipt latency, and the hosts that are currently shaping the overall health of the OpenClaw fleet.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {analytics?.generatedAt ? `Generated ${formatRelativeTime(analytics.generatedAt)}` : 'No analytics snapshot yet'}
+            </div>
+          </div>
+
+          <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+            <MetricCard label="Ack samples" value={!analytics ? '—' : formatNumber(analytics.summary.ackSamples)} tone={(analytics?.summary.ackSamples ?? 0) > 0 ? 'success' : 'default'} />
+            <MetricCard label="Avg latency" value={!analytics ? '—' : formatLatency(analytics.summary.avgAckLatencyMs)} tone={(analytics?.summary.overSloCount ?? 0) > 0 ? 'warning' : 'success'} />
+            <MetricCard label="p95 latency" value={!analytics ? '—' : formatLatency(analytics.summary.p95AckLatencyMs)} tone={(analytics?.summary.overSloCount ?? 0) > 0 ? 'warning' : 'success'} />
+            <MetricCard
+              label="Missing / failed"
+              value={!analytics ? '—' : `${formatNumber(analytics.summary.missingReceipts)} / ${formatNumber(analytics.summary.failedReceipts)}`}
+              tone={(analytics?.summary.failedReceipts ?? 0) > 0 ? 'critical' : (analytics?.summary.missingReceipts ?? 0) > 0 ? 'warning' : 'default'}
+            />
+          </div>
+
+          <div className="mt-4 grid gap-4 xl:grid-cols-[0.92fr,1.08fr]">
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Delivery trend</div>
+              <div className="mt-3 space-y-2">
+                {analytics && analytics.deliveryTrend.length > 0 ? (
+                  analytics.deliveryTrend.map((entry) => (
+                    <div key={entry.status} className="flex items-center justify-between gap-3 rounded-xl border border-slate-200 px-3 py-2 text-sm dark:border-slate-800">
+                      <span className="text-slate-600 dark:text-slate-300">{entry.status.replace(/_/g, ' ')}</span>
+                      <span className="font-medium text-slate-900 dark:text-slate-100">{formatNumber(entry.count)}</span>
+                    </div>
+                  ))
+                ) : (
+                  <EmptyPanel label="No delivery trend snapshot yet." />
+                )}
+              </div>
+              {analytics ? (
+                <div className="mt-4 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                  <div>{`${formatNumber(analytics.summary.totalHosts)} total hosts · ${formatNumber(analytics.summary.staleHosts)} stale`}</div>
+                  <div>{`${formatNumber(analytics.summary.degradedHosts)} degraded · ${formatNumber(analytics.summary.duplicateIdentityConflicts)} conflicts`}</div>
+                  <div>{`${formatNumber(analytics.summary.overSloCount)} over SLO`}</div>
+                  <div>{`Resolutions ${formatNumber(analytics.conflictTrend.recentResolutions)} · disables ${formatNumber(analytics.conflictTrend.recentDisables)}`}</div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Host posture</div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {analytics ? `${formatNumber(analytics.hostPosture.length)} hosts` : '—'}
+                </div>
+              </div>
+              <div className="mt-3 space-y-3">
+                {analytics && analytics.hostPosture.length > 0 ? (
+                  analytics.hostPosture.slice(0, 6).map((host) => {
+                    const churn = analytics.routeChurn.find((entry) => entry.hostId === host.hostId)
+                    return (
+                      <div key={`analytics-host-${host.hostId}`} className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{host.hostLabel || `Host ${host.hostId}`}</div>
+                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                              {[
+                                host.uptimeState,
+                                host.lastHeartbeatAt ? `Heartbeat ${formatRelativeTime(host.lastHeartbeatAt)}` : 'No heartbeat yet',
+                                `${formatNumber(host.routeCount)} routes`,
+                              ].join(' · ')}
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap gap-2">
+                            <StatusPill label={host.healthStatus} tone={hostHealthTone(host.healthStatus)} />
+                            <StatusPill label={host.maintenanceState} tone={maintenanceStateTone(host.maintenanceState)} />
+                          </div>
+                        </div>
+                        <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                          <div>{host.lastHeartbeatAgeHours === null ? 'No heartbeat age yet' : `Heartbeat age ${formatNumber(host.lastHeartbeatAgeHours)}h`}</div>
+                          <div>{churn ? `${formatNumber(churn.liveRoutes)} live · ${formatNumber(churn.staleRoutes)} stale · ${formatNumber(churn.endedRoutes)} ended` : 'No churn snapshot yet'}</div>
+                          <div>{churn ? `${formatNumber(churn.conflictRoutes)} conflicts · ${formatNumber(churn.garbageCollectableRoutes)} GC candidates` : 'No conflict snapshot yet'}</div>
+                          <div>{host.href ? 'Operator drill-down ready' : 'No detail link'}</div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <button
+                            type="button"
+                            className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                            onClick={() => focusHost(host.hostId)}
+                          >
+                            Open host
+                          </button>
+                          <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={host.href}>
+                            Detail view
+                          </Link>
+                        </div>
+                      </div>
+                    )
+                  })
+                ) : (
+                  <EmptyPanel label="No host-posture snapshot yet." />
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="panel">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Recent enrollment requests</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Guided bootstrap links, claimed-host state, and approval posture for machines entering the hosted fleet.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">
+              {`${formatNumber(enrollments.length)} requests`}
+            </div>
+          </div>
+          <div className="mt-4 space-y-3">
+            {enrollments.length > 0 ? (
+              enrollments.slice(0, 6).map((enrollment) => (
+                <div
+                  key={`enrollment-${enrollment.id}`}
+                  className={`rounded-2xl border p-4 ${selectedEnrollmentId === enrollment.id ? 'border-orange-300 bg-orange-50/60 dark:border-orange-500/40 dark:bg-orange-500/10' : 'border-slate-200 dark:border-slate-800'}`}
+                >
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{enrollment.label || `Enrollment ${enrollment.id}`}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                        {[
+                          enrollment.workspaceSlug ? `Workspace ${enrollment.workspaceSlug}` : 'No workspace preset',
+                          `Issued ${formatRelativeTime(enrollment.createdAt)}`,
+                          enrollment.expiresAt ? `Expires ${formatRelativeTime(enrollment.expiresAt)}` : null,
+                        ].filter(Boolean).join(' · ')}
+                      </div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <StatusPill label={enrollment.status} tone={enrollment.status === 'approved' ? 'success' : enrollment.status === 'pending' ? 'warning' : enrollment.status === 'revoked' || enrollment.status === 'expired' ? 'critical' : 'default'} />
+                      {enrollment.claimedHost ? (
+                        <StatusPill label={enrollment.claimedHost.healthStatus} tone={hostHealthTone(enrollment.claimedHost.healthStatus)} />
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                    <div>{enrollment.approvedAt ? `Approved ${formatDateTime(enrollment.approvedAt)}${enrollment.approvedBy ? ` · ${enrollment.approvedBy}` : ''}` : 'Approval pending'}</div>
+                    <div>{enrollment.claimedAt ? `Claimed ${formatDateTime(enrollment.claimedAt)}` : 'Not claimed yet'}</div>
+                    <div>{enrollment.claimedHost ? `${enrollment.claimedHost.label || enrollment.claimedHost.hostKey} · ${enrollment.claimedHost.status}` : 'No claimed host attached yet'}</div>
+                    <div>{enrollment.guidedEnrollmentUrl ? 'Guided view available' : 'No guided link stored'}</div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    {enrollment.guidedEnrollmentUrl ? (
+                      <a className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" href={enrollment.guidedEnrollmentUrl}>
+                        Guided view
+                      </a>
+                    ) : null}
+                    {enrollment.claimedHost ? (
+                      <button
+                        type="button"
+                        className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                        onClick={() => {
+                          if (enrollment.claimedHost) {
+                            focusHost(enrollment.claimedHost.id)
+                          }
+                        }}
+                      >
+                        Open host
+                      </button>
+                    ) : null}
+                    {enrollment.claimedHost?.href ? (
+                      <Link className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" to={enrollment.claimedHost.href}>
+                        Host detail
+                      </Link>
+                    ) : null}
+                  </div>
+                </div>
+              ))
+            ) : (
+              <EmptyPanel label="No enrollment requests have been issued yet." />
+            )}
+          </div>
+        </div>
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
@@ -2699,16 +2951,18 @@ export default function OpenClawFleetPage() {
                   enrollmentResult.expiresAt ? `Expires ${formatDateTime(enrollmentResult.expiresAt)}` : null,
                 ].filter(Boolean).join(' · ')}
               </div>
+              {enrollmentResult.guidedEnrollmentUrl ? (
+                <div className="mt-3 space-y-2">
+                  <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Guided enrollment</div>
+                  <a className="inline-flex rounded-xl border border-slate-200 px-3 py-2 text-xs text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800" href={enrollmentResult.guidedEnrollmentUrl}>
+                    Open guided enrollment flow
+                  </a>
+                </div>
+              ) : null}
               {enrollmentResult.installPack ? (
                 <div className="mt-4 space-y-3">
                   <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Install pack</div>
-                  {[
-                    ['Managed macOS', enrollmentResult.installPack.commands.managedMacos],
-                    ['Managed Linux', enrollmentResult.installPack.commands.managedLinux],
-                    ['Foreground debug', enrollmentResult.installPack.commands.foregroundDebug],
-                    ['Status', enrollmentResult.installPack.commands.status],
-                    ['Uninstall', enrollmentResult.installPack.commands.uninstall],
-                  ].map(([label, command]) => (
+                  {installPackCommandSections(enrollmentResult.installPack).map(({ label, command }) => (
                     <div key={label}>
                       <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">{label}</div>
                       <div className="mt-1 break-all rounded-xl bg-slate-100 px-3 py-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-200">
@@ -2716,10 +2970,96 @@ export default function OpenClawFleetPage() {
                       </div>
                     </div>
                   ))}
+                  {enrollmentResult.installPack.operatorChecklist.length > 0 ? (
+                    <div className="rounded-2xl border border-slate-200 px-3 py-3 dark:border-slate-800">
+                      <div className="text-[11px] font-medium uppercase tracking-wide text-slate-400">Operator checklist</div>
+                      <div className="mt-2 space-y-2 text-xs text-slate-600 dark:text-slate-300">
+                        {enrollmentResult.installPack.operatorChecklist.map((item) => (
+                          <div key={item} className="flex gap-2">
+                            <span className="mt-0.5 text-orange-500">•</span>
+                            <span>{item}</span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
                 </div>
               ) : null}
             </div>
           ) : null}
+
+          <div className="mt-6 rounded-2xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Support bundle</div>
+                <p className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                  Export the current fleet posture, selected host/workspace/trace context, recent intent evidence, and digest state as one JSON bundle for support or incident handoff.
+                </p>
+              </div>
+              <div className="text-[11px] text-slate-500 dark:text-slate-400">
+                {selectedHost ? `Default host ${selectedHost.id}` : 'Fleet-wide export'}
+              </div>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Host ID</span>
+                <input
+                  className="input-field"
+                  placeholder="Optional"
+                  value={supportBundleForm.hostId}
+                  onChange={(event) => setSupportBundleForm((current) => ({ ...current, hostId: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Workspace slug</span>
+                <input
+                  className="input-field"
+                  placeholder="Optional"
+                  value={supportBundleForm.workspaceSlug}
+                  onChange={(event) => setSupportBundleForm((current) => ({ ...current, workspaceSlug: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Trace nonce</span>
+                <input
+                  className="input-field"
+                  placeholder="Optional"
+                  value={supportBundleForm.traceNonce}
+                  onChange={(event) => setSupportBundleForm((current) => ({ ...current, traceNonce: event.target.value }))}
+                />
+              </label>
+              <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                <span>Lookback hours</span>
+                <input
+                  className="input-field"
+                  min={1}
+                  step={1}
+                  type="number"
+                  value={supportBundleForm.hours}
+                  onChange={(event) => setSupportBundleForm((current) => ({ ...current, hours: event.target.value }))}
+                />
+              </label>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button
+                type="button"
+                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                disabled={actionBusy === 'support-bundle'}
+                onClick={() => { void handleDownloadSupportBundle() }}
+              >
+                {actionBusy === 'support-bundle' ? 'Preparing…' : 'Download support bundle'}
+              </button>
+              {selectedConflictBeamId ? (
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  onClick={() => setSupportBundleForm((current) => ({ ...current, traceNonce: selectedConflictBeamId }))}
+                >
+                  Use current conflict trace
+                </button>
+              ) : null}
+            </div>
+          </div>
         </div>
       </section>
 

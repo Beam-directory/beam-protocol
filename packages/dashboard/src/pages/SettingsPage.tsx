@@ -1,11 +1,15 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import {
   ApiError,
+  adminAuthApi,
+  type AdminMagicLinkResponse,
+  type AdminRole,
   BUS_DEFAULT_URL,
   DIRECTORY_URL,
   busApi,
   clearStoredBusConfig,
   directoryApi,
+  directoryRoleApi,
   getBusBaseUrl,
   getStoredBusApiKey,
   getStoredBusUrl,
@@ -15,6 +19,7 @@ import {
   setStoredBusUrl,
   type BusHealth,
   type BusStats,
+  type DirectoryRoleAssignment,
   type DirectoryHealth,
   type RootStatsResponse,
   type RetentionResponse,
@@ -22,6 +27,11 @@ import {
 import { useAdminAuth } from '../lib/admin-auth'
 
 const PRIVATE_KEY_PREFIX = 'beam-dashboard-private-key:'
+
+type RoleFormState = {
+  email: string
+  role: AdminRole
+}
 
 export default function SettingsPage() {
   const { session, config, logout } = useAdminAuth()
@@ -34,6 +44,14 @@ export default function SettingsPage() {
   const [busUrl, setBusUrl] = useState(() => getStoredBusUrl() || BUS_DEFAULT_URL)
   const [busApiKey, setBusApiKey] = useState(() => getStoredBusApiKey())
   const [busStatus, setBusStatus] = useState<string | null>(hasStoredBusApiKey() || getStoredBusUrl() ? 'Bus configuration stored locally.' : null)
+  const [roles, setRoles] = useState<DirectoryRoleAssignment[]>([])
+  const [roleForm, setRoleForm] = useState<RoleFormState>({ email: '', role: 'viewer' })
+  const [roleStatus, setRoleStatus] = useState<string | null>(null)
+  const [roleActionBusy, setRoleActionBusy] = useState<string | null>(null)
+  const [magicLinkResult, setMagicLinkResult] = useState<AdminMagicLinkResponse | null>(null)
+
+  const isAdmin = session?.role === 'admin'
+  const canOperate = session?.role === 'admin' || session?.role === 'operator'
 
   useEffect(() => {
     let cancelled = false
@@ -113,6 +131,28 @@ export default function SettingsPage() {
     return Object.keys(localStorage).filter((key) => key.startsWith(PRIVATE_KEY_PREFIX))
   }, [])
 
+  const sortedRoles = useMemo(() => {
+    return [...roles].sort((left, right) => left.email.localeCompare(right.email))
+  }, [roles])
+
+  async function loadRoles() {
+    try {
+      const response = await directoryRoleApi.list()
+      setRoles(response.roles)
+    } catch (err) {
+      setRoleStatus(err instanceof ApiError ? err.message : 'Failed to load directory roles')
+    }
+  }
+
+  useEffect(() => {
+    if (!session) {
+      setRoles([])
+      return
+    }
+
+    void loadRoles()
+  }, [session?.email, session?.role])
+
   async function validateBusConfig() {
     try {
       setStoredBusUrl(busUrl)
@@ -136,6 +176,80 @@ export default function SettingsPage() {
     setBusHealth(null)
     setBusStats(null)
     setBusStatus('Message bus URL and API key removed from local storage.')
+  }
+
+  async function handleAssignRole(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!isAdmin) {
+      setRoleStatus('Assigning or changing roles requires an admin session.')
+      return
+    }
+
+    const email = roleForm.email.trim().toLowerCase()
+    if (!email || !email.includes('@')) {
+      setRoleStatus('Enter a valid email address for the role assignment.')
+      return
+    }
+
+    try {
+      setRoleActionBusy('assign')
+      setRoleStatus(null)
+      await directoryRoleApi.assign({ email, role: roleForm.role })
+      await loadRoles()
+      setRoleForm({ email: '', role: 'viewer' })
+      setRoleStatus(`Role ${roleForm.role} assigned to ${email}.`)
+    } catch (err) {
+      setRoleStatus(err instanceof ApiError ? err.message : 'Failed to assign directory role')
+    } finally {
+      setRoleActionBusy(null)
+    }
+  }
+
+  async function handleRevokeRole(email: string) {
+    if (!isAdmin) {
+      setRoleStatus('Revoking roles requires an admin session.')
+      return
+    }
+    if (!window.confirm(`Revoke the directory role for ${email}?`)) {
+      return
+    }
+
+    try {
+      setRoleActionBusy(`revoke:${email}`)
+      setRoleStatus(null)
+      await directoryRoleApi.revoke(email)
+      await loadRoles()
+      setRoleStatus(`Role assignment removed for ${email}.`)
+    } catch (err) {
+      setRoleStatus(err instanceof ApiError ? err.message : 'Failed to revoke directory role')
+    } finally {
+      setRoleActionBusy(null)
+    }
+  }
+
+  async function handleIssueMagicLink(email?: string) {
+    if (!canOperate) {
+      setRoleStatus('Issuing sign-in links requires at least an operator session.')
+      return
+    }
+
+    const targetEmail = (email ?? roleForm.email).trim().toLowerCase()
+    if (!targetEmail || !targetEmail.includes('@')) {
+      setRoleStatus('Enter a valid email address before issuing a sign-in link.')
+      return
+    }
+
+    try {
+      setRoleActionBusy(`magic:${targetEmail}`)
+      setRoleStatus(null)
+      const response = await adminAuthApi.requestMagicLink(targetEmail)
+      setMagicLinkResult(response)
+      setRoleStatus(`Sign-in link issued for ${targetEmail}.`)
+    } catch (err) {
+      setRoleStatus(err instanceof ApiError ? err.message : 'Failed to issue sign-in link')
+    } finally {
+      setRoleActionBusy(null)
+    }
   }
 
   return (
@@ -224,6 +338,127 @@ export default function SettingsPage() {
             Dead-letter requests use the configured URL and attach the bus API key as `Authorization: Bearer ...`.
           </p>
           {busStatus ? <p className="text-sm text-slate-600 dark:text-slate-300">{busStatus}</p> : null}
+        </div>
+      </section>
+
+      <section className="grid gap-4 lg:grid-cols-[1.1fr,0.9fr]">
+        <div className="panel space-y-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="panel-title">Operators and members</div>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                Beam role directory for hosted fleet operators. Viewers can inspect posture, operators can issue sign-in links, and admins can change access.
+              </p>
+            </div>
+            <div className="text-xs text-slate-500 dark:text-slate-400">{sortedRoles.length} assignments</div>
+          </div>
+
+          {roleStatus ? (
+            <div className="rounded-xl border border-slate-200 px-4 py-3 text-sm text-slate-600 dark:border-slate-800 dark:text-slate-300">
+              {roleStatus}
+            </div>
+          ) : null}
+
+          <div className="space-y-3">
+            {sortedRoles.length > 0 ? (
+              sortedRoles.map((role) => (
+                <div key={role.email} className="rounded-2xl border border-slate-200 px-4 py-4 dark:border-slate-800">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-slate-900 dark:text-slate-100">{role.email}</div>
+                      <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Hosted fleet access via {role.role} privileges.</div>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <span className="rounded-full border border-slate-200 px-3 py-1 text-xs text-slate-700 dark:border-slate-800 dark:text-slate-200">{role.role}</span>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={roleActionBusy === `magic:${role.email}`}
+                        onClick={() => { void handleIssueMagicLink(role.email) }}
+                      >
+                        {roleActionBusy === `magic:${role.email}` ? 'Issuing…' : 'Issue link'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn-secondary"
+                        disabled={!isAdmin || roleActionBusy === `revoke:${role.email}`}
+                        onClick={() => { void handleRevokeRole(role.email) }}
+                      >
+                        {roleActionBusy === `revoke:${role.email}` ? 'Revoking…' : 'Revoke'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))
+            ) : (
+              <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-6 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">
+                No directory roles are assigned yet.
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="panel space-y-4">
+          <div className="panel-title">Role management</div>
+          <form className="space-y-3" onSubmit={(event) => { void handleAssignRole(event) }}>
+            <input
+              className="input-field"
+              placeholder="operator@beam.directory"
+              type="email"
+              value={roleForm.email}
+              onChange={(event) => setRoleForm((current) => ({ ...current, email: event.target.value }))}
+            />
+            <select
+              className="input-field"
+              value={roleForm.role}
+              onChange={(event) => setRoleForm((current) => ({ ...current, role: event.target.value as AdminRole }))}
+            >
+              <option value="viewer">viewer</option>
+              <option value="operator">operator</option>
+              <option value="admin">admin</option>
+            </select>
+            <div className="flex flex-wrap gap-3">
+              <button className="btn-primary" disabled={!isAdmin || roleActionBusy === 'assign'} type="submit">
+                {roleActionBusy === 'assign' ? 'Saving…' : 'Assign role'}
+              </button>
+              <button
+                className="btn-secondary"
+                disabled={!canOperate || roleActionBusy === `magic:${roleForm.email.trim().toLowerCase()}`}
+                onClick={() => { void handleIssueMagicLink() }}
+                type="button"
+              >
+                {roleActionBusy === `magic:${roleForm.email.trim().toLowerCase()}` ? 'Issuing…' : 'Issue sign-in link'}
+              </button>
+            </div>
+          </form>
+
+          <div className="rounded-2xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
+            <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Role guardrails</div>
+            <div className="mt-2 space-y-2 text-slate-600 dark:text-slate-300">
+              <div>`viewer` can inspect release truth, fleet posture, and dashboards.</div>
+              <div>`operator` can run guided operations and issue sign-in links.</div>
+              <div>`admin` can change roles and execute destructive fleet actions.</div>
+            </div>
+          </div>
+
+          {magicLinkResult ? (
+            <div className="rounded-2xl border border-slate-200 px-4 py-4 text-sm dark:border-slate-800">
+              <div className="text-xs font-medium uppercase tracking-wide text-slate-400">Latest sign-in link</div>
+              <div className="mt-2 text-sm font-medium text-slate-900 dark:text-slate-100">{magicLinkResult.email}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">
+                {`${magicLinkResult.role} · expires ${magicLinkResult.expiresAt}`}
+              </div>
+              {magicLinkResult.url ? (
+                <a className="mt-3 inline-flex break-all rounded-xl bg-slate-100 px-3 py-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-200" href={magicLinkResult.url}>
+                  {magicLinkResult.url}
+                </a>
+              ) : magicLinkResult.token ? (
+                <div className="mt-3 break-all rounded-xl bg-slate-100 px-3 py-3 font-mono text-xs text-slate-700 dark:bg-slate-900 dark:text-slate-200">
+                  {magicLinkResult.token}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 

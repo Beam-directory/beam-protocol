@@ -1,5 +1,18 @@
 # Changelog
 
+## v1.7.0 (draft)
+
+### Hosted Fleet Adoption
+- package the OpenClaw host installer and bootstrap-token flow into a reusable host-adoption path
+- add guided enrollment links, recent enrollment visibility, and install-pack operator onboarding in the fleet surface
+- add operator/member management with explicit `viewer`, `operator`, and `admin` administration in Settings
+- add screenshot baselines, visual compare, and CI-backed UI regression evidence for the operator dashboard
+- add fleet analytics and support-bundle export so operators can package host, workspace, and trace context for support handoff
+- commit installer, buyer, operator, UI-smoke, and external-dogfood status reports before cutting the release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.7.0` remains on `beam/1`.
+
 ## v1.6.0 (2026-04-03)
 
 ### Fleet Production Readiness
