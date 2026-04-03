@@ -107,7 +107,7 @@ async function main() {
 
     const rolloutUpdate = await fleet.updateRollout('alpha', {
       ring: 'canary',
-      desiredConnectorVersion: '1.5.0-test',
+      desiredConnectorVersion: '1.6.0-test',
       notes: 'Operator dry run canary ring',
     })
     if (rolloutUpdate.host.rollout.ring !== 'canary') {

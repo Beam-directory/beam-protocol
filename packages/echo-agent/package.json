@@ -1,6 +1,6 @@
 {
   "name": "@beam-protocol/echo-agent",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "Standalone Beam Echo Agent for local testing and onboarding",
   "type": "module",
   "main": "./dist/index.js",
@@ -10,7 +10,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "beam-protocol-sdk": "^1.5.0"
+    "beam-protocol-sdk": "^1.6.0"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",

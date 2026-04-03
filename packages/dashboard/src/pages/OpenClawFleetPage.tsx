@@ -3781,7 +3781,7 @@ export default function OpenClawFleetPage() {
                     <span>Desired connector version</span>
                     <input
                       className="input-field"
-                      placeholder="1.5.0"
+                      placeholder="1.6.0"
                       value={rolloutForm.desiredConnectorVersion}
                       onChange={(event) => setRolloutForm((current) => ({ ...current, desiredConnectorVersion: event.target.value }))}
                     />
@@ -3799,7 +3799,7 @@ export default function OpenClawFleetPage() {
                   <span>Rollback target version</span>
                   <input
                     className="input-field"
-                    placeholder="1.5.0"
+                    placeholder="1.6.0"
                     value={rolloutForm.rollbackConnectorVersion}
                     onChange={(event) => setRolloutForm((current) => ({ ...current, rollbackConnectorVersion: event.target.value }))}
                   />

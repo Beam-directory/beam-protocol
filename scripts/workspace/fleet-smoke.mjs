@@ -92,7 +92,7 @@ async function main() {
 
     const rollout = await fleet.updateRollout('alpha', {
       ring: 'canary',
-      desiredConnectorVersion: '1.5.0-test',
+      desiredConnectorVersion: '1.6.0-test',
       notes: 'Fleet drill canary visibility',
     })
     const rolloutOverview = await fleet.fetchFleetOverview()
