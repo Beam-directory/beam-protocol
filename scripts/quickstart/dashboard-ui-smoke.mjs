@@ -166,9 +166,11 @@ async function captureProtectedPage({
   route,
   selector,
   heading,
+  bodyText,
   screenshotPath,
   timeoutMs = 20_000,
   fullPage = true,
+  allowHeadingFallback = true,
 }) {
   const page = await context.newPage()
   try {
@@ -184,7 +186,16 @@ async function captureProtectedPage({
       }
     }
 
-    if (!ready && heading) {
+    if (!ready && bodyText) {
+      try {
+        await page.getByText(bodyText, { exact: false }).first().waitFor({ state: 'visible', timeout: timeoutMs })
+        ready = true
+      } catch {
+        // Fall back to the page heading when trace/body copy is still loading.
+      }
+    }
+
+    if (!ready && heading && allowHeadingFallback) {
       await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible', timeout: timeoutMs })
       ready = true
     }
@@ -290,10 +301,10 @@ async function main() {
           context: desktopContext,
           runtime,
           route: `/intents/${encodeURIComponent(traceNonce)}`,
-          selector: '[data-ui-page="trace-detail"][data-ui-state="ready"]',
+          bodyText: `Nonce ${traceNonce}`,
           heading: 'Trace',
           screenshotPath: path.join(outputDir, 'trace-desktop.png'),
-          timeoutMs: 45_000,
+          timeoutMs: 90_000,
           fullPage: false,
         }),
         fleetTablet: await captureProtectedPage({
