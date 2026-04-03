@@ -168,6 +168,12 @@ For a one-command fleet smoke, use:
 npm run workspace:fleet-smoke
 ```
 
+For the repo-owned restore and rollback drill, use:
+
+```bash
+npm run workspace:fleet-recovery-drill
+```
+
 For a repo-owned fleet digest and escalation summary, use:
 
 ```bash
@@ -213,6 +219,7 @@ The fleet and workspace surfaces now also show last-delivery receipts for host-b
 The fleet surface also gives operators explicit day-2 actions:
 
 - rotate host credentials without reinstalling the whole host
+- stage a rollback target for one host and start a guarded connector rollback when a canary or recovery step needs to return to the last known good version
 - recover or replace a revoked or lost host with a new credential cutover
 - place a host into maintenance mode or drain it before planned work, then resume it explicitly when Beam delivery is safe again
 - prefer, disable, or reset route ownership when duplicate Beam identities appear
@@ -242,6 +249,7 @@ The host detail and fleet summary now also expose the operational thresholds beh
 - recovery owner, replacement host label, cutover window notes, and a cleanup-ready state after recovery completes
 - maintenance owner, maintenance reason, maintenance start time, and whether Beam delivery is intentionally blocked for that host
 - the connector rollout ring, desired connector version, and whether the currently reported connector version has drifted
+- the staged rollback target, rollback state, and rollback notes for one host
 - the active workspace template, linked policy pack, host-group match, and template application provenance for fleet-backed workspaces
 - receipt coverage across active routes
 - p50 / p95 latency, SLO bucket counts, and direct links back to the host, workspace, and latest trace that caused the warning

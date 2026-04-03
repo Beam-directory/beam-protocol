@@ -246,6 +246,8 @@ type OpenClawHostRolloutRing = 'canary' | 'stable' | 'pinned'
 
 type OpenClawHostRolloutVersionState = 'unmanaged' | 'current' | 'drifted'
 
+type OpenClawHostRollbackState = 'idle' | 'prepared' | 'rollback_pending' | 'completed'
+
 type OpenClawHostEnvironmentSummary = {
   label: string
   hostCount: number
@@ -493,6 +495,8 @@ type OpenClawFleetRolloutAttentionHost = {
   connectorVersion: string
   desiredConnectorVersion: string | null
   versionState: OpenClawHostRolloutVersionState
+  rollbackState: OpenClawHostRollbackState
+  rollbackConnectorVersion: string | null
   reasons: string[]
   severity: OpenClawFleetDigestSeverity
   href: string
@@ -524,6 +528,7 @@ type OpenClawFleetRolloutSummary = {
     canaryHosts: number
     driftHosts: number
     unmanagedHosts: number
+    rollbackPendingHosts: number
   }
   versions: OpenClawFleetConnectorVersionSummary[]
   rings: OpenClawFleetRolloutRingSummary[]
@@ -648,6 +653,10 @@ type OpenClawHostMetadataJson = {
     desiredConnectorVersion?: string | null
     notes?: string | null
     updatedAt?: string | null
+    rollbackConnectorVersion?: string | null
+    rollbackState?: OpenClawHostRollbackState | null
+    rollbackNotes?: string | null
+    rollbackUpdatedAt?: string | null
   }
 }
 
@@ -1123,6 +1132,12 @@ function normalizeOpenClawHostRolloutRing(value: unknown): OpenClawHostRolloutRi
   return value === 'canary' || value === 'pinned' ? value : 'stable'
 }
 
+function normalizeOpenClawHostRollbackState(value: unknown): OpenClawHostRollbackState {
+  return value === 'prepared' || value === 'rollback_pending' || value === 'completed'
+    ? value
+    : 'idle'
+}
+
 function serializeOpenClawHostMaintenance(host: OpenClawHostRow) {
   const metadata = parseOpenClawHostMetadata(host.metadata_json)
   const maintenance = metadata.maintenance && typeof metadata.maintenance === 'object'
@@ -1147,6 +1162,14 @@ function serializeOpenClawHostRollout(host: OpenClawHostRow) {
     : {}
 
   const desiredConnectorVersion = normalizeOptionalString(rollout.desiredConnectorVersion)
+  const rollbackConnectorVersion = normalizeOptionalString(rollout.rollbackConnectorVersion)
+  const rawRollbackState = normalizeOpenClawHostRollbackState(rollout.rollbackState)
+  const rollbackState: OpenClawHostRollbackState =
+    rollbackConnectorVersion && rawRollbackState === 'rollback_pending' && rollbackConnectorVersion === host.connector_version
+      ? 'completed'
+      : rollbackConnectorVersion
+        ? rawRollbackState
+        : 'idle'
   const versionState: OpenClawHostRolloutVersionState = desiredConnectorVersion
     ? (desiredConnectorVersion === host.connector_version ? 'current' : 'drifted')
     : 'unmanaged'
@@ -1158,6 +1181,10 @@ function serializeOpenClawHostRollout(host: OpenClawHostRow) {
     updatedAt: normalizeIsoDateTime(rollout.updatedAt),
     versionState,
     canary: normalizeOpenClawHostRolloutRing(rollout.ring) === 'canary',
+    rollbackConnectorVersion,
+    rollbackState,
+    rollbackNotes: normalizeOptionalString(rollout.rollbackNotes),
+    rollbackUpdatedAt: normalizeIsoDateTime(rollout.rollbackUpdatedAt),
   }
 }
 
@@ -1202,10 +1229,21 @@ function buildOpenClawHostRolloutPatch(
     ring?: OpenClawHostRolloutRing | null
     desiredConnectorVersion?: string | null
     notes?: string | null
+    rollbackConnectorVersion?: string | null
+    rollbackState?: OpenClawHostRollbackState | null
+    rollbackNotes?: string | null
   },
 ) {
   const metadata = parseOpenClawHostMetadata(host.metadata_json)
   const current = serializeOpenClawHostRollout(host)
+  const rollbackConnectorVersion = input.rollbackConnectorVersion !== undefined
+    ? normalizeOptionalString(input.rollbackConnectorVersion)
+    : current.rollbackConnectorVersion
+  const rollbackState = rollbackConnectorVersion
+    ? (input.rollbackState !== undefined
+      ? normalizeOpenClawHostRollbackState(input.rollbackState)
+      : current.rollbackState)
+    : 'idle'
   const nextRollout = {
     ring: input.ring ? normalizeOpenClawHostRolloutRing(input.ring) : current.ring,
     desiredConnectorVersion: input.desiredConnectorVersion !== undefined
@@ -1215,6 +1253,14 @@ function buildOpenClawHostRolloutPatch(
       ? normalizeOptionalString(input.notes)
       : current.notes,
     updatedAt: new Date().toISOString(),
+    rollbackConnectorVersion,
+    rollbackState,
+    rollbackNotes: rollbackConnectorVersion
+      ? (input.rollbackNotes !== undefined
+        ? normalizeOptionalString(input.rollbackNotes)
+        : current.rollbackNotes)
+      : null,
+    rollbackUpdatedAt: rollbackConnectorVersion ? new Date().toISOString() : null,
   }
 
   const nextMetadata: OpenClawHostMetadataJson = {
@@ -2698,6 +2744,7 @@ function buildOpenClawFleetRolloutSummary(
   let canaryHosts = 0
   let driftHosts = 0
   let unmanagedHosts = 0
+  let rollbackPendingHosts = 0
 
   for (const host of hosts) {
     const versionLabel = host.connectorVersion || 'unknown'
@@ -2727,6 +2774,9 @@ function buildOpenClawFleetRolloutSummary(
     if (host.rollout.versionState === 'unmanaged') {
       unmanagedHosts += 1
     }
+    if (host.rollout.rollbackState === 'rollback_pending') {
+      rollbackPendingHosts += 1
+    }
     versionBuckets.set(versionLabel, versionBucket)
 
     const ringBucket = ringBuckets.get(host.rollout.ring) ?? {
@@ -2755,6 +2805,11 @@ function buildOpenClawFleetRolloutSummary(
     if (host.rollout.versionState === 'drifted') {
       reasons.push(`expected ${host.rollout.desiredConnectorVersion}`)
     }
+    if (host.rollout.rollbackState === 'rollback_pending' && host.rollout.rollbackConnectorVersion) {
+      reasons.push(`rollback to ${host.rollout.rollbackConnectorVersion}`)
+    } else if (host.rollout.rollbackState === 'prepared' && host.rollout.rollbackConnectorVersion) {
+      reasons.push(`rollback prepared for ${host.rollout.rollbackConnectorVersion}`)
+    }
     if (host.rollout.canary) {
       reasons.push('canary ring')
     }
@@ -2763,6 +2818,9 @@ function buildOpenClawFleetRolloutSummary(
       severity = 'critical'
     }
     if (host.rollout.versionState === 'drifted' && host.healthStatus === 'stale') {
+      severity = 'critical'
+    }
+    if (host.rollout.rollbackState === 'rollback_pending' && host.healthStatus === 'stale') {
       severity = 'critical'
     }
     if (reasons.length === 0) {
@@ -2778,6 +2836,8 @@ function buildOpenClawFleetRolloutSummary(
       connectorVersion: host.connectorVersion,
       desiredConnectorVersion: host.rollout.desiredConnectorVersion,
       versionState: host.rollout.versionState,
+      rollbackState: host.rollout.rollbackState,
+      rollbackConnectorVersion: host.rollout.rollbackConnectorVersion,
       reasons,
       severity,
       href: buildOpenClawFleetHref(host.id),
@@ -2810,6 +2870,7 @@ function buildOpenClawFleetRolloutSummary(
       canaryHosts,
       driftHosts,
       unmanagedHosts,
+      rollbackPendingHosts,
     },
     versions,
     rings,
@@ -3366,6 +3427,38 @@ function buildOpenClawFleetDigest(db: Database, baseUrl: string) {
         title: `${hostTitleForDigest(host)} is off the desired connector version`,
         detail: `${baseDetail} is on connector ${host.connectorVersion} while the rollout target is ${host.rollout.desiredConnectorVersion}.`,
         nextAction: 'Finish the connector rollout on this host or move it to a pinned ring with an explicit owner note.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.rollout.rollbackState === 'prepared' && host.rollout.rollbackConnectorVersion) {
+      actionItems.push({
+        id: `rollout-rollback-prepared:${host.id}`,
+        severity: 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} has a rollback plan staged`,
+        detail: `${baseDetail} is carrying a prepared rollback target of ${host.rollout.rollbackConnectorVersion}${host.rollout.rollbackNotes ? `: ${host.rollout.rollbackNotes}` : ''}.`,
+        nextAction: 'Review the rollback target, then start the rollback when the host should move back to the known-good connector version.',
+        hostId: host.id,
+        hostLabel: host.label,
+        workspaceSlug: host.workspaceSlug,
+        href: hostHref,
+        traceHref: null,
+      })
+    }
+
+    if (host.rollout.rollbackState === 'rollback_pending' && host.rollout.rollbackConnectorVersion) {
+      actionItems.push({
+        id: `rollout-rollback-pending:${host.id}`,
+        severity: host.healthStatus === 'stale' ? 'critical' : 'warning',
+        category: 'host',
+        title: `${hostTitleForDigest(host)} is rolling back connector version`,
+        detail: `${baseDetail} should return on connector ${host.rollout.rollbackConnectorVersion}, but it is still reporting ${host.connectorVersion}.`,
+        nextAction: 'Complete the rollback on the host, then confirm the next heartbeat and inventory sync show the rollback target version.',
         hostId: host.id,
         hostLabel: host.label,
         workspaceSlug: host.workspaceSlug,
@@ -6073,6 +6166,15 @@ export function openClawAdminRouter(db: Database) {
       notes: Object.prototype.hasOwnProperty.call(body, 'notes')
         ? normalizeOptionalString(body.notes)
         : undefined,
+      rollbackConnectorVersion: Object.prototype.hasOwnProperty.call(body, 'rollbackConnectorVersion')
+        ? normalizeOptionalString(body.rollbackConnectorVersion)
+        : undefined,
+      rollbackState: Object.prototype.hasOwnProperty.call(body, 'rollbackState')
+        ? normalizeOpenClawHostRollbackState(body.rollbackState)
+        : undefined,
+      rollbackNotes: Object.prototype.hasOwnProperty.call(body, 'rollbackNotes')
+        ? normalizeOptionalString(body.rollbackNotes)
+        : undefined,
     })
 
     const updated = updateOpenClawHost(db, {
@@ -6091,6 +6193,83 @@ export function openClawAdminRouter(db: Database) {
         role: auth.session.role,
         ring: patch.rollout.ring,
         desiredConnectorVersion: patch.rollout.desiredConnectorVersion,
+        rollbackConnectorVersion: patch.rollout.rollbackConnectorVersion,
+        rollbackState: patch.rollout.rollbackState,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      host: serializeHost(db, updated),
+    })
+  })
+
+  router.post('/hosts/:id/rollback', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const hostId = normalizePositiveInteger(c.req.param('id'))
+    if (!hostId) {
+      return c.json({ error: 'Invalid host id', errorCode: 'INVALID_HOST_ID' }, 400)
+    }
+
+    const host = getOpenClawHostById(db, hostId)
+    if (!host) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    if (host.status === 'revoked') {
+      return c.json({ error: 'Host is revoked and cannot start a rollback', errorCode: 'HOST_REVOKED' }, 409)
+    }
+
+    let body: Record<string, unknown> = {}
+    try {
+      body = await c.req.json() as Record<string, unknown>
+    } catch {
+      body = {}
+    }
+    const confirmError = requireConfirmPhrase(body, 'ROLLBACK_HOST', 'confirmPhrase ROLLBACK_HOST is required')
+    if (confirmError) {
+      return confirmError
+    }
+
+    const currentRollout = serializeOpenClawHostRollout(host)
+    const rollbackConnectorVersion = normalizeOptionalString(body.connectorVersion)
+      ?? currentRollout.rollbackConnectorVersion
+    if (!rollbackConnectorVersion) {
+      return c.json({
+        error: 'Rollback target connector version is required',
+        errorCode: 'ROLLBACK_TARGET_REQUIRED',
+      }, 400)
+    }
+
+    const patch = buildOpenClawHostRolloutPatch(host, {
+      desiredConnectorVersion: rollbackConnectorVersion,
+      rollbackConnectorVersion,
+      rollbackState: 'rollback_pending',
+      rollbackNotes: Object.prototype.hasOwnProperty.call(body, 'notes')
+        ? normalizeOptionalString(body.notes)
+        : (currentRollout.rollbackNotes ?? currentRollout.notes),
+    })
+
+    const updated = updateOpenClawHost(db, {
+      id: host.id,
+      metadataJson: patch.metadataJson,
+    })
+    if (!updated) {
+      return c.json({ error: 'Host not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.openclaw_host.rollback_started',
+      actor: auth.session.email,
+      target: `openclaw-host:${updated.id}`,
+      details: {
+        role: auth.session.role,
+        connectorVersion: updated.connector_version,
+        rollbackConnectorVersion,
+        previousDesiredConnectorVersion: currentRollout.desiredConnectorVersion,
       },
     })
 

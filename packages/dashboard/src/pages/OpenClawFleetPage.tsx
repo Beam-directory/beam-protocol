@@ -28,6 +28,7 @@ import {
   type OpenClawHostProfilePatchInput,
   type OpenClawHostPolicyPatchInput,
   type OpenClawHostRecoveryRunbookState,
+  type OpenClawHostRollbackState,
   type OpenClawHostRolloutRing,
   type OpenClawRouteReconciliationClassification,
   type OpenClawRouteRuntimeState,
@@ -131,6 +132,19 @@ function rolloutRingTone(ring: OpenClawHostRolloutRing): 'default' | 'warning' |
       return 'critical'
     case 'stable':
       return 'success'
+    default:
+      return 'default'
+  }
+}
+
+function rollbackStateTone(state: OpenClawHostRollbackState): 'default' | 'warning' | 'critical' | 'success' {
+  switch (state) {
+    case 'completed':
+      return 'success'
+    case 'prepared':
+      return 'warning'
+    case 'rollback_pending':
+      return 'critical'
     default:
       return 'default'
   }
@@ -281,6 +295,8 @@ type HostRolloutFormState = {
   ring: OpenClawHostRolloutRing
   desiredConnectorVersion: string
   notes: string
+  rollbackConnectorVersion: string
+  rollbackNotes: string
 }
 
 type DigestScheduleFormState = {
@@ -362,6 +378,8 @@ export default function OpenClawFleetPage() {
     ring: 'stable',
     desiredConnectorVersion: '',
     notes: '',
+    rollbackConnectorVersion: '',
+    rollbackNotes: '',
   })
   const [digestScheduleForm, setDigestScheduleForm] = useState<DigestScheduleFormState>({
     enabled: true,
@@ -665,6 +683,8 @@ export default function OpenClawFleetPage() {
       ring: selectedHost.rollout.ring,
       desiredConnectorVersion: selectedHost.rollout.desiredConnectorVersion ?? '',
       notes: selectedHost.rollout.notes ?? '',
+      rollbackConnectorVersion: selectedHost.rollout.rollbackConnectorVersion ?? '',
+      rollbackNotes: selectedHost.rollout.rollbackNotes ?? '',
     })
   }, [selectedHost?.id, selectedHost?.updatedAt])
 
@@ -918,9 +938,29 @@ export default function OpenClawFleetPage() {
         ring: rolloutForm.ring,
         desiredConnectorVersion: rolloutForm.desiredConnectorVersion.trim() || null,
         notes: rolloutForm.notes.trim() || null,
+        rollbackConnectorVersion: rolloutForm.rollbackConnectorVersion.trim() || null,
+        rollbackNotes: rolloutForm.rollbackNotes.trim() || null,
       })
       await refreshAll(host.id, selectedConflictBeamId)
     }, `Rollout settings updated for ${hostTitle(host)}.`)
+  }
+
+  async function handleStartRollback(host: OpenClawHostSummary) {
+    if (!ensureAdminAction('Connector rollback')) {
+      return
+    }
+    const confirmPhrase = promptConfirmPhrase('ROLLBACK_HOST', `rolling back ${hostTitle(host)}`)
+    if (!confirmPhrase) {
+      return
+    }
+    await runAction(`rollback-${host.id}`, async () => {
+      await directoryApi.rollbackOpenClawHost(host.id, {
+        connectorVersion: rolloutForm.rollbackConnectorVersion.trim() || null,
+        notes: rolloutForm.rollbackNotes.trim() || null,
+        confirmPhrase,
+      })
+      await refreshAll(host.id, selectedConflictBeamId)
+    }, `Rollback started for ${hostTitle(host)}.`)
   }
 
   async function handleRevoke(host: OpenClawHostSummary) {
@@ -2454,6 +2494,9 @@ export default function OpenClawFleetPage() {
                       {host.rollout.versionState === 'drifted' ? (
                         <StatusPill label="rollout drift" tone="warning" />
                       ) : null}
+                      {host.rollout.rollbackState !== 'idle' ? (
+                        <StatusPill label={`rollback:${host.rollout.rollbackState}`} tone={rollbackStateTone(host.rollout.rollbackState)} />
+                      ) : null}
                       {host.policy.rotation.windowOpen ? (
                         <StatusPill label="rotation window open" tone="warning" />
                       ) : null}
@@ -2473,6 +2516,9 @@ export default function OpenClawFleetPage() {
                       <div>{host.credentialIssuedAt ? `Credential age ${host.credentialAgeHours ?? 0}h` : 'No credential issued yet'}</div>
                       <div>{host.maintenance.state === 'serving' ? 'Serving traffic' : `${host.maintenance.state} · ${host.maintenance.owner ?? 'no owner'}${host.maintenance.reason ? ` · ${host.maintenance.reason}` : ''}`}</div>
                       <div>{host.rollout.desiredConnectorVersion ? `Rollout ${host.rollout.ring} · want ${host.rollout.desiredConnectorVersion} · ${host.rollout.versionState}` : `Rollout ${host.rollout.ring} · ${host.rollout.versionState}`}</div>
+                      {host.rollout.rollbackConnectorVersion ? (
+                        <div>{`Rollback ${host.rollout.rollbackState} · target ${host.rollout.rollbackConnectorVersion}`}</div>
+                      ) : null}
                       <div>{host.policy.rotation.nextRotationDueAt ? `Rotation ${host.policy.rotation.reviewState === 'overdue' ? 'overdue' : 'due'} ${formatRelativeTime(host.policy.rotation.nextRotationDueAt)}` : 'No rotation schedule yet'}</div>
                       <div>{host.summary.delivery.latency.samples > 0 ? `p95 ${formatLatency(host.summary.delivery.latency.p95Ms)} · ${formatNumber(host.summary.delivery.latency.overSlo)} breach` : 'No latency samples yet'}</div>
                       <div>{host.policy.recovery.status !== 'idle' ? `Recovery ${host.policy.recovery.status}${host.policy.recovery.owner ? ` · ${host.policy.recovery.owner}` : ''}` : 'Recovery runbook idle'}</div>
@@ -3096,6 +3142,7 @@ export default function OpenClawFleetPage() {
             <MetricCard label="Canary" value={!overview ? '—' : formatNumber(overview.rollout.summary.canaryHosts)} tone={(overview?.rollout.summary.canaryHosts ?? 0) > 0 ? 'warning' : 'default'} />
             <MetricCard label="Pinned" value={!overview ? '—' : formatNumber(overview.rollout.rings.find((ring) => ring.ring === 'pinned')?.hostCount ?? 0)} tone={(overview?.rollout.rings.find((ring) => ring.ring === 'pinned')?.hostCount ?? 0) > 0 ? 'critical' : 'default'} />
             <MetricCard label="Drift" value={!overview ? '—' : formatNumber(overview.rollout.summary.driftHosts)} tone={(overview?.rollout.summary.driftHosts ?? 0) > 0 ? 'warning' : 'default'} />
+            <MetricCard label="Rollback" value={!overview ? '—' : formatNumber(overview.rollout.summary.rollbackPendingHosts)} tone={(overview?.rollout.summary.rollbackPendingHosts ?? 0) > 0 ? 'critical' : 'default'} />
             <MetricCard label="Unmanaged" value={!overview ? '—' : formatNumber(overview.rollout.summary.unmanagedHosts)} tone={(overview?.rollout.summary.unmanagedHosts ?? 0) > 0 ? 'warning' : 'default'} />
             <MetricCard label="Versions" value={!overview ? '—' : formatNumber(overview.rollout.summary.versions)} />
           </div>
@@ -3141,11 +3188,14 @@ export default function OpenClawFleetPage() {
                     <div className="flex flex-wrap gap-2">
                       <StatusPill label={item.ring} tone={rolloutRingTone(item.ring)} />
                       <StatusPill label={item.versionState} tone={item.versionState === 'drifted' ? 'warning' : item.versionState === 'current' ? 'success' : 'default'} />
+                      {item.rollbackState !== 'idle' ? (
+                        <StatusPill label={`rollback:${item.rollbackState}`} tone={rollbackStateTone(item.rollbackState)} />
+                      ) : null}
                     </div>
                   </div>
                   <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
                     <div>{item.workspaceSlug ? `Workspace ${item.workspaceSlug}` : 'No workspace default'}</div>
-                    <div>{`Current ${item.connectorVersion}${item.desiredConnectorVersion ? ` · desired ${item.desiredConnectorVersion}` : ''}`}</div>
+                    <div>{`Current ${item.connectorVersion}${item.desiredConnectorVersion ? ` · desired ${item.desiredConnectorVersion}` : ''}${item.rollbackConnectorVersion ? ` · rollback ${item.rollbackConnectorVersion}` : ''}`}</div>
                   </div>
                   <div className="mt-3 flex flex-wrap gap-2">
                     <button
@@ -3705,16 +3755,19 @@ export default function OpenClawFleetPage() {
                       Track rollout rings, desired connector version, and version drift without leaving the fleet surface.
                     </div>
                   </div>
-                  <div className="flex flex-wrap gap-2">
-                    <StatusPill label={`ring:${selectedHost.rollout.ring}`} tone={rolloutRingTone(selectedHost.rollout.ring)} />
-                    <StatusPill label={selectedHost.rollout.versionState} tone={selectedHost.rollout.versionState === 'drifted' ? 'warning' : selectedHost.rollout.versionState === 'current' ? 'success' : 'default'} />
-                  </div>
+                <div className="flex flex-wrap gap-2">
+                  <StatusPill label={`ring:${selectedHost.rollout.ring}`} tone={rolloutRingTone(selectedHost.rollout.ring)} />
+                  <StatusPill label={selectedHost.rollout.versionState} tone={selectedHost.rollout.versionState === 'drifted' ? 'warning' : selectedHost.rollout.versionState === 'current' ? 'success' : 'default'} />
+                  {selectedHost.rollout.rollbackState !== 'idle' ? (
+                    <StatusPill label={`rollback:${selectedHost.rollout.rollbackState}`} tone={rollbackStateTone(selectedHost.rollout.rollbackState)} />
+                  ) : null}
                 </div>
+              </div>
 
-                <div className="mt-4 grid gap-3 md:grid-cols-3">
-                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
-                    <span>Rollout ring</span>
-                    <select
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400">
+                  <span>Rollout ring</span>
+                  <select
                       className="input-field"
                       value={rolloutForm.ring}
                       onChange={(event) => setRolloutForm((current) => ({ ...current, ring: event.target.value as OpenClawHostRolloutRing }))}
@@ -3733,35 +3786,69 @@ export default function OpenClawFleetPage() {
                       onChange={(event) => setRolloutForm((current) => ({ ...current, desiredConnectorVersion: event.target.value }))}
                     />
                   </label>
-                  <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
-                    <span>Notes</span>
-                    <textarea
-                      className="input-field min-h-[96px]"
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
+                  <span>Notes</span>
+                  <textarea
+                    className="input-field min-h-[96px]"
                       placeholder="Canary cohort, change ticket, rollout guardrails..."
                       value={rolloutForm.notes}
-                      onChange={(event) => setRolloutForm((current) => ({ ...current, notes: event.target.value }))}
-                    />
-                  </label>
-                </div>
+                    onChange={(event) => setRolloutForm((current) => ({ ...current, notes: event.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-2">
+                  <span>Rollback target version</span>
+                  <input
+                    className="input-field"
+                    placeholder="1.5.0"
+                    value={rolloutForm.rollbackConnectorVersion}
+                    onChange={(event) => setRolloutForm((current) => ({ ...current, rollbackConnectorVersion: event.target.value }))}
+                  />
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-1">
+                  <span>Rollback state</span>
+                  <div className="input-field flex min-h-[42px] items-center">
+                    {selectedHost.rollout.rollbackState}
+                  </div>
+                </label>
+                <label className="space-y-1 text-xs text-slate-500 dark:text-slate-400 md:col-span-3">
+                  <span>Rollback notes</span>
+                  <textarea
+                    className="input-field min-h-[88px]"
+                    placeholder="Known good version, rollback trigger, incident link..."
+                    value={rolloutForm.rollbackNotes}
+                    onChange={(event) => setRolloutForm((current) => ({ ...current, rollbackNotes: event.target.value }))}
+                  />
+                </label>
+              </div>
 
-                <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
-                  <div>{`Current connector ${selectedHost.connectorVersion}`}</div>
-                  <div>{selectedHost.rollout.updatedAt ? `Last rollout update ${formatDateTime(selectedHost.rollout.updatedAt)}` : 'No rollout update yet'}</div>
-                  <div>{selectedHost.rollout.desiredConnectorVersion ? `Desired version ${selectedHost.rollout.desiredConnectorVersion}` : 'No desired version configured'}</div>
-                  <div>{selectedHost.rollout.canary ? 'Canary visibility enabled for this host' : 'Not marked as canary'}</div>
-                </div>
+              <div className="mt-3 grid gap-2 text-xs text-slate-500 dark:text-slate-400 md:grid-cols-2">
+                <div>{`Current connector ${selectedHost.connectorVersion}`}</div>
+                <div>{selectedHost.rollout.updatedAt ? `Last rollout update ${formatDateTime(selectedHost.rollout.updatedAt)}` : 'No rollout update yet'}</div>
+                <div>{selectedHost.rollout.desiredConnectorVersion ? `Desired version ${selectedHost.rollout.desiredConnectorVersion}` : 'No desired version configured'}</div>
+                <div>{selectedHost.rollout.canary ? 'Canary visibility enabled for this host' : 'Not marked as canary'}</div>
+                <div>{selectedHost.rollout.rollbackConnectorVersion ? `Rollback target ${selectedHost.rollout.rollbackConnectorVersion}` : 'No rollback target configured'}</div>
+                <div>{selectedHost.rollout.rollbackUpdatedAt ? `Last rollback update ${formatDateTime(selectedHost.rollout.rollbackUpdatedAt)}` : 'No rollback update yet'}</div>
+              </div>
 
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    type="button"
+              <div className="mt-3 flex flex-wrap gap-2">
+                <button
+                  type="button"
                     className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
                     disabled={actionBusy === `rollout-${selectedHost.id}`}
                     onClick={() => { void handleSaveRollout(selectedHost) }}
-                  >
-                    {actionBusy === `rollout-${selectedHost.id}` ? 'Saving…' : 'Save rollout'}
-                  </button>
-                </div>
+                >
+                  {actionBusy === `rollout-${selectedHost.id}` ? 'Saving…' : 'Save rollout'}
+                </button>
+                <button
+                  type="button"
+                  className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
+                  disabled={actionBusy === `rollback-${selectedHost.id}` || !rolloutForm.rollbackConnectorVersion.trim()}
+                  onClick={() => { void handleStartRollback(selectedHost) }}
+                >
+                  {actionBusy === `rollback-${selectedHost.id}` ? 'Rolling back…' : 'Start rollback'}
+                </button>
               </div>
+            </div>
 
               <div>
                 <div className="mb-2 text-sm font-medium text-slate-900 dark:text-slate-100">Routes</div>
