@@ -1,12 +1,20 @@
 import path from 'node:path'
 import { formatDate, formatDateTime, optionalFlag, resolveReleaseLabel, toJsonBlock, writeMarkdownReport } from '../production/shared.mjs'
+import { startWebhookCapture } from './fleet-evidence-shared.mjs'
 import { startOpenClawFleetHarness } from './fleet-shared.mjs'
 
 const releaseLabel = resolveReleaseLabel()
 const outputPath = optionalFlag('--output', path.join(process.cwd(), `reports/${releaseLabel}-operator-dry-run.md`))
 
+function assertStatus(response, status, label) {
+  if (response.status !== status) {
+    throw new Error(`Expected ${label} to return ${status}, received ${response.status}: ${JSON.stringify(response.payload)}`)
+  }
+}
+
 async function main() {
   const fleet = await startOpenClawFleetHarness()
+  const alertWebhook = await startWebhookCapture()
 
   try {
     const overview = await fleet.fetchFleetOverview()
@@ -16,6 +24,78 @@ async function main() {
     if (overview.summary.liveRoutes < 3) {
       throw new Error(`Expected at least 3 live fleet routes, found ${overview.summary.liveRoutes}`)
     }
+
+    const viewerOverview = await fleet.fetchFleetOverview('viewer')
+    if (viewerOverview.summary.totalHosts !== 3) {
+      throw new Error('Expected the viewer session to read the fleet overview.')
+    }
+
+    const viewerCreateAlertDenied = await fleet.createFleetAlertTarget({
+      label: 'Viewer should not create this',
+      deliveryKind: 'webhook',
+      destination: alertWebhook.url,
+      severityThreshold: 'warning',
+    }, 'viewer', true)
+    assertStatus(viewerCreateAlertDenied, 403, 'viewer alert-target creation')
+
+    const operatorCreateAlertDenied = await fleet.createFleetAlertTarget({
+      label: 'Operator should not create this',
+      deliveryKind: 'webhook',
+      destination: alertWebhook.url,
+      severityThreshold: 'warning',
+    }, 'operator', true)
+    assertStatus(operatorCreateAlertDenied, 403, 'operator alert-target creation')
+
+    const alertTarget = await fleet.createFleetAlertTarget({
+      label: 'Operator drill webhook',
+      deliveryKind: 'webhook',
+      destination: alertWebhook.url,
+      severityThreshold: 'warning',
+      notes: 'Operator drill webhook target',
+      headers: {
+        'x-beam-alert-source': 'operator-dry-run',
+      },
+    })
+
+    const viewerAlerts = await fleet.fetchFleetAlerts('viewer')
+    if (viewerAlerts.targets.length < 1) {
+      throw new Error('Expected the viewer role to list at least one fleet alert target.')
+    }
+
+    const viewerDigestDenied = await fleet.requestRole('/admin/openclaw/fleet/digest/schedule', {
+      role: 'viewer',
+      method: 'PATCH',
+      body: {
+        enabled: true,
+      },
+      allowError: true,
+    })
+    assertStatus(viewerDigestDenied, 403, 'viewer digest schedule update')
+
+    const now = new Date()
+    const digestSchedule = await fleet.updateFleetDigestSchedule({
+      enabled: true,
+      deliveryEmail: 'ops@example.com',
+      escalationEmail: 'critical@example.com',
+      runHourUtc: now.getUTCHours(),
+      runMinuteUtc: now.getUTCMinutes(),
+      escalateOnCritical: true,
+    }, 'operator')
+    if (!digestSchedule.schedule.enabled) {
+      throw new Error('Expected the operator role to enable the fleet digest schedule.')
+    }
+
+    const testAlert = await fleet.testFleetAlertTarget(alertTarget.target.id, 'operator')
+    if (!testAlert.ok || testAlert.status !== 'delivered') {
+      throw new Error(`Expected operator alert-target test delivery to succeed, received ${JSON.stringify(testAlert)}`)
+    }
+    const [testAlertEvent] = await alertWebhook.waitForCount(1)
+    if (testAlertEvent.body?.test !== true) {
+      throw new Error('Expected the first captured webhook alert to be a test delivery.')
+    }
+
+    const operatorRotateDenied = await fleet.rotateHost('beta', 'operator', true)
+    assertStatus(operatorRotateDenied, 403, 'operator credential rotation')
 
     const workspaceIdentities = await fleet.fetchWorkspaceIdentities()
     if (workspaceIdentities.total !== 3) {
@@ -103,6 +183,26 @@ async function main() {
       throw new Error('Expected the fleet digest to include a delivery follow-up item.')
     }
 
+    const digestRun = await fleet.runFleetDigest({
+      triggerKind: 'manual',
+      deliver: true,
+    }, 'operator')
+    if (!digestRun.run || digestRun.run.deliveryState === 'skipped') {
+      throw new Error('Expected the operator-triggered digest run to persist delivery evidence.')
+    }
+    const alertEvents = await alertWebhook.waitForCount(2)
+    const liveAlertEvent = alertEvents.at(-1)
+    if (!liveAlertEvent?.body || liveAlertEvent.body.test === true) {
+      throw new Error('Expected the second captured webhook event to be a live fleet alert delivery.')
+    }
+    if ((liveAlertEvent.body.matchingItems?.length ?? 0) < 1) {
+      throw new Error('Expected the live fleet alert payload to include at least one matching action item.')
+    }
+    const alertsAfterDigest = await fleet.fetchFleetAlerts('viewer')
+    if (alertsAfterDigest.deliveries.length < 2) {
+      throw new Error('Expected persisted fleet alert delivery history after the test and live alert fanout.')
+    }
+
     await fleet.syncHost('alpha', null, { stage: 'stale-remediation' })
     await fleet.syncHost('beta', null, { stage: 'rotation-remediation' })
 
@@ -170,6 +270,20 @@ async function main() {
       date: formatDate(),
       workspace: fleet.workspaceSlug,
       summary: overview.summary,
+      rbac: {
+        viewerOverviewRole: 'viewer',
+        viewerAlertCreateStatus: viewerCreateAlertDenied.status,
+        operatorAlertCreateStatus: operatorCreateAlertDenied.status,
+        viewerDigestScheduleStatus: viewerDigestDenied.status,
+        operatorRotateStatus: operatorRotateDenied.status,
+      },
+      alerting: {
+        targetId: alertTarget.target.id,
+        testStatus: testAlert.status,
+        webhookEvents: alertEvents.length,
+        liveMatchingItems: liveAlertEvent.body.matchingItems.length,
+        persistedDeliveries: alertsAfterDigest.deliveries.length,
+      },
       selectedHost: {
         id: betaHost.host.id,
         label: betaHost.host.label,
@@ -206,6 +320,7 @@ async function main() {
         criticalItems: digest.summary.criticalItems,
         pendingCredentialActions: digest.summary.pendingCredentialActions,
         duplicateIdentityConflicts: digest.summary.duplicateIdentityConflicts,
+        deliveryState: digestRun.run.deliveryState,
       },
       conflict: {
         total: conflictOverview.summary.duplicateIdentityConflicts,
@@ -246,16 +361,23 @@ async function main() {
 
 1. Bootstrap three approved OpenClaw hosts into one central Beam control plane.
 2. Verify the fleet overview, selected host detail, and workspace host badges.
-3. Put one host into a canary rollout ring and another into maintenance mode, then resume it cleanly.
-4. Force reconciliation drift on a subagent route, run reconciliation, and confirm garbage collection removes the stale historical state.
-5. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
-6. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
-7. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
+3. Prove real RBAC boundaries: viewer can inspect, operator can run the digest and test alerts, and admin-only actions stay guarded.
+4. Create and test one external webhook alert target, then drive a live digest fanout through it.
+5. Put one host into a canary rollout ring and another into maintenance mode, then resume it cleanly.
+6. Force reconciliation drift on a subagent route, run reconciliation, and confirm garbage collection removes the stale historical state.
+7. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
+8. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
+9. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
 
 ## Verification
 
 - Approved active hosts: \`${overview.summary.activeHosts}\`
 - Live routes: \`${overview.summary.liveRoutes}\`
+- Viewer alert-create guard: \`${viewerCreateAlertDenied.status}\`
+- Operator alert-create guard: \`${operatorCreateAlertDenied.status}\`
+- Viewer digest-schedule guard: \`${viewerDigestDenied.status}\`
+- Operator rotate guard: \`${operatorRotateDenied.status}\`
+- Webhook alert deliveries captured: \`${alertEvents.length}\`
 - Selected host identities: \`${betaHost.identities.length}\`
 - Canary hosts after rollout update: \`${rolloutOverview.rollout.summary.canaryHosts}\`
 - Maintenance-blocked hosts: \`${maintenanceOverview.maintenance.counts.blocked}\`
@@ -276,6 +398,7 @@ ${toJsonBlock(result)}
     await writeMarkdownReport(outputPath, markdown)
     console.log(JSON.stringify({ ...result, report: outputPath }, null, 2))
   } finally {
+    await alertWebhook.close()
     await fleet.cleanup()
   }
 }

@@ -1,5 +1,17 @@
 # Changelog
 
+## v1.6.0 (draft)
+
+### Fleet Production Readiness
+- add external fleet alerting with persisted webhook delivery evidence and escalation history
+- enforce `viewer`, `operator`, and `admin` role boundaries for risky fleet actions and keep destructive confirmation guards explicit
+- prove backup, restore, revoke, recovery, and rollback flows against the three-host OpenClaw fleet harness
+- add accelerated multi-day fleet soak evidence with real heartbeats, route churn, maintenance, conflict, rotation, and recovery state changes
+- commit buyer, operator, incident, recovery, and soak reports before cutting the release
+
+### Compatibility Note
+- No protocol-family change in this release train. Beam `1.6.0` remains on `beam/1`.
+
 ## v1.5.0 (2026-04-02)
 
 ### OpenClaw Fleet Autonomy
