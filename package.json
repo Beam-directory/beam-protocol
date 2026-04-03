@@ -21,6 +21,8 @@
     "production:operator-dry-run": "node scripts/production/operator-dry-run.mjs",
     "production:partner-dry-run": "node scripts/production/production-partner-dry-run.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
+    "quickstart:ui-baseline": "node scripts/quickstart/dashboard-ui-baseline.mjs",
+    "quickstart:ui-compare": "node scripts/quickstart/dashboard-ui-compare.mjs",
     "quickstart:ui-report": "node scripts/quickstart/dashboard-ui-report.mjs",
     "quickstart:ui-smoke": "node scripts/quickstart/dashboard-ui-smoke.mjs",
     "quickstart:ui-smoke:install": "playwright install chromium",
@@ -39,11 +41,13 @@
     "workspace:fleet-soak": "node scripts/workspace/fleet-soak.mjs",
     "workspace:fleet-smoke": "node scripts/workspace/fleet-smoke.mjs",
     "workspace:incident-drill": "node scripts/workspace/incident-drill.mjs",
+    "workspace:installer-dry-run": "node scripts/workspace/installer-dry-run.mjs",
     "workspace:openclaw": "node scripts/workspace/openclaw-onboarding.mjs",
     "workspace:import-openclaw": "node scripts/workspace/import-openclaw.mjs",
     "workspace:openclaw-beam-send:install": "node scripts/workspace/install-openclaw-beam-send-shim.mjs",
     "workspace:openclaw-beam-send:uninstall": "node scripts/workspace/install-openclaw-beam-send-shim.mjs --uninstall",
     "workspace:openclaw-host": "node scripts/workspace/beam-openclaw-host.mjs run",
+    "workspace:openclaw-host:bootstrap": "node scripts/workspace/beam-openclaw-host.mjs bootstrap",
     "workspace:openclaw-host:install": "node scripts/workspace/beam-openclaw-host.mjs install",
     "workspace:openclaw-host:use-credential": "node scripts/workspace/beam-openclaw-host.mjs use-credential",
     "workspace:openclaw-host:uninstall": "node scripts/workspace/beam-openclaw-host.mjs uninstall",
@@ -84,6 +88,8 @@
     "url": "https://github.com/beam-directory/beam-protocol"
   },
   "devDependencies": {
-    "playwright": "^1.54.2"
+    "pixelmatch": "^7.1.0",
+    "playwright": "^1.54.2",
+    "pngjs": "^7.0.0"
   }
 }

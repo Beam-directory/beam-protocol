@@ -102,6 +102,7 @@ async function main() {
   if (uiSmoke) {
     console.log(`UI smoke:        ${uiSmoke.outputDir}`)
   }
+  console.log('Tip:             open the fleet page, issue a guided enrollment, then use Settings -> Operators and members for shared admin posture')
 }
 
 main().catch((error) => {

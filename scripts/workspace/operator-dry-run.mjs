@@ -29,6 +29,69 @@ async function main() {
     if (viewerOverview.summary.totalHosts !== 3) {
       throw new Error('Expected the viewer session to read the fleet overview.')
     }
+    const viewerRoles = await fleet.listRoles('viewer')
+    if (!Array.isArray(viewerRoles.roles)) {
+      throw new Error('Expected the viewer role to inspect the directory role list.')
+    }
+
+    const viewerAssignDenied = await fleet.assignRole('viewer-blocked@example.com', 'viewer', 'viewer', true)
+    assertStatus(viewerAssignDenied, 403, 'viewer role assignment')
+
+    const operatorAssignDenied = await fleet.assignRole('operator-blocked@example.com', 'viewer', 'operator', true)
+    assertStatus(operatorAssignDenied, 403, 'operator role assignment')
+
+    await fleet.assignRole('second-operator@example.com', 'operator')
+    const rolesAfterAssign = await fleet.listRoles('viewer')
+    if (!rolesAfterAssign.roles.some((assignment) => assignment.email === 'second-operator@example.com' && assignment.role === 'operator')) {
+      throw new Error('Expected the new operator assignment to become visible in the shared role list.')
+    }
+    await fleet.revokeRole('second-operator@example.com')
+    const rolesAfterRevoke = await fleet.listRoles('viewer')
+    if (rolesAfterRevoke.roles.some((assignment) => assignment.email === 'second-operator@example.com')) {
+      throw new Error('Expected the operator assignment to disappear after revocation.')
+    }
+
+    const analytics = await fleet.fetchFleetAnalytics('viewer')
+    if (analytics.summary.totalHosts !== 3 || analytics.hostPosture.length < 1 || analytics.routeChurn.length < 1) {
+      throw new Error('Expected fleet analytics to expose host totals, host posture, and route churn history.')
+    }
+
+    const viewerEnrollmentDenied = await fleet.createEnrollment({
+      label: 'Viewer enrollment should fail',
+      workspaceSlug: fleet.workspaceSlug,
+      notes: 'viewer should not mint install packs',
+    }, 'viewer', true)
+    assertStatus(viewerEnrollmentDenied, 403, 'viewer enrollment creation')
+
+    const enrollment = await fleet.createEnrollment({
+      label: 'Operator onboarding candidate',
+      workspaceSlug: fleet.workspaceSlug,
+      notes: 'Operator dry run enrollment request',
+      expiresInHours: 24,
+    }, 'operator')
+    if (!enrollment.enrollment?.guidedEnrollmentUrl || !enrollment.enrollment?.installPack?.commands.bootstrapMacos) {
+      throw new Error('Expected operator enrollment creation to return a guided enrollment URL and bootstrap commands.')
+    }
+    const enrollments = await fleet.listEnrollments('operator')
+    if (!enrollments.enrollments.some((entry) => entry.id === enrollment.enrollment.id && entry.token)) {
+      throw new Error('Expected the operator enrollment queue to list the new install-pack token.')
+    }
+
+    const viewerSupportBundleDenied = await fleet.fetchFleetSupportBundle({
+      hostId: fleet.hosts.alpha.id,
+      workspaceSlug: fleet.workspaceSlug,
+      hours: 12,
+    }, 'viewer', true)
+    assertStatus(viewerSupportBundleDenied, 403, 'viewer support-bundle export')
+
+    const supportBundle = await fleet.fetchFleetSupportBundle({
+      hostId: fleet.hosts.alpha.id,
+      workspaceSlug: fleet.workspaceSlug,
+      hours: 12,
+    }, 'operator')
+    if (!supportBundle.payload?.host?.host || !supportBundle.payload?.workspace || !supportBundle.payload?.digest) {
+      throw new Error('Expected the support bundle export to include host, workspace, and digest context.')
+    }
 
     const viewerCreateAlertDenied = await fleet.createFleetAlertTarget({
       label: 'Viewer should not create this',
@@ -272,10 +335,37 @@ async function main() {
       summary: overview.summary,
       rbac: {
         viewerOverviewRole: 'viewer',
+        viewerRoleAssignStatus: viewerAssignDenied.status,
+        operatorRoleAssignStatus: operatorAssignDenied.status,
         viewerAlertCreateStatus: viewerCreateAlertDenied.status,
         operatorAlertCreateStatus: operatorCreateAlertDenied.status,
         viewerDigestScheduleStatus: viewerDigestDenied.status,
         operatorRotateStatus: operatorRotateDenied.status,
+      },
+      operatorAdministration: {
+        visibleRoles: viewerRoles.roles.length,
+        assignedRoleEmail: 'second-operator@example.com',
+        rolesAfterAssign: rolesAfterAssign.roles.length,
+        rolesAfterRevoke: rolesAfterRevoke.roles.length,
+      },
+      enrollment: {
+        id: enrollment.enrollment.id,
+        queueSize: enrollments.total,
+        guidedEnrollmentUrl: Boolean(enrollment.enrollment.guidedEnrollmentUrl),
+        bootstrapMacos: Boolean(enrollment.enrollment.installPack?.commands.bootstrapMacos),
+      },
+      analytics: {
+        totalHosts: analytics.summary.totalHosts,
+        staleHosts: analytics.summary.staleHosts,
+        duplicateIdentityConflicts: analytics.summary.duplicateIdentityConflicts,
+        hostPostureRows: analytics.hostPosture.length,
+        routeChurnRows: analytics.routeChurn.length,
+      },
+      supportBundle: {
+        filename: supportBundle.filename,
+        hostLabel: supportBundle.payload.host.host.label,
+        workspaceSlug: supportBundle.payload.workspace.workspace.slug,
+        digestActionItems: supportBundle.payload.digest.summary.actionItems,
       },
       alerting: {
         targetId: alertTarget.target.id,
@@ -361,18 +451,28 @@ async function main() {
 
 1. Bootstrap three approved OpenClaw hosts into one central Beam control plane.
 2. Verify the fleet overview, selected host detail, and workspace host badges.
-3. Prove real RBAC boundaries: viewer can inspect, operator can run the digest and test alerts, and admin-only actions stay guarded.
-4. Create and test one external webhook alert target, then drive a live digest fanout through it.
-5. Put one host into a canary rollout ring and another into maintenance mode, then resume it cleanly.
-6. Force reconciliation drift on a subagent route, run reconciliation, and confirm garbage collection removes the stale historical state.
-7. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
-8. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
-9. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
+3. Prove hosted-fleet operator administration: viewers can inspect roles, only admins can change them, and operator onboarding can issue install-pack enrollments without exposing admin-only mutation paths.
+4. Verify the new fleet analytics and support-bundle export surfaces, including the operator-only export guard.
+5. Create and test one external webhook alert target, then drive a live digest fanout through it.
+6. Put one host into a canary rollout ring and another into maintenance mode, then resume it cleanly.
+7. Force reconciliation drift on a subagent route, run reconciliation, and confirm garbage collection removes the stale historical state.
+8. Force one stale host, rotate one host credential, and confirm the fleet digest surfaces both conditions with next actions.
+9. Introduce a duplicate Beam identity on a second host, then resolve it through explicit route-owner actions.
+10. Revoke and recover the affected host and confirm the fleet returns to an active, healthy state without rebuilding workspace bindings.
 
 ## Verification
 
 - Approved active hosts: \`${overview.summary.activeHosts}\`
 - Live routes: \`${overview.summary.liveRoutes}\`
+- Viewer role-list access: \`${viewerRoles.roles.length}\`
+- Viewer role-assign guard: \`${viewerAssignDenied.status}\`
+- Operator role-assign guard: \`${operatorAssignDenied.status}\`
+- Operator enrollment queue size: \`${enrollments.total}\`
+- Guided enrollment URL returned: \`${Boolean(enrollment.enrollment.guidedEnrollmentUrl)}\`
+- Viewer support-bundle guard: \`${viewerSupportBundleDenied.status}\`
+- Support-bundle workspace slug: \`${supportBundle.payload.workspace.workspace.slug}\`
+- Analytics host-posture rows: \`${analytics.hostPosture.length}\`
+- Analytics route-churn rows: \`${analytics.routeChurn.length}\`
 - Viewer alert-create guard: \`${viewerCreateAlertDenied.status}\`
 - Operator alert-create guard: \`${operatorCreateAlertDenied.status}\`
 - Viewer digest-schedule guard: \`${viewerDigestDenied.status}\`

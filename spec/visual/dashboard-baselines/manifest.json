@@ -1,0 +1,13 @@
+{
+  "generatedAt": "2026-04-03T11:32:11.885Z",
+  "sourceGeneratedAt": "2026-04-03T11:31:59.243Z",
+  "sourceSummaryPath": "/Users/tobik/Documents/BEAM/beam-protocol/tmp/dashboard-ui-smoke/2026-04-03T11-31-46-793Z/summary.json",
+  "sourceOutputDir": "/Users/tobik/Documents/BEAM/beam-protocol/tmp/dashboard-ui-smoke/2026-04-03T11-31-46-793Z",
+  "pages": {
+    "loginDesktop": "loginDesktop.png",
+    "fleetDesktop": "fleetDesktop.png",
+    "workspaceDesktop": "workspaceDesktop.png",
+    "intentsDesktop": "intentsDesktop.png",
+    "traceDesktop": "traceDesktop.png"
+  }
+}

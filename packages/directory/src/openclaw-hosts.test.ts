@@ -211,10 +211,17 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
         id: number
         token: string
         status: string
+        guidedEnrollmentUrl?: string
         installPack: {
           directoryUrl: string
           workspaceSlug: string
+          guidedEnrollmentUrl: string
+          bootstrapScriptUrl: string
+          operatorChecklist: string[]
           commands: {
+            guidedOnboarding: string
+            bootstrapMacos: string
+            bootstrapLinux: string
             managedMacos: string
             status: string
           }
@@ -224,6 +231,13 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
     assert.equal(enrollmentBody.enrollment.status, 'issued')
     assert.equal(enrollmentBody.enrollment.installPack.directoryUrl, 'http://localhost')
     assert.equal(enrollmentBody.enrollment.installPack.workspaceSlug, 'openclaw-local')
+    assert.match(enrollmentBody.enrollment.guidedEnrollmentUrl ?? '', /\/openclaw-fleet\?enrollment=/)
+    assert.match(enrollmentBody.enrollment.installPack.guidedEnrollmentUrl, /\/openclaw-fleet\?enrollment=/)
+    assert.match(enrollmentBody.enrollment.installPack.bootstrapScriptUrl, /beam-openclaw-host-bootstrap\.sh$/)
+    assert.ok(enrollmentBody.enrollment.installPack.operatorChecklist.length >= 3)
+    assert.match(enrollmentBody.enrollment.installPack.commands.guidedOnboarding, /workspace:openclaw/)
+    assert.match(enrollmentBody.enrollment.installPack.commands.bootstrapMacos, /curl -fsSL/)
+    assert.match(enrollmentBody.enrollment.installPack.commands.bootstrapLinux, /curl -fsSL/)
     assert.match(enrollmentBody.enrollment.installPack.commands.managedMacos, /workspace:openclaw-host:install/)
     assert.match(enrollmentBody.enrollment.installPack.commands.managedMacos, new RegExp(enrollmentBody.enrollment.token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')))
     assert.equal(enrollmentBody.enrollment.installPack.commands.status, 'npm run workspace:openclaw-status')
@@ -379,6 +393,82 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
     assert.equal(overviewBody.hosts[0]?.healthStatus, 'healthy')
     assert.equal(overviewBody.hosts[0]?.summary.live, 1)
     assert.equal(overviewBody.conflicts.length, 0)
+
+    const analyticsResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/analytics', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(analyticsResponse.status, 200)
+    const analyticsBody = await analyticsResponse.json() as {
+      summary: {
+        totalHosts: number
+        staleHosts: number
+      }
+      hostPosture: Array<{ hostId: number; href: string }>
+    }
+    assert.equal(analyticsBody.summary.totalHosts, 1)
+    assert.equal(analyticsBody.summary.staleHosts, 0)
+    assert.equal(analyticsBody.hostPosture[0]?.hostId, approveBody.host.id)
+    assert.match(analyticsBody.hostPosture[0]?.href ?? '', /\/openclaw-fleet\?host=/)
+
+    const listEnrollmentsResponse = await app.request(new Request('http://localhost/admin/openclaw/hosts/enrollment', {
+      headers: createAdminHeaders(db, 'operator@example.com', 'operator'),
+    }))
+    assert.equal(listEnrollmentsResponse.status, 200)
+    const listEnrollmentsBody = await listEnrollmentsResponse.json() as {
+      total: number
+      enrollments: Array<{
+        id: number
+        token?: string
+        guidedEnrollmentUrl?: string
+        claimedHost: {
+          id: number
+          status: string
+          href: string
+        } | null
+        installPack?: {
+          commands: {
+            bootstrapMacos: string
+            guidedOnboarding: string
+          }
+        }
+      }>
+    }
+    assert.equal(listEnrollmentsBody.total, 1)
+    assert.equal(listEnrollmentsBody.enrollments[0]?.id, enrollmentBody.enrollment.id)
+    assert.equal(listEnrollmentsBody.enrollments[0]?.claimedHost?.id, approveBody.host.id)
+    assert.equal(listEnrollmentsBody.enrollments[0]?.claimedHost?.status, 'active')
+    assert.match(listEnrollmentsBody.enrollments[0]?.claimedHost?.href ?? '', /\/openclaw-fleet\?host=/)
+    assert.equal(listEnrollmentsBody.enrollments[0]?.token, undefined)
+    assert.match(listEnrollmentsBody.enrollments[0]?.guidedEnrollmentUrl ?? '', /\/openclaw-fleet\?enrollment=/)
+    assert.equal(listEnrollmentsBody.enrollments[0]?.installPack, undefined)
+
+    const supportBundleResponse = await app.request(new Request(`http://localhost/admin/openclaw/fleet/support-bundle?hostId=${approveBody.host.id}&workspaceSlug=openclaw-local&hours=12`, {
+      headers: createAdminHeaders(db, 'operator@example.com', 'operator'),
+    }))
+    assert.equal(supportBundleResponse.status, 200)
+    assert.match(supportBundleResponse.headers.get('content-disposition') ?? '', /beam-openclaw-support-bundle-/)
+    const supportBundleBody = await supportBundleResponse.json() as {
+      filters: {
+        hostId: number | null
+        workspaceSlug: string | null
+        hours: number
+      }
+      host: {
+        host: {
+          id: number
+        }
+      } | null
+      workspace: {
+        workspace: {
+          slug: string
+        }
+      } | null
+    }
+    assert.equal(supportBundleBody.filters.hostId, approveBody.host.id)
+    assert.equal(supportBundleBody.filters.workspaceSlug, 'openclaw-local')
+    assert.equal(supportBundleBody.filters.hours, 12)
+    assert.equal(supportBundleBody.host?.host.id, approveBody.host.id)
+    assert.equal(supportBundleBody.workspace?.workspace.slug, 'openclaw-local')
 
     const identitiesResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${approveBody.host.id}/identities`, {
       headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),

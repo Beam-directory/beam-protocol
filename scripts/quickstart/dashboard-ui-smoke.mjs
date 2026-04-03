@@ -121,13 +121,13 @@ async function requestJson(url, init) {
 
 async function launchBrowser() {
   try {
-    return await chromium.launch({
-      channel: 'chrome',
-      headless: true,
-    })
+    return await chromium.launch({ headless: true })
   } catch {
     try {
-      return await chromium.launch({ headless: true })
+      return await chromium.launch({
+        channel: 'chrome',
+        headless: true,
+      })
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error)
       throw new Error(`Playwright browser unavailable. Install Chromium with "npm run quickstart:ui-smoke:install" or ensure Google Chrome is installed. Underlying error: ${message}`)
@@ -169,7 +169,7 @@ async function captureProtectedPage({
   bodyText,
   screenshotPath,
   timeoutMs = 20_000,
-  fullPage = true,
+  fullPage = false,
   allowHeadingFallback = true,
 }) {
   const page = await context.newPage()
@@ -314,6 +314,7 @@ async function main() {
           selector: '[data-ui-page="openclaw-fleet"]',
           heading: 'OpenClaw Fleet',
           screenshotPath: path.join(outputDir, 'fleet-tablet.png'),
+          fullPage: false,
         }),
         workspaceTablet: await captureProtectedPage({
           context: tabletContext,
@@ -322,6 +323,7 @@ async function main() {
           selector: '[data-ui-page="workspaces"]',
           heading: 'Workspaces',
           screenshotPath: path.join(outputDir, 'workspace-tablet.png'),
+          fullPage: false,
         }),
         fleetMobile: await captureProtectedPage({
           context: mobileContext,
@@ -330,6 +332,7 @@ async function main() {
           selector: '[data-ui-page="openclaw-fleet"]',
           heading: 'OpenClaw Fleet',
           screenshotPath: path.join(outputDir, 'fleet-mobile.png'),
+          fullPage: false,
         }),
         workspaceMobile: await captureProtectedPage({
           context: mobileContext,
@@ -338,6 +341,7 @@ async function main() {
           selector: '[data-ui-page="workspaces"]',
           heading: 'Workspaces',
           screenshotPath: path.join(outputDir, 'workspace-mobile.png'),
+          fullPage: false,
         }),
       }
 

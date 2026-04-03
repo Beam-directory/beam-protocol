@@ -248,6 +248,16 @@ export interface OpenClawEnrollmentRequest {
   expiresAt: string | null
   createdAt: string
   updatedAt: string
+  guidedEnrollmentUrl?: string
+  claimedHost?: {
+    id: number
+    hostKey: string
+    label: string | null
+    status: OpenClawHostStatus
+    healthStatus: OpenClawHostHealth
+    lastHeartbeatAt: string | null
+    href: string
+  } | null
   token?: string
   installPack?: OpenClawInstallPack
 }
@@ -255,7 +265,13 @@ export interface OpenClawEnrollmentRequest {
 export interface OpenClawInstallPack {
   directoryUrl: string
   workspaceSlug: string
+  guidedEnrollmentUrl: string
+  bootstrapScriptUrl: string
+  operatorChecklist: string[]
   commands: {
+    guidedOnboarding: string
+    bootstrapMacos: string
+    bootstrapLinux: string
     managedMacos: string
     managedLinux: string
     foregroundDebug: string
@@ -1068,6 +1084,11 @@ export interface OpenClawEnrollmentCreateResponse {
   enrollment: OpenClawEnrollmentRequest
 }
 
+export interface OpenClawEnrollmentRequestsResponse {
+  enrollments: OpenClawEnrollmentRequest[]
+  total: number
+}
+
 export interface OpenClawHostApproveResponse {
   host: OpenClawHostSummary
   credential: string
@@ -1220,6 +1241,60 @@ export interface OpenClawFleetAlertTestResponse {
   errorMessage: string | null
   target: OpenClawFleetAlertTarget
   delivery: OpenClawFleetAlertDelivery
+}
+
+export interface OpenClawFleetAnalyticsResponse {
+  generatedAt: string
+  summary: {
+    totalHosts: number
+    staleHosts: number
+    degradedHosts: number
+    duplicateIdentityConflicts: number
+    ackSamples: number
+    avgAckLatencyMs: number | null
+    p50AckLatencyMs: number | null
+    p95AckLatencyMs: number | null
+    overSloCount: number
+    failedReceipts: number
+    missingReceipts: number
+  }
+  deliveryTrend: Array<{
+    status: IntentLifecycleStatus | 'missing_receipt'
+    count: number
+  }>
+  hostPosture: Array<{
+    hostId: number
+    hostLabel: string | null
+    healthStatus: OpenClawHostHealth
+    maintenanceState: OpenClawHostMaintenanceState
+    routeCount: number
+    lastHeartbeatAt: string | null
+    lastHeartbeatAgeHours: number | null
+    uptimeState: 'healthy' | 'watch' | 'stale' | 'revoked'
+    href: string
+  }>
+  routeChurn: Array<{
+    hostId: number
+    hostLabel: string | null
+    liveRoutes: number
+    staleRoutes: number
+    endedRoutes: number
+    conflictRoutes: number
+    garbageCollectableRoutes: number
+    href: string
+  }>
+  conflictTrend: {
+    active: number
+    recentResolutions: number
+    recentDisables: number
+  }
+}
+
+export interface OpenClawFleetSupportBundleInput {
+  hostId?: number | null
+  workspaceSlug?: string | null
+  traceNonce?: string | null
+  hours?: number | null
 }
 
 export interface WorkspaceIdentitiesResponse {
@@ -2734,6 +2809,16 @@ export interface ExportDownload {
 
 export type AdminRole = 'admin' | 'operator' | 'viewer'
 
+export interface DirectoryRoleAssignment {
+  email: string
+  role: AdminRole
+}
+
+export interface DirectoryRolesResponse {
+  roles: DirectoryRoleAssignment[]
+  total: number
+}
+
 export interface AdminSessionInfo {
   email: string
   role: AdminRole
@@ -2997,6 +3082,7 @@ export const directoryApi = {
   },
   getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
+  getOpenClawFleetAnalytics: () => request<OpenClawFleetAnalyticsResponse>('/admin/openclaw/fleet/analytics', undefined, { admin: true }),
   getOpenClawFleetReconciliation: () => request<OpenClawFleetReconciliationResponse>('/admin/openclaw/fleet/reconciliation', undefined, { admin: true }),
   listOpenClawPolicyPacks: () => request<{ total: number; policyPacks: OpenClawPolicyPack[] }>('/admin/openclaw/fleet/policy-packs', undefined, { admin: true }),
   upsertOpenClawPolicyPack: (key: string, input: OpenClawPolicyPackUpsertInput) => request<{ policyPack: OpenClawPolicyPack }>(`/admin/openclaw/fleet/policy-packs/${encodeURIComponent(key)}`, {
@@ -3065,7 +3151,20 @@ export const directoryApi = {
     method: 'POST',
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
+  downloadOpenClawFleetSupportBundle: async (input?: OpenClawFleetSupportBundleInput): Promise<ExportDownload> => {
+    const response = await requestRaw(`/admin/openclaw/fleet/support-bundle${buildQuery({
+      hostId: input?.hostId,
+      workspaceSlug: input?.workspaceSlug,
+      traceNonce: input?.traceNonce,
+      hours: input?.hours,
+    })}`, undefined, { admin: true })
+    return {
+      blob: await response.blob(),
+      filename: getFilenameFromResponse(response, 'openclaw-support-bundle', 'json'),
+    }
+  },
   getOpenClawConflict: (beamId: string) => request<OpenClawConflictDetailResponse>(`/admin/openclaw/conflicts/${encodeURIComponent(beamId)}`, undefined, { admin: true }),
+  listOpenClawEnrollments: () => request<OpenClawEnrollmentRequestsResponse>('/admin/openclaw/hosts/enrollment', undefined, { admin: true }),
   listOpenClawHosts: () => request<OpenClawHostsResponse>('/admin/openclaw/hosts', undefined, { admin: true }),
   getOpenClawHost: (id: number) => request<OpenClawHostDetailResponse>(`/admin/openclaw/hosts/${id}`, undefined, { admin: true }),
   getOpenClawHostRoutes: (id: number) => request<OpenClawHostRoutesResponse>(`/admin/openclaw/hosts/${id}/routes`, undefined, { admin: true }),
@@ -3398,6 +3497,17 @@ export const directoryApi = {
       filename: getFilenameFromResponse(response, dataset, format),
     }
   },
+}
+
+export const directoryRoleApi = {
+  list: () => request<DirectoryRolesResponse>('/admin/roles', undefined, { admin: true }),
+  assign: (input: DirectoryRoleAssignment) => request<DirectoryRoleAssignment>('/admin/roles', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  revoke: (email: string) => requestRaw(`/admin/roles/${encodeURIComponent(email)}`, {
+    method: 'DELETE',
+  }, { admin: true }),
 }
 
 export const adminAuthApi = {

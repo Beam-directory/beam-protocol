@@ -413,6 +413,11 @@ export async function startOpenClawFleetHarness() {
         headers: this.roleHeaders(role),
       })
     },
+    async fetchFleetAnalytics(role = 'viewer') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/analytics`, {
+        headers: this.roleHeaders(role),
+      })
+    },
     async fetchFleetReconciliation(role = 'admin') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/reconciliation`, {
         headers: this.roleHeaders(role),
@@ -440,6 +445,75 @@ export async function startOpenClawFleetHarness() {
     async fetchFleetAlerts(role = 'viewer') {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/fleet/alerts`, {
         headers: this.roleHeaders(role),
+      })
+    },
+    async fetchFleetSupportBundle(params = {}, role = 'operator', allowError = false) {
+      const query = new URLSearchParams()
+      if (params.hostId) {
+        query.set('hostId', String(params.hostId))
+      }
+      if (params.workspaceSlug) {
+        query.set('workspaceSlug', params.workspaceSlug)
+      }
+      if (params.traceNonce) {
+        query.set('traceNonce', params.traceNonce)
+      }
+      if (params.hours) {
+        query.set('hours', String(params.hours))
+      }
+
+      const url = `${harness.directoryUrl}/admin/openclaw/fleet/support-bundle${query.size > 0 ? `?${query.toString()}` : ''}`
+      const response = await fetch(url, {
+        headers: this.roleHeaders(role),
+      })
+      const text = await response.text()
+      let payload = null
+      if (text.length > 0) {
+        payload = JSON.parse(text)
+      }
+      if (!response.ok && !allowError) {
+        throw new Error(`Fleet support bundle request failed with ${response.status}: ${text}`)
+      }
+      return {
+        status: response.status,
+        payload,
+        filename: response.headers.get('content-disposition') ?? null,
+      }
+    },
+    async listEnrollments(role = 'operator') {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/enrollment`, {
+        headers: this.roleHeaders(role),
+      })
+    },
+    async createEnrollment(input, role = 'operator', allowError = false) {
+      return this.requestRole('/admin/openclaw/hosts/enrollment', {
+        role,
+        method: 'POST',
+        body: input,
+        allowError,
+      })
+    },
+    async listRoles(role = 'viewer') {
+      return requestJson(`${harness.directoryUrl}/admin/roles`, {
+        headers: this.roleHeaders(role),
+      })
+    },
+    async assignRole(email, assignedRole, role = 'admin', allowError = false) {
+      return this.requestRole('/admin/roles', {
+        role,
+        method: 'POST',
+        body: {
+          email,
+          role: assignedRole,
+        },
+        allowError,
+      })
+    },
+    async revokeRole(email, role = 'admin', allowError = false) {
+      return this.requestRole(`/admin/roles/${encodeURIComponent(email)}`, {
+        role,
+        method: 'DELETE',
+        allowError,
       })
     },
     async createFleetAlertTarget(input, role = 'admin', allowError = false) {

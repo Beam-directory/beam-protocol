@@ -952,6 +952,9 @@ switch (command) {
   case 'setup':
     await setupCommand()
     break
+  case 'bootstrap':
+    await installCommand()
+    break
   case 'install':
     await installCommand()
     break

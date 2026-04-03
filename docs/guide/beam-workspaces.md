@@ -124,6 +124,15 @@ If you want the latest dashboard proof summarized as a small Markdown evidence f
 npm run quickstart:ui-report -- --latest --output tmp/dashboard-ui-smoke/report.md
 ```
 
+If you want to pin the latest proof set as the committed baseline and compare a fresh run against it, use:
+
+```bash
+npm run quickstart:ui-baseline -- --latest
+npm run quickstart:ui-compare -- --latest
+```
+
+The CI `quickstart` job now runs the same compare step and uploads both the screenshots and the Markdown UI report as release evidence.
+
 The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.
 It also installs the local OpenClaw receiver service, which keeps Beam WebSocket connections open for imported identities and forwards incoming intents into the matching OpenClaw runtime session.
 
@@ -197,6 +206,7 @@ The fleet enrollment response now also includes a copy-paste install pack with:
 - uninstall command
 
 That keeps the operator path explicit: issue enrollment, hand off one command, approve the host, and then watch receipts and health in the fleet view.
+The same fleet surface now also exposes the guided enrollment link, the recent enrollment queue, a fleet analytics summary, and support-bundle export for the host/workspace/trace slice you want to hand to another operator.
 
 The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
 
@@ -231,6 +241,14 @@ The fleet UI reflects those same guards directly:
 
 - `Create/update requires admin.`
 - `Testing requires operator or admin.`
+
+Shared operator administration now lives in the dashboard Settings page:
+
+- `Operators and members`
+- `Role management`
+- `Latest sign-in link`
+
+That is the hosted-fleet control point for adding viewers and operators without repo edits while still keeping admin-only destructive actions explicit.
 
 External alerting is first-class now. Fleet items can fan out to:
 

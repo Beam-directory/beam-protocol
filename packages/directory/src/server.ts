@@ -4035,7 +4035,7 @@ export function createApp(db: Database): Hono {
   app.route('/keys', revokedKeysRouter(db))
 
   app.get('/admin/roles', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
