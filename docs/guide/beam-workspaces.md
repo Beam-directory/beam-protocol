@@ -73,6 +73,8 @@ The shortest local install path is:
 npm run workspace:openclaw
 ```
 
+On a fresh Mac, that command now also self-heals the dashboard proof dependency: if Chromium is not available yet, Beam installs it automatically and retries the UI proof once.
+
 If you want the shortest human-friendly health check after setup, run:
 
 ```bash
@@ -114,6 +116,12 @@ If the UI smoke cannot launch a browser on this machine, install the bundled Chr
 
 ```bash
 npm run quickstart:ui-smoke:install
+```
+
+If you want the latest dashboard proof summarized as a small Markdown evidence file, run:
+
+```bash
+npm run quickstart:ui-report -- --latest --output tmp/dashboard-ui-smoke/report.md
 ```
 
 The setup now also seeds the local development ACLs automatically, so imported OpenClaw agents can send `conversation.message` and `task.delegate` across the local fleet and to `echo@beam.directory` without manual ACL patching.

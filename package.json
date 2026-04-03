@@ -21,6 +21,7 @@
     "production:operator-dry-run": "node scripts/production/operator-dry-run.mjs",
     "production:partner-dry-run": "node scripts/production/production-partner-dry-run.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
+    "quickstart:ui-report": "node scripts/quickstart/dashboard-ui-report.mjs",
     "quickstart:ui-smoke": "node scripts/quickstart/dashboard-ui-smoke.mjs",
     "quickstart:ui-smoke:install": "playwright install chromium",
     "release:admin-auth": "node scripts/release/live-admin-auth-smoke.mjs",

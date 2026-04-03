@@ -123,6 +123,9 @@ jobs:
       - name: Run dashboard UI smoke path
         run: npm run quickstart:ui-smoke
 
+      - name: Write dashboard UI smoke report
+        run: npm run quickstart:ui-report -- --latest --output tmp/dashboard-ui-smoke/report.md
+
       - name: Upload quickstart UI smoke artifacts
         if: always()
         uses: actions/upload-artifact@v4

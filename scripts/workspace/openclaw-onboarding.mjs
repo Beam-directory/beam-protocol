@@ -6,6 +6,7 @@ const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
 const nodePath = process.execPath
 const hostScript = path.join(repoRoot, 'scripts/workspace/beam-openclaw-host.mjs')
 const uiSmokeScript = path.join(repoRoot, 'scripts/quickstart/dashboard-ui-smoke.mjs')
+const isWindows = process.platform === 'win32'
 
 const passthroughArgs = process.argv.slice(2)
 const skipUiSmoke = passthroughArgs.includes('--skip-ui-smoke')
@@ -28,6 +29,37 @@ function runNode(args, { capture = false } = {}) {
 function parseJsonCommand(args) {
   const output = runNode(args, { capture: true })
   return JSON.parse(output)
+}
+
+function isMissingBrowserError(error) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.includes('Playwright browser unavailable')
+    || message.includes("Executable doesn't exist")
+    || message.includes('Please run the following command to download new browsers')
+}
+
+function installChromium() {
+  const npxCommand = isWindows ? 'npx.cmd' : 'npx'
+  execFileSync(npxCommand, ['playwright', 'install', 'chromium'], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+    env: process.env,
+    maxBuffer: 1024 * 1024 * 10,
+  })
+}
+
+function captureUiSmoke() {
+  try {
+    return parseJsonCommand([uiSmokeScript, '--json'])
+  } catch (error) {
+    if (!isMissingBrowserError(error)) {
+      throw error
+    }
+
+    logStep('installing Chromium because the dashboard proof browser is not available yet')
+    installChromium()
+    return parseJsonCommand([uiSmokeScript, '--json'])
+  }
 }
 
 function formatReadyState(status) {
@@ -53,7 +85,7 @@ async function main() {
   let uiSmoke = null
   if (!skipUiSmoke) {
     logStep('capturing dashboard proof')
-    uiSmoke = parseJsonCommand([uiSmokeScript, '--json'])
+    uiSmoke = captureUiSmoke()
   }
 
   console.log('')
