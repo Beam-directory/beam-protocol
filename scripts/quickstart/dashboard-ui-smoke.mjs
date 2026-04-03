@@ -88,6 +88,27 @@ async function waitForHealth(url, label, predicate = (response) => response.ok) 
   throw new Error(`${label} did not become ready at ${url}`)
 }
 
+async function waitForAuthedJson(url, token, label, timeoutMs = 90_000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url, {
+        headers: {
+          Authorization: `Bearer ${token}`,
+        },
+      })
+      if (response.ok) {
+        return response
+      }
+    } catch {
+      // Wait until the authenticated endpoint is ready.
+    }
+    await sleep(500)
+  }
+
+  throw new Error(`${label} did not become ready at ${url}`)
+}
+
 async function requestJson(url, init) {
   const response = await fetch(url, init)
   const text = await response.text()
@@ -145,7 +166,11 @@ async function captureProtectedPage({
   route,
   selector,
   heading,
+  bodyText,
   screenshotPath,
+  timeoutMs = 20_000,
+  fullPage = true,
+  allowHeadingFallback = true,
 }) {
   const page = await context.newPage()
   try {
@@ -154,15 +179,24 @@ async function captureProtectedPage({
     let ready = false
     if (selector) {
       try {
-        await page.locator(selector).first().waitFor({ state: 'visible', timeout: 7_500 })
+        await page.locator(selector).first().waitFor({ state: 'visible', timeout: timeoutMs })
         ready = true
       } catch {
         // Fall back to a page-specific heading when layout wrappers change.
       }
     }
 
-    if (!ready && heading) {
-      await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible', timeout: 20_000 })
+    if (!ready && bodyText) {
+      try {
+        await page.getByText(bodyText, { exact: false }).first().waitFor({ state: 'visible', timeout: timeoutMs })
+        ready = true
+      } catch {
+        // Fall back to the page heading when trace/body copy is still loading.
+      }
+    }
+
+    if (!ready && heading && allowHeadingFallback) {
+      await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible', timeout: timeoutMs })
       ready = true
     }
 
@@ -171,7 +205,7 @@ async function captureProtectedPage({
     }
 
     await page.waitForTimeout(750)
-    await page.screenshot({ path: screenshotPath, fullPage: true })
+    await page.screenshot({ path: screenshotPath, fullPage })
     return screenshotPath
   } catch (error) {
     const snippet = await page.locator('body').innerText().then((value) => value.slice(0, 800)).catch(() => '')
@@ -222,6 +256,11 @@ async function main() {
   })
   const traceNonce = run?.quote?.nonce
   assert.equal(typeof traceNonce, 'string', 'demo run did not return a quote nonce')
+  await waitForAuthedJson(
+    `${runtime.directoryUrl}/observability/intents/${encodeURIComponent(traceNonce)}`,
+    verify.token,
+    'trace detail',
+  )
 
   logStep('capturing dashboard pages')
   const browser = await launchBrowser()
@@ -262,9 +301,11 @@ async function main() {
           context: desktopContext,
           runtime,
           route: `/intents/${encodeURIComponent(traceNonce)}`,
-          selector: '[data-ui-page="trace-detail"]',
+          bodyText: `Nonce ${traceNonce}`,
           heading: 'Trace',
           screenshotPath: path.join(outputDir, 'trace-desktop.png'),
+          timeoutMs: 90_000,
+          fullPage: false,
         }),
         fleetTablet: await captureProtectedPage({
           context: tabletContext,

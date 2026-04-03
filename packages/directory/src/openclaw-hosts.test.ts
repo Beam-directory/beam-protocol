@@ -2828,3 +2828,146 @@ test('fleet overview surfaces maintenance counts and rollout inventory', async (
     db.close()
   }
 })
+
+test('openclaw host rollback discipline tracks pending and completed rollback state', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    const atlas = createFixtureAgent('atlas@openclaw.beam.directory')
+    registerFixtureAgent(db, atlas, 'Atlas')
+
+    const approved = createApprovedHostWithRoute(db, {
+      label: 'OpenClaw Host Alpha',
+      hostname: 'alpha.local',
+      beamId: atlas.beamId,
+      routeKey: 'alpha-route',
+      workspaceSlug: 'openclaw-local',
+    })
+
+    const upgraded = updateOpenClawHost(db, {
+      id: approved.host.id,
+      connectorVersion: '1.6.0-test',
+      lastHeartbeatAt: new Date().toISOString(),
+      lastInventoryAt: new Date().toISOString(),
+    })
+    assert.ok(upgraded)
+
+    const app = createApp(db)
+    const adminHeaders = {
+      ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+      'content-type': 'application/json',
+    }
+
+    const preparedResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${approved.host.id}/rollout`, {
+      method: 'PATCH',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        ring: 'stable',
+        desiredConnectorVersion: '1.6.0-test',
+        notes: 'upgraded to 1.6.0-test',
+        rollbackConnectorVersion: '1.2.0-test',
+        rollbackState: 'prepared',
+        rollbackNotes: 'Known good pre-upgrade connector version',
+      }),
+    }))
+    assert.equal(preparedResponse.status, 200)
+    const preparedBody = await preparedResponse.json() as {
+      host: {
+        rollout: {
+          desiredConnectorVersion: string | null
+          rollbackConnectorVersion: string | null
+          rollbackState: string
+        }
+      }
+    }
+    assert.equal(preparedBody.host.rollout.desiredConnectorVersion, '1.6.0-test')
+    assert.equal(preparedBody.host.rollout.rollbackConnectorVersion, '1.2.0-test')
+    assert.equal(preparedBody.host.rollout.rollbackState, 'prepared')
+
+    const rollbackResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${approved.host.id}/rollback`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify({
+        confirmPhrase: 'ROLLBACK_HOST',
+      }),
+    }))
+    assert.equal(rollbackResponse.status, 200)
+    const rollbackBody = await rollbackResponse.json() as {
+      host: {
+        rollout: {
+          desiredConnectorVersion: string | null
+          rollbackConnectorVersion: string | null
+          rollbackState: string
+          versionState: string
+        }
+      }
+    }
+    assert.equal(rollbackBody.host.rollout.desiredConnectorVersion, '1.2.0-test')
+    assert.equal(rollbackBody.host.rollout.rollbackConnectorVersion, '1.2.0-test')
+    assert.equal(rollbackBody.host.rollout.rollbackState, 'rollback_pending')
+    assert.equal(rollbackBody.host.rollout.versionState, 'drifted')
+
+    const pendingOverviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(pendingOverviewResponse.status, 200)
+    const pendingOverviewBody = await pendingOverviewResponse.json() as {
+      rollout: {
+        summary: {
+          rollbackPendingHosts: number
+        }
+        attentionHosts: Array<{
+          hostId: number
+          rollbackState: string
+          rollbackConnectorVersion: string | null
+          reasons: string[]
+        }>
+      }
+    }
+    assert.equal(pendingOverviewBody.rollout.summary.rollbackPendingHosts, 1)
+    assert.equal(pendingOverviewBody.rollout.attentionHosts.find((entry) => entry.hostId === approved.host.id)?.rollbackState, 'rollback_pending')
+    assert.ok(pendingOverviewBody.rollout.attentionHosts.find((entry) => entry.hostId === approved.host.id)?.reasons.some((reason) => reason.includes('rollback to 1.2.0-test')))
+
+    const restored = updateOpenClawHost(db, {
+      id: approved.host.id,
+      connectorVersion: '1.2.0-test',
+      lastHeartbeatAt: new Date().toISOString(),
+      lastInventoryAt: new Date().toISOString(),
+    })
+    assert.ok(restored)
+
+    const hostResponse = await app.request(new Request(`http://localhost/admin/openclaw/hosts/${approved.host.id}`, {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(hostResponse.status, 200)
+    const hostBody = await hostResponse.json() as {
+      host: {
+        rollout: {
+          desiredConnectorVersion: string | null
+          rollbackConnectorVersion: string | null
+          rollbackState: string
+          versionState: string
+        }
+      }
+    }
+    assert.equal(hostBody.host.rollout.desiredConnectorVersion, '1.2.0-test')
+    assert.equal(hostBody.host.rollout.rollbackConnectorVersion, '1.2.0-test')
+    assert.equal(hostBody.host.rollout.rollbackState, 'completed')
+    assert.equal(hostBody.host.rollout.versionState, 'current')
+
+    const completedOverviewResponse = await app.request(new Request('http://localhost/admin/openclaw/fleet/overview', {
+      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+    }))
+    assert.equal(completedOverviewResponse.status, 200)
+    const completedOverviewBody = await completedOverviewResponse.json() as {
+      rollout: {
+        summary: {
+          rollbackPendingHosts: number
+        }
+      }
+    }
+    assert.equal(completedOverviewBody.rollout.summary.rollbackPendingHosts, 0)
+  } finally {
+    db.close()
+  }
+})

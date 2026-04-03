@@ -131,13 +131,29 @@ export default function TraceDetailPage() {
   }, [resolvedNonce])
 
   if (loading) {
-    return <div className="panel">Loading trace…</div>
+    return (
+      <div data-ui-page="trace-detail" data-ui-state="loading" className="space-y-8">
+        <PageHeader
+          eyebrow="Intent Trace"
+          title="Trace"
+          description={resolvedNonce ? `Nonce ${resolvedNonce}` : 'Loading trace'}
+        />
+        <div className="panel">Loading trace…</div>
+      </div>
+    )
   }
 
   if (error || !trace) {
     return (
-      <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
-        {error ?? 'Trace not found'}
+      <div data-ui-page="trace-detail" data-ui-state="error" className="space-y-8">
+        <PageHeader
+          eyebrow="Intent Trace"
+          title="Trace"
+          description={resolvedNonce ? `Nonce ${resolvedNonce}` : 'Trace lookup failed'}
+        />
+        <div className="rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">
+          {error ?? 'Trace not found'}
+        </div>
       </div>
     )
   }
@@ -179,7 +195,7 @@ export default function TraceDetailPage() {
   }, [deliveryStage, firstErrorStage, highRiskShield, shieldFlagCount, terminalStage, trace.intent.status])
 
   return (
-    <div data-ui-page="trace-detail" className="space-y-8">
+    <div data-ui-page="trace-detail" data-ui-state="ready" className="space-y-8">
       <PageHeader
         eyebrow="Intent Trace"
         title="Trace"

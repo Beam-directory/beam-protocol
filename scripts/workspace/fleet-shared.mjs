@@ -9,7 +9,7 @@ import {
   startProductionHarness,
 } from '../production/shared.mjs'
 
-const connectorVersion = '1.3.0-test'
+const defaultConnectorVersion = '1.6.0-test'
 
 function createFixtureAgent(beamId, displayName) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
@@ -120,7 +120,17 @@ async function approveOpenClawHost(directoryUrl, token, hostId) {
   })
 }
 
+function resolveConnectorVersion(details = {}) {
+  return typeof details.connectorVersion === 'string' && details.connectorVersion.trim()
+    ? details.connectorVersion.trim()
+    : defaultConnectorVersion
+}
+
 export async function heartbeatOpenClawHost(directoryUrl, credential, routeCount, details = {}) {
+  const connectorVersion = resolveConnectorVersion(details)
+  const nextDetails = { ...details }
+  delete nextDetails.connectorVersion
+
   return requestJson(`${directoryUrl}/openclaw/hosts/heartbeat`, {
     method: 'POST',
     headers: {
@@ -130,7 +140,7 @@ export async function heartbeatOpenClawHost(directoryUrl, credential, routeCount
     body: JSON.stringify({
       routeCount,
       connectorVersion,
-      details,
+      details: nextDetails,
     }),
   })
 }
@@ -143,7 +153,7 @@ export async function syncOpenClawInventory(directoryUrl, credential, host, rout
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      connectorVersion,
+      connectorVersion: host.connectorVersion ?? defaultConnectorVersion,
       beamDirectoryUrl: directoryUrl,
       workspaceSlug: host.workspaceSlug,
       label: host.label,
@@ -201,6 +211,7 @@ export async function startOpenClawFleetHarness() {
       workspaceSlug,
       routeSource: 'gateway-agent',
       agent: agents.alpha,
+      connectorVersion: defaultConnectorVersion,
     },
     {
       key: 'beta',
@@ -210,6 +221,7 @@ export async function startOpenClawFleetHarness() {
       workspaceSlug,
       routeSource: 'workspace-agent',
       agent: agents.beta,
+      connectorVersion: defaultConnectorVersion,
     },
     {
       key: 'gamma',
@@ -219,6 +231,7 @@ export async function startOpenClawFleetHarness() {
       workspaceSlug,
       routeSource: 'subagent-run',
       agent: agents.gamma,
+      connectorVersion: defaultConnectorVersion,
     },
   ]
 
@@ -294,7 +307,7 @@ export async function startOpenClawFleetHarness() {
       label: blueprint.label,
       hostname: blueprint.hostname,
       os: blueprint.os,
-      connectorVersion,
+      connectorVersion: blueprint.connectorVersion,
       beamDirectoryUrl: harness.directoryUrl,
       workspaceSlug: blueprint.workspaceSlug,
       metadata: {
@@ -303,19 +316,21 @@ export async function startOpenClawFleetHarness() {
       },
     })
     const approved = await approveOpenClawHost(harness.directoryUrl, token, pending.host.id)
-    await syncOpenClawInventory(harness.directoryUrl, approved.credential, blueprint, [
-      buildRoute(blueprint, blueprint.agent, blueprint.routeSource),
-    ])
-    await heartbeatOpenClawHost(harness.directoryUrl, approved.credential, 1, {
-      hostKey: blueprint.key,
-      stage: 'fleet-bootstrap',
-    })
-
-    hosts[blueprint.key] = {
+    const bootstrappedHost = {
       ...blueprint,
       id: approved.host.id,
       credential: approved.credential,
     }
+    await syncOpenClawInventory(harness.directoryUrl, approved.credential, bootstrappedHost, [
+      buildRoute(bootstrappedHost, bootstrappedHost.agent, bootstrappedHost.routeSource),
+    ])
+    await heartbeatOpenClawHost(harness.directoryUrl, approved.credential, 1, {
+      connectorVersion: bootstrappedHost.connectorVersion,
+      hostKey: blueprint.key,
+      stage: 'fleet-bootstrap',
+    })
+
+    hosts[blueprint.key] = bootstrappedHost
   }
 
   const clients = {
@@ -418,6 +433,7 @@ export async function startOpenClawFleetHarness() {
         buildRoute(hosts.gamma, hosts.alpha.agent, 'subagent-run', 'duplicate-alpha'),
       ])
       await heartbeatOpenClawHost(harness.directoryUrl, hosts.gamma.credential, 2, {
+        connectorVersion: hosts.gamma.connectorVersion,
         hostKey: 'gamma',
         stage: 'duplicate-route',
       })
@@ -426,6 +442,7 @@ export async function startOpenClawFleetHarness() {
       const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/rotate`, {
         method: 'POST',
         headers: createAdminHeaders(token),
+        body: JSON.stringify({ confirmPhrase: 'ROTATE_HOST' }),
       })
       hosts[hostKey].credential = response.credential
       return response
@@ -434,6 +451,7 @@ export async function startOpenClawFleetHarness() {
       const response = await requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/recover`, {
         method: 'POST',
         headers: createAdminHeaders(token),
+        body: JSON.stringify({ confirmPhrase: 'RECOVER_HOST' }),
       })
       hosts[hostKey].credential = response.credential
       return response
@@ -442,21 +460,27 @@ export async function startOpenClawFleetHarness() {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/revoke`, {
         method: 'POST',
         headers: createAdminHeaders(token),
-        body: JSON.stringify({ reason }),
+        body: JSON.stringify({ reason, confirmPhrase: 'REVOKE_HOST' }),
       })
     },
     async enableMaintenance(hostKey, input = {}) {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/maintenance`, {
         method: 'POST',
         headers: createAdminHeaders(token),
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          confirmPhrase: 'MAINTENANCE_HOST',
+          ...input,
+        }),
       })
     },
     async drainHost(hostKey, input = {}) {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/drain`, {
         method: 'POST',
         headers: createAdminHeaders(token),
-        body: JSON.stringify(input),
+        body: JSON.stringify({
+          confirmPhrase: 'DRAIN_HOST',
+          ...input,
+        }),
       })
     },
     async resumeHost(hostKey) {
@@ -472,11 +496,26 @@ export async function startOpenClawFleetHarness() {
         body: JSON.stringify(input),
       })
     },
+    async rollbackHost(hostKey, input = {}) {
+      return requestJson(`${harness.directoryUrl}/admin/openclaw/hosts/${hosts[hostKey].id}/rollback`, {
+        method: 'POST',
+        headers: createAdminHeaders(token),
+        body: JSON.stringify({
+          confirmPhrase: 'ROLLBACK_HOST',
+          ...input,
+        }),
+      })
+    },
+    setHostConnectorVersion(hostKey, version) {
+      hosts[hostKey].connectorVersion = version
+      return hosts[hostKey]
+    },
     async syncHost(hostKey, routes = null, details = {}) {
       const host = hosts[hostKey]
       const inventoryRoutes = routes ?? [buildRoute(host, host.agent, host.routeSource)]
       await syncOpenClawInventory(harness.directoryUrl, host.credential, host, inventoryRoutes)
       await heartbeatOpenClawHost(harness.directoryUrl, host.credential, inventoryRoutes.length, {
+        connectorVersion: host.connectorVersion,
         hostKey,
         stage: 'manual-sync',
         ...details,
@@ -484,6 +523,7 @@ export async function startOpenClawFleetHarness() {
     },
     async heartbeatHost(hostKey, routeCount = 1, details = {}) {
       return heartbeatOpenClawHost(harness.directoryUrl, hosts[hostKey].credential, routeCount, {
+        connectorVersion: hosts[hostKey].connectorVersion,
         hostKey,
         stage: 'manual-heartbeat',
         ...details,
@@ -505,7 +545,7 @@ export async function startOpenClawFleetHarness() {
       return requestJson(`${harness.directoryUrl}/admin/openclaw/routes/${routeId}/disable`, {
         method: 'POST',
         headers: createAdminHeaders(token),
-        body: JSON.stringify({ note }),
+        body: JSON.stringify({ note, confirmPhrase: 'DISABLE_ROUTE' }),
       })
     },
     async clearRouteOwner(routeId, note = 'Reset route owner resolution') {

@@ -35,6 +35,7 @@
     "workspace:fleet-digest": "node scripts/workspace/fleet-digest.mjs",
     "workspace:fleet-digest:tick": "node scripts/workspace/fleet-digest-tick.mjs",
     "workspace:fleet-drill": "node scripts/workspace/fleet-smoke.mjs",
+    "workspace:fleet-recovery-drill": "node scripts/workspace/fleet-recovery-drill.mjs",
     "workspace:fleet-smoke": "node scripts/workspace/fleet-smoke.mjs",
     "workspace:openclaw": "node scripts/workspace/openclaw-onboarding.mjs",
     "workspace:import-openclaw": "node scripts/workspace/import-openclaw.mjs",

@@ -31,6 +31,7 @@ export type OpenClawHostCredentialState = 'missing' | 'ready' | 'rotation_pendin
 export type OpenClawHostMaintenanceState = 'serving' | 'maintenance' | 'draining'
 export type OpenClawHostRolloutRing = 'canary' | 'stable' | 'pinned'
 export type OpenClawHostRolloutVersionState = 'unmanaged' | 'current' | 'drifted'
+export type OpenClawHostRollbackState = 'idle' | 'prepared' | 'rollback_pending' | 'completed'
 export type OpenClawHostEnrollmentStatus = 'issued' | 'pending' | 'approved' | 'revoked' | 'expired'
 export type OpenClawRouteSource = 'agent-folder' | 'workspace-agent' | 'gateway-agent' | 'subagent-run'
 export type OpenClawRouteReportedState = 'live' | 'idle' | 'ended'
@@ -401,6 +402,10 @@ export interface OpenClawHostSummary {
     updatedAt: string | null
     versionState: OpenClawHostRolloutVersionState
     canary: boolean
+    rollbackConnectorVersion: string | null
+    rollbackState: OpenClawHostRollbackState
+    rollbackNotes: string | null
+    rollbackUpdatedAt: string | null
   }
   reconciliation: {
     state: 'steady' | 'attention' | 'cleanup_required'
@@ -751,6 +756,7 @@ export interface OpenClawFleetOverviewResponse {
       canaryHosts: number
       driftHosts: number
       unmanagedHosts: number
+      rollbackPendingHosts: number
     }
     versions: Array<{
       version: string
@@ -778,6 +784,8 @@ export interface OpenClawFleetOverviewResponse {
       connectorVersion: string
       desiredConnectorVersion: string | null
       versionState: OpenClawHostRolloutVersionState
+      rollbackState: OpenClawHostRollbackState
+      rollbackConnectorVersion: string | null
       reasons: string[]
       severity: 'warning' | 'critical'
       href: string
@@ -1138,6 +1146,9 @@ export interface OpenClawHostRolloutPatchInput {
   ring?: OpenClawHostRolloutRing | null
   desiredConnectorVersion?: string | null
   notes?: string | null
+  rollbackConnectorVersion?: string | null
+  rollbackState?: OpenClawHostRollbackState | null
+  rollbackNotes?: string | null
 }
 
 export interface OpenClawHostPolicyActionResponse {
@@ -3103,6 +3114,10 @@ export const directoryApi = {
   updateOpenClawHostRollout: (id: number, input: OpenClawHostRolloutPatchInput) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/rollout`, {
     method: 'PATCH',
     body: JSON.stringify(input),
+  }, { admin: true }),
+  rollbackOpenClawHost: (id: number, input?: { connectorVersion?: string | null; notes?: string | null; confirmPhrase?: string | null }) => request<{ host: OpenClawHostSummary }>(`/admin/openclaw/hosts/${id}/rollback`, {
+    method: 'POST',
+    body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   revokeOpenClawHost: (id: number, input?: { reason?: string | null; confirmPhrase?: string | null }) => request<OpenClawHostRevokeResponse>(`/admin/openclaw/hosts/${id}/revoke`, {
     method: 'POST',
