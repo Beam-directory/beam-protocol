@@ -222,6 +222,21 @@ That writes:
 
 For `localhost`, Beam auto-mints a local admin session. For a non-local control plane, pass `--token` or set `BEAM_ADMIN_TOKEN`.
 
+For release evidence toward `#196`, use a non-local control plane and make that requirement explicit:
+
+```bash
+BEAM_ADMIN_TOKEN=<admin-session-token> \
+npm run workspace:external-dogfood-pack -- \
+  --directory-url https://api.beam.directory \
+  --workspace openclaw-external-dogfood \
+  --tester-name "Jane Example" \
+  --tester-email "jane@example.com" \
+  --host-label "Jane MacBook" \
+  --require-public-directory
+```
+
+The `--require-public-directory` guard fails the command if it would create a localhost-only packet. Local packs are useful rehearsals, but they do not count as external release evidence.
+
 The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
 
 If you also want Beam to keep picking up newly spawned OpenClaw subagents while you work, run:

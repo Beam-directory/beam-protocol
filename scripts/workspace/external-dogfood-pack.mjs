@@ -1,5 +1,6 @@
 import { mkdir } from 'node:fs/promises'
 import path from 'node:path'
+import { pathToFileURL } from 'node:url'
 import { createAdminHeaders, createAdminToken, formatDate, formatDateTime, optionalFlag, repoRoot, requestJson, resolveReleaseLabel, writeMarkdownReport } from '../production/shared.mjs'
 
 const releaseLabel = resolveReleaseLabel('1.7.0')
@@ -15,6 +16,7 @@ const explicitToken = optionalFlag('--token', process.env.BEAM_ADMIN_TOKEN ?? nu
 const expiresInHours = Number.parseInt(optionalFlag('--expires-in-hours', '72'), 10)
 const notes = optionalFlag('--notes', `External hosted-fleet dogfood for ${testerName}`)
 const outputDir = optionalFlag('--output-dir', path.join(repoRoot, 'tmp/external-dogfood-pack'))
+const requirePublicDirectory = process.argv.includes('--require-public-directory') || process.argv.includes('--release-evidence')
 
 function slugify(value) {
   return value
@@ -24,12 +26,18 @@ function slugify(value) {
     .slice(0, 48) || 'external-dogfood'
 }
 
-function isLoopback(url) {
+export function isLoopback(url) {
   try {
     const parsed = new URL(url)
     return parsed.hostname === 'localhost' || parsed.hostname === '127.0.0.1'
   } catch {
     return false
+  }
+}
+
+export function assertPublicDirectoryForEvidence(url, required = false) {
+  if (required && isLoopback(url)) {
+    throw new Error('Release-evidence external dogfood packs must target a non-local Beam directory. Pass --directory-url https://api.beam.directory and --token/BEAM_ADMIN_TOKEN, or omit --require-public-directory for local rehearsal packs.')
   }
 }
 
@@ -59,8 +67,10 @@ async function main() {
     throw new Error(`Invalid --expires-in-hours value: ${expiresInHours}`)
   }
 
+  assertPublicDirectoryForEvidence(directoryUrl, requirePublicDirectory)
   await ensureDirectoryIsReachable(directoryUrl)
   const token = await resolveAdminToken()
+  const publicDirectory = !isLoopback(directoryUrl)
 
   const enrollmentResponse = await requestJson(`${directoryUrl}/admin/openclaw/hosts/enrollment`, {
     method: 'POST',
@@ -133,6 +143,14 @@ Generated at: \`${formatDateTime()}\`
 ## Goal
 
 Use this pack to install one external OpenClaw host into Beam through the hosted fleet adoption path, without needing repo context.
+
+## Release evidence posture
+
+- Directory URL: \`${directoryUrl}\`
+- Public directory: \`${publicDirectory ? 'yes' : 'no'}\`
+- Release evidence candidate: \`${publicDirectory ? 'yes' : 'no'}\`
+
+Only count this pack toward GitHub issue \`#196\` after a real external operator runs it on a non-local control plane, the host is approved, heartbeat/inventory are observed, support evidence is exported, and the tester returns written feedback.
 
 ## Host install
 
@@ -212,6 +230,8 @@ Send the tester this file after the install run:
     directoryUrl,
     workspaceSlug,
     hostLabel,
+    publicDirectory,
+    releaseEvidenceCandidate: publicDirectory,
     enrollmentId: enrollment.id,
     guidedEnrollmentUrl: enrollment.guidedEnrollmentUrl,
     output: packPath,
@@ -219,7 +239,9 @@ Send the tester this file after the install run:
   }, null, 2))
 }
 
-main().catch((error) => {
-  console.error('[workspace:external-dogfood-pack] failed:', error)
-  process.exit(1)
-})
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main().catch((error) => {
+    console.error('[workspace:external-dogfood-pack] failed:', error)
+    process.exit(1)
+  })
+}
