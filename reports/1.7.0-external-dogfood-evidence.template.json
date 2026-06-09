@@ -1,0 +1,54 @@
+{
+  "template": true,
+  "release": "1.7.0",
+  "generatedAt": "YYYY-MM-DDTHH:mm:ss.sssZ",
+  "operators": [
+    {
+      "name": "External Operator 1",
+      "email": "operator1@example.com",
+      "organization": "Example Partner",
+      "external": true
+    },
+    {
+      "name": "External Operator 2",
+      "email": "operator2@example.com",
+      "organization": "Example Partner",
+      "external": true
+    }
+  ],
+  "hosts": [
+    {
+      "label": "Partner MacBook 1",
+      "machine": "MacBook Pro",
+      "os": "macOS 15",
+      "operatorEmail": "operator1@example.com",
+      "external": true,
+      "installed": true,
+      "bootstrapFlow": "packaged",
+      "freshMachine": true,
+      "noPreloadedRepoState": true,
+      "heartbeatSeen": true,
+      "inventorySeen": true,
+      "installedAt": "YYYY-MM-DDTHH:mm:ss.sssZ"
+    }
+  ],
+  "supportHandoffs": [
+    {
+      "type": "support-bundle",
+      "hostLabel": "Partner MacBook 1",
+      "usedInRealDebug": true,
+      "summary": "What support/debug question was answered with this bundle or analytics handoff.",
+      "exportedAt": "YYYY-MM-DDTHH:mm:ss.sssZ"
+    }
+  ],
+  "feedback": [
+    {
+      "tester": "External Tester 1",
+      "hostLabel": "Partner MacBook 1",
+      "external": true,
+      "verdict": "Written verdict from the tester.",
+      "productionBlocker": "Anything that still feels non-production.",
+      "solidSignal": "What already felt production-solid."
+    }
+  ]
+}

@@ -1,1 +1,16 @@
-{"projectId":"prj_1PjxTEV1rfEmDtNtgxlYI7ql59QG","orgId":"team_cpdsDNj35FG3cMzE7ga1G2Tk","projectName":"dashboard"}
+{
+  "projectId": "prj_1PjxTEV1rfEmDtNtgxlYI7ql59QG",
+  "orgId": "team_cpdsDNj35FG3cMzE7ga1G2Tk",
+  "projectName": "dashboard",
+  "settings": {
+    "createdAt": 1772991634933,
+    "framework": "vite",
+    "devCommand": null,
+    "installCommand": null,
+    "buildCommand": "npm run build",
+    "outputDirectory": "dist",
+    "rootDirectory": null,
+    "directoryListing": false,
+    "nodeVersion": "24.x"
+  }
+}

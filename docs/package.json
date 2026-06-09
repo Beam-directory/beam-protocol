@@ -11,7 +11,8 @@
     "vitepress": "1.6.4"
   },
   "overrides": {
-    "vite": "6.4.1",
+    "vite": "6.4.3",
+    "postcss": "8.5.15",
     "@vitejs/plugin-vue": "6.0.1",
     "esbuild": "0.25.0"
   },

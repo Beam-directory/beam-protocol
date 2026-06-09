@@ -15,7 +15,15 @@
     "dogfood:hosted-demo": "node scripts/demo/dogfood-hosted-demo.mjs",
     "production:buyer-dry-run": "node scripts/production/buyer-dry-run.mjs",
     "production:digest": "node scripts/production/operator-digest.mjs",
+    "production:dashboard-domain": "node scripts/production/dashboard-domain-preflight.mjs",
+    "production:dashboard-deployment": "node scripts/production/dashboard-deployment-truth-check.mjs",
+    "production:dashboard-go": "node scripts/production/dashboard-production-go.mjs",
+    "production:dashboard-shell": "node scripts/production/dashboard-shell-check.mjs",
+    "production:external-dogfood": "node scripts/production/external-dogfood-evidence-check.mjs",
+    "production:extract-vercel-url": "node scripts/production/extract-vercel-deployment-url.mjs",
     "production:parity": "node scripts/production/environment-parity-check.mjs",
+    "production:readiness": "node scripts/production/production-readiness-gate.mjs",
+    "production:workflow-guards": "node scripts/production/workflow-production-guard-check.mjs",
     "production:backup-restore": "node scripts/production/backup-restore-drill.mjs",
     "production:fire-drill": "node scripts/production/fire-drill.mjs",
     "production:operator-dry-run": "node scripts/production/operator-dry-run.mjs",
@@ -30,7 +38,7 @@
     "release:smoke": "node scripts/release/release-smoke.mjs",
     "test": "npm run test:workspaces && npm run test:scripts",
     "test:workspaces": "npm run test --workspaces --if-present",
-    "test:scripts": "node --test scripts/workspace/*.test.mjs",
+    "test:scripts": "node --test scripts/production/*.test.mjs scripts/workspace/*.test.mjs",
     "test:e2e": "node scripts/e2e/run.mjs",
     "workspace:buyer-dry-run": "node scripts/workspace/buyer-dry-run.mjs",
     "workspace:digest": "node scripts/workspace/operator-digest.mjs",
@@ -90,7 +98,8 @@
   },
   "devDependencies": {
     "pixelmatch": "^7.1.0",
-    "playwright": "^1.54.2",
-    "pngjs": "^7.0.0"
+    "playwright": "^1.60.0",
+    "pngjs": "^7.0.0",
+    "vite": "^6.4.3"
   }
 }

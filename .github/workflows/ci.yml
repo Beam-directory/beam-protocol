@@ -28,11 +28,27 @@ jobs:
       - name: Install workspace dependencies
         run: npm ci
 
+      - name: Audit workspace dependencies
+        run: npm audit --audit-level=moderate
+
       - name: Build workspaces
         run: npm run build
 
       - name: Test workspaces
         run: npm test
+
+      - name: Check production gate scripts
+        run: |
+          node --check scripts/production/dashboard-domain-preflight.mjs
+          node --check scripts/production/dashboard-deployment-truth-check.mjs
+          node --check scripts/production/dashboard-production-go.mjs
+          node --check scripts/production/dashboard-shell-check.mjs
+          node --check scripts/production/environment-parity-check.mjs
+          node --check scripts/production/extract-vercel-deployment-url.mjs
+          node --check scripts/production/external-dogfood-evidence-check.mjs
+          node --check scripts/production/production-readiness-gate.mjs
+          node --check scripts/production/workflow-production-guard-check.mjs
+          node --check scripts/release/release-smoke.mjs
 
   e2e:
     runs-on: ubuntu-latest
@@ -85,6 +101,10 @@ jobs:
         working-directory: docs
         run: npm ci
 
+      - name: Audit docs dependencies
+        working-directory: docs
+        run: npm audit --audit-level=moderate
+
       - name: Build docs
         working-directory: docs
         run: npm run build
@@ -119,6 +139,9 @@ jobs:
 
       - name: Run hosted quickstart smoke path
         run: npm run quickstart:smoke
+
+      - name: Verify dashboard shell guard
+        run: npm run production:dashboard-shell -- --dashboard-base http://localhost:43173
 
       - name: Run dashboard UI smoke path
         run: npm run quickstart:ui-smoke

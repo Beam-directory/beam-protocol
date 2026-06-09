@@ -48,6 +48,7 @@ jobs:
       VERCEL_ORG_ID: ${{ vars.VERCEL_ORG_ID }}
       VERCEL_PROJECT_ID: ${{ vars.VERCEL_DASHBOARD_PROJECT_ID }}
       VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      VERCEL_CLI_VERSION: '54.4.1'
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -75,9 +76,11 @@ jobs:
           fi
           echo "ready=$ready" >> "$GITHUB_OUTPUT"
 
-      - name: Skip deploy when Vercel config is missing
+      - name: Fail deploy when Vercel config is missing
         if: ${{ steps.config.outputs.ready != 'true' }}
-        run: echo "Skipping dashboard deploy because Vercel configuration is incomplete."
+        run: |
+          echo "Dashboard deploy is not production-safe because Vercel configuration is incomplete." >&2
+          exit 1
 
       - name: Resolve deployment target
         if: ${{ steps.config.outputs.ready == 'true' }}
@@ -106,33 +109,71 @@ jobs:
 
       - name: Install Vercel CLI
         if: ${{ steps.config.outputs.ready == 'true' }}
-        run: npm install --global vercel@latest
+        run: npm install --global "vercel@$VERCEL_CLI_VERSION"
+
+      - name: Validate Vercel token and dashboard project access
+        if: ${{ steps.config.outputs.ready == 'true' }}
+        run: |
+          VERCEL_USER="$(vercel whoami --token "$VERCEL_TOKEN")"
+          echo "Vercel token accepted for ${VERCEL_USER}"
+
+          vercel project inspect "$VERCEL_PROJECT_ID" \
+            --token "$VERCEL_TOKEN" \
+            --non-interactive > /tmp/vercel-dashboard-project.txt
+
+          if ! grep -q "$VERCEL_PROJECT_ID" /tmp/vercel-dashboard-project.txt; then
+            echo "Vercel token could not inspect dashboard project $VERCEL_PROJECT_ID"
+            exit 1
+          fi
 
       - name: Pull project settings
         if: ${{ steps.config.outputs.ready == 'true' }}
         working-directory: packages/dashboard
-        run: vercel pull --yes --environment='${{ steps.target.outputs.pull_env }}' --token "$VERCEL_TOKEN"
+        run: vercel pull --yes --environment='${{ steps.target.outputs.pull_env }}' --project "$VERCEL_PROJECT_ID" --token "$VERCEL_TOKEN"
 
       - name: Deploy dashboard
         if: ${{ steps.config.outputs.ready == 'true' }}
         id: deploy
         working-directory: packages/dashboard
         run: |
+          set -euo pipefail
+          DASHBOARD_VERSION="$(node -p "require('./package.json').version")"
           COMMON_ARGS=(
             --yes
             --token "$VERCEL_TOKEN"
+            --project "$VERCEL_PROJECT_ID"
+            --meta "beamDashboardVersion=$DASHBOARD_VERSION"
             --build-env "VITE_API_URL=${{ steps.target.outputs.api_url }}"
             --build-env "VITE_BEAM_BUS_URL=${{ steps.target.outputs.bus_url }}"
           )
+          DEPLOY_OUTPUT="$(mktemp)"
 
           if [ "${{ steps.target.outputs.deploy_target }}" = "production" ]; then
-            DEPLOY_URL="$(vercel deploy --prod "${COMMON_ARGS[@]}" | tail -n1)"
+            vercel deploy --prod "${COMMON_ARGS[@]}" | tee "$DEPLOY_OUTPUT"
           else
-            DEPLOY_URL="$(vercel deploy --target=preview "${COMMON_ARGS[@]}" | tail -n1)"
+            vercel deploy --target=preview "${COMMON_ARGS[@]}" | tee "$DEPLOY_OUTPUT"
           fi
+          DEPLOY_URL="$(node ../../scripts/production/extract-vercel-deployment-url.mjs "$DEPLOY_OUTPUT")"
 
           echo "url=$DEPLOY_URL" >> "$GITHUB_OUTPUT"
           echo "Dashboard deployed to $DEPLOY_URL"
+
+      - name: Verify production dashboard deployment truth
+        if: ${{ steps.config.outputs.ready == 'true' && steps.target.outputs.deploy_target == 'production' }}
+        run: |
+          node scripts/production/dashboard-deployment-truth-check.mjs \
+            --deployment-url "${{ steps.deploy.outputs.url }}" \
+            --required-alias dashboard.beam.directory \
+            --timeout-ms 120000 \
+            --interval-ms 5000
+
+      - name: Verify production dashboard domain
+        if: ${{ steps.config.outputs.ready == 'true' && steps.target.outputs.deploy_target == 'production' }}
+        run: node scripts/production/dashboard-domain-preflight.mjs --dashboard-base https://dashboard.beam.directory --timeout-ms 120000 --interval-ms 5000
+
+      - name: Verify production dashboard shell
+        if: ${{ steps.config.outputs.ready == 'true' && steps.target.outputs.deploy_target == 'production' }}
+        run: node scripts/production/dashboard-shell-check.mjs --dashboard-base https://dashboard.beam.directory --timeout-ms 120000 --interval-ms 5000
 
       - name: Write deployment summary
         if: ${{ steps.config.outputs.ready == 'true' }}

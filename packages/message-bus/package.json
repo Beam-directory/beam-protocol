@@ -46,16 +46,16 @@
     "beam-bus": "dist/server.js"
   },
   "dependencies": {
-    "@hono/node-server": "^1.19.11",
-    "better-sqlite3": "^11.0.0",
-    "hono": "^4.12.9"
+    "@hono/node-server": "^1.19.14",
+    "better-sqlite3": "^12.10.0",
+    "hono": "^4.12.24"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.0",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.2"
+    "vitest": "^4.1.8"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=20.19.0"
   }
 }

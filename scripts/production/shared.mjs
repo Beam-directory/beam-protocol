@@ -18,6 +18,14 @@ export const repoPackageVersion = (() => {
     return '0.0.0'
   }
 })()
+export const dashboardPackageVersion = (() => {
+  try {
+    const packageJson = JSON.parse(readFileSync(path.join(repoRoot, 'packages/dashboard/package.json'), 'utf8'))
+    return typeof packageJson.version === 'string' ? packageJson.version : repoPackageVersion
+  } catch {
+    return repoPackageVersion
+  }
+})()
 const directoryEntry = path.join(repoRoot, 'packages/directory/dist/index.js')
 const messageBusEntry = path.join(repoRoot, 'packages/message-bus/dist/server.js')
 const directoryDbModule = path.join(repoRoot, 'packages/directory/dist/db.js')
@@ -216,8 +224,59 @@ export function toJsonBlock(value) {
   return `\`\`\`json\n${JSON.stringify(value, null, 2)}\n\`\`\``
 }
 
-export function formatDate(value = new Date()) {
-  return value.toISOString().slice(0, 10)
+function htmlAttribute(tag, name) {
+  return tag.match(new RegExp(`\\b${name}=["']([^"']+)["']`, 'iu'))?.[1] ?? null
+}
+
+export function extractDashboardShellVersion(html) {
+  const text = String(html ?? '')
+  const rootTag = text.match(/<[^>]*\bid=["']root["'][^>]*>/iu)?.[0] ?? ''
+  const rootVersion = htmlAttribute(rootTag, 'data-beam-dashboard-version')
+  if (rootVersion) {
+    return rootVersion
+  }
+
+  for (const match of text.matchAll(/<meta\b[^>]*>/giu)) {
+    const tag = match[0]
+    if (htmlAttribute(tag, 'name') === 'beam-dashboard-version') {
+      return htmlAttribute(tag, 'content')
+    }
+  }
+
+  return null
+}
+
+export function validateDashboardShellHtml(html, expectedDashboardVersion = dashboardPackageVersion) {
+  const text = String(html ?? '')
+  const title = text.match(/<title>([^<]+)<\/title>/iu)?.[1] ?? null
+  const rootReady = /<[^>]*\bid=["']root["'][^>]*>/iu.test(text)
+  const dashboardVersion = extractDashboardShellVersion(text)
+  const versionReady = !expectedDashboardVersion || dashboardVersion === expectedDashboardVersion
+  return {
+    title,
+    titleReady: title === 'Beam Control Plane',
+    rootReady,
+    dashboardVersion,
+    expectedDashboardVersion,
+    versionReady,
+    shellReady: title === 'Beam Control Plane' && rootReady && versionReady,
+  }
+}
+
+export function formatDate(value = new Date(), timeZone = process.env.BEAM_REPORT_TIME_ZONE ?? 'Europe/Berlin') {
+  const date = value instanceof Date ? value : new Date(value)
+  try {
+    const parts = new Intl.DateTimeFormat('en', {
+      timeZone,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    }).formatToParts(date)
+    const lookup = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+    return `${lookup.year}-${lookup.month}-${lookup.day}`
+  } catch {
+    return date.toISOString().slice(0, 10)
+  }
 }
 
 export function formatDateTime(value = new Date()) {

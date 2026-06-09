@@ -130,6 +130,43 @@ export default function TraceDetailPage() {
     }
   }, [resolvedNonce])
 
+  const guidance = getOperatorGuidance(trace?.intent.status ?? 'loading')
+  const latestStage = trace && trace.stages.length > 0 ? trace.stages[trace.stages.length - 1] ?? null : null
+  const deliveryStage = trace?.stages.find((stage) => stage.stage === 'delivered' || stage.status === 'delivered') ?? null
+  const terminalStage = trace ? [...trace.stages].reverse().find((stage) => {
+    const lifecycle = classifyIntentLifecycle(stage.status)
+    return lifecycle === 'success' || lifecycle === 'error'
+  }) ?? null : null
+  const firstErrorStage = trace?.stages.find((stage) => classifyIntentLifecycle(stage.status) === 'error') ?? null
+  const latestAudit = trace?.audit[0] ?? null
+  const highRiskShield = trace?.shield.find((entry) => (entry.riskScore ?? 0) >= 0.8) ?? null
+  const shieldFlagCount = trace?.shield.reduce((count, entry) => count + entry.anomalyFlags.length, 0) ?? 0
+  const postureTone = intentLifecycleTone(trace?.intent.status ?? 'received')
+  const routePath = trace ? `${trace.intent.from} -> ${trace.intent.to}` : ''
+
+  const operatorChecklist = useMemo(() => {
+    if (!trace) return []
+    const items: string[] = []
+    if (firstErrorStage) {
+      items.push(`Failure entered at ${formatIntentLifecycleLabel(firstErrorStage.stage)}.`)
+    }
+    if (!terminalStage && deliveryStage) {
+      items.push('Transport accepted the handoff, but terminal completion has not been recorded yet.')
+    }
+    if (!deliveryStage && trace.intent.status !== 'received' && trace.intent.status !== 'validated') {
+      items.push('No delivery evidence exists yet. Check queue health, routing, or downstream availability.')
+    }
+    if (highRiskShield) {
+      items.push(`Shield recorded a critical review (${highRiskShield.decision ?? 'unknown decision'}).`)
+    } else if (shieldFlagCount > 0) {
+      items.push(`Shield flagged ${shieldFlagCount} anomaly signal${shieldFlagCount === 1 ? '' : 's'} across this nonce.`)
+    }
+    if (items.length === 0) {
+      items.push('Trace looks internally consistent. Use audit and lifecycle history as operator evidence.')
+    }
+    return items
+  }, [deliveryStage, firstErrorStage, highRiskShield, shieldFlagCount, terminalStage, trace])
+
   if (loading) {
     return (
       <div data-ui-page="trace-detail" data-ui-state="loading" className="space-y-8">
@@ -157,42 +194,6 @@ export default function TraceDetailPage() {
       </div>
     )
   }
-
-  const guidance = getOperatorGuidance(trace.intent.status)
-  const latestStage = trace.stages.length > 0 ? trace.stages[trace.stages.length - 1] ?? null : null
-  const deliveryStage = trace.stages.find((stage) => stage.stage === 'delivered' || stage.status === 'delivered') ?? null
-  const terminalStage = [...trace.stages].reverse().find((stage) => {
-    const lifecycle = classifyIntentLifecycle(stage.status)
-    return lifecycle === 'success' || lifecycle === 'error'
-  }) ?? null
-  const firstErrorStage = trace.stages.find((stage) => classifyIntentLifecycle(stage.status) === 'error') ?? null
-  const latestAudit = trace.audit[0] ?? null
-  const highRiskShield = trace.shield.find((entry) => (entry.riskScore ?? 0) >= 0.8) ?? null
-  const shieldFlagCount = trace.shield.reduce((count, entry) => count + entry.anomalyFlags.length, 0)
-  const postureTone = intentLifecycleTone(trace.intent.status)
-  const routePath = `${trace.intent.from} -> ${trace.intent.to}`
-
-  const operatorChecklist = useMemo(() => {
-    const items: string[] = []
-    if (firstErrorStage) {
-      items.push(`Failure entered at ${formatIntentLifecycleLabel(firstErrorStage.stage)}.`)
-    }
-    if (!terminalStage && deliveryStage) {
-      items.push('Transport accepted the handoff, but terminal completion has not been recorded yet.')
-    }
-    if (!deliveryStage && trace.intent.status !== 'received' && trace.intent.status !== 'validated') {
-      items.push('No delivery evidence exists yet. Check queue health, routing, or downstream availability.')
-    }
-    if (highRiskShield) {
-      items.push(`Shield recorded a critical review (${highRiskShield.decision ?? 'unknown decision'}).`)
-    } else if (shieldFlagCount > 0) {
-      items.push(`Shield flagged ${shieldFlagCount} anomaly signal${shieldFlagCount === 1 ? '' : 's'} across this nonce.`)
-    }
-    if (items.length === 0) {
-      items.push('Trace looks internally consistent. Use audit and lifecycle history as operator evidence.')
-    }
-    return items
-  }, [deliveryStage, firstErrorStage, highRiskShield, shieldFlagCount, terminalStage, trace.intent.status])
 
   return (
     <div data-ui-page="trace-detail" data-ui-state="ready" className="space-y-8">

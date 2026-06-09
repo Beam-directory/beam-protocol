@@ -121,12 +121,22 @@ See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibilit
 ## Release Readiness
 
 The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
-The current release-control evidence lives in [`reports/0.8.0-buyer-final-pass.md`](./reports/0.8.0-buyer-final-pass.md), [`reports/0.8.0-operator-final-pass.md`](./reports/0.8.0-operator-final-pass.md), [`reports/0.8.0-rc1-checklist.md`](./reports/0.8.0-rc1-checklist.md), [`reports/0.8.0-release-smoke.md`](./reports/0.8.0-release-smoke.md), and [`reports/0.8.1-release-notes-draft.md`](./reports/0.8.1-release-notes-draft.md).
+The current 1.7.0 release-control evidence lives in [`reports/1.7.0-rc1-checklist.md`](./reports/1.7.0-rc1-checklist.md), [`reports/1.7.0-production-readiness-refresh.md`](./reports/1.7.0-production-readiness-refresh.md), [`reports/1.7.0-production-readiness-gate.md`](./reports/1.7.0-production-readiness-gate.md), [`reports/1.7.0-dashboard-production-go-runbook.md`](./reports/1.7.0-dashboard-production-go-runbook.md), [`reports/1.7.0-external-dogfood-status.md`](./reports/1.7.0-external-dogfood-status.md), [`reports/1.7.0-ui-smoke.md`](./reports/1.7.0-ui-smoke.md), and [`reports/1.7.0-release-notes-draft.md`](./reports/1.7.0-release-notes-draft.md).
+
+Production readiness now requires the API, public site, docs, npm packages, and dashboard control plane to agree. The default production dashboard gates check `https://dashboard.beam.directory` and its Vercel-recommended DNS record; use `--dashboard-base http://localhost:43173` only for local quickstart proof.
 
 For post-release verification, run:
 
 ```bash
 npm run release:smoke -- --version <release-version> --git-sha <tagged-sha> --output reports/<release-version>-release-smoke.md
+npm run production:readiness
+npm run production:dashboard-go
+npm run production:dashboard-deployment
+npm run production:dashboard-domain
+npm run production:dashboard-shell
+npm run production:external-dogfood
+npm run production:parity
+npm run production:workflow-guards
 ```
 
 ## Repository Layout
