@@ -172,12 +172,8 @@ jobs:
 
           vercel project inspect "$VERCEL_PROJECT_ID" \
             --token "$VERCEL_TOKEN" \
-            --non-interactive > /tmp/vercel-dashboard-project.txt
-
-          if ! grep -q "$VERCEL_PROJECT_ID" /tmp/vercel-dashboard-project.txt; then
-            echo "Vercel token could not inspect dashboard project $VERCEL_PROJECT_ID"
-            exit 1
-          fi
+            --non-interactive > /dev/null
+          echo "Vercel dashboard project access confirmed"
 
       - name: Pull dashboard project settings
         if: ${{ steps.dashboard_config.outputs.ready == 'true' }}

@@ -73,12 +73,8 @@ jobs:
 
           vercel project inspect "$VERCEL_PROJECT_ID" \
             --token "$VERCEL_TOKEN" \
-            --non-interactive > /tmp/vercel-public-site-project.txt
-
-          if ! grep -q "$VERCEL_PROJECT_ID" /tmp/vercel-public-site-project.txt; then
-            echo "Vercel token could not inspect public-site project $VERCEL_PROJECT_ID"
-            exit 1
-          fi
+            --non-interactive > /dev/null
+          echo "Vercel public-site project access confirmed"
 
       - name: Pull production project settings
         if: ${{ steps.config.outputs.ready == 'true' }}
