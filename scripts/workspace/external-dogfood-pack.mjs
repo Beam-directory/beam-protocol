@@ -1,4 +1,4 @@
-import { mkdir } from 'node:fs/promises'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 import { createAdminHeaders, createAdminToken, formatDate, formatDateTime, optionalFlag, repoRoot, requestJson, resolveReleaseLabel, writeMarkdownReport } from '../production/shared.mjs'
@@ -38,6 +38,80 @@ export function isLoopback(url) {
 export function assertPublicDirectoryForEvidence(url, required = false) {
   if (required && isLoopback(url)) {
     throw new Error('Release-evidence external dogfood packs must target a non-local Beam directory. Pass --directory-url https://api.beam.directory and --token/BEAM_ADMIN_TOKEN, or omit --require-public-directory for local rehearsal packs.')
+  }
+}
+
+export function createCompletionTemplate({
+  release,
+  generatedAt,
+  directoryUrl,
+  workspaceSlug,
+  hostLabel,
+  testerName,
+  testerEmail,
+  operatorName,
+  operatorEmail,
+  enrollment,
+  packPath,
+  feedbackPath,
+  publicDirectory,
+}) {
+  return {
+    template: true,
+    release,
+    generatedAt,
+    instructions: [
+      'Fill this file only after a real external operator completes the install on a non-local control plane.',
+      'Do not commit this template as release evidence while template is true or TODO values remain.',
+      'Run npm run production:external-dogfood-assemble after all completion files are filled.',
+    ],
+    source: {
+      directoryUrl,
+      workspaceSlug,
+      packPath,
+      feedbackPath,
+      publicDirectory,
+      releaseEvidenceCandidate: publicDirectory === true,
+      enrollmentId: enrollment?.id ?? null,
+      guidedEnrollmentUrl: enrollment?.guidedEnrollmentUrl ?? null,
+      enrollmentExpiresAt: enrollment?.expiresAt ?? null,
+    },
+    operator: {
+      name: operatorName,
+      email: operatorEmail,
+      organization: 'TODO external organization',
+      external: true,
+    },
+    host: {
+      label: hostLabel,
+      machine: 'TODO machine model or VM type',
+      os: 'TODO operating system and version',
+      operatorEmail,
+      external: true,
+      installed: false,
+      bootstrapFlow: 'packaged',
+      freshMachine: false,
+      noPreloadedRepoState: false,
+      heartbeatSeen: false,
+      inventorySeen: false,
+      installedAt: 'TODO ISO timestamp',
+    },
+    supportHandoff: {
+      type: 'support-bundle',
+      hostLabel,
+      usedInRealDebug: false,
+      summary: 'TODO real support/debug question answered with this bundle or analytics handoff',
+      exportedAt: 'TODO ISO timestamp',
+    },
+    feedback: {
+      tester: testerName,
+      testerEmail,
+      hostLabel,
+      external: true,
+      verdict: 'TODO written verdict from the tester',
+      productionBlocker: 'TODO anything that still feels non-production',
+      solidSignal: 'TODO what already felt production-solid',
+    },
   }
 }
 
@@ -94,6 +168,7 @@ async function main() {
   const fileStem = `${formatDate()}-${slugify(`${testerName}-${hostLabel}`)}`
   const packPath = path.join(outputDir, `${fileStem}.md`)
   const feedbackPath = path.join(outputDir, `${fileStem}.feedback.md`)
+  const completionPath = path.join(outputDir, `${fileStem}.completion.json`)
 
   await mkdir(outputDir, { recursive: true })
 
@@ -219,10 +294,33 @@ ${enrollment.installPack.operatorChecklist.map((item) => `- ${item}`).join('\n')
 Send the tester this file after the install run:
 
 \`${feedbackPath}\`
+
+## Completion JSON
+
+After the external run is complete, fill this structured completion file. The production assembler will turn completed packets into the release evidence JSON:
+
+\`${completionPath}\`
 `
+
+  const completion = createCompletionTemplate({
+    release: releaseLabel,
+    generatedAt: formatDateTime(),
+    directoryUrl,
+    workspaceSlug,
+    hostLabel,
+    testerName,
+    testerEmail,
+    operatorName,
+    operatorEmail,
+    enrollment,
+    packPath,
+    feedbackPath,
+    publicDirectory,
+  })
 
   await writeMarkdownReport(packPath, markdown)
   await writeMarkdownReport(feedbackPath, feedbackTemplate)
+  await writeFile(completionPath, `${JSON.stringify(completion, null, 2)}\n`, 'utf8')
 
   console.log(JSON.stringify({
     ok: true,
@@ -236,6 +334,7 @@ Send the tester this file after the install run:
     guidedEnrollmentUrl: enrollment.guidedEnrollmentUrl,
     output: packPath,
     feedbackOutput: feedbackPath,
+    completionOutput: completionPath,
   }, null, 2))
 }
 

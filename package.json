@@ -19,6 +19,7 @@
     "production:dashboard-deployment": "node scripts/production/dashboard-deployment-truth-check.mjs",
     "production:dashboard-go": "node scripts/production/dashboard-production-go.mjs",
     "production:dashboard-shell": "node scripts/production/dashboard-shell-check.mjs",
+    "production:external-dogfood-assemble": "node scripts/production/external-dogfood-evidence-assemble.mjs",
     "production:external-dogfood": "node scripts/production/external-dogfood-evidence-check.mjs",
     "production:extract-vercel-url": "node scripts/production/extract-vercel-deployment-url.mjs",
     "production:parity": "node scripts/production/environment-parity-check.mjs",

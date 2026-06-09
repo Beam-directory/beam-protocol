@@ -219,6 +219,7 @@ That writes:
 - a host-install packet with the guided enrollment URL and copy-paste install commands
 - an operator runbook for approval and support handoff
 - a separate feedback template you can send back to the tester
+- a structured `.completion.json` template that captures the operator, host, support handoff, and feedback fields needed for release evidence
 
 For `localhost`, Beam auto-mints a local admin session. For a non-local control plane, pass `--token` or set `BEAM_ADMIN_TOKEN`.
 
@@ -236,6 +237,16 @@ npm run workspace:external-dogfood-pack -- \
 ```
 
 The `--require-public-directory` guard fails the command if it would create a localhost-only packet. Local packs are useful rehearsals, but they do not count as external release evidence.
+After each real run, fill the generated `.completion.json` file.
+When all external completion files are filled, assemble and validate the release evidence with:
+
+```bash
+npm run production:external-dogfood-assemble -- \
+  --input-dir tmp/external-dogfood-pack \
+  --output reports/1.7.0-external-dogfood-evidence.json
+```
+
+The assembler writes the release evidence file only when the completed packets satisfy the production gate.
 
 The local developer path keeps convenience shortcuts for `localhost`, but the product model is still manual host approval. A non-local OpenClaw host starts as `pending`, appears in the fleet view, and only receives a reusable host credential after an operator approves it.
 
