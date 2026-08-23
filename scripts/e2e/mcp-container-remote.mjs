@@ -103,13 +103,12 @@ async function waitForHealth(url, child, getLogs, sensitiveValues, timeoutMs = 1
 }
 
 async function prepareSecretMountsForRuntime(secretDirectory) {
-  if (process.platform !== 'linux') return
   await execFile('docker', [
     'run', '--rm',
     '--network', 'none',
     '--user', '0:0',
     '--entrypoint', '/bin/sh',
-    '--mount', `type=bind,src=${secretDirectory},dst=/run/secrets,rw`,
+    '--mount', `type=bind,src=${secretDirectory},dst=/run/secrets`,
     'beam-mcp:local',
     '-c', 'chmod 0711 /run/secrets && chown 1000:1000 /run/secrets/* && chmod 0400 /run/secrets/*',
   ])
