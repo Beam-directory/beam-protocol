@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { randomBytes } from 'node:crypto'
-import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
@@ -29,6 +29,7 @@ const apply = process.argv.includes('--apply')
 const beamId = (valueAfter('--beam-id') ?? 'grok-pilot@beam.directory').trim().toLowerCase()
 const directoryUrl = (valueAfter('--directory-url') ?? 'https://api.beam.directory').replace(/\/$/, '')
 const secretDirectoryInput = valueAfter('--secret-dir')
+const orgApiKeyFileInput = valueAfter('--org-api-key-file')
 
 if (!secretDirectoryInput) fail('--secret-dir with an absolute path outside the repository is required')
 const secretDirectory = path.resolve(secretDirectoryInput)
@@ -44,11 +45,43 @@ if (directoryUrl !== 'https://api.beam.directory') {
   fail('the hosted pilot is pinned to https://api.beam.directory')
 }
 
+let orgApiKeyFile = null
+let orgApiKey
+if (parsed.kind === 'organization') {
+  if (!orgApiKeyFileInput) {
+    fail('organization Beam IDs require --org-api-key-file with the verified organization bootstrap key')
+  }
+  if (!path.isAbsolute(orgApiKeyFileInput)) fail('--org-api-key-file must be absolute')
+  orgApiKeyFile = path.resolve(orgApiKeyFileInput)
+  const relativeOrgKeyToRepo = path.relative(repoRoot, orgApiKeyFile)
+  if (!relativeOrgKeyToRepo.startsWith('..') && !path.isAbsolute(relativeOrgKeyToRepo)) {
+    fail('--org-api-key-file must be outside the repository')
+  }
+  let metadata
+  try {
+    metadata = statSync(orgApiKeyFile)
+  } catch {
+    fail('--org-api-key-file could not be read')
+  }
+  if (!metadata.isFile()) fail('--org-api-key-file must point to a regular file')
+  if (metadata.size < 1 || metadata.size > 4_096) fail('--org-api-key-file must contain 1-4096 bytes')
+  if ((metadata.mode & 0o077) !== 0) fail('--org-api-key-file permissions must be 0600 or stricter')
+  if (apply) {
+    orgApiKey = readFileSync(orgApiKeyFile, 'utf8').trim()
+    if (!orgApiKey.startsWith('beam_org_')) {
+      fail('--org-api-key-file does not contain a Beam organization API key')
+    }
+  }
+} else if (orgApiKeyFileInput) {
+  fail('--org-api-key-file is only valid for organization Beam IDs')
+}
+
 const plan = {
   apply,
   beamId,
   directoryUrl,
   secretDirectory,
+  organizationProof: orgApiKeyFile ? 'file' : 'not-required',
   files: [
     'postgres_password',
     'keycloak_admin_password',
@@ -82,7 +115,7 @@ writeSecret(secretDirectory, 'mcp_oauth_client_secret', randomBytes(32).toString
 writeSecret(secretDirectory, 'beam_public_key', exported.publicKeyBase64)
 writeSecret(secretDirectory, 'beam_private_key', exported.privateKeyBase64)
 
-const client = new BeamClient({ identity: exported, directoryUrl })
+const client = new BeamClient({ identity: exported, directoryUrl, apiKey: orgApiKey })
 const registration = await client.register('Grok read-only MCP pilot', ['conversation.message'])
 if (!registration.apiKey) fail('Directory registration did not return an API key')
 writeSecret(secretDirectory, 'beam_api_key', registration.apiKey)

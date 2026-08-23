@@ -2262,7 +2262,7 @@ export interface RegisterAgentInput {
 export interface OrgRegistrationInput {
   name: string
   displayName?: string
-  domain?: string
+  domain: string
 }
 
 export interface OrgVerificationInfo {
@@ -2276,6 +2276,7 @@ export interface DirectoryOrg {
   domain: string | null
   beamDomain: string
   verified: boolean
+  claimExpiresAt: string | null
   createdAt: string
   verifiedAt: string | null
   verification: OrgVerificationInfo | null
@@ -2313,6 +2314,13 @@ export interface OrgDetailsResponse {
   org: DirectoryOrg
   agents: OrgAgentResponse[]
   total: number
+}
+
+export interface OrgVerificationResponse {
+  verified: true
+  txtName: string
+  expected: string
+  org: DirectoryOrg
 }
 
 export interface IntentCatalogItem {
@@ -3325,6 +3333,15 @@ export const directoryApi = {
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
+  createWorkspace: (input: {
+    name: string
+    slug: string
+    orgName?: string
+    description?: string
+  }) => request<{ workspace: WorkspaceRecord }>('/admin/workspaces', {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   getWorkspaceAccess: (slug: string) => request<WorkspaceAccessResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/access`, undefined, { admin: true }),
   listWorkspaceMembers: (slug: string) => request<WorkspaceMembersResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/members`, undefined, { admin: true }),
   updateWorkspaceMember: (slug: string, id: number, role: WorkspaceMemberRole) => request<{ member: WorkspaceMember }>(`/admin/workspaces/${encodeURIComponent(slug)}/members/${id}`, {
@@ -3532,6 +3549,10 @@ export const directoryApi = {
     body: JSON.stringify(input),
   }),
   getOrg: (name: string, apiKey: string) => request<OrgDetailsResponse>(`/orgs/${encodeURIComponent(name)}`, {
+    headers: withApiKey(apiKey),
+  }),
+  verifyOrg: (name: string, apiKey: string) => request<OrgVerificationResponse>(`/orgs/${encodeURIComponent(name)}/verify`, {
+    method: 'POST',
     headers: withApiKey(apiKey),
   }),
   createOrgAgent: (name: string, apiKey: string, input: OrgAgentCreateInput) => request<OrgAgentResponse>(`/orgs/${encodeURIComponent(name)}/agents`, {

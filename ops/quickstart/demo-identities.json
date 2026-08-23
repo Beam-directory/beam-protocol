@@ -1,21 +1,25 @@
 {
   "procurement": {
     "beamId": "procurement@acme.beam.directory",
+    "apiKey": "bk_cHJvY3VyZW1lbnRAYWNtZS5iZWFtLmRpcmVjdG9yeQ.I4_FYDLtfXpr-PTJ4YRPvRzWEMOkEueV",
     "publicKeyBase64": "MCowBQYDK2VwAyEA6tAyx4a8h3z/BVnIvnF0CiSI8KcJFWLQSJOFmDyF4R8=",
     "privateKeyBase64": "MC4CAQAwBQYDK2VwBCIEIAKvNTlJS5lJ1v7WffPDWIVlMIyc34IYIpwqW7XyyqiM"
   },
   "partnerDesk": {
     "beamId": "partner-desk@northwind.beam.directory",
+    "apiKey": "bk_cGFydG5lci1kZXNrQG5vcnRod2luZC5iZWFtLmRpcmVjdG9yeQ.1iDK_6Mdgg9jOjtX2FigLM4oqHm0n-7I",
     "publicKeyBase64": "MCowBQYDK2VwAyEAP19ywOMr/hD95jmXx8wxBjfbIlJDJKyVlfKxbh8Mzu0=",
     "privateKeyBase64": "MC4CAQAwBQYDK2VwBCIEIObqCgUh20tY3vdPFl/6od2ngJn5HPHKoj/IDxt5BVPp"
   },
   "warehouse": {
     "beamId": "warehouse@northwind.beam.directory",
+    "apiKey": "bk_d2FyZWhvdXNlQG5vcnRod2luZC5iZWFtLmRpcmVjdG9yeQ.TTqAbzIO_42S0kjW5C-uidMMZ0fw0y_x",
     "publicKeyBase64": "MCowBQYDK2VwAyEAs2Y3luWp9ut3OX12ri7v56T4fOzhcSU4gQOx8tutARc=",
     "privateKeyBase64": "MC4CAQAwBQYDK2VwBCIEIAqK8a22pHpZgwaZU612rSOlFBPZgW0fpY86wA8X5Z1u"
   },
   "finance": {
     "beamId": "finance@acme.beam.directory",
+    "apiKey": "bk_ZmluYW5jZUBhY21lLmJlYW0uZGlyZWN0b3J5.-bBcv2atZWlORyBfvpEAg4yzxHvPBjg4",
     "publicKeyBase64": "MCowBQYDK2VwAyEAq1br+HjpfvX1TLUrjPyjxPuslAfCB9Q9xIL41vCa3vE=",
     "privateKeyBase64": "MC4CAQAwBQYDK2VwBCIEIDN08HZ2RtGD9L9Xg29rGg85xB6dS6PiOtgyy7kvGSLL"
   }

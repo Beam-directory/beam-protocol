@@ -29,19 +29,26 @@ const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
 
 function requireReservedEchoRegistrationSecret(
-  authHeader: string | undefined,
+  request: Request,
   beamId: string,
-): { ok: true } | { ok: false; response: { error: string; errorCode: string; status: 401 } } {
+): { ok: true } | { ok: false; response: { error: string; errorCode: string; status: 401 | 503 } } {
   if (beamId !== 'echo@beam.directory') {
     return { ok: true }
   }
 
   const configuredSecret = process.env['ECHO_AGENT_SECRET']?.trim()
   if (!configuredSecret) {
-    return { ok: true }
+    return {
+      ok: false,
+      response: {
+        error: 'Reserved echo-agent registration is disabled',
+        errorCode: 'ECHO_AGENT_REGISTRATION_DISABLED',
+        status: 503,
+      },
+    }
   }
 
-  const providedToken = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : ''
+  const providedToken = getSuppliedApiKey(request)
   if (providedToken === configuredSecret) {
     return { ok: true }
   }
@@ -297,7 +304,7 @@ export function agentsRouter(db: Database): Hono {
       beamId = buildBeamId(baseName, org, personal, db)
     }
 
-    const reservedEchoCheck = requireReservedEchoRegistrationSecret(c.req.header('authorization'), beamId)
+    const reservedEchoCheck = requireReservedEchoRegistrationSecret(c.req.raw, beamId)
     if (!reservedEchoCheck.ok) {
       return c.json(
         { error: reservedEchoCheck.response.error, errorCode: reservedEchoCheck.response.errorCode },
@@ -327,6 +334,13 @@ export function agentsRouter(db: Database): Hono {
         return c.json({
           error: 'A valid organization API key is required to create an organization Beam ID',
           errorCode: 'ORG_OWNERSHIP_REQUIRED',
+        }, 403)
+      }
+
+      if (registeredOrg.verified !== 1) {
+        return c.json({
+          error: 'Organization domain must be verified before creating organization Beam IDs',
+          errorCode: 'ORG_VERIFICATION_REQUIRED',
         }, 403)
       }
     }

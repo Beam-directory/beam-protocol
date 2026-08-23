@@ -6,7 +6,7 @@ vi.mock('../src/email.js', () => ({
   sendAgentVerificationEmail: vi.fn(async () => true),
 }))
 
-import { createDatabase, createOrg } from '../src/db.js'
+import { createDatabase, createOrg, markOrgVerified } from '../src/db.js'
 import { hashApiKey } from '../src/api-key.js'
 import { sendAgentVerificationEmail } from '../src/email.js'
 import { createApp } from '../src/server.js'
@@ -54,6 +54,7 @@ describe('directory agent enhancements', () => {
       apiKeyHash: hashApiKey(orgApiKey),
       verificationToken: 'test-verification-token',
     })
+    markOrgVerified(db, 'testorg')
     app = createApp(db)
     vi.mocked(sendAgentVerificationEmail).mockResolvedValue(true)
   })

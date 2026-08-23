@@ -216,6 +216,29 @@ async function captureProtectedPage({
   }
 }
 
+async function captureOnboardingClaim(context, runtime, screenshotPath) {
+  const page = await context.newPage()
+  try {
+    await page.goto(`${runtime.dashboardUrl}/register`, { waitUntil: 'domcontentloaded' })
+    await page.locator('[data-ui-page="register"]').waitFor({ state: 'visible', timeout: 20_000 })
+    await page.getByLabel('Namespace').fill('ui-smoke')
+    await page.getByLabel('Display name').first().fill('UI Smoke')
+    await page.getByLabel('Company domain').fill('ui-smoke.example')
+    await page.getByRole('button', { name: 'Claim namespace' }).click()
+    await page.getByText('Publish this DNS TXT record', { exact: true }).waitFor({ state: 'visible', timeout: 20_000 })
+
+    const browserStorage = await page.evaluate(() => JSON.stringify({
+      localStorage: { ...window.localStorage },
+      sessionStorage: { ...window.sessionStorage },
+    }))
+    assert.equal(browserStorage.includes('beam_org_'), false, 'organization API key leaked into browser storage')
+    await page.screenshot({ path: screenshotPath, fullPage: true })
+    return screenshotPath
+  } finally {
+    await page.close()
+  }
+}
+
 async function main() {
   const config = await loadQuickstartEnv()
   const runtime = resolveRuntime(config)
@@ -307,6 +330,11 @@ async function main() {
           timeoutMs: 90_000,
           fullPage: false,
         }),
+        registerOnboardingDesktop: await captureOnboardingClaim(
+          desktopContext,
+          runtime,
+          path.join(outputDir, 'register-onboarding-desktop.png'),
+        ),
         fleetTablet: await captureProtectedPage({
           context: tabletContext,
           runtime,

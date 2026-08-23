@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
 import { access, mkdtemp, rm, writeFile } from 'node:fs/promises'
@@ -21,6 +22,10 @@ async function ensureBuiltArtifacts() {
 
 async function loadSdk() {
   return import(pathToFileURL(sdkEntry).href)
+}
+
+async function loadDirectoryDb() {
+  return import(pathToFileURL(path.join(repoRoot, 'packages/directory/dist/db.js')).href)
 }
 
 async function getFreePort() {
@@ -160,12 +165,34 @@ async function main() {
   const messageBusUrl = `${messageBusBaseUrl}/v1/beam`
   const adminEmail = 'ops@beam.local'
   const busApiKey = 'beam-dogfood-bus-key'
+  const acmeOrgApiKey = 'beam_org_acme_dogfood_test_only'
+  const northwindOrgApiKey = 'beam_org_northwind_dogfood_test_only'
 
   let directoryProcess
   let messageBusProcess
   const clients = []
 
   try {
+    const { createDatabase, createOrg, markOrgVerified } = await loadDirectoryDb()
+    const bootstrapDb = createDatabase(directoryDb)
+    createOrg(bootstrapDb, {
+      name: 'acme',
+      displayName: 'Acme',
+      domain: 'acme.example',
+      apiKeyHash: createHash('sha256').update(acmeOrgApiKey).digest('hex'),
+      verificationToken: 'acme-dogfood-test-only',
+    })
+    createOrg(bootstrapDb, {
+      name: 'northwind',
+      displayName: 'Northwind',
+      domain: 'northwind.example',
+      apiKeyHash: createHash('sha256').update(northwindOrgApiKey).digest('hex'),
+      verificationToken: 'northwind-dogfood-test-only',
+    })
+    markOrgVerified(bootstrapDb, 'acme')
+    markOrgVerified(bootstrapDb, 'northwind')
+    bootstrapDb.close()
+
     const procurementIdentity = BeamIdentity.generate({ agentName: 'procurement', orgName: 'acme' })
     const partnerDeskIdentity = BeamIdentity.generate({ agentName: 'partner-desk', orgName: 'northwind' })
     const warehouseIdentity = BeamIdentity.generate({ agentName: 'warehouse', orgName: 'northwind' })
@@ -217,18 +244,22 @@ async function main() {
     const procurement = new BeamClient({
       identity: procurementIdentity.export(),
       directoryUrl,
+      apiKey: acmeOrgApiKey,
     })
     const partnerDesk = new BeamClient({
       identity: partnerDeskIdentity.export(),
       directoryUrl,
+      apiKey: northwindOrgApiKey,
     })
     const warehouse = new BeamClient({
       identity: warehouseIdentity.export(),
       directoryUrl,
+      apiKey: northwindOrgApiKey,
     })
     const finance = new BeamClient({
       identity: financeIdentity.export(),
       directoryUrl,
+      apiKey: acmeOrgApiKey,
     })
     clients.push(procurement, partnerDesk, warehouse, finance)
 

@@ -2293,8 +2293,17 @@ export function workspacesRouter(db: Database): Hono {
     }
 
     const orgName = normalizeOptionalString(raw.orgName)
-    if (orgName && !getOrg(db, orgName)) {
-      return c.json({ error: 'orgName was not found', errorCode: 'ORG_NOT_FOUND' }, 404)
+    if (orgName) {
+      const org = getOrg(db, orgName)
+      if (!org) {
+        return c.json({ error: 'orgName was not found', errorCode: 'ORG_NOT_FOUND' }, 404)
+      }
+      if (org.verified !== 1) {
+        return c.json({
+          error: 'Organization domain must be verified before creating an organization workspace',
+          errorCode: 'ORG_VERIFICATION_REQUIRED',
+        }, 403)
+      }
     }
 
     const description = normalizeOptionalString(raw.description)
@@ -3826,6 +3835,13 @@ export function workspacesRouter(db: Database): Hono {
         return c.json({
           error: 'A valid organization API key is required to provision an organization Beam ID',
           errorCode: 'ORG_OWNERSHIP_REQUIRED',
+        }, 403)
+      }
+
+      if (workspaceOrg.verified !== 1) {
+        return c.json({
+          error: 'Organization domain must be verified before provisioning organization Beam IDs',
+          errorCode: 'ORG_VERIFICATION_REQUIRED',
         }, 403)
       }
 

@@ -80,6 +80,18 @@ The repository also includes a hardened dedicated-tenant Compose baseline under
 as UID 1000 with a read-only filesystem and no capabilities, and hard-codes the
 first hosted pilot to read-only with `business` target assurance.
 
+When preparing pilot secrets for an organization Beam ID, pass the verified organization bootstrap key through an absolute, mode-`0600` file outside the repository:
+
+```bash
+node scripts/production/prepare-mcp-pilot-secrets.mjs \
+  --secret-dir /absolute/private/beam-pilot \
+  --beam-id grok-pilot@acme.beam.directory \
+  --org-api-key-file /absolute/private/acme-org-api-key \
+  --apply
+```
+
+The script reads at most 4096 bytes, never prints the key, and rejects repository-local or group/world-readable key files.
+
 For Grok CLI, the remote connector command is:
 
 ```bash

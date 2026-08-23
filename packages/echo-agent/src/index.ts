@@ -1,4 +1,6 @@
 import { createServer, type Server } from 'node:http'
+import { mkdir, readFile, stat, writeFile } from 'node:fs/promises'
+import path from 'node:path'
 import { BeamClient, BeamIdentity, type BeamIdentityData } from 'beam-protocol-sdk'
 
 const ECHO_BEAM_ID = 'echo@beam.directory'
@@ -7,6 +9,7 @@ const ECHO_CAPABILITIES = ['conversation.message', 'booking.create', 'booking.ca
 
 const directoryUrl = process.env['BEAM_DIRECTORY_URL'] ?? 'http://localhost:3100'
 const registrationSecret = process.env['ECHO_AGENT_SECRET']?.trim() || undefined
+const credentialPath = path.resolve(process.env['ECHO_CREDENTIAL_PATH'] ?? '.beam/echo-credentials.json')
 const port = Number.parseInt(process.env['PORT'] ?? '8788', 10)
 
 const state = {
@@ -23,31 +26,51 @@ function createIdentity(): BeamIdentityData {
   return BeamIdentity.generate({ agentName: 'echo' }).export()
 }
 
-async function registerEchoAgent(identity: BeamIdentityData): Promise<void> {
-  const response = await fetch(new URL('/agents/register', directoryUrl), {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      ...(registrationSecret ? { Authorization: `Bearer ${registrationSecret}` } : {}),
-    },
-    body: JSON.stringify({
-      beamId: ECHO_BEAM_ID,
-      displayName: ECHO_DISPLAY_NAME,
-      capabilities: ECHO_CAPABILITIES,
-      publicKey: identity.publicKeyBase64,
-      org: 'personal',
-    }),
-  })
+type EchoCredential = { identity: BeamIdentityData; apiKey: string }
 
-  if (!response.ok) {
-    const payload = await response.json().catch(() => ({})) as { error?: string }
-    throw new Error(payload.error ?? `Echo agent registration failed with ${response.status}`)
+async function loadCredential(): Promise<EchoCredential | null> {
+  try {
+    const metadata = await stat(credentialPath)
+    if ((metadata.mode & 0o077) !== 0) {
+      throw new Error(`Echo credential file must be mode 0600: ${credentialPath}`)
+    }
+    const parsed = JSON.parse(await readFile(credentialPath, 'utf8')) as EchoCredential
+    if (parsed.identity?.beamId !== ECHO_BEAM_ID || !parsed.apiKey) {
+      throw new Error(`Echo credential file is invalid: ${credentialPath}`)
+    }
+    return parsed
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+    throw error
+  }
+}
+
+async function loadOrRegisterClient(): Promise<BeamClient> {
+  const stored = await loadCredential()
+  if (stored) {
+    state.registered = true
+    return new BeamClient({ identity: stored.identity, directoryUrl, apiKey: stored.apiKey })
   }
 
-  await response.json().catch(() => ({}))
+  if (!registrationSecret) {
+    throw new Error('First echo-agent boot requires ECHO_AGENT_SECRET')
+  }
+
+  const identity = createIdentity()
+  const client = new BeamClient({ identity, directoryUrl, apiKey: registrationSecret })
+  await client.register(ECHO_DISPLAY_NAME, ECHO_CAPABILITIES)
+  if (!client.apiKey) throw new Error('Echo agent registration did not return an API key')
+
+  await mkdir(path.dirname(credentialPath), { recursive: true, mode: 0o700 })
+  await writeFile(credentialPath, `${JSON.stringify({ identity, apiKey: client.apiKey }, null, 2)}\n`, {
+    encoding: 'utf8',
+    mode: 0o600,
+    flag: 'wx',
+  })
 
   state.registered = true
   state.lastRegistrationAt = new Date().toISOString()
+  return client
 }
 
 function createHealthServer(): Server {
@@ -75,8 +98,7 @@ function createHealthServer(): Server {
 }
 
 async function main(): Promise<void> {
-  const identity = createIdentity()
-  const client = new BeamClient({ identity, directoryUrl })
+  const client = await loadOrRegisterClient()
   const healthServer = createHealthServer()
 
   client.onTalk(async (message, from, respond) => {
@@ -103,7 +125,6 @@ async function main(): Promise<void> {
     })
   })
 
-  await registerEchoAgent(identity)
   await client.connect()
   state.connected = true
   state.lastConnectionAt = new Date().toISOString()

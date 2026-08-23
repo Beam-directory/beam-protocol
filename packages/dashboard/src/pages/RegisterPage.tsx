@@ -3,12 +3,17 @@ import { Link } from 'react-router-dom'
 import {
   ApiError,
   directoryApi,
+  type DirectoryOrg,
   type WorkspaceIdentityProvisionResponse,
   type WorkspaceRecord,
 } from '../lib/api'
 
 function credentialDownloadName(beamId: string): string {
   return `${beamId.replace(/[^a-z0-9._-]+/gi, '-')}.beam-identity.json`
+}
+
+function workspaceSlugForOrg(name: string): string {
+  return `${name}-agents`.replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')
 }
 
 export default function RegisterPage() {
@@ -25,6 +30,17 @@ export default function RegisterPage() {
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  const [orgName, setOrgName] = useState('')
+  const [orgDisplayName, setOrgDisplayName] = useState('')
+  const [orgDomain, setOrgDomain] = useState('')
+  const [orgClaim, setOrgClaim] = useState<DirectoryOrg | null>(null)
+  const [orgClaimApiKey, setOrgClaimApiKey] = useState('')
+  const [orgCredentialNew, setOrgCredentialNew] = useState(false)
+  const [orgCredentialDownloaded, setOrgCredentialDownloaded] = useState(false)
+  const [orgSubmitting, setOrgSubmitting] = useState(false)
+  const [orgError, setOrgError] = useState<string | null>(null)
+  const [newWorkspaceName, setNewWorkspaceName] = useState('')
+  const [newWorkspaceSlug, setNewWorkspaceSlug] = useState('')
 
   const selectedWorkspace = useMemo(
     () => workspaces.find((workspace) => workspace.slug === workspaceSlug) ?? null,
@@ -61,14 +77,115 @@ export default function RegisterPage() {
   }, [])
 
   useEffect(() => {
-    if (!result || downloaded) return undefined
+    if ((!result || downloaded) && (!orgCredentialNew || orgCredentialDownloaded)) return undefined
     const warnBeforeUnload = (event: BeforeUnloadEvent) => {
       event.preventDefault()
       event.returnValue = ''
     }
     window.addEventListener('beforeunload', warnBeforeUnload)
     return () => window.removeEventListener('beforeunload', warnBeforeUnload)
-  }, [downloaded, result])
+  }, [downloaded, orgCredentialDownloaded, orgCredentialNew, result])
+
+  async function handleOrgClaim(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    try {
+      setOrgSubmitting(true)
+      setOrgError(null)
+      const response = await directoryApi.createOrg({
+        name: orgName.trim().toLowerCase(),
+        displayName: orgDisplayName.trim(),
+        domain: orgDomain.trim().toLowerCase(),
+      })
+      setOrgClaim(response)
+      setOrgClaimApiKey(response.apiKey)
+      setOrgCredentialNew(true)
+      setOrgCredentialDownloaded(false)
+      setNewWorkspaceName(`${response.displayName} Agents`)
+      setNewWorkspaceSlug(workspaceSlugForOrg(response.name))
+    } catch (reason) {
+      setOrgError(reason instanceof ApiError ? reason.message : 'Failed to claim organization namespace')
+    } finally {
+      setOrgSubmitting(false)
+    }
+  }
+
+  async function handleResumeOrgClaim() {
+    if (!orgName.trim() || !orgClaimApiKey.trim()) return
+    try {
+      setOrgSubmitting(true)
+      setOrgError(null)
+      const response = await directoryApi.getOrg(orgName.trim().toLowerCase(), orgClaimApiKey.trim())
+      setOrgClaim(response.org)
+      setOrgCredentialNew(false)
+      setOrgCredentialDownloaded(true)
+      setNewWorkspaceName(`${response.org.displayName} Agents`)
+      setNewWorkspaceSlug(workspaceSlugForOrg(response.org.name))
+    } catch (reason) {
+      setOrgError(reason instanceof ApiError ? reason.message : 'Failed to resume organization claim')
+    } finally {
+      setOrgSubmitting(false)
+    }
+  }
+
+  function handleOrgCredentialDownload() {
+    if (!orgClaim || !orgClaimApiKey) return
+    const bundle = {
+      format: 'beam-org-claim/v1',
+      name: orgClaim.name,
+      displayName: orgClaim.displayName,
+      domain: orgClaim.domain,
+      beamDomain: orgClaim.beamDomain,
+      apiKey: orgClaimApiKey,
+      verification: orgClaim.verification,
+      claimExpiresAt: orgClaim.claimExpiresAt,
+    }
+    const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = `${orgClaim.name}.beam-organization.json`
+    document.body.append(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 0)
+    setOrgCredentialDownloaded(true)
+  }
+
+  async function handleVerifyOrgClaim() {
+    if (!orgClaim || !orgClaimApiKey) return
+    try {
+      setOrgSubmitting(true)
+      setOrgError(null)
+      const response = await directoryApi.verifyOrg(orgClaim.name, orgClaimApiKey)
+      setOrgClaim(response.org)
+    } catch (reason) {
+      setOrgError(reason instanceof ApiError ? reason.message : 'DNS verification has not completed yet')
+    } finally {
+      setOrgSubmitting(false)
+    }
+  }
+
+  async function handleCreateOrgWorkspace(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!orgClaim?.verified) return
+    try {
+      setOrgSubmitting(true)
+      setOrgError(null)
+      const response = await directoryApi.createWorkspace({
+        name: newWorkspaceName.trim(),
+        slug: newWorkspaceSlug.trim().toLowerCase(),
+        orgName: orgClaim.name,
+        description: `Agent workspace for ${orgClaim.displayName}`,
+      })
+      setWorkspaces((current) => [...current.filter((workspace) => workspace.id !== response.workspace.id), response.workspace])
+      setWorkspaceSlug(response.workspace.slug)
+      setOrgApiKey(orgClaimApiKey)
+    } catch (reason) {
+      setOrgError(reason instanceof ApiError ? reason.message : 'Failed to create organization workspace')
+    } finally {
+      setOrgSubmitting(false)
+    }
+  }
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -112,19 +229,109 @@ export default function RegisterPage() {
   }
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6" data-ui-page="register">
       <section className="panel">
         <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-orange-600 dark:text-orange-300">Beam onboarding</div>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">Create the identity Grok will use</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
           The workspace reserves one Beam ID, binds it to your tenant, and returns its signing key plus API key exactly once. Nothing secret is written to browser storage.
         </p>
-        <div className="mt-6 grid gap-3 md:grid-cols-4">
-          <Step number="1" title="Workspace" detail="Choose the collaboration boundary." />
-          <Step number="2" title="Beam ID" detail="Reserve a unique cryptographic identity." />
-          <Step number="3" title="Credential" detail="Download the one-time identity bundle." />
-          <Step number="4" title="Grok" detail="Connect the dedicated MCP URL with OAuth." />
+        <div className="mt-6 grid gap-3 md:grid-cols-5">
+          <Step number="1" title="Organization" detail="Prove the company domain." />
+          <Step number="2" title="Workspace" detail="Choose the collaboration boundary." />
+          <Step number="3" title="Beam ID" detail="Reserve a cryptographic identity." />
+          <Step number="4" title="Credential" detail="Download the one-time bundle." />
+          <Step number="5" title="Grok" detail="Connect MCP with OAuth." />
         </div>
+      </section>
+
+      <section className="panel">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Organization prerequisite</div>
+            <div className="panel-title mt-2">Claim and verify the company namespace</div>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
+              The namespace must match the registrable company domain. A pending claim expires after 72 hours, and no organization Beam ID can be issued before DNS verification succeeds.
+            </p>
+          </div>
+          {orgClaim ? (
+            <span className={`rounded-full px-3 py-1 text-xs font-medium ${orgClaim.verified ? 'bg-emerald-100 text-emerald-800 dark:bg-emerald-500/15 dark:text-emerald-200' : 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-200'}`}>
+              {orgClaim.verified ? 'Domain verified' : 'DNS proof pending'}
+            </span>
+          ) : null}
+        </div>
+
+        {!orgClaim ? (
+          <div className="mt-5 grid gap-5 lg:grid-cols-[1fr,0.8fr]">
+            <form className="grid gap-4 sm:grid-cols-2" onSubmit={handleOrgClaim}>
+              <Field label="Namespace">
+                <input className="input-field" pattern="[a-z0-9_-]+" value={orgName} onChange={(event) => setOrgName(event.target.value.toLowerCase())} placeholder="acme" required />
+              </Field>
+              <Field label="Display name">
+                <input className="input-field" value={orgDisplayName} onChange={(event) => setOrgDisplayName(event.target.value)} placeholder="Acme GmbH" required />
+              </Field>
+              <div className="sm:col-span-2">
+                <Field label="Company domain">
+                  <input className="input-field" value={orgDomain} onChange={(event) => setOrgDomain(event.target.value.toLowerCase())} placeholder="acme.com" required />
+                </Field>
+              </div>
+              <div className="sm:col-span-2">
+                <button className="btn-primary" type="submit" disabled={orgSubmitting}>{orgSubmitting ? 'Claiming…' : 'Claim namespace'}</button>
+              </div>
+            </form>
+
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="text-sm font-medium">Resume an existing claim</div>
+              <p className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">Enter the namespace on the left and paste the saved organization API key. It stays only in this browser session.</p>
+              <input className="input-field mt-3" type="password" autoComplete="off" value={orgClaimApiKey} onChange={(event) => setOrgClaimApiKey(event.target.value)} placeholder="beam_org_…" />
+              <button className="btn-secondary mt-3" type="button" disabled={orgSubmitting || !orgName.trim() || !orgClaimApiKey.trim()} onClick={handleResumeOrgClaim}>Resume DNS verification</button>
+            </div>
+          </div>
+        ) : (
+          <div className="mt-5 grid gap-5 lg:grid-cols-2">
+            <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 text-sm dark:border-slate-800 dark:bg-slate-950/40">
+              <div className="font-medium">{orgClaim.displayName}</div>
+              <div className="mt-2 font-mono text-xs">{orgClaim.name} → {orgClaim.beamDomain}</div>
+              <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">Domain: {orgClaim.domain}</div>
+              {!orgClaim.verified && orgClaim.claimExpiresAt ? (
+                <div className="mt-1 text-xs text-amber-700 dark:text-amber-300">Claim expires: {new Date(orgClaim.claimExpiresAt).toLocaleString()}</div>
+              ) : null}
+              {orgCredentialNew ? (
+                <button className="btn-secondary mt-4" type="button" onClick={handleOrgCredentialDownload}>
+                  {orgCredentialDownloaded ? 'Download organization credential again' : 'Download organization credential now'}
+                </button>
+              ) : null}
+              <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">Beam stores only the key hash. The plaintext organization API key is never written to browser storage or shown on screen.</p>
+            </div>
+
+            {!orgClaim.verified ? (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/10 dark:text-amber-100">
+                <div className="font-medium">Publish this DNS TXT record</div>
+                <div className="mt-3 break-all font-mono text-xs">{orgClaim.verification?.txtName}</div>
+                <div className="mt-2 break-all font-mono text-xs">{orgClaim.verification?.txtValue}</div>
+                <button className="btn-primary mt-4" type="button" disabled={orgSubmitting} onClick={handleVerifyOrgClaim}>{orgSubmitting ? 'Checking…' : 'Check DNS now'}</button>
+              </div>
+            ) : workspaces.some((workspace) => workspace.orgName === orgClaim.name) ? (
+              <div className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900 dark:border-emerald-500/20 dark:bg-emerald-500/10 dark:text-emerald-100">
+                <div className="font-medium">Organization workspace is ready</div>
+                <p className="mt-2 leading-6">Select it below, create the Beam ID, and download the one-time agent credential.</p>
+                <button className="btn-secondary mt-3" type="button" onClick={() => {
+                  const workspace = workspaces.find((item) => item.orgName === orgClaim.name)
+                  if (workspace) setWorkspaceSlug(workspace.slug)
+                  setOrgApiKey(orgClaimApiKey)
+                }}>Use this organization below</button>
+              </div>
+            ) : (
+              <form className="rounded-2xl border border-emerald-200 bg-emerald-50 p-4 text-sm dark:border-emerald-500/20 dark:bg-emerald-500/10" onSubmit={handleCreateOrgWorkspace}>
+                <div className="font-medium text-emerald-900 dark:text-emerald-100">Create the organization workspace</div>
+                <input className="input-field mt-3" value={newWorkspaceName} onChange={(event) => setNewWorkspaceName(event.target.value)} required />
+                <input className="input-field mt-3" pattern="[a-z0-9-]+" value={newWorkspaceSlug} onChange={(event) => setNewWorkspaceSlug(event.target.value.toLowerCase())} required />
+                <button className="btn-primary mt-3" type="submit" disabled={orgSubmitting}>{orgSubmitting ? 'Creating…' : 'Create workspace'}</button>
+              </form>
+            )}
+          </div>
+        )}
+        {orgError ? <div className="mt-4 rounded-xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300">{orgError}</div> : null}
       </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.15fr,0.85fr]">

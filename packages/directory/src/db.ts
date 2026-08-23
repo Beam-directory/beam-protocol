@@ -104,6 +104,7 @@ function initSchema(db: DB): void {
       api_key_hash TEXT NOT NULL,
       verification_token TEXT NOT NULL,
       verified INTEGER NOT NULL DEFAULT 0,
+      claim_expires_at TEXT,
       created_at TEXT NOT NULL,
       verified_at TEXT
     );
@@ -1020,6 +1021,22 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
+  ensureColumn(db, 'orgs', 'claim_expires_at', 'TEXT')
+  const pendingOrgClaims = db.prepare(`
+    SELECT name, created_at
+    FROM orgs
+    WHERE verified = 0
+      AND claim_expires_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM org_agents WHERE org_agents.org_name = orgs.name)
+      AND NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.org_name = orgs.name)
+  `).all() as Array<{ name: string; created_at: string }>
+  const backfillOrgClaimExpiry = db.prepare('UPDATE orgs SET claim_expires_at = ? WHERE name = ? AND verified = 0')
+  for (const claim of pendingOrgClaims) {
+    const createdAt = Date.parse(claim.created_at)
+    const baseTime = Number.isFinite(createdAt) ? createdAt : Date.now()
+    backfillOrgClaimExpiry.run(new Date(baseTime + (72 * 60 * 60 * 1000)).toISOString(), claim.name)
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_orgs_claim_expiry ON orgs(verified, claim_expires_at)')
   ensureColumn(db, 'workspace_threads', 'draft_intent_type', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_payload_json', 'TEXT')
   ensureColumn(db, 'workspace_identity_bindings', 'credential_managed', 'INTEGER NOT NULL DEFAULT 0')
@@ -1274,6 +1291,7 @@ export function createOrg(
     domain?: string | null
     apiKeyHash: string
     verificationToken: string
+    claimExpiresAt?: string | null
   }
 ): OrgRow {
   const now = nowIso()
@@ -1288,9 +1306,10 @@ export function createOrg(
       api_key_hash,
       verification_token,
       verified,
+      claim_expires_at,
       created_at,
       verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL)
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
   `).run(
     input.name,
     input.displayName,
@@ -1298,6 +1317,7 @@ export function createOrg(
     beamDomain,
     input.apiKeyHash,
     input.verificationToken,
+    input.claimExpiresAt ?? new Date(Date.now() + (72 * 60 * 60 * 1000)).toISOString(),
     now,
   )
 
@@ -1307,6 +1327,24 @@ export function createOrg(
 export function getOrg(db: DB, name: string): OrgRow | null {
   const row = db.prepare('SELECT * FROM orgs WHERE name = ?').get(name) as OrgRow | undefined
   return row ?? null
+}
+
+export function getOrgByDomain(db: DB, domain: string): OrgRow | null {
+  const row = db.prepare('SELECT * FROM orgs WHERE domain = ?').get(domain) as OrgRow | undefined
+  return row ?? null
+}
+
+export function deleteExpiredOrgClaim(db: DB, name: string, at = nowIso()): boolean {
+  const result = db.prepare(`
+    DELETE FROM orgs
+    WHERE name = ?
+      AND verified = 0
+      AND claim_expires_at IS NOT NULL
+      AND claim_expires_at <= ?
+      AND NOT EXISTS (SELECT 1 FROM org_agents WHERE org_agents.org_name = orgs.name)
+      AND NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.org_name = orgs.name)
+  `).run(name, at)
+  return result.changes === 1
 }
 
 function ensureWorkspacePolicyRecord(db: DB, workspaceId: number, updatedAt: string, updatedBy: string | null = null): void {
@@ -2488,7 +2526,7 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
 
 export function markOrgVerified(db: DB, name: string): OrgRow | null {
   const now = nowIso()
-  db.prepare('UPDATE orgs SET verified = 1, verified_at = ? WHERE name = ?').run(now, name)
+  db.prepare('UPDATE orgs SET verified = 1, verified_at = ?, claim_expires_at = NULL WHERE name = ?').run(now, name)
   return getOrg(db, name)
 }
 

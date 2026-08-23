@@ -41,6 +41,8 @@ Default local values:
 
 The quickstart defaults use higher localhost ports to avoid common collisions with existing dev servers. Change them if you want different local credentials or ports.
 
+The compose stack explicitly enables a demo-fixture bootstrap that is rejected unless `PUBLIC_BASE_URL` is loopback. Its checked-in agent API keys are deliberately local-only test credentials. Production startup never seeds these organizations or identities.
+
 ## 3. Start The Stack
 
 ```bash
@@ -85,7 +87,7 @@ The smoke path verifies:
 
 ## 6. Reseed The Demo Identities
 
-The hosted demo uses committed demo-only identities under [`ops/quickstart/demo-identities.json`](https://github.com/Beam-directory/beam-protocol/blob/main/ops/quickstart/demo-identities.json). They are safe for local demo use only and must not be reused in production.
+The hosted demo uses committed demo-only identities and credentials under [`ops/quickstart/demo-identities.json`](https://github.com/Beam-directory/beam-protocol/blob/main/ops/quickstart/demo-identities.json). They are safe for local demo use only and must not be reused in production. The fixture bootstrap verifies the expected public keys and safely upgrades older quickstart volumes without permitting an identity replacement.
 
 To reapply registrations and ACLs without touching SQLite directly:
 

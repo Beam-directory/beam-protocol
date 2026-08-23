@@ -631,6 +631,7 @@ export interface OrgRow {
   api_key_hash: string
   verification_token: string
   verified: number
+  claim_expires_at: string | null
   created_at: string
   verified_at: string | null
 }

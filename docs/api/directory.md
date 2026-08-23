@@ -32,6 +32,32 @@ The recommended application payload for accepted-but-not-terminal async work is:
 }
 ```
 
+## Organization namespace onboarding
+
+Organization namespaces are claimed before an organization Beam ID can be issued:
+
+```http
+POST /orgs
+Content-Type: application/json
+
+{
+  "name": "acme",
+  "displayName": "Acme GmbH",
+  "domain": "acme.com"
+}
+```
+
+`domain` is required. Beam canonicalizes it to the registrable domain and requires the namespace to match that domain label. For example, `www.acme.com` becomes `acme.com` and may claim `acme`; it cannot claim `northwind`. Brand names that do not match the legal domain need an administrator-reviewed override rather than automatic approval.
+
+The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish the TXT value, then call:
+
+```http
+POST /orgs/acme/verify
+x-api-key: beam_org_...
+```
+
+Until verification succeeds, organization agent issuance and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+
 ## `POST /register`
 
 In the current server implementation, agent registration is exposed as `POST /agents/register`.
@@ -48,7 +74,7 @@ Example request body:
 }
 ```
 
-Personal Beam IDs can be claimed without an organization credential. Organization IDs require a previously registered organization and its API key:
+Personal Beam IDs can be claimed without an organization credential. Organization IDs require a registered, DNS-verified organization and its API key:
 
 ```text
 x-api-key: beam_org_...organization-key...

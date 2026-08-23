@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { Hono } from 'hono'
 import type Stripe from 'stripe'
-import { assignDirectoryRole, createDatabase, createDomainVerification, createOrg, getAgent, registerAgent, updateDomainVerificationStatus } from './db.js'
+import { assignDirectoryRole, createDatabase, createDomainVerification, createOrg, getAgent, markOrgVerified, registerAgent, updateDomainVerificationStatus } from './db.js'
 import { createAdminSession } from './admin-auth.js'
 import { createAgentApiKey, hashApiKey } from './api-key.js'
 import { getLocalDirectoryUrl } from './federation.js'
@@ -167,6 +167,7 @@ describe('billing and identity assurance trust boundaries', () => {
       apiKeyHash: hashApiKey(orgApiKey),
       verificationToken: 'acme-verification-token',
     })
+    markOrgVerified(db, 'acme')
     const { publicKey } = generateKeyPairSync('ed25519')
     const body = {
       beamId: 'grok@acme.beam.directory',

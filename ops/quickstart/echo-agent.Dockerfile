@@ -40,9 +40,14 @@ COPY packages/echo-agent/package.json ./package.json
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/dist ./dist/
 
+RUN mkdir -p /data
+
 ENV NODE_ENV=production
 ENV PORT=8788
 ENV BEAM_DIRECTORY_URL=http://directory:3100
+ENV ECHO_CREDENTIAL_PATH=/data/echo-credentials.json
+
+VOLUME ["/data"]
 
 EXPOSE 8788
 

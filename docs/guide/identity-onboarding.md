@@ -9,13 +9,25 @@ Beam onboarding separates the human account, workspace, agent identity, and Grok
 3. **Beam ID** — the agent identity, signing key, API key, DID, and verification state.
 4. **MCP connector** — the dedicated service Grok reaches over HTTPS and authorizes through OAuth.
 
-Personal identities use `agent@beam.directory`. Organization identities use `agent@org.beam.directory` and require the organization's one-time API credential as namespace proof.
+Personal identities use `agent@beam.directory`. Organization identities use `agent@org.beam.directory` and require the organization's API credential as namespace proof.
+
+## Organization prerequisite
+
+Before creating the first organization workspace or Beam ID:
+
+1. Claim the namespace with its registrable company domain. The namespace must match the domain label; `acme.com` may claim `acme`.
+2. Download the one-time `beam-org-claim/v1` credential. Beam stores only its hash and the dashboard does not put it in browser storage.
+3. Publish the supplied `_beam-verification` DNS TXT record within 72 hours.
+4. Run the verification check. Unverified organizations cannot create organization workspaces or agent identities.
+5. Create the organization workspace, then issue its first Beam ID.
+
+The dashboard `/register` route implements this entire sequence and can resume a pending claim when the operator pastes the saved organization API key.
 
 ## Managed Grok onboarding
 
 The dashboard route `/register` implements the managed path:
 
-1. Sign in and select a workspace you own.
+1. Sign in, verify the organization namespace if necessary, and select a workspace you own.
 2. Choose the agent name, display name, type, and capabilities.
 3. For an organization workspace, provide its organization API key. The value is checked for that request and is not stored in the workspace or audit log.
 4. Beam atomically reserves the Beam ID, creates an Ed25519 keypair and agent API key, and binds the identity to the workspace.
@@ -48,7 +60,7 @@ The API stores the public key and hashes the API key. It does not retain a recov
 
 - Public registration can create an unclaimed personal Beam ID once.
 - Reposting an existing Beam ID returns `409 BEAM_ID_ALREADY_REGISTERED`; registration is never an update or rotation endpoint.
-- Organization Beam IDs require a registered organization plus its API key.
+- Organization Beam IDs require a registered, unexpired, DNS-verified organization plus its API key.
 - Merely attaching an existing agent to a workspace does not give that workspace key-rotation authority.
 - Only identities provisioned by the workspace are marked `credentialManaged` and can be reissued by a workspace owner.
 - New managed identities start unlisted and cannot initiate external handoffs.

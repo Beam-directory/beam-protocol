@@ -111,9 +111,10 @@ class BeamAgentTests(unittest.TestCase):
                 return identity
 
         class FakeBeamClientCtor:
-            def __init__(self, *, identity, directory_url):
+            def __init__(self, *, identity, directory_url, api_key=None):
                 self.beam_id = identity.beam_id
                 self.directory_url = directory_url
+                self.api_key = api_key
 
         identity_module.BeamIdentity = FakeBeamIdentity
         client_module.BeamClient = FakeBeamClientCtor
@@ -132,9 +133,11 @@ class BeamAgentTests(unittest.TestCase):
                 agent_name="researcher",
                 org_name="acme",
                 directory_url="https://api.beam.directory",
+                api_key="beam_org_acme_test",
             )
 
             self.assertEqual(agent.beam_id, "researcher@acme.beam.directory")
+            self.assertEqual(agent.client.api_key, "beam_org_acme_test")
         finally:
             for name, module in original_modules.items():
                 if module is None:
@@ -145,4 +148,3 @@ class BeamAgentTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
-

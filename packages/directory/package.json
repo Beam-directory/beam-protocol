@@ -24,6 +24,7 @@
     "hono": "^4.13.3",
     "nodemailer": "^9.0.5",
     "stripe": "^20.4.1",
+    "tldts": "7.4.10",
     "ws": "^8.21.0"
   },
   "devDependencies": {

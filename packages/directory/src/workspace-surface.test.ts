@@ -11,6 +11,7 @@ import {
   getWorkspaceMember,
   listWorkspaces,
   logIntentStart,
+  markOrgVerified,
   registerAgent,
   setIntentLifecycleStatus,
 } from './db.js'
@@ -464,6 +465,7 @@ test('organization workspace onboarding requires namespace proof and reserves th
     assert.equal(orgResponse.status, 201)
     const orgBody = await orgResponse.json() as { apiKey: string }
     assert.match(orgResponse.headers.get('cache-control') ?? '', /no-store/i)
+    markOrgVerified(db, 'acme')
 
     const orgAgentResponse = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',

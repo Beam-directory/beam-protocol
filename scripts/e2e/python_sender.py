@@ -20,7 +20,11 @@ async def main() -> int:
     suffix = secrets.token_hex(3)
 
     identity = BeamIdentity.generate(agent_name=f"python-sender-{suffix}", org_name=org_name)
-    client = BeamClient(identity=identity, directory_url=directory_url)
+    client = BeamClient(
+        identity=identity,
+        directory_url=directory_url,
+        api_key=os.environ["BEAM_ORG_API_KEY"],
+    )
 
     await client.register("Python Sender", capabilities=["conversation.message"])
 

@@ -25,6 +25,7 @@ class BeamAgent:
         agent_name: str,
         org_name: str,
         directory_url: str,
+        api_key: str | None = None,
         default_recipient: str | None = None,
     ) -> "BeamAgent":
         """Create a new Beam identity and client."""
@@ -33,7 +34,7 @@ class BeamAgent:
         from beam_directory.identity import BeamIdentity
 
         identity = BeamIdentity.generate(agent_name=agent_name, org_name=org_name)
-        client = BeamClient(identity=identity, directory_url=directory_url)
+        client = BeamClient(identity=identity, directory_url=directory_url, api_key=api_key)
         return cls(client=client, default_recipient=default_recipient)
 
     @classmethod
@@ -42,6 +43,7 @@ class BeamAgent:
         *,
         identity_data: Any,
         directory_url: str,
+        api_key: str | None = None,
         default_recipient: str | None = None,
     ) -> "BeamAgent":
         """Rebuild a Beam wrapper from exported Beam identity data."""
@@ -50,7 +52,7 @@ class BeamAgent:
         from beam_directory.identity import BeamIdentity
 
         identity = BeamIdentity.from_data(identity_data)
-        client = BeamClient(identity=identity, directory_url=directory_url)
+        client = BeamClient(identity=identity, directory_url=directory_url, api_key=api_key)
         return cls(client=client, default_recipient=default_recipient)
 
     @property
@@ -176,4 +178,3 @@ class BeamAgent:
 
         recipient = self._resolve_recipient(to)
         return self.client.thread(recipient, language=language, timeout_ms=timeout_ms)
-

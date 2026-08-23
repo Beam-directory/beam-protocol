@@ -88,10 +88,10 @@ async function loadIdentityBundle() {
 
 function createClients(bundle) {
   return {
-    procurement: new BeamClient({ identity: bundle.procurement, directoryUrl }),
-    partnerDesk: new BeamClient({ identity: bundle.partnerDesk, directoryUrl }),
-    warehouse: new BeamClient({ identity: bundle.warehouse, directoryUrl }),
-    finance: new BeamClient({ identity: bundle.finance, directoryUrl }),
+    procurement: new BeamClient({ identity: bundle.procurement, directoryUrl, apiKey: bundle.procurement.apiKey }),
+    partnerDesk: new BeamClient({ identity: bundle.partnerDesk, directoryUrl, apiKey: bundle.partnerDesk.apiKey }),
+    warehouse: new BeamClient({ identity: bundle.warehouse, directoryUrl, apiKey: bundle.warehouse.apiKey }),
+    finance: new BeamClient({ identity: bundle.finance, directoryUrl, apiKey: bundle.finance.apiKey }),
   }
 }
 
@@ -283,7 +283,7 @@ function attachHandlers() {
   handlersAttached = true
 }
 
-async function ensureRegistered(client, spec) {
+async function assertRegistered(client, spec) {
   const existing = await client.directory.lookup(client.beamId)
   const expectedPublicKey = identities?.[spec.key]?.publicKeyBase64 ?? null
   const expectedCapabilities = [...spec.capabilities].sort()
@@ -299,7 +299,7 @@ async function ensureRegistered(client, spec) {
     return existing
   }
 
-  return client.register(spec.displayName, spec.capabilities)
+  throw new Error(`Demo identity ${client.beamId} is missing or differs from the guarded directory fixture`)
 }
 
 async function seedDemo() {
@@ -320,10 +320,10 @@ async function seedDemo() {
 
     attachHandlers()
 
-    await ensureRegistered(clients.procurement, DEMO_SPECS.procurement)
-    await ensureRegistered(clients.partnerDesk, DEMO_SPECS.partnerDesk)
-    await ensureRegistered(clients.warehouse, DEMO_SPECS.warehouse)
-    await ensureRegistered(clients.finance, DEMO_SPECS.finance)
+    await assertRegistered(clients.procurement, DEMO_SPECS.procurement)
+    await assertRegistered(clients.partnerDesk, DEMO_SPECS.partnerDesk)
+    await assertRegistered(clients.warehouse, DEMO_SPECS.warehouse)
+    await assertRegistered(clients.finance, DEMO_SPECS.finance)
 
     await allowIntent(clients.partnerDesk.beamId, 'quote.request', clients.procurement.beamId)
     await allowIntent(clients.warehouse.beamId, 'inventory.check', clients.partnerDesk.beamId)
