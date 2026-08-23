@@ -17,7 +17,7 @@ Start a local directory in one terminal:
 ```bash
 npm install
 npm run build --workspace=packages/directory
-JWT_SECRET=local-dev-secret npm run start --workspace=packages/directory
+JWT_SECRET=local-dev-secret BEAM_ADMIN_EMAILS=ops@beam.local npm run start --workspace=packages/directory
 ```
 
 Install the example runner in another terminal:
@@ -30,10 +30,10 @@ npm install
 ## Run
 
 ```bash
-npm run partner-handoff
-npm run hello-world
-npm run multi-agent
-npm run webhook-bridge
+BEAM_ADMIN_EMAIL=ops@beam.local npm run partner-handoff
+BEAM_ADMIN_EMAIL=ops@beam.local npm run hello-world
+BEAM_ADMIN_EMAIL=ops@beam.local npm run multi-agent
+BEAM_ADMIN_EMAIL=ops@beam.local npm run webhook-bridge
 ```
 
-Set `BEAM_DIRECTORY_URL` if you want to target another directory.
+`BEAM_ADMIN_EMAIL` uses the local magic-link flow to authorize ACL setup. For a non-local directory, set `BEAM_ADMIN_TOKEN` to an active admin session token instead. Set `BEAM_DIRECTORY_URL` if you want to target another directory.

@@ -29,9 +29,12 @@ export default function Layout() {
   const [menuOpen, setMenuOpen] = useState(false)
   const { theme, toggleTheme } = useThemeMode()
   const { session, logout } = useAdminAuth()
-  const activeNavItem = NAV_ITEMS.find(({ path, exact }) => (
+  const visibleNavItems = session?.scope === 'workspace'
+    ? NAV_ITEMS.filter((item) => item.path === '/workspaces')
+    : NAV_ITEMS
+  const activeNavItem = visibleNavItems.find(({ path, exact }) => (
     exact ? location.pathname === path : location.pathname.startsWith(path)
-  )) ?? NAV_ITEMS[0]
+  )) ?? visibleNavItems[0]
 
   return (
     <div className="min-h-screen overflow-hidden bg-transparent text-slate-950 dark:text-slate-50">
@@ -57,7 +60,7 @@ export default function Layout() {
           )}
         >
           <div className="flex items-center justify-between border-b border-white/10 px-5 py-5">
-            <Link to="/" className="flex items-center gap-3" onClick={() => setMenuOpen(false)}>
+            <Link to={session?.scope === 'workspace' ? '/workspaces' : '/'} className="flex items-center gap-3" onClick={() => setMenuOpen(false)}>
               <div className="flex h-11 w-11 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-[0_20px_40px_rgba(249,115,22,0.35)]">
                 <Radio size={18} />
               </div>
@@ -76,7 +79,7 @@ export default function Layout() {
           </div>
 
           <nav className="flex-1 space-y-1.5 p-4">
-            {NAV_ITEMS.map(({ path, label, icon: Icon, exact }) => {
+            {visibleNavItems.map(({ path, label, icon: Icon, exact }) => {
               const active = exact ? location.pathname === path : location.pathname.startsWith(path)
               return (
                 <NavLink
@@ -106,7 +109,9 @@ export default function Layout() {
                 Live directory
               </div>
               <div className="mt-2 leading-5 text-slate-400">
-                One operator surface for fleet health, workspaces, traces, and partner motion.
+                {session?.scope === 'workspace'
+                  ? 'Access is limited to workspaces where your email has an active membership.'
+                  : 'One operator surface for fleet health, workspaces, traces, and partner motion.'}
               </div>
             </div>
           </div>
@@ -125,7 +130,7 @@ export default function Layout() {
               <div className="truncate text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-400">Beam Command</div>
               <div className="truncate text-lg font-semibold tracking-tight">{activeNavItem.label}</div>
               <div className="truncate text-xs text-slate-500 dark:text-slate-400">
-                {session ? `${session.email} · ${session.role}` : 'Connected to the real directory API'}
+                {session ? `${session.email} · ${session.scope === 'workspace' ? 'workspace member' : session.role}` : 'Connected to the real directory API'}
               </div>
             </div>
             <div className="hidden items-center gap-2 rounded-full border border-white/50 bg-white/65 px-3 py-1.5 text-xs font-medium text-slate-600 shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur-xl dark:border-white/10 dark:bg-slate-900/70 dark:text-slate-300 lg:flex">

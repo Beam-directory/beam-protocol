@@ -22,6 +22,7 @@ import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
 import { openClawAdminRouter, openClawPublicRouter } from './routes/openclaw-hosts.js'
 import { verificationRouter } from './routes/verify.js'
+import { webSocketTicketRouter } from './routes/websocket-ticket.js'
 import { workspacesRouter } from './routes/workspaces.js'
 import { createTrustGateMiddleware } from './middleware/trust-gate.js'
 import {
@@ -59,7 +60,7 @@ import {
   upsertDIDDocument,
   upsertOperatorNotification,
 } from './db.js'
-import { getFederationSharedSecret, getLocalDirectoryUrl, isPrivateDirectoryMode } from './federation.js'
+import { getLocalDirectoryUrl, isFederationRequestAuthorized, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
 import { getReleaseInfo } from './release.js'
 import { sendOperatorDigestEmail } from './email.js'
@@ -1425,6 +1426,9 @@ function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
     verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
+    verificationStatus: row.verified === 1 || row.verification_tier !== 'basic' ? 'verified' : 'unverified',
+    assuranceScope: 'local',
+    assuranceIssuer: getLocalDirectoryUrl(),
     connected: connectedSet.has(row.beam_id),
   }
 }
@@ -1434,12 +1438,7 @@ function loadIntentCatalog(): unknown {
 }
 
 function hasFederationAuth(c: Context): boolean {
-  if (c.req.header('x-beam-mtls-verified') === 'true') {
-    return true
-  }
-
-  const secret = getFederationSharedSecret()
-  return Boolean(secret) && c.req.header('x-beam-federation-secret') === secret
+  return isFederationRequestAuthorized(c.req.raw.headers)
 }
 
 function tableExists(db: Database, tableName: string): boolean {
@@ -3998,6 +3997,7 @@ export function createApp(db: Database): Hono {
 
   app.route('/orgs', orgsRouter(db))
   app.route('/agents', agentsRouter(db))
+  app.route('/agents', webSocketTicketRouter(db))
   app.route('/agents', verificationRouter(db))
   app.route('/agents', businessVerificationRouter(db))
   app.route('/agents', agentKeysRouter(db))
@@ -4119,6 +4119,11 @@ export function createApp(db: Database): Hono {
   })
 
   app.post('/acl', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
     let body: unknown
     try {
       body = await c.req.json()
@@ -4149,9 +4154,15 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/acl/:beamId', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
     const beamId = decodeURIComponent(c.req.param('beamId'))
     try {
       const rows = listAclsForBeam(db, beamId)
+      c.header('Cache-Control', 'no-store')
       return c.json({ acl: rows, total: rows.length })
     } catch (err) {
       console.error('List ACL error:', err)
@@ -4160,6 +4171,11 @@ export function createApp(db: Database): Hono {
   })
 
   app.delete('/acl/:id', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) {
+      return auth
+    }
+
     const id = Number(c.req.param('id'))
     if (!Number.isFinite(id) || id <= 0) {
       return c.json({ error: 'Invalid ACL id', errorCode: 'INVALID_ACL_ID' }, 400)
@@ -4583,6 +4599,11 @@ export function createApp(db: Database): Hono {
   })
 
   app.get('/intents/recent', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+
     const limit = Number.parseInt(c.req.query('limit') ?? '50', 10)
 
     try {

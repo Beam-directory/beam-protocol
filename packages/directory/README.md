@@ -16,7 +16,8 @@ Default local endpoints:
 - health: `GET /health`
 - agent registration: `POST /agents/register`
 - intent relay: `POST /intents/send`
-- WebSocket relay: `ws://localhost:3100/ws?beamId=<beam-id>`
+- WebSocket ticket: `POST /agents/<beam-id>/ws-ticket` with the agent API key
+- WebSocket relay: `ws://localhost:3100/ws?beamId=<beam-id>&ticket=<single-use-ticket>`
 
 ## Core Capabilities
 
@@ -47,6 +48,7 @@ Default local endpoints:
 - `PUBLIC_BASE_URL` - public origin used in verification links
 - `BEAM_RATE_LIMIT_PER_MIN` - global per-agent rate limit override
 - `ECHO_AGENT_SECRET` - protects registration of `echo@beam.directory`
+- `BEAM_ALLOW_LEGACY_WS_API_KEY_QUERY` - temporary migration switch; keep unset so long-lived keys are rejected in WebSocket URLs
 
 ### Verification and email
 
@@ -58,6 +60,7 @@ Default local endpoints:
 
 - `BEAM_DIRECTORY_URL`
 - `BEAM_FEDERATION_SHARED_SECRET`
+- `BEAM_FEDERATION_PROXY_SECRET` - second factor required when a trusted reverse proxy sets `X-Beam-mTLS-Verified`; the proxy must strip client-supplied federation headers
 - `BEAM_PRIVATE_DIRECTORY_MODE`
 - `BEAM_DIRECTORY_DID`
 - `BEAM_DIRECTORY_SIGNING_PRIVATE_KEY`

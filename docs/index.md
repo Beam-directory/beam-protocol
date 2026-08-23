@@ -47,7 +47,8 @@ Use the docs when you need one of these supporting paths:
 4. The [Hosted Quickstart](/guide/hosted-quickstart) if you want to run the same proof stack locally.
 5. The [Beam Workspaces guide](/guide/beam-workspaces) if you want the first identity and control-plane model for teams, agents, and partner-facing access.
 6. The [Beam Workspaces guide](/guide/beam-workspaces) also covers the new OpenClaw Fleet model when you want one central Beam control plane managing multiple OpenClaw hosts.
-7. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
+7. The [Trust and Assurance guide](/guide/trust-assurance) for the boundary between a human, organization, agent, runtime, delegation, and payment.
+8. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
 
 ## Choose Your Path
 
@@ -81,6 +82,7 @@ If that is your problem, Beam is aimed directly at it. If it is not, Beam should
 - [Operator Runbook](/guide/operator-runbook)
 - [Getting Started](/guide/getting-started)
 - [Compatibility Policy](/guide/compatibility)
+- [Trust and Assurance](/guide/trust-assurance)
 - [Hosted Beta Request](https://beam.directory/hosted-beta.html)
 - [0.8.0 Buyer Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-buyer-final-pass.md)
 - [0.8.0 Operator Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-operator-final-pass.md)

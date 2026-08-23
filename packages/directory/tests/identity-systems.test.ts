@@ -12,6 +12,7 @@ import { verificationRouter } from '../src/routes/verify.js'
 import { delegationsRouter } from '../src/routes/delegations.js'
 import { reportsRouter } from '../src/routes/reports.js'
 import { canActOnBehalf } from '../src/websocket.js'
+import { createAgentApiKey, hashApiKey } from '../src/api-key.js'
 
 function generateIdentity() {
   const { publicKey, privateKey } = generateKeyPairSync('ed25519')
@@ -65,11 +66,13 @@ describe('directory identity and verification routes', () => {
   it('verifies domains and applies the verification tier trust boost', async () => {
     const identity = generateIdentity()
     const beamId = 'alpha@acme.beam.directory'
+    const apiKey = createAgentApiKey(beamId)
     registerAgent(db, {
       beamId,
       displayName: 'Alpha',
       capabilities: ['agent.introduce'],
       publicKey: identity.publicKey,
+      apiKeyHash: hashApiKey(apiKey),
       org: 'acme',
     })
 
@@ -78,7 +81,7 @@ describe('directory identity and verification routes', () => {
 
     const created = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}/verify/domain`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
       body: JSON.stringify({ domain: 'example.com' }),
     })
 
@@ -86,7 +89,9 @@ describe('directory identity and verification routes', () => {
     expectedTxtValue = created.body.dnsRecord.value
     expect(created.body.dnsRecord.name).toBe('_beam-verify.example.com')
 
-    const checked = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}/verify/domain/check`)
+    const checked = await jsonRequest(app, `/agents/${encodeURIComponent(beamId)}/verify/domain/check`, {
+      headers: { 'x-api-key': apiKey },
+    })
     expect(checked.response.status).toBe(200)
     expect(checked.body.verified).toBe(true)
     expect(checked.body.agent.verificationTier).toBe('verified')

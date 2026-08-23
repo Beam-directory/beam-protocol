@@ -17,6 +17,8 @@ The workspace foundation now adds these records to the directory:
   - named control-plane containers for a team or company workflow
 - `workspace_members`
   - humans, agents, services, or partner principals attached to a workspace
+- `workspace_member_invitations`
+  - email-bound, expiring, one-time human invitations; only a SHA-256 token hash is stored
 - `workspace_identity_bindings`
   - Beam identities that are active inside the workspace roster
 - `workspace_partner_channels`
@@ -33,6 +35,22 @@ It also supports direct operator dispatch: a blocked handoff thread can now be a
 Partner channels now also resolve back into the local control plane when the target Beam ID belongs to another Beam-managed workspace identity. That gives operators a real cross-workspace route instead of a raw external address.
 Each local identity card now also exposes the explicit Beam DID, key history, a one-time local credential reissue flow, and a per-agent partner-control override. That makes it practical to bind imported OpenClaw agents, hand them a Beam identity bundle, and keep partner policy close to the specific agent that is allowed to speak externally.
 The workspace page now also exposes an approval queue for manual-review bindings and blocked outbound handoff threads. Operators can approve one binding, pause it, bulk-approve several bindings, or save partner-scoped defaults for known channels without bouncing between the policy, thread, and partner panels.
+
+## Team access and invitations
+
+Workspace owners manage people from the **Members and invitations** section. An invitation carries one role (`viewer`, `operator`, or `owner`), expires after 1–336 hours, and returns its secret URL only once. Beam never stores the raw invitation secret, so a lost link must be revoked and recreated.
+
+The acceptance flow is deliberately narrower than the platform admin model:
+
+1. the invitee opens `/workspace-invite?token=...`
+2. Beam shows only the workspace name, requested role, masked email, and expiry
+3. the invitee verifies the exact invited email through a magic link
+4. the one-time invitation is accepted atomically
+5. the resulting session can see only workspaces where that email is a member
+
+Workspace-only sessions cannot read global directory roles, fleet state, platform audit views, or other tenants. Owners can revoke a pending invitation, change an accepted member role, or remove a member. Beam rejects any update that would leave a workspace without a human owner.
+
+Production operators should share invitation URLs through an authenticated company channel. Do not place them in tickets, analytics fields, logs, or public chat rooms.
 
 ## Fast local sync demo
 

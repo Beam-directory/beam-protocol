@@ -22,6 +22,14 @@ import RegisterPage from './pages/RegisterPage'
 import SettingsPage from './pages/SettingsPage'
 import TraceDetailPage from './pages/TraceDetailPage'
 import WorkspacesPage from './pages/WorkspacesPage'
+import WorkspaceInvitePage from './pages/WorkspaceInvitePage'
+
+function SessionLandingPage() {
+  const { session } = useAdminAuth()
+  return session?.scope === 'workspace'
+    ? <Navigate to="/workspaces" replace />
+    : <OverviewPage />
+}
 
 function RequireAdminSession({ children }: { children: JSX.Element }) {
   const { session, loading } = useAdminAuth()
@@ -72,6 +80,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/auth/callback" element={<AuthCallbackPage />} />
+          <Route path="/workspace-invite" element={<WorkspaceInvitePage />} />
           <Route
             path="/"
             element={(
@@ -80,7 +89,7 @@ export default function App() {
               </RequireAdminSession>
             )}
           >
-            <Route index element={<OverviewPage />} />
+            <Route index element={<SessionLandingPage />} />
             <Route path="intents" element={<IntentsPage />} />
             <Route path="intents/:nonce" element={<TraceDetailPage />} />
             <Route path="audit" element={<AuditPage />} />

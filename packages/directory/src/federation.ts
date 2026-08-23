@@ -1,4 +1,5 @@
 import type { Database } from 'better-sqlite3'
+import { timingSafeEqual } from 'node:crypto'
 import {
   deleteFederatedAgentCache,
   getAgent,
@@ -26,6 +27,16 @@ export type ResolvedAgentDocument = Record<string, unknown> & {
   ttl?: number
 }
 
+type RemoteAssurance = {
+  issuer: string
+  verified: boolean
+  tier: 'basic' | 'verified' | 'business' | 'enterprise' | null
+  status: string | null
+  trustScore: number | null
+}
+
+const VERIFICATION_TIERS = new Set(['basic', 'verified', 'business', 'enterprise'])
+
 export type ResolvedAgent = {
   scope: 'local' | 'cache' | 'peer' | 'discovered'
   agent: ResolvedAgentDocument
@@ -44,6 +55,29 @@ export function getFederationSharedSecret(): string {
   return process.env['BEAM_FEDERATION_SHARED_SECRET'] ?? ''
 }
 
+export function getFederationProxySecret(): string {
+  return process.env['BEAM_FEDERATION_PROXY_SECRET'] ?? ''
+}
+
+function secretMatches(candidate: string | null, expected: string): boolean {
+  if (!candidate || !expected) {
+    return false
+  }
+  const candidateBuffer = Buffer.from(candidate, 'utf8')
+  const expectedBuffer = Buffer.from(expected, 'utf8')
+  return candidateBuffer.length === expectedBuffer.length
+    && timingSafeEqual(candidateBuffer, expectedBuffer)
+}
+
+export function isFederationRequestAuthorized(headers: Headers): boolean {
+  if (secretMatches(headers.get('x-beam-federation-secret'), getFederationSharedSecret())) {
+    return true
+  }
+
+  return headers.get('x-beam-mtls-verified') === 'true'
+    && secretMatches(headers.get('x-beam-federation-proxy-secret'), getFederationProxySecret())
+}
+
 export function isPrivateDirectoryMode(): boolean {
   return process.env['BEAM_PRIVATE_DIRECTORY_MODE'] === 'true'
 }
@@ -53,6 +87,7 @@ function roundScore(value: number): number {
 }
 
 function serializeLocalAgent(row: AgentRow): ResolvedAgentDocument {
+  const verified = row.verified === 1 || row.verification_tier !== 'basic'
   return {
     beam_id: row.beam_id,
     org: row.org,
@@ -60,9 +95,57 @@ function serializeLocalAgent(row: AgentRow): ResolvedAgentDocument {
     capabilities: JSON.parse(row.capabilities) as string[],
     public_key: row.public_key,
     trust_score: row.trust_score,
-    verified: row.verified === 1,
+    verified,
+    verificationTier: row.verification_tier,
+    verificationStatus: verified ? 'verified' : 'unverified',
+    assuranceScope: 'local',
+    assuranceIssuer: getLocalDirectoryUrl(),
     created_at: row.created_at,
     last_seen: row.last_seen,
+  }
+}
+
+function readRemoteAssurance(document: ResolvedAgentDocument, issuer: string): RemoteAssurance {
+  const nested = document.remoteAssurance
+  const raw = nested && typeof nested === 'object' && !Array.isArray(nested)
+    ? nested as Record<string, unknown>
+    : document
+  const tierCandidate = raw['tier'] ?? raw['verificationTier'] ?? raw['verification_tier']
+  const statusCandidate = raw['status'] ?? raw['verificationStatus'] ?? raw['verification_status']
+  const trustCandidate = raw['trustScore'] ?? raw['trust_score']
+
+  return {
+    issuer: typeof raw['issuer'] === 'string' && raw['issuer'].trim() ? raw['issuer'] : issuer,
+    verified: raw['verified'] === true,
+    tier: typeof tierCandidate === 'string' && VERIFICATION_TIERS.has(tierCandidate)
+      ? tierCandidate as RemoteAssurance['tier']
+      : null,
+    status: typeof statusCandidate === 'string' && statusCandidate.trim() ? statusCandidate : null,
+    trustScore: typeof trustCandidate === 'number' && Number.isFinite(trustCandidate)
+      ? roundScore(trustCandidate)
+      : null,
+  }
+}
+
+function sanitizeFederatedAgentDocument(
+  document: ResolvedAgentDocument,
+  issuer: string,
+  effectiveTrustScore: number,
+): ResolvedAgentDocument {
+  return {
+    ...document,
+    verified: false,
+    verificationTier: 'basic',
+    verification_tier: 'basic',
+    verificationStatus: 'unverified',
+    verification_status: 'unverified',
+    trustScore: roundScore(effectiveTrustScore),
+    trust_score: roundScore(effectiveTrustScore),
+    assuranceScope: 'federated-untrusted',
+    assurance_scope: 'federated-untrusted',
+    assuranceIssuer: issuer,
+    assurance_issuer: issuer,
+    remoteAssurance: readRemoteAssurance(document, issuer),
   }
 }
 
@@ -117,11 +200,17 @@ export function getCachedFederatedAgent(db: Database, beamId: string, now = Date
     return null
   }
 
-  const agent = normalizeAgentDocument(JSON.parse(row.cached_document))
-  if (!agent) {
+  const cachedDocument = normalizeAgentDocument(JSON.parse(row.cached_document))
+  if (!cachedDocument) {
     deleteFederatedAgentCache(db, beamId)
     return null
   }
+
+  const agent = sanitizeFederatedAgentDocument(
+    cachedDocument,
+    row.home_directory_url,
+    getEffectiveFederatedTrust(db, beamId, now),
+  )
 
   return {
     scope: 'cache',
@@ -230,18 +319,15 @@ function getAgentDocumentTtl(agent: ResolvedAgentDocument): number {
   return typeof ttl === 'number' ? Math.max(1, Math.trunc(ttl)) : DEFAULT_AGENT_CACHE_TTL
 }
 
-function cacheResolvedAgent(db: Database, directoryUrl: string, agent: ResolvedAgentDocument): void {
+function cacheResolvedAgent(
+  db: Database,
+  directoryUrl: string,
+  agent: ResolvedAgentDocument,
+): ResolvedAgentDocument | null {
   const beamId = getDocumentBeamId(agent)
   if (!beamId) {
-    return
+    return null
   }
-
-  upsertFederatedAgentCache(db, {
-    beamId,
-    homeDirectoryUrl: directoryUrl,
-    document: agent,
-    ttl: getAgentDocumentTtl(agent),
-  })
 
   const trustScore = typeof agent.trust_score === 'number'
     ? agent.trust_score
@@ -258,6 +344,19 @@ function cacheResolvedAgent(db: Database, directoryUrl: string, agent: ResolvedA
       hopCount: 1,
     })
   }
+
+  const sanitized = sanitizeFederatedAgentDocument(
+    agent,
+    directoryUrl,
+    getEffectiveFederatedTrust(db, beamId),
+  )
+  upsertFederatedAgentCache(db, {
+    beamId,
+    homeDirectoryUrl: directoryUrl,
+    document: sanitized,
+    ttl: getAgentDocumentTtl(agent),
+  })
+  return sanitized
 }
 
 export async function syncAgents(
@@ -405,12 +504,15 @@ export async function queryPeerForAgent(
     return null
   }
 
-  cacheResolvedAgent(db, peerUrl, agent)
+  const sanitized = cacheResolvedAgent(db, peerUrl, agent)
+  if (!sanitized) {
+    return null
+  }
   touchPeer(db, peerUrl, ['last_seen'])
 
   return {
     scope: 'peer',
-    agent,
+    agent: sanitized,
     directoryUrl: peerUrl,
   }
 }

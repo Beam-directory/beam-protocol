@@ -22,14 +22,14 @@ export function adminAuthRouter(db: Database): Hono {
   })
 
   router.post('/magic-link', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { email?: string }
+    const body = await c.req.json().catch(() => ({})) as { email?: string; returnTo?: string }
     const email = body.email?.trim().toLowerCase()
 
     if (!email || !email.includes('@')) {
       return c.json({ error: 'Valid email required', errorCode: 'INVALID_EMAIL' }, 400)
     }
 
-    const link = issueAdminMagicLink(db, email)
+    const link = issueAdminMagicLink(db, email, body.returnTo)
     if (!link) {
       return c.json({ error: 'This email is not authorized for admin access', errorCode: 'UNAUTHORIZED' }, 403)
     }
@@ -56,6 +56,7 @@ export function adminAuthRouter(db: Database): Hono {
       details: {
         origin: c.req.header('origin') ?? null,
         userAgent: c.req.header('user-agent') ?? null,
+        authScope: link.scope,
       },
     })
 
@@ -63,6 +64,7 @@ export function adminAuthRouter(db: Database): Hono {
       ok: true,
       email: link.email,
       role: link.role,
+      scope: link.scope,
       expiresAt: link.expiresAt,
       dev: !isEmailDeliveryConfigured() && isLocalDevRequest(c.req.raw),
       url: !isEmailDeliveryConfigured() && isLocalDevRequest(c.req.raw) ? link.url : undefined,
@@ -71,7 +73,7 @@ export function adminAuthRouter(db: Database): Hono {
   })
 
   router.post('/verify', async (c) => {
-    const body = await c.req.json().catch(() => ({})) as { token?: string }
+    const body = await c.req.json().catch(() => ({})) as { token?: string; sessionTransport?: 'bearer' | 'cookie' }
     const token = body.token?.trim()
 
     if (!token) {
@@ -90,17 +92,21 @@ export function adminAuthRouter(db: Database): Hono {
       details: {
         origin: c.req.header('origin') ?? null,
         authType: 'magic-link',
+        authScope: result.session.scope,
       },
     })
 
     c.header('Cache-Control', 'no-store')
     c.header('Set-Cookie', buildAdminSessionCookie(c, result.token, getAdminSessionTtlSeconds()))
+    const cookieOnly = body.sessionTransport === 'cookie'
     return c.json({
       ok: true,
-      token: result.token,
+      token: cookieOnly ? undefined : result.token,
       email: result.session.email,
       role: result.session.role,
+      scope: result.session.scope,
       expiresAt: result.session.expiresAt,
+      returnTo: result.returnTo,
     })
   })
 
@@ -114,6 +120,7 @@ export function adminAuthRouter(db: Database): Hono {
     return c.json({
       email: session.email,
       role: session.role,
+      scope: session.scope,
       expiresAt: session.expiresAt,
     })
   })

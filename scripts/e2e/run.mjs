@@ -121,12 +121,39 @@ async function requestJson(url, init) {
   return parsed
 }
 
-async function allowIntent(directoryUrl, targetBeamId, intentType, allowedFrom) {
+async function allowIntent(directoryUrl, adminToken, targetBeamId, intentType, allowedFrom) {
   await requestJson(`${directoryUrl}/acl`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ targetBeamId, intentType, allowedFrom }),
   })
+}
+
+async function createAdminToken(directoryUrl, adminEmail) {
+  const challenge = await requestJson(`${directoryUrl}/admin/auth/magic-link`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:5173',
+    },
+    body: JSON.stringify({ email: adminEmail }),
+  })
+  if (typeof challenge.token !== 'string' || challenge.token.length === 0) {
+    throw new Error('Local E2E admin flow did not return a magic-link token')
+  }
+
+  const verified = await requestJson(`${directoryUrl}/admin/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: challenge.token }),
+  })
+  if (typeof verified.token !== 'string' || verified.token.length === 0) {
+    throw new Error('Local E2E admin flow did not return a session token')
+  }
+  return verified.token
 }
 
 async function runCli(args, cwd, env = {}) {
@@ -183,6 +210,7 @@ async function main() {
   const directoryUrl = `http://127.0.0.1:${directoryPort}`
   const messageBusUrl = `http://127.0.0.1:${messageBusPort}/v1/beam`
   const beamBusApiKey = 'beam-bus-e2e-key'
+  const adminEmail = 'ops@beam.local'
 
   await mkdir(cliRoot, { recursive: true })
 
@@ -209,10 +237,12 @@ async function main() {
         PORT: String(directoryPort),
         DB_PATH: directoryDb,
         JWT_SECRET: 'beam-e2e-jwt-secret',
+        BEAM_ADMIN_EMAILS: adminEmail,
       },
     })
 
     await waitForHealth(`${directoryUrl}/health`, 'directory')
+    const adminToken = await createAdminToken(directoryUrl, adminEmail)
 
     messageBusProcess = spawnProcess({
       name: 'message-bus',
@@ -249,7 +279,7 @@ async function main() {
         })
       })
       await receiver.connect()
-      await allowIntent(directoryUrl, receiver.beamId, 'conversation.message', '*')
+      await allowIntent(directoryUrl, adminToken, receiver.beamId, 'conversation.message', '*')
     })
 
     await step('validating the TypeScript SDK flow', async () => {

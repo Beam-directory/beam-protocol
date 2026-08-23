@@ -31,7 +31,7 @@ The directory server includes peer-management and relay routes under `/federatio
 Important concepts:
 
 - peer registration
-- shared-secret or mTLS-style federation authentication
+- shared-secret or reverse-proxy-verified mTLS federation authentication
 - federated agent lookup
 - relay hop counting
 - federated trust assertions
@@ -47,6 +47,13 @@ You should still:
 - authenticate peer directories
 - limit which peers may relay or sync
 - observe relay outcomes and trust signals over time
+
+`X-Beam-mTLS-Verified` is never trusted on its own. If TLS terminates at a
+reverse proxy, configure `BEAM_FEDERATION_PROXY_SECRET`, strip all incoming
+`X-Beam-*` federation headers, and inject both the verified marker and proxy
+secret only after a successful client-certificate check. Direct peer calls use
+`BEAM_FEDERATION_SHARED_SECRET`. Received trust values are bounded to `0..1`
+and remain signals; they are not KYB/KYC evidence.
 
 ## When to use federation
 

@@ -494,7 +494,7 @@ test('openclaw hosts enroll, approve, heartbeat, and inventory surface in fleet 
     assert.equal(identitiesBody.identities[0]?.bindings[0]?.workspaceSlug, 'openclaw-local')
 
     const workspaceIdentitiesResponse = await app.request(new Request('http://localhost/admin/workspaces/openclaw-local/identities', {
-      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
     }))
     assert.equal(workspaceIdentitiesResponse.status, 200)
     const workspaceIdentitiesBody = await workspaceIdentitiesResponse.json() as {
@@ -2174,7 +2174,7 @@ test('stale openclaw host routes block Beam delivery before transport dispatch',
     assert.match(routesBody.routes[0]?.lastDelivery?.href ?? '', /\/intents\//)
 
     const workspaceIdentitiesResponse = await app.request(new Request('http://localhost/admin/workspaces/openclaw-local/identities', {
-      headers: createAdminHeaders(db, 'viewer@example.com', 'viewer'),
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
     }))
     assert.equal(workspaceIdentitiesResponse.status, 200)
     const workspaceIdentitiesBody = await workspaceIdentitiesResponse.json() as {

@@ -17,6 +17,8 @@ export type WorkspaceBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceBindingStatus = 'active' | 'paused'
 export type WorkspaceIdentityLifecycleStatus = 'healthy' | 'stale' | 'paused' | 'missing' | 'revoked' | 'unowned'
 export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
+export type WorkspaceMemberRole = 'owner' | 'operator' | 'viewer'
+export type WorkspaceMemberInvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
 export type WorkspaceThreadKind = 'internal' | 'handoff'
 export type WorkspaceThreadStatus = 'open' | 'blocked' | 'closed'
 export type WorkspaceThreadParticipantRole = 'owner' | 'participant' | 'observer' | 'approver'
@@ -148,6 +150,62 @@ export interface WorkspaceRecord {
 export interface WorkspaceListResponse {
   workspaces: WorkspaceRecord[]
   total: number
+}
+
+export interface WorkspaceMember {
+  id: number
+  workspaceId: number
+  principalId: string
+  principalType: WorkspacePrincipalType
+  role: WorkspaceMemberRole
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspaceMembersResponse {
+  workspace: WorkspaceRecord
+  members: WorkspaceMember[]
+  total: number
+}
+
+export interface WorkspaceAccessResponse {
+  access: {
+    email: string
+    authScope: 'platform' | 'workspace'
+    platformRole: AdminRole | null
+    workspaceRole: WorkspaceMemberRole
+  }
+}
+
+export interface WorkspaceMemberInvitation {
+  id: string
+  workspaceId: number
+  email: string
+  role: WorkspaceMemberRole
+  status: WorkspaceMemberInvitationStatus
+  invitedBy: string
+  expiresAt: string
+  acceptedAt: string | null
+  acceptedBy: string | null
+  revokedAt: string | null
+  revokedBy: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export interface WorkspaceInvitationsResponse {
+  workspace: WorkspaceRecord
+  invitations: WorkspaceMemberInvitation[]
+  total: number
+}
+
+export interface WorkspaceInvitationPreview {
+  invitation: {
+    workspace: { slug: string; name: string }
+    emailMasked: string
+    role: WorkspaceMemberRole
+    expiresAt: string
+  }
 }
 
 export interface WorkspaceIdentityBinding {
@@ -2822,8 +2880,10 @@ export interface DirectoryRolesResponse {
 export interface AdminSessionInfo {
   email: string
   role: AdminRole
+  scope: 'platform' | 'workspace'
   expiresAt: string
   token?: string
+  returnTo?: string | null
 }
 
 export interface AdminAuthConfig {
@@ -2837,6 +2897,7 @@ export interface AdminMagicLinkResponse {
   ok: boolean
   email: string
   role: AdminRole
+  scope: 'platform' | 'workspace'
   expiresAt: string
   dev: boolean
   url?: string
@@ -3239,6 +3300,27 @@ export const directoryApi = {
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   listWorkspaces: () => request<WorkspaceListResponse>('/admin/workspaces', undefined, { admin: true }),
+  getWorkspaceAccess: (slug: string) => request<WorkspaceAccessResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/access`, undefined, { admin: true }),
+  listWorkspaceMembers: (slug: string) => request<WorkspaceMembersResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/members`, undefined, { admin: true }),
+  updateWorkspaceMember: (slug: string, id: number, role: WorkspaceMemberRole) => request<{ member: WorkspaceMember }>(`/admin/workspaces/${encodeURIComponent(slug)}/members/${id}`, {
+    method: 'PATCH',
+    body: JSON.stringify({ role }),
+  }, { admin: true }),
+  removeWorkspaceMember: (slug: string, id: number) => request<{ removed: WorkspaceMember }>(`/admin/workspaces/${encodeURIComponent(slug)}/members/${id}`, {
+    method: 'DELETE',
+  }, { admin: true }),
+  listWorkspaceInvitations: (slug: string) => request<WorkspaceInvitationsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/invitations`, undefined, { admin: true }),
+  createWorkspaceInvitation: (slug: string, input: { email: string; role: WorkspaceMemberRole; expiresInHours?: number }) => request<{ invitation: WorkspaceMemberInvitation; url: string }>(`/admin/workspaces/${encodeURIComponent(slug)}/invitations`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
+  revokeWorkspaceInvitation: (slug: string, id: string) => request<{ invitation: WorkspaceMemberInvitation }>(`/admin/workspaces/${encodeURIComponent(slug)}/invitations/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  }, { admin: true }),
+  getWorkspaceInvitationPreview: (token: string) => request<WorkspaceInvitationPreview>(`/admin/workspaces/invitations/${encodeURIComponent(token)}`),
+  acceptWorkspaceInvitation: (token: string) => request<{ workspace: WorkspaceRecord; member: WorkspaceMember }>(`/admin/workspaces/invitations/${encodeURIComponent(token)}/accept`, {
+    method: 'POST',
+  }, { admin: true }),
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
   getWorkspaceApprovalQueue: (slug: string) => request<WorkspaceApprovalQueueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/approval-queue`, undefined, { admin: true }),
   listWorkspaceIdentities: (slug: string) => request<WorkspaceIdentitiesResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities`, undefined, { admin: true }),
@@ -3288,7 +3370,7 @@ export const directoryApi = {
     method: 'POST',
     body: JSON.stringify(input),
   }),
-  getRecentIntents: (limit = 50) => request<RecentIntentsResponse>(`/intents/recent?limit=${limit}`),
+  getRecentIntents: (limit = 50) => request<RecentIntentsResponse>(`/intents/recent?limit=${limit}`, undefined, { admin: true }),
   getIntentCatalog: () => request<IntentCatalogResponse>('/intents/catalog'),
   sendIntent: (input: SendIntentInput) => request<SendIntentResponse>('/intents/send', {
     method: 'POST',
@@ -3512,13 +3594,13 @@ export const directoryRoleApi = {
 
 export const adminAuthApi = {
   getConfig: () => request<AdminAuthConfig>('/admin/auth/config'),
-  requestMagicLink: (email: string) => request<AdminMagicLinkResponse>('/admin/auth/magic-link', {
+  requestMagicLink: (email: string, returnTo?: string) => request<AdminMagicLinkResponse>('/admin/auth/magic-link', {
     method: 'POST',
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email, returnTo }),
   }),
   verify: (token: string) => request<AdminSessionInfo>('/admin/auth/verify', {
     method: 'POST',
-    body: JSON.stringify({ token }),
+    body: JSON.stringify({ token, sessionTransport: 'cookie' }),
   }),
   getSession: () => request<AdminSessionInfo>('/admin/auth/session'),
   logout: () => request<{ ok: boolean }>('/admin/auth/logout', {

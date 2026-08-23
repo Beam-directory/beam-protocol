@@ -39,6 +39,7 @@ async def main():
     )
     record = await client.register("Acme Procurement Desk", capabilities=["conversation.message", "quote.request"])
     print(f"Registered! Trust score: {record.trust_score}")
+    # register() adopts the one-time API key for authenticated HTTP/WebSocket use.
 
     # 3. Look up the partner agent
     directory = BeamDirectory(DirectoryConfig(base_url="https://api.beam.directory"))
@@ -154,10 +155,18 @@ await dir.heartbeat("agent@org.beam.directory")
 ### `BeamClient`
 
 ```python
-client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
+client = BeamClient(
+    identity=identity,
+    directory_url="https://api.beam.directory",
+    api_key="bk_...",  # omit only for the initial register() call
+)
 
 # Register shortcut
 record = await client.register("Acme Procurement Desk", ["conversation.message", "quote.request"])
+
+# WebSocket listening fails closed without an API key. The client exchanges it
+# for a 30-second, single-use ticket so the long-lived key never enters the URL.
+# A newly registered client adopts record.api_key automatically.
 
 # Send intent
 result = await client.send(to="partner-desk@northwind.beam.directory", intent="quote.request", params={})

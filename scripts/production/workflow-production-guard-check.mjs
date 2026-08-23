@@ -7,6 +7,40 @@ const workflowRoot = path.join(repoRoot, '.github/workflows')
 
 const workflowSpecs = [
   {
+    name: 'ci',
+    path: path.join(workflowRoot, 'ci.yml'),
+    required: [
+      ['read-only default permissions', 'permissions:\n  contents: read'],
+      ['pinned checkout action', 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803'],
+      ['pinned setup-node action', 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38'],
+      ['pinned setup-python action', 'actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1'],
+      ['pinned artifact action', 'actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02'],
+      ['MCP container candidate job', 'mcp-container:'],
+      ['hardened image build', 'npm run container:build --workspace=@beam-protocol/mcp-server'],
+      ['remote container E2E', 'npm run test:mcp-container-e2e'],
+      ['digest-pinned Trivy image', 'aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e'],
+      ['vulnerability scanners only', '--scanners vuln'],
+      ['strict High and Critical threshold', '--severity HIGH,CRITICAL'],
+      ['fail-on-findings scan', '--exit-code 1'],
+      ['CycloneDX SBOM', '--format cyclonedx'],
+      ['hashed candidate evidence', 'sha256sum tmp/mcp-release-candidate/*'],
+      ['MCP pilot evidence job', 'mcp-pilot-evidence:'],
+      ['tag matches package version before publish', 'Tag version $VERSION does not match package.json version $PACKAGE_VERSION'],
+      ['safe pilot release version', 'MCP pilot release must be a safe semantic version'],
+      ['release-scoped pilot evidence', 'EVIDENCE="reports/${VERSION}-mcp-pilot-evidence.json"'],
+      ['hosted pilot verifier', 'npm run production:mcp-pilot'],
+      ['release depends on MCP gates', 'needs: [monorepo, e2e, docs, quickstart, mcp-container, mcp-pilot-evidence]'],
+    ],
+    forbidden: [
+      ['floating checkout action', 'actions/checkout@v'],
+      ['floating setup-node action', 'actions/setup-node@v'],
+      ['floating setup-python action', 'actions/setup-python@v'],
+      ['floating artifact action', 'actions/upload-artifact@v'],
+      ['floating Trivy image', 'aquasec/trivy:latest'],
+      ['ignored unfixed vulnerabilities', '--ignore-unfixed'],
+    ],
+  },
+  {
     name: 'dashboard',
     path: path.join(workflowRoot, 'dashboard.yml'),
     required: [

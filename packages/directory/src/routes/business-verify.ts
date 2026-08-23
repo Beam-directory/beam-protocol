@@ -1,15 +1,23 @@
 import { Buffer } from 'node:buffer'
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
-import type { AgentRow, BusinessVerificationRow } from '../types.js'
+import type { BusinessVerificationRow } from '../types.js'
 import { issueBusinessVC } from '../credentials.js'
 import { BEAM_ID_RE } from '../validation.js'
 import { serializeAgent } from '../utils/serialize.js'
+import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
+import { requireAdminRole } from '../admin-auth.js'
 import {
   createBusinessVerification,
   getAgent,
+  getBusinessVerificationById,
   getLatestBusinessVerification,
+  getLatestDomainVerification,
+  listBusinessVerifications,
+  logAuditEvent,
   markAgentBusinessVerified,
+  reviewBusinessVerification,
 } from '../db.js'
 
 const DE_REGISTRATION_RE = /^(HRB|HRA)[\s-]*(\d{1,12})$/i
@@ -36,8 +44,8 @@ function parseEvidence(row: BusinessVerificationRow): unknown {
   }
 }
 
-function serializeBusinessVerification(row: BusinessVerificationRow): object {
-  return {
+function serializeBusinessVerification(row: BusinessVerificationRow, includeEvidence: boolean = false): object {
+  const serialized: Record<string, unknown> = {
     id: row.id,
     beamId: row.beam_id,
     country: row.country,
@@ -46,10 +54,15 @@ function serializeBusinessVerification(row: BusinessVerificationRow): object {
     status: row.status,
     verificationSource: row.verification_source,
     sourceReference: row.source_reference,
-    evidence: parseEvidence(row),
     createdAt: row.created_at,
     verifiedAt: row.verified_at,
   }
+
+  if (includeEvidence) {
+    serialized.evidence = parseEvidence(row)
+  }
+
+  return serialized
 }
 
 function normalizeCountry(value: string): SupportedCountry | null {
@@ -151,6 +164,29 @@ async function verifyUkCompany(
 export function businessVerificationRouter(db: Database): Hono {
   const router = new Hono()
 
+  const requireAgentApiKey = (c: Context, beamId: string): Response | null => {
+    const agent = getAgent(db, beamId)
+    if (!agent) {
+      return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    return agentApiKeyMatches(agent, getSuppliedApiKey(c.req.raw))
+      ? null
+      : c.json({ error: 'Missing or invalid API key', errorCode: 'UNAUTHORIZED' }, 401)
+  }
+
+  router.get('/business-verifications/pending', (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    if (auth instanceof Response) return auth
+
+    const limit = Number.parseInt(c.req.query('limit') ?? '100', 10)
+    const requests = listBusinessVerifications(db, 'pending', Number.isFinite(limit) ? limit : 100)
+    return c.json({
+      requests: requests.map((row) => serializeBusinessVerification(row, true)),
+      total: requests.length,
+    })
+  })
+
   router.post('/:beamId/verify-business', async (c) => {
     const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
     if (!BEAM_ID_RE.test(beamId)) {
@@ -161,6 +197,8 @@ export function businessVerificationRouter(db: Database): Hono {
     if (!agent) {
       return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
+    const authError = requireAgentApiKey(c, beamId)
+    if (authError) return authError
 
     let body: unknown
     try {
@@ -194,32 +232,23 @@ export function businessVerificationRouter(db: Database): Hono {
           country,
           registrationNumber,
           legalName,
-          status: 'verified',
-          verificationSource: 'de-format',
+          status: 'pending',
+          verificationSource: 'manual-registry-review',
           sourceReference: registrationNumber,
           evidence: {
             registrationType: registrationNumber.split(' ')[0],
-            validation: 'format',
+            formatValidated: true,
+            registryMatched: false,
           },
         })
 
-        const updatedAgent = markAgentBusinessVerified(db, beamId)
-        const credential = issueBusinessVC(beamId, {
-          country,
-          registrationNumber,
-          legalName,
-          verificationSource: verification.verification_source,
-          sourceReference: verification.source_reference,
-          verifiedAt: verification.verified_at,
-        })
-
         return c.json({
-          verified: true,
+          verified: false,
           status: verification.status,
-          verification: serializeBusinessVerification(verification),
-          credential,
-          agent: updatedAgent ? serializeAgent(updatedAgent) : null,
-        }, 201)
+          reviewRequired: true,
+          message: 'Registration format accepted. Registry and organization ownership require independent review.',
+          verification: serializeBusinessVerification(verification, true),
+        }, 202)
       }
 
       const registrationNumber = normalizeUkRegistrationNumber(registrationNumberInput)
@@ -233,32 +262,22 @@ export function businessVerificationRouter(db: Database): Hono {
         country,
         registrationNumber,
         legalName,
-        status: 'verified',
+        status: 'pending',
         verificationSource: 'companies-house',
         sourceReference: upstream.sourceReference,
         evidence: upstream.evidence,
       })
 
-      const updatedAgent = markAgentBusinessVerified(db, beamId)
-      const credential = issueBusinessVC(beamId, {
-        country,
-        registrationNumber,
-        legalName,
-        verificationSource: verification.verification_source,
-        sourceReference: verification.source_reference,
-        verifiedAt: verification.verified_at,
-      })
-
       return c.json({
-        verified: true,
+        verified: false,
         status: verification.status,
-        verification: serializeBusinessVerification(verification),
-        credential,
-        agent: updatedAgent ? serializeAgent(updatedAgent) : null,
-      }, 201)
+        reviewRequired: true,
+        message: 'Registry record matched. Organization ownership and control require independent review.',
+        verification: serializeBusinessVerification(verification, true),
+      }, 202)
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Business verification failed'
-      const verificationSource = country === 'UK' ? 'companies-house' : 'de-format'
+      const verificationSource = country === 'UK' ? 'companies-house' : 'manual-registry-review'
       const normalizedRegistrationNumber = country === 'UK'
         ? normalizeUkRegistrationNumber(registrationNumberInput) ?? registrationNumberInput.toUpperCase()
         : normalizeGermanRegistrationNumber(registrationNumberInput) ?? registrationNumberInput.toUpperCase()
@@ -281,9 +300,104 @@ export function businessVerificationRouter(db: Database): Hono {
         status: verification.status,
         error: message,
         errorCode: status === 503 ? 'COMPANIES_HOUSE_UNAVAILABLE' : 'BUSINESS_VERIFICATION_FAILED',
-        verification: serializeBusinessVerification(verification),
+        verification: serializeBusinessVerification(verification, true),
       }, status)
     }
+  })
+
+  router.post('/:beamId/business-review', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    if (auth instanceof Response) return auth
+
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
+    if (!BEAM_ID_RE.test(beamId)) {
+      return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
+    }
+
+    let raw: Record<string, unknown>
+    try {
+      raw = await c.req.json() as Record<string, unknown>
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    const verificationId = Number(raw.verificationId)
+    const decision = raw.decision === 'approve' || raw.decision === 'reject' ? raw.decision : null
+    const evidenceReference = String(raw.evidenceReference ?? '').trim()
+    const reviewNotes = String(raw.reviewNotes ?? '').trim()
+    if (!Number.isInteger(verificationId) || verificationId <= 0 || !decision || !evidenceReference || evidenceReference.length > 1024 || reviewNotes.length > 2000) {
+      return c.json({
+        error: 'verificationId, decision (approve|reject), and evidenceReference are required',
+        errorCode: 'INVALID_REVIEW',
+      }, 400)
+    }
+
+    const verification = getBusinessVerificationById(db, verificationId)
+    if (!verification || verification.beam_id !== beamId) {
+      return c.json({ error: 'Business verification request not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    if (verification.status !== 'pending') {
+      return c.json({ error: 'Business verification request has already been reviewed', errorCode: 'ALREADY_REVIEWED' }, 409)
+    }
+
+    if (decision === 'approve') {
+      const domainProof = getLatestDomainVerification(db, beamId)
+      if (!domainProof || domainProof.status !== 'verified') {
+        return c.json({
+          error: 'Verified domain control is required before business approval',
+          errorCode: 'DOMAIN_PROOF_REQUIRED',
+        }, 409)
+      }
+    }
+
+    const previousEvidence = parseEvidence(verification)
+    const reviewedAt = new Date().toISOString()
+    const reviewed = reviewBusinessVerification(db, {
+      id: verification.id,
+      status: decision === 'approve' ? 'verified' : 'rejected',
+      evidence: {
+        submission: previousEvidence,
+        review: {
+          decision,
+          evidenceReference,
+          notes: reviewNotes || null,
+          reviewedBy: auth.session.email,
+          reviewedAt,
+        },
+      },
+    })
+    if (!reviewed) {
+      return c.json({ error: 'Business verification request could not be reviewed', errorCode: 'REVIEW_CONFLICT' }, 409)
+    }
+
+    let updatedAgent = getAgent(db, beamId)
+    let credential: ReturnType<typeof issueBusinessVC> | null = null
+    if (decision === 'approve') {
+      updatedAgent = markAgentBusinessVerified(db, beamId)
+      credential = issueBusinessVC(beamId, {
+        country: reviewed.country,
+        registrationNumber: reviewed.registration_number,
+        legalName: reviewed.legal_name,
+        verificationSource: reviewed.verification_source,
+        sourceReference: evidenceReference,
+        verifiedAt: reviewed.verified_at,
+      })
+    }
+
+    logAuditEvent(db, {
+      action: `business.verification.${decision === 'approve' ? 'approved' : 'rejected'}`,
+      actor: auth.session.email,
+      target: beamId,
+      details: { verificationId, evidenceReference },
+    })
+
+    return c.json({
+      verified: decision === 'approve',
+      status: reviewed.status,
+      verification: serializeBusinessVerification(reviewed, true),
+      credential,
+      agent: updatedAgent ? serializeAgent(updatedAgent) : null,
+    })
   })
 
   router.get('/:beamId/business-status', (c) => {

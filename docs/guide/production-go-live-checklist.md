@@ -38,6 +38,10 @@ These are the exact checklist items Beam operators should track in the dashboard
 - confirm the latest walkthrough proof is attached to the same request
 - confirm the operator knows where to inspect trace, signal, alerts, and dead letters
 - confirm the partner thread has the correct reminder and next-meeting state
+- for a Grok/MCP workflow, confirm the read-only hosted pilot evidence passes
+  `npm run production:mcp-pilot` before any send-enabled profile is reviewed
+- confirm runtime secrets are mounted files and the deployed image is pinned by
+  immutable digest
 
 ## Day-Of Go-Live
 
@@ -45,6 +49,8 @@ These are the exact checklist items Beam operators should track in the dashboard
 - confirm no unrelated critical alert pressure is already open
 - confirm the correct sender and recipient identities are active
 - confirm policy and trust settings match the agreed workflow
+- confirm OAuth revocation, exact resource audience, and disabled-user behavior
+  were observed against the selected identity provider
 - confirm the operator signal path is clear before the first live request starts
 
 ## First 24 Hours

@@ -47,6 +47,7 @@ client.on('task.execute', async (frame, respond) => {
   })
 })
 
+// connect() exchanges the API key for a 30-second, single-use WebSocket ticket.
 await client.connect()
 ```
 

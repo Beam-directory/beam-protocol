@@ -110,10 +110,13 @@ async function requestJson(url, init) {
   return payload
 }
 
-async function allowIntent(directoryUrl, targetBeamId, intentType, allowedFrom) {
+async function allowIntent(directoryUrl, adminToken, targetBeamId, intentType, allowedFrom) {
   await requestJson(`${directoryUrl}/acl`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ targetBeamId, intentType, allowedFrom }),
   })
 }
@@ -325,9 +328,9 @@ async function main() {
     await warehouse.register('Northwind Warehouse', ['inventory.check'])
     await finance.register('Acme Finance Desk', ['purchase.preflight'])
 
-    await allowIntent(directoryUrl, partnerDesk.beamId, 'quote.request', procurement.beamId)
-    await allowIntent(directoryUrl, warehouse.beamId, 'inventory.check', partnerDesk.beamId)
-    await allowIntent(directoryUrl, finance.beamId, 'purchase.preflight', partnerDesk.beamId)
+    await allowIntent(directoryUrl, adminToken, partnerDesk.beamId, 'quote.request', procurement.beamId)
+    await allowIntent(directoryUrl, adminToken, warehouse.beamId, 'inventory.check', partnerDesk.beamId)
+    await allowIntent(directoryUrl, adminToken, finance.beamId, 'purchase.preflight', partnerDesk.beamId)
 
     await Promise.all(clients.map((client) => client.connect()))
     await sleep(250)

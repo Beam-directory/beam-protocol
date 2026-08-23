@@ -247,7 +247,7 @@ export function agentsRouter(db: Database): Hono {
       }
     }
 
-    const emailVerified = raw.emailVerified === true || raw.email_verified === true
+    const emailVerifiedClaim = raw.emailVerified === true || raw.email_verified === true
     const requestedTier = typeof raw.verificationTier === 'string'
       ? raw.verificationTier
       : typeof raw.verification_tier === 'string'
@@ -255,6 +255,12 @@ export function agentsRouter(db: Database): Hono {
         : undefined
     if (requestedTier && !ALLOWED_TIERS.has(requestedTier as VerificationTier)) {
       return c.json({ error: 'verification_tier is invalid', errorCode: 'INVALID_VERIFICATION_TIER' }, 400)
+    }
+    if (emailVerifiedClaim || (requestedTier && requestedTier !== 'basic')) {
+      return c.json({
+        error: 'Email and assurance tiers can only be granted by Beam verification workflows',
+        errorCode: 'ASSURANCE_CLAIM_NOT_ALLOWED',
+      }, 403)
     }
 
     let beamId = typeof raw.beamId === 'string' ? raw.beamId.trim().toLowerCase() : ''
@@ -339,10 +345,9 @@ export function agentsRouter(db: Database): Hono {
       publicKey,
       apiKeyHash: hashApiKey(apiKey),
       email: email || undefined,
-      emailVerified,
+      emailVerified: false,
       description,
       logoUrl: cleanedLogoUrl,
-      verificationTier: (requestedTier as VerificationTier | undefined) ?? (emailVerified ? 'verified' : 'basic'),
       visibility,
       httpEndpoint,
       dhPublicKey,

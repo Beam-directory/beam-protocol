@@ -133,7 +133,27 @@ Admin and operator access is session-based.
 - `GET /admin/auth/session`
 - `POST /admin/auth/logout`
 
-Successful verification returns a short-lived signed bearer token and also sets the admin session cookie for dashboard clients.
+Successful verification always sets an HttpOnly session cookie. The dashboard requests cookie-only transport and never stores the bearer token in browser storage. CLI and automation clients receive the short-lived bearer token by default; they can request cookie-only transport with `{"sessionTransport":"cookie"}`.
+
+New magic-link secrets are stored only as SHA-256 hashes. Unused legacy plaintext rows remain consumable during the migration window and are deleted by the normal used/expired cleanup.
+
+## Workspace access and invitations
+
+```text
+GET    /admin/workspaces/:slug/access
+GET    /admin/workspaces/:slug/members
+PATCH  /admin/workspaces/:slug/members/:id
+DELETE /admin/workspaces/:slug/members/:id
+
+GET    /admin/workspaces/:slug/invitations
+POST   /admin/workspaces/:slug/invitations
+DELETE /admin/workspaces/:slug/invitations/:id
+
+GET    /admin/workspaces/invitations/:token
+POST   /admin/workspaces/invitations/:token/accept
+```
+
+Member and invitation administration requires the workspace `owner` role. Invitation preview is token-authenticated and deliberately redacted. Acceptance also requires an authenticated session for the exact invited email. Raw invitation secrets and token hashes are never returned by list endpoints.
 
 ## Key lifecycle endpoints
 
@@ -358,17 +378,20 @@ Clears waitlist and hosted beta intake entries from the legacy admin surface.
 
 The real-time transport endpoint is `/ws`.
 
-Connect with a registered Beam-ID in the query string:
+Agent sockets require the registered Beam-ID and a short-lived, single-use WebSocket ticket. Obtain
+the ticket with `POST /agents/:beamId/ws-ticket` and the agent API key. The API key therefore stays
+in the authenticated HTTPS request instead of appearing in a WebSocket URL. Transport authentication
+and per-frame Ed25519 signatures serve different purposes; both remain required.
 
 ```text
-wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory
+wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory&ticket=bwt_...single-use...
 ```
 
-You can also authenticate the socket with an API key instead of relying on per-message Ed25519 signatures:
-
-```text
-wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory&apiKey=bk_...your-key...
-```
+Non-browser clients may authenticate the WebSocket upgrade itself with
+`Authorization: Bearer <api-key>` or `X-API-Key`, but tickets are the portable default. Query-string API keys are disabled
+unless the explicit temporary migration flag `BEAM_ALLOW_LEGACY_WS_API_KEY_QUERY=true` is set.
+Result Frames must be signed by the connected recipient's Ed25519 identity. The `feed=intents`
+operator feed requires an authenticated directory admin session and is not a public status feed.
 
 Common message types:
 

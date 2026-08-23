@@ -5,7 +5,10 @@ import { createApp } from './server.js'
 import {
   assignDirectoryRole,
   createDatabase,
+  createWorkspaceMember,
   finalizeIntentLog,
+  getWorkspaceMember,
+  listWorkspaces,
   logIntentStart,
   registerAgent,
   setIntentLifecycleStatus,
@@ -23,6 +26,20 @@ function createAdminHeaders(
     role,
     directoryUrl: getLocalDirectoryUrl(),
   })
+  // Legacy surface scenarios exercise workspace behavior with global test roles.
+  // Materialize those fixtures as explicit tenant memberships under the RBAC model.
+  if (role !== 'admin') {
+    for (const workspace of listWorkspaces(db)) {
+      if (!getWorkspaceMember(db, workspace.id, email, 'human')) {
+        createWorkspaceMember(db, {
+          workspaceId: workspace.id,
+          principalId: email,
+          principalType: 'human',
+          role,
+        })
+      }
+    }
+  }
   const session = createAdminSession(db, { email, role })
   return {
     Authorization: `Bearer ${session.token}`,

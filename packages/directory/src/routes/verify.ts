@@ -89,10 +89,6 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
   const router = new Hono()
 
   const requireAgentApiKey = (c: Context, agent: AgentRow): Response | null => {
-    if (!agent.api_key_hash) {
-      return null
-    }
-
     const suppliedApiKey = getSuppliedApiKey(c.req.raw)
     return agentApiKeyMatches(agent, suppliedApiKey)
       ? null

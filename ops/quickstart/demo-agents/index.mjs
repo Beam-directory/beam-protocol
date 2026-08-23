@@ -6,6 +6,8 @@ const directoryUrl = (process.env.BEAM_DIRECTORY_URL ?? 'http://directory:3100')
 const busUrl = (process.env.BEAM_BUS_URL ?? 'http://message-bus:8420/v1/beam').replace(/\/$/, '')
 const busBaseUrl = busUrl.replace(/\/v1\/beam$/, '')
 const busApiKey = process.env.BEAM_BUS_API_KEY ?? ''
+const configuredAdminToken = process.env.BEAM_ADMIN_TOKEN?.trim() ?? ''
+const adminEmail = process.env.BEAM_ADMIN_EMAIL?.trim() ?? ''
 const identityPath = process.env.DEMO_IDENTITY_PATH ?? '/app/demo-identities.json'
 const port = Number.parseInt(process.env.PORT ?? '8790', 10)
 
@@ -44,6 +46,7 @@ let identities = null
 let clients = null
 let handlersAttached = false
 let seedPromise = null
+let adminTokenPromise = null
 
 async function waitForHealth(url, label, timeoutMs = 30_000) {
   const deadline = Date.now() + timeoutMs
@@ -118,10 +121,51 @@ function buildSeedSummary() {
   }
 }
 
+async function getAclAdminToken() {
+  if (configuredAdminToken) {
+    return configuredAdminToken
+  }
+  if (!adminEmail) {
+    throw new Error('ACL setup requires BEAM_ADMIN_TOKEN, or BEAM_ADMIN_EMAIL for a local development directory')
+  }
+  if (!adminTokenPromise) {
+    adminTokenPromise = (async () => {
+      const challenge = await requestJson(`${directoryUrl}/admin/auth/magic-link`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Origin: 'http://localhost:5173',
+        },
+        body: JSON.stringify({ email: adminEmail }),
+      })
+      if (typeof challenge.token !== 'string' || challenge.token.length === 0) {
+        throw new Error('The directory did not expose a local development token; set BEAM_ADMIN_TOKEN explicitly')
+      }
+      const verified = await requestJson(`${directoryUrl}/admin/auth/verify`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: challenge.token }),
+      })
+      if (typeof verified.token !== 'string' || verified.token.length === 0) {
+        throw new Error('The directory did not return a verified admin session token')
+      }
+      return verified.token
+    })().catch((error) => {
+      adminTokenPromise = null
+      throw error
+    })
+  }
+  return adminTokenPromise
+}
+
 async function allowIntent(targetBeamId, intentType, allowedFrom) {
+  const adminToken = await getAclAdminToken()
   await requestJson(`${directoryUrl}/acl`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ targetBeamId, intentType, allowedFrom }),
   })
 }

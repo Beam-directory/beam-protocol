@@ -1,14 +1,18 @@
-import { generateKeyPairSync, randomUUID } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
-import { requireAdminRole } from '../admin-auth.js'
+import { requireAdminRole, requireAdminSession, type AdminSession } from '../admin-auth.js'
 import { createAgentApiKey, hashApiKey } from '../api-key.js'
 import {
   createWorkspace,
   createWorkspaceIdentityBinding,
+  createWorkspaceMemberInvitation,
+  createWorkspaceMember,
   createWorkspacePartnerChannel,
   createWorkspaceThread,
   createWorkspaceThreadParticipant,
+  deleteWorkspaceMember,
+  expireWorkspaceMemberInvitations,
   getAgent,
   getIntentLogByNonce,
   getLatestIntentLogByTarget,
@@ -17,6 +21,10 @@ import {
   getWorkspaceBySlug,
   getWorkspaceIdentityBindingByBeamId,
   getWorkspaceIdentityBindingById,
+  getWorkspaceMember,
+  getWorkspaceMemberInvitationById,
+  getWorkspaceMemberInvitationByTokenHash,
+  getWorkspaceMemberById,
   getWorkspacePartnerChannelByBeamId,
   getWorkspacePartnerChannelById,
   getWorkspacePolicyDocument,
@@ -27,16 +35,24 @@ import {
   listOpenClawResolvedRoutesByBeamId,
   listWorkspaceIdentityBindings,
   listWorkspaceIdentityBindingsByBeamId,
+  listWorkspaceMembers,
+  listWorkspaceMemberInvitations,
   listWorkspacePartnerChannels,
   listWorkspaceThreadParticipants,
   listWorkspaceThreads,
   listWorkspaces,
+  listWorkspacesForHumanPrincipal,
   logAuditEvent,
   registerAgent,
+  revokeWorkspaceMemberInvitation,
+  acceptWorkspaceMemberInvitation,
   updateWorkspaceThread,
   updateWorkspacePartnerChannel,
   updateWorkspacePolicyDocument,
   updateWorkspaceIdentityBinding,
+  updateWorkspaceMemberRole,
+  WorkspaceOwnerRequiredError,
+  WorkspaceInvitationError,
 } from '../db.js'
 import type {
   AuditLogRow,
@@ -46,6 +62,9 @@ import type {
   WorkspaceIdentityBindingStatus,
   WorkspaceIdentityBindingType,
   WorkspaceIdentityLifecycleStatus,
+  WorkspaceMemberRole,
+  WorkspaceMemberInvitationRow,
+  WorkspaceMemberRow,
   OpenClawHostHealth,
   OpenClawRouteRuntimeState,
   OpenClawRouteSource,
@@ -79,6 +98,7 @@ const WORKSPACE_THREAD_KIND_SET = new Set<WorkspaceThreadKind>(['internal', 'han
 const WORKSPACE_THREAD_STATUS_SET = new Set<WorkspaceThreadStatus>(['open', 'blocked', 'closed'])
 const WORKSPACE_THREAD_PARTICIPANT_ROLE_SET = new Set<WorkspaceThreadParticipantRole>(['owner', 'participant', 'observer', 'approver'])
 const WORKSPACE_PRINCIPAL_TYPE_SET = new Set<WorkspacePrincipalType>(['human', 'agent', 'service', 'partner'])
+const WORKSPACE_MEMBER_ROLE_SET = new Set<WorkspaceMemberRole>(['owner', 'operator', 'viewer'])
 const WORKSPACE_PARTNER_CHANNEL_STATUS_SET = new Set<WorkspacePartnerChannelStatus>(['active', 'trial', 'blocked'])
 const WORKSPACE_SLUG_RE = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/
 const WORKSPACE_OVERVIEW_STALE_AFTER_HOURS = 24
@@ -106,6 +126,32 @@ type SerializedWorkspace = {
     partnerChannels: number
   }
   policyConfigured: boolean
+}
+
+type SerializedWorkspaceMember = {
+  id: number
+  workspaceId: number
+  principalId: string
+  principalType: WorkspacePrincipalType
+  role: WorkspaceMemberRole
+  createdAt: string
+  updatedAt: string
+}
+
+type SerializedWorkspaceMemberInvitation = {
+  id: string
+  workspaceId: number
+  email: string
+  role: WorkspaceMemberRole
+  status: WorkspaceMemberInvitationRow['status']
+  invitedBy: string
+  expiresAt: string
+  acceptedAt: string | null
+  acceptedBy: string | null
+  revokedAt: string | null
+  revokedBy: string | null
+  createdAt: string
+  updatedAt: string
 }
 
 type SerializedWorkspaceIdentityBinding = {
@@ -534,6 +580,15 @@ function normalizePrincipalType(value: unknown): WorkspacePrincipalType | null {
   return WORKSPACE_PRINCIPAL_TYPE_SET.has(normalized) ? normalized : null
 }
 
+function normalizeWorkspaceMemberRole(value: unknown): WorkspaceMemberRole | null {
+  if (typeof value !== 'string') {
+    return null
+  }
+
+  const normalized = value.trim().toLowerCase() as WorkspaceMemberRole
+  return WORKSPACE_MEMBER_ROLE_SET.has(normalized) ? normalized : null
+}
+
 function normalizeThreadParticipantRole(value: unknown): WorkspaceThreadParticipantRole | null {
   if (typeof value !== 'string') {
     return null
@@ -880,6 +935,12 @@ function summarizeWorkspaceAuditAction(action: string, details: Record<string, u
   switch (action) {
     case 'admin.workspace.created':
       return 'Workspace created.'
+    case 'admin.workspace_member.invited':
+      return 'Workspace member access granted.'
+    case 'admin.workspace_member.updated':
+      return 'Workspace member role updated.'
+    case 'admin.workspace_member.removed':
+      return 'Workspace member removed.'
     case 'admin.workspace_policy.updated':
       return 'Workspace policy updated.'
     case 'admin.workspace_identity.created':
@@ -933,6 +994,52 @@ export function serializeWorkspace(db: Database, row: WorkspaceRow): SerializedW
     },
     policyConfigured: policy.bindingRules.length > 0 || policy.workflowRules.length > 0 || policy.defaults.allowedPartners.length > 0 || policy.defaults.externalInitiation !== 'binding' || Boolean(policy.metadata.notes),
   }
+}
+
+function serializeWorkspaceMember(row: WorkspaceMemberRow): SerializedWorkspaceMember {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    principalId: row.principal_id,
+    principalType: row.principal_type,
+    role: row.role,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function serializeWorkspaceMemberInvitation(row: WorkspaceMemberInvitationRow): SerializedWorkspaceMemberInvitation {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    email: row.email,
+    role: row.role,
+    status: row.status,
+    invitedBy: row.invited_by,
+    expiresAt: row.expires_at,
+    acceptedAt: row.accepted_at,
+    acceptedBy: row.accepted_by,
+    revokedAt: row.revoked_at,
+    revokedBy: row.revoked_by,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+  }
+}
+
+function hashWorkspaceInvitationToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
+}
+
+function getDashboardUrl(): string {
+  return (process.env['BEAM_DASHBOARD_URL'] ?? process.env['APP_URL'] ?? 'https://dashboard.beam.directory').replace(/\/$/, '')
+}
+
+function maskEmail(email: string): string {
+  const [local = '', domain = ''] = email.split('@')
+  const maskedLocal = local.length <= 2
+    ? `${local.slice(0, 1)}*`
+    : `${local.slice(0, 2)}${'*'.repeat(Math.min(6, local.length - 2))}`
+  return `${maskedLocal}@${domain}`
 }
 
 function serializeWorkspaceIdentityBinding(db: Database, row: WorkspaceIdentityBindingRow): SerializedWorkspaceIdentityBinding {
@@ -1461,7 +1568,7 @@ function syncRoutedWorkspaceThread(
   db: Database,
   input: {
     actor: string
-    actorRole: 'admin' | 'operator' | 'viewer'
+    actorRole: WorkspaceMemberRole
     sourceWorkspace: WorkspaceRow
     sourceThread: WorkspaceThreadRow
     sourceSenderBinding: WorkspaceIdentityBindingRow
@@ -1950,16 +2057,81 @@ function isUniqueConstraintError(err: unknown, target: string): boolean {
   return err instanceof Error && err.message.includes(`UNIQUE constraint failed: ${target}`)
 }
 
+const WORKSPACE_ROLE_ORDER: Record<WorkspaceMemberRole, number> = {
+  viewer: 0,
+  operator: 1,
+  owner: 2,
+}
+
+type WorkspaceAccess = {
+  session: AdminSession
+  workspace: WorkspaceRow
+  workspaceRole: WorkspaceMemberRole
+}
+
+function workspaceAccessError(status: 403 | 404, error: string, errorCode: string): Response {
+  return new Response(JSON.stringify({ error, errorCode }), {
+    status,
+    headers: {
+      'content-type': 'application/json',
+      'cache-control': 'no-store',
+    },
+  })
+}
+
+function requireWorkspaceRole(
+  db: Database,
+  request: Request,
+  slug: string,
+  requiredRole: WorkspaceMemberRole,
+): WorkspaceAccess | Response {
+  const auth = requireAdminSession(db, request)
+  if (auth instanceof Response) {
+    return auth
+  }
+
+  const workspace = getWorkspaceBySlug(db, slug)
+  if (!workspace) {
+    return workspaceAccessError(404, 'Workspace not found', 'NOT_FOUND')
+  }
+
+  if (auth.session.scope === 'platform' && auth.session.role === 'admin') {
+    return {
+      session: auth.session,
+      workspace,
+      workspaceRole: 'owner',
+    }
+  }
+
+  const member = getWorkspaceMember(db, workspace.id, auth.session.email, 'human')
+  if (!member) {
+    // Do not reveal whether an inaccessible tenant exists.
+    return workspaceAccessError(404, 'Workspace not found', 'NOT_FOUND')
+  }
+
+  if (WORKSPACE_ROLE_ORDER[member.role] < WORKSPACE_ROLE_ORDER[requiredRole]) {
+    return workspaceAccessError(403, `Workspace ${requiredRole} role required`, 'WORKSPACE_ROLE_REQUIRED')
+  }
+
+  return {
+    session: auth.session,
+    workspace,
+    workspaceRole: member.role,
+  }
+}
+
 export function workspacesRouter(db: Database): Hono {
   const router = new Hono()
 
   router.get('/', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireAdminSession(db, c.req.raw)
     if (auth instanceof Response) {
       return auth
     }
 
-    const rows = listWorkspaces(db)
+    const rows = auth.session.scope === 'platform' && auth.session.role === 'admin'
+      ? listWorkspaces(db)
+      : listWorkspacesForHumanPrincipal(db, auth.session.email)
     c.header('Cache-Control', 'no-store')
     return c.json({
       workspaces: rows.map((row) => serializeWorkspace(db, row)),
@@ -1967,8 +2139,90 @@ export function workspacesRouter(db: Database): Hono {
     })
   })
 
+  router.get('/invitations/:token', (c) => {
+    const token = c.req.param('token').trim()
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      return c.json({ error: 'Invitation is invalid or no longer available', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const invitation = getWorkspaceMemberInvitationByTokenHash(db, hashWorkspaceInvitationToken(token))
+    if (!invitation) {
+      return c.json({ error: 'Invitation is invalid or no longer available', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    expireWorkspaceMemberInvitations(db, { workspaceId: invitation.workspace_id })
+    const current = getWorkspaceMemberInvitationById(db, invitation.id)
+    const workspace = getWorkspaceById(db, invitation.workspace_id)
+    if (!current || current.status !== 'pending' || !workspace) {
+      return c.json({ error: 'Invitation is invalid or no longer available', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      invitation: {
+        workspace: {
+          slug: workspace.slug,
+          name: workspace.name,
+        },
+        emailMasked: maskEmail(current.email),
+        role: current.role,
+        expiresAt: current.expires_at,
+      },
+    })
+  })
+
+  router.post('/invitations/:token/accept', (c) => {
+    const auth = requireAdminSession(db, c.req.raw)
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const token = c.req.param('token').trim()
+    if (!/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      return c.json({ error: 'Invitation is invalid or no longer available', errorCode: 'WORKSPACE_INVITATION_INVALID' }, 404)
+    }
+
+    try {
+      const result = acceptWorkspaceMemberInvitation(db, {
+        tokenHash: hashWorkspaceInvitationToken(token),
+        email: auth.session.email,
+      })
+      const workspace = getWorkspaceById(db, result.invitation.workspace_id)
+      if (!workspace) {
+        return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_invitation.accepted',
+        actor: auth.session.email,
+        target: `${workspace.slug}:human:${auth.session.email}`,
+        details: {
+          authScope: auth.session.scope,
+          invitationId: result.invitation.id,
+          memberRole: result.member.role,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        workspace: serializeWorkspace(db, workspace),
+        member: serializeWorkspaceMember(result.member),
+      })
+    } catch (err) {
+      if (err instanceof WorkspaceInvitationError) {
+        const status = err.code === 'WORKSPACE_INVITATION_EMAIL_MISMATCH' ? 403 : 404
+        return c.json({ error: err.message, errorCode: err.code }, status)
+      }
+      if (err instanceof WorkspaceOwnerRequiredError) {
+        return c.json({ error: err.message, errorCode: err.code }, 409)
+      }
+      console.error('Workspace invitation acceptance error:', err)
+      return c.json({ error: 'Failed to accept workspace invitation', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
   router.post('/', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    const auth = requireAdminRole(db, c.req.raw, 'viewer')
     if (auth instanceof Response) {
       return auth
     }
@@ -2029,6 +2283,7 @@ export function workspacesRouter(db: Database): Hono {
         status: status ?? 'active',
         defaultThreadScope: defaultThreadScope ?? 'internal',
         externalHandoffsEnabled: externalHandoffsEnabled ?? false,
+        ownerPrincipalId: auth.session.email,
       })
 
       logAuditEvent(db, {
@@ -2036,7 +2291,8 @@ export function workspacesRouter(db: Database): Hono {
         actor: auth.session.email,
         target: workspace.slug,
         details: {
-          role: auth.session.role,
+          workspaceRole: 'owner',
+          platformRole: auth.session.role,
           orgName: workspace.org_name,
           defaultThreadScope: workspace.default_thread_scope,
           externalHandoffsEnabled: workspace.external_handoffs_enabled === 1,
@@ -2055,31 +2311,369 @@ export function workspacesRouter(db: Database): Hono {
     }
   })
 
-  router.get('/:slug', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+  router.get('/:slug/access', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
 
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      access: {
+        email: auth.session.email,
+        authScope: auth.session.scope,
+        platformRole: auth.session.scope === 'platform' ? auth.session.role : null,
+        workspaceRole: auth.workspaceRole,
+      },
+    })
+  })
+
+  router.get('/:slug/members', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
     }
+
+    const rows = listWorkspaceMembers(db, auth.workspace.id)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, auth.workspace),
+      members: rows.map(serializeWorkspaceMember),
+      total: rows.length,
+    })
+  })
+
+  router.get('/:slug/invitations', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const rows = listWorkspaceMemberInvitations(db, auth.workspace.id)
+    c.header('Cache-Control', 'no-store')
+    return c.json({
+      workspace: serializeWorkspace(db, auth.workspace),
+      invitations: rows.map(serializeWorkspaceMemberInvitation),
+      total: rows.length,
+    })
+  })
+
+  router.post('/:slug/invitations', async (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const email = normalizeOptionalString(raw.email)?.toLowerCase()
+    if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
+      return c.json({ error: 'Valid email required', errorCode: 'INVALID_MEMBER_EMAIL' }, 400)
+    }
+
+    const role = 'role' in raw ? normalizeWorkspaceMemberRole(raw.role) : 'viewer'
+    if (!role) {
+      return c.json({ error: 'Invalid workspace member role', errorCode: 'INVALID_WORKSPACE_MEMBER_ROLE' }, 400)
+    }
+
+    if (getWorkspaceMember(db, auth.workspace.id, email, 'human')) {
+      return c.json({ error: 'Workspace member already exists', errorCode: 'WORKSPACE_MEMBER_EXISTS' }, 409)
+    }
+
+    const expiresInHours = raw.expiresInHours === undefined ? 72 : Number(raw.expiresInHours)
+    if (!Number.isInteger(expiresInHours) || expiresInHours < 1 || expiresInHours > 14 * 24) {
+      return c.json({ error: 'expiresInHours must be an integer between 1 and 336', errorCode: 'INVALID_INVITATION_EXPIRY' }, 400)
+    }
+
+    const token = randomBytes(32).toString('base64url')
+    const expiresAt = new Date(Date.now() + expiresInHours * 60 * 60 * 1000).toISOString()
+    try {
+      const invitation = createWorkspaceMemberInvitation(db, {
+        id: randomUUID(),
+        workspaceId: auth.workspace.id,
+        email,
+        role,
+        tokenHash: hashWorkspaceInvitationToken(token),
+        invitedBy: auth.session.email,
+        expiresAt,
+      })
+      const url = `${getDashboardUrl()}/workspace-invite?token=${encodeURIComponent(token)}`
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_invitation.created',
+        actor: auth.session.email,
+        target: `${auth.workspace.slug}:human:${email}`,
+        details: {
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
+          authScope: auth.session.scope,
+          invitationId: invitation.id,
+          memberRole: role,
+          expiresAt,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        invitation: serializeWorkspaceMemberInvitation(invitation),
+        url,
+      }, 201)
+    } catch (err) {
+      if (isUniqueConstraintError(err, 'workspace_member_invitations.workspace_id, workspace_member_invitations.email')) {
+        return c.json({ error: 'A pending invitation already exists for this email', errorCode: 'WORKSPACE_INVITATION_EXISTS' }, 409)
+      }
+      console.error('Workspace invitation create error:', err)
+      return c.json({ error: 'Failed to create workspace invitation', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.delete('/:slug/invitations/:id', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const invitationId = c.req.param('id').trim()
+    const existing = getWorkspaceMemberInvitationById(db, invitationId)
+    if (!existing || existing.workspace_id !== auth.workspace.id) {
+      return c.json({ error: 'Workspace invitation not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    const revoked = revokeWorkspaceMemberInvitation(db, {
+      id: invitationId,
+      workspaceId: auth.workspace.id,
+      revokedBy: auth.session.email,
+    })
+    if (!revoked) {
+      return c.json({ error: 'Workspace invitation is not pending', errorCode: 'WORKSPACE_INVITATION_NOT_PENDING' }, 409)
+    }
+
+    logAuditEvent(db, {
+      action: 'admin.workspace_invitation.revoked',
+      actor: auth.session.email,
+      target: `${auth.workspace.slug}:human:${revoked.email}`,
+      details: {
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
+        authScope: auth.session.scope,
+        invitationId: revoked.id,
+        memberRole: revoked.role,
+      },
+    })
+
+    c.header('Cache-Control', 'no-store')
+    return c.json({ invitation: serializeWorkspaceMemberInvitation(revoked) })
+  })
+
+  router.post('/:slug/members', async (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const raw = body as Record<string, unknown>
+    const principalType = 'principalType' in raw ? normalizePrincipalType(raw.principalType) : 'human'
+    if (!principalType) {
+      return c.json({ error: 'Invalid principalType', errorCode: 'INVALID_PRINCIPAL_TYPE' }, 400)
+    }
+
+    const rawPrincipalId = normalizeOptionalString(raw.principalId ?? raw.email)
+    if (!rawPrincipalId) {
+      return c.json({ error: 'principalId is required', errorCode: 'INVALID_PRINCIPAL_ID' }, 400)
+    }
+    const principalId = principalType === 'human' ? rawPrincipalId.toLowerCase() : rawPrincipalId
+    if (principalType === 'human' && !principalId.includes('@')) {
+      return c.json({ error: 'Human principalId must be an email address', errorCode: 'INVALID_MEMBER_EMAIL' }, 400)
+    }
+
+    const role = 'role' in raw ? normalizeWorkspaceMemberRole(raw.role) : 'viewer'
+    if (!role) {
+      return c.json({ error: 'Invalid workspace member role', errorCode: 'INVALID_WORKSPACE_MEMBER_ROLE' }, 400)
+    }
+
+    try {
+      const member = createWorkspaceMember(db, {
+        workspaceId: auth.workspace.id,
+        principalId,
+        principalType,
+        role,
+      })
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_member.invited',
+        actor: auth.session.email,
+        target: `${auth.workspace.slug}:${principalType}:${principalId}`,
+        details: {
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
+          principalType,
+          memberRole: role,
+          accessGrant: 'direct',
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({
+        member: serializeWorkspaceMember(member),
+        invitation: {
+          mode: 'direct_access_grant',
+          accepted: true,
+        },
+      }, 201)
+    } catch (err) {
+      if (isUniqueConstraintError(err, 'workspace_members.workspace_id, workspace_members.principal_id, workspace_members.principal_type')) {
+        return c.json({ error: 'Workspace member already exists', errorCode: 'WORKSPACE_MEMBER_EXISTS' }, 409)
+      }
+      if (err instanceof WorkspaceOwnerRequiredError) {
+        return c.json({ error: err.message, errorCode: err.code }, 409)
+      }
+
+      console.error('Workspace member create error:', err)
+      return c.json({ error: 'Failed to create workspace member', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.patch('/:slug/members/:id', async (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const memberId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(memberId) || memberId <= 0) {
+      return c.json({ error: 'Invalid workspace member id', errorCode: 'INVALID_WORKSPACE_MEMBER_ID' }, 400)
+    }
+
+    const existing = getWorkspaceMemberById(db, memberId)
+    if (!existing || existing.workspace_id !== auth.workspace.id) {
+      return c.json({ error: 'Workspace member not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+
+    const role = normalizeWorkspaceMemberRole((body as Record<string, unknown>).role)
+    if (!role) {
+      return c.json({ error: 'Invalid workspace member role', errorCode: 'INVALID_WORKSPACE_MEMBER_ROLE' }, 400)
+    }
+
+    try {
+      const member = updateWorkspaceMemberRole(db, { id: existing.id, role })
+      if (!member) {
+        return c.json({ error: 'Workspace member not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_member.updated',
+        actor: auth.session.email,
+        target: `${auth.workspace.slug}:${existing.principal_type}:${existing.principal_id}`,
+        details: {
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
+          previousRole: existing.role,
+          memberRole: member.role,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({ member: serializeWorkspaceMember(member) })
+    } catch (err) {
+      if (err instanceof WorkspaceOwnerRequiredError) {
+        return c.json({ error: err.message, errorCode: err.code }, 409)
+      }
+      console.error('Workspace member update error:', err)
+      return c.json({ error: 'Failed to update workspace member', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.delete('/:slug/members/:id', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
+    if (auth instanceof Response) {
+      return auth
+    }
+
+    const memberId = Number.parseInt(c.req.param('id'), 10)
+    if (!Number.isFinite(memberId) || memberId <= 0) {
+      return c.json({ error: 'Invalid workspace member id', errorCode: 'INVALID_WORKSPACE_MEMBER_ID' }, 400)
+    }
+
+    const existing = getWorkspaceMemberById(db, memberId)
+    if (!existing || existing.workspace_id !== auth.workspace.id) {
+      return c.json({ error: 'Workspace member not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    try {
+      const removed = deleteWorkspaceMember(db, existing.id)
+      if (!removed) {
+        return c.json({ error: 'Workspace member not found', errorCode: 'NOT_FOUND' }, 404)
+      }
+
+      logAuditEvent(db, {
+        action: 'admin.workspace_member.removed',
+        actor: auth.session.email,
+        target: `${auth.workspace.slug}:${removed.principal_type}:${removed.principal_id}`,
+        details: {
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
+          memberRole: removed.role,
+        },
+      })
+
+      c.header('Cache-Control', 'no-store')
+      return c.json({ removed: serializeWorkspaceMember(removed) })
+    } catch (err) {
+      if (err instanceof WorkspaceOwnerRequiredError) {
+        return c.json({ error: err.message, errorCode: err.code }, 409)
+      }
+      console.error('Workspace member delete error:', err)
+      return c.json({ error: 'Failed to delete workspace member', errorCode: 'DB_ERROR' }, 500)
+    }
+  })
+
+  router.get('/:slug', (c) => {
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
+    if (auth instanceof Response) {
+      return auth
+    }
+    const workspace = auth.workspace
 
     c.header('Cache-Control', 'no-store')
     return c.json({ workspace: serializeWorkspace(db, workspace) })
   })
 
   router.get('/:slug/overview', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     c.header('Cache-Control', 'no-store')
     return c.json({
@@ -2089,30 +2683,22 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/approval-queue', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     c.header('Cache-Control', 'no-store')
     return c.json(buildWorkspaceApprovalQueue(db, workspace))
   })
 
   router.get('/:slug/partner-channels', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const localBeamIds = listWorkspaceIdentityBindings(db, workspace.id)
       .filter((binding) => binding.binding_type !== 'partner')
@@ -2128,15 +2714,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/partner-channels', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     let body: unknown
     try {
@@ -2179,7 +2761,8 @@ export function workspacesRouter(db: Database): Hono {
         actor: auth.session.email,
         target: `${workspace.slug}:${partnerBeamId}`,
         details: {
-          role: auth.session.role,
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
           owner: channel.owner,
           status: channel.status,
         },
@@ -2204,15 +2787,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.patch('/:slug/partner-channels/:id', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const channelId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(channelId) || channelId <= 0) {
@@ -2266,7 +2845,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:${existing.partner_beam_id}`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         owner: updated.owner,
         status: updated.status,
         lastIntentNonce: updated.last_intent_nonce,
@@ -2284,15 +2864,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/threads', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const rows = listWorkspaceThreads(db, workspace.id)
     c.header('Cache-Control', 'no-store')
@@ -2304,15 +2880,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/threads/:id', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const threadId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(threadId) || threadId <= 0) {
@@ -2334,15 +2906,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/threads', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     let body: unknown
     try {
@@ -2509,7 +3077,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:${thread.id}`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         kind: thread.kind,
         workflowType: thread.workflow_type,
         draftIntentType: thread.draft_intent_type,
@@ -2526,15 +3095,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/threads/:id/dispatch', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const threadId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(threadId) || threadId <= 0) {
@@ -2763,7 +3328,7 @@ export function workspacesRouter(db: Database): Hono {
       try {
         workspaceSync = syncRoutedWorkspaceThread(db, {
           actor: auth.session.email,
-          actorRole: auth.session.role,
+          actorRole: auth.workspaceRole,
           sourceWorkspace: workspace,
           sourceThread: thread,
           sourceSenderBinding: senderBinding,
@@ -2781,7 +3346,8 @@ export function workspacesRouter(db: Database): Hono {
         actor: auth.session.email,
         target: `${workspace.slug}:${thread.id}`,
         details: {
-          role: auth.session.role,
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
           linkedIntentNonce: result.nonce,
           workflowType: thread.workflow_type,
           intentType: effectiveIntentType,
@@ -2871,30 +3437,22 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/policy', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     c.header('Cache-Control', 'no-store')
     return c.json(buildWorkspacePolicyEnvelope(db, workspace))
   })
 
   router.patch('/:slug/policy', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     let body: unknown
     try {
@@ -2915,7 +3473,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: workspace.slug,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         defaultExternalInitiation: result.policy.defaults.externalInitiation,
         bindingRules: result.policy.bindingRules.length,
         workflowRules: result.policy.workflowRules.length,
@@ -2930,15 +3489,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/timeline', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const limit = Math.max(
       1,
@@ -2958,15 +3513,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/digest', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const days = Math.max(1, Number.parseInt(c.req.query('days') ?? String(WORKSPACE_DIGEST_DEFAULT_DAYS), 10) || WORKSPACE_DIGEST_DEFAULT_DAYS)
     const format = (c.req.query('format') ?? 'json').trim().toLowerCase()
@@ -2988,15 +3539,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/digest/deliver', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     let body: Record<string, unknown> = {}
     try {
@@ -3029,7 +3576,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:digest`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         workspace: workspace.slug,
         days,
         deliveredTo: targetEmail,
@@ -3047,15 +3595,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.get('/:slug/identities', (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'viewer')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'viewer')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const rows = listWorkspaceIdentityBindings(db, workspace.id)
     c.header('Cache-Control', 'no-store')
@@ -3067,15 +3611,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/identities', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     let body: unknown
     try {
@@ -3151,7 +3691,8 @@ export function workspacesRouter(db: Database): Hono {
         actor: auth.session.email,
         target: `${workspace.slug}:${beamId}`,
         details: {
-          role: auth.session.role,
+          workspaceRole: auth.workspaceRole,
+          platformRole: auth.session.role,
           bindingType,
           owner,
           runtimeType,
@@ -3173,15 +3714,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.patch('/:slug/identities/:id', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const bindingId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(bindingId) || bindingId <= 0) {
@@ -3249,7 +3786,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:${existing.beam_id}`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         owner,
         runtimeType,
         policyProfile,
@@ -3265,15 +3803,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.patch('/:slug/identities/:id/policy', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'operator')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const bindingId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(bindingId) || bindingId <= 0) {
@@ -3333,7 +3867,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:${binding.beam_id}`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         externalInitiation: externalInitiation ?? 'inherit',
         allowedPartners: allowedPartners ?? [],
       },
@@ -3358,15 +3893,11 @@ export function workspacesRouter(db: Database): Hono {
   })
 
   router.post('/:slug/identities/:id/reissue-local-credential', async (c) => {
-    const auth = requireAdminRole(db, c.req.raw, 'admin')
+    const auth = requireWorkspaceRole(db, c.req.raw, c.req.param('slug'), 'owner')
     if (auth instanceof Response) {
       return auth
     }
-
-    const workspace = getWorkspaceBySlug(db, c.req.param('slug'))
-    if (!workspace) {
-      return c.json({ error: 'Workspace not found', errorCode: 'NOT_FOUND' }, 404)
-    }
+    const workspace = auth.workspace
 
     const bindingId = Number.parseInt(c.req.param('id'), 10)
     if (!Number.isFinite(bindingId) || bindingId <= 0) {
@@ -3415,7 +3946,8 @@ export function workspacesRouter(db: Database): Hono {
       actor: auth.session.email,
       target: `${workspace.slug}:${binding.beam_id}`,
       details: {
-        role: auth.session.role,
+        workspaceRole: auth.workspaceRole,
+        platformRole: auth.session.role,
         did: toBeamDID(binding.beam_id),
         workspace: workspace.slug,
       },

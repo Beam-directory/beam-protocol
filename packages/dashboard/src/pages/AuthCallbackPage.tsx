@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { ArrowRight, LoaderCircle, Radio, ShieldAlert } from 'lucide-react'
 import { useAdminAuth } from '../lib/admin-auth'
@@ -8,21 +8,24 @@ export default function AuthCallbackPage() {
   const { verify } = useAdminAuth()
   const navigate = useNavigate()
   const [error, setError] = useState('')
+  const verificationStarted = useRef(false)
 
   useEffect(() => {
+    if (verificationStarted.current) return
+    verificationStarted.current = true
     const token = searchParams.get('token')
     if (!token) {
       setError('No token found in URL')
       return
     }
 
-    verify(token).then(success => {
-      if (success) {
-        navigate('/', { replace: true })
-      } else {
+    verify(token)
+      .then((returnTo) => {
+        navigate(returnTo, { replace: true })
+      })
+      .catch(() => {
         setError('Invalid or expired magic link. Please request a new one.')
-      }
-    })
+      })
   }, [searchParams, verify, navigate])
 
   return (

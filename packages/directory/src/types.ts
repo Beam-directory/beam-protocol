@@ -106,10 +106,14 @@ export interface DirectoryRoleRow {
   directory_url: string
 }
 
+export type AdminAuthScope = 'platform' | 'workspace'
+
 export interface AdminMagicLinkRow {
   token: string
   email: string
   role: 'admin' | 'operator' | 'viewer'
+  auth_scope: AdminAuthScope
+  return_to: string | null
   created_at: string
   expires_at: string
   used: number
@@ -119,6 +123,7 @@ export interface AdminSessionRow {
   id: string
   email: string
   role: 'admin' | 'operator' | 'viewer'
+  auth_scope: AdminAuthScope
   created_at: string
   last_seen_at: string
   expires_at: string
@@ -162,6 +167,7 @@ export interface OperatorNotificationRow {
 export type WorkspaceStatus = 'active' | 'paused' | 'archived'
 export type WorkspaceThreadScope = 'internal' | 'handoff'
 export type WorkspaceMemberRole = 'owner' | 'operator' | 'viewer'
+export type WorkspaceMemberInvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
 export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingStatus = 'active' | 'paused'
@@ -209,6 +215,29 @@ export interface WorkspaceMemberRow {
   principal_id: string
   principal_type: WorkspacePrincipalType
   role: WorkspaceMemberRole
+  created_at: string
+  updated_at: string
+}
+
+export interface WorkspaceMemberGrant {
+  principalId: string
+  principalType: WorkspacePrincipalType
+  role: WorkspaceMemberRole
+}
+
+export interface WorkspaceMemberInvitationRow {
+  id: string
+  workspace_id: number
+  email: string
+  role: WorkspaceMemberRole
+  token_hash: string
+  status: WorkspaceMemberInvitationStatus
+  invited_by: string
+  expires_at: string
+  accepted_at: string | null
+  accepted_by: string | null
+  revoked_at: string | null
+  revoked_by: string | null
   created_at: string
   updated_at: string
 }

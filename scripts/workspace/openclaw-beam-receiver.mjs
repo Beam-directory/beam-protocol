@@ -109,16 +109,31 @@ async function openWebSocket(url) {
   return new WS(url)
 }
 
-function buildWsUrl(beamId, apiKey) {
+function buildWsUrl(beamId, ticket) {
   const params = new URLSearchParams({
     beamId,
-    apiKey,
+    ticket,
   })
 
   return directoryUrl
     .replace(/^http:\/\//u, 'ws://')
     .replace(/^https:\/\//u, 'wss://')
     .replace(/\/$/u, '') + `/ws?${params.toString()}`
+}
+
+async function requestWsTicket(beamId, apiKey) {
+  const response = await fetch(`${directoryUrl}/agents/${encodeURIComponent(beamId)}/ws-ticket`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+  })
+  const body = await response.json().catch(() => ({}))
+  if (!response.ok || typeof body.ticket !== 'string' || !body.ticket.startsWith('bwt_')) {
+    throw new Error(`WebSocket ticket request failed for ${beamId} (${response.status})`)
+  }
+  return body.ticket
 }
 
 async function postRouteEvent(route, reportedState) {
@@ -385,7 +400,8 @@ class RouteConnection {
       return
     }
 
-    const wsUrl = buildWsUrl(this.route.beamId, this.route.apiKey)
+    const ticket = await requestWsTicket(this.route.beamId, this.route.apiKey)
+    const wsUrl = buildWsUrl(this.route.beamId, ticket)
     log(`connecting ${this.route.beamId} (${this.route.runtimeType})`)
     const ws = await openWebSocket(wsUrl)
     this.ws = ws
