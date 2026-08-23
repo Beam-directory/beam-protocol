@@ -66,11 +66,26 @@ function directoryAgent(beamId) {
   }
 }
 
-async function waitForHealth(url, child, timeoutMs = 15_000) {
+function sanitizedLogTail(logs, sensitiveValues) {
+  let sanitized = logs
+  for (const value of sensitiveValues) {
+    if (value) sanitized = sanitized.replaceAll(value, '[REDACTED]')
+  }
+  return sanitized.trim().slice(-4_096)
+}
+
+function containerFailure(message, logs, sensitiveValues) {
+  const tail = sanitizedLogTail(logs, sensitiveValues)
+  return new Error(tail ? `${message}\nSanitized container logs:\n${tail}` : message)
+}
+
+async function waitForHealth(url, child, getLogs, sensitiveValues, timeoutMs = 15_000) {
   const deadline = Date.now() + timeoutMs
   let lastError
   while (Date.now() < deadline) {
-    if (child.exitCode !== null) throw new Error(`MCP container exited early with code ${child.exitCode}`)
+    if (child.exitCode !== null) {
+      throw containerFailure(`MCP container exited early with code ${child.exitCode}`, getLogs(), sensitiveValues)
+    }
     try {
       const response = await fetch(url, { signal: AbortSignal.timeout(1_000) })
       if (response.status === 200) return
@@ -80,7 +95,24 @@ async function waitForHealth(url, child, timeoutMs = 15_000) {
     }
     await new Promise((resolve) => setTimeout(resolve, 150))
   }
-  throw new Error(`MCP container health timed out: ${lastError?.message ?? 'unknown error'}`)
+  throw containerFailure(
+    `MCP container health timed out: ${lastError?.message ?? 'unknown error'}`,
+    getLogs(),
+    sensitiveValues,
+  )
+}
+
+async function prepareSecretMountsForRuntime(secretDirectory) {
+  if (process.platform !== 'linux') return
+  await execFile('docker', [
+    'run', '--rm',
+    '--network', 'none',
+    '--user', '0:0',
+    '--entrypoint', '/bin/sh',
+    '--mount', `type=bind,src=${secretDirectory},dst=/run/secrets,rw`,
+    'beam-mcp:local',
+    '-c', 'chmod 0711 /run/secrets && chown 1000:1000 /run/secrets/* && chmod 0400 /run/secrets/*',
+  ])
 }
 
 async function stopContainer(child, name) {
@@ -172,6 +204,7 @@ try {
   for (const [name, value] of Object.entries(secrets)) {
     await writeFile(join(secretDirectory, name), `${value}\n`, { encoding: 'utf8', mode: 0o600 })
   }
+  await prepareSecretMountsForRuntime(secretDirectory)
 
   const dockerArgs = [
     'run', '--rm', '--name', containerName,
@@ -207,7 +240,12 @@ try {
     })
   }
 
-  await waitForHealth(new URL('/health', mcpUrl), dockerChild)
+  await waitForHealth(
+    new URL('/health', mcpUrl),
+    dockerChild,
+    () => containerLogs,
+    [accessToken, ...Object.values(secrets)],
+  )
   const inspection = JSON.parse((await execFile('docker', ['inspect', containerName, '--format', '{{json .Config.Env}}'])).stdout)
   const serializedInspection = JSON.stringify(inspection)
   for (const secret of Object.values(secrets)) assert.equal(serializedInspection.includes(secret), false)
