@@ -1,10 +1,9 @@
 {
   "schemaVersion": 1,
   "release": "1.7.0",
-  "testedAt": "2026-08-23T09:34:37.988Z",
+  "testedAt": "2026-08-23T10:12:42.000Z",
   "gateEligible": false,
   "gateIneligibilityReasons": [
-    "Grok cloud connector OAuth is pending action-time approval",
     "No external operator run has been completed",
     "The public Directory currently has zero business-assurance targets"
   ],
@@ -71,8 +70,24 @@
     "localMcpConfigAdded": true,
     "oauthChallengeDetected": true,
     "webConnectorFormPrepared": true,
-    "persistentOAuthApprovalPending": true,
-    "connectionVerified": false
+    "persistentOAuthApprovalPending": false,
+    "connectionVerified": true,
+    "connectorStatus": "Connected",
+    "authorizationCodeTokenIssued": true,
+    "issuedScopes": [
+      "beam:read"
+    ],
+    "sendScopeAssigned": false,
+    "pkceMethod": "S256",
+    "redirectUri": "https://grok.com/connectors-oauth-exchange-code/",
+    "dynamicClientRegistrationClosed": true,
+    "registrationAccessTokenRotatedAndDiscarded": true,
+    "toolInvocationVerified": true,
+    "invokedTool": "beam_status",
+    "toolCardObserved": true,
+    "beamSendAdvertised": false,
+    "handoffPrepared": false,
+    "messageSent": false
   },
   "directory": {
     "publicRelease": "1.6.0",

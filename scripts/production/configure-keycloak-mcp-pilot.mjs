@@ -221,8 +221,9 @@ const audienceScopeId = await ensureClientScope({
 })
 
 const realmDefaultScopes = await request(`${realmPath}/default-default-client-scopes`, { token: adminToken })
-if (realmDefaultScopes.some((scope) => scope.id === readScopeId)) {
-  await request(`${realmPath}/default-default-client-scopes/${encodeURIComponent(readScopeId)}`, {
+for (const scope of realmDefaultScopes) {
+  if (scope.id === audienceScopeId) continue
+  await request(`${realmPath}/default-default-client-scopes/${encodeURIComponent(scope.id)}`, {
     method: 'DELETE', token: adminToken, expected: [204],
   })
 }
@@ -232,6 +233,18 @@ if (!realmDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
   })
 }
 
+const realmOptionalScopes = await request(`${realmPath}/default-optional-client-scopes`, { token: adminToken })
+for (const scope of realmOptionalScopes) {
+  if (scope.id === readScopeId) continue
+  await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(scope.id)}`, {
+    method: 'DELETE', token: adminToken, expected: [204],
+  })
+}
+if (!realmOptionalScopes.some((scope) => scope.id === readScopeId)) {
+  await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(readScopeId)}`, {
+    method: 'PUT', token: adminToken, expected: [204],
+  })
+}
 async function ensureClient(representation) {
   const clients = await request(`${realmPath}/clients?clientId=${encodeURIComponent(representation.clientId)}`, { token: adminToken })
   const existing = clients.find((client) => client.clientId === representation.clientId)

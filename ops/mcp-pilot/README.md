@@ -62,6 +62,42 @@ connector creation, an external operator run, and a lookup of a real
 business-assurance target remain separate release evidence. Do not create the
 release-gate evidence file from an internal smoke or fixture.
 
+Grok's cloud connector performs anonymous dynamic client registration from
+rotating Google Cloud egress addresses. Keep anonymous registration closed in
+steady state. The helper below supports a short, max-one-client registration
+window and fails closed by default:
+
+```bash
+node scripts/production/configure-keycloak-grok-dcr-window.mjs \
+  --mode open \
+  --activate-new-client \
+  --trusted-domain '*.bc.googleusercontent.com' \
+  --trusted-domain grok.com
+
+node scripts/production/configure-keycloak-grok-dcr-window.mjs \
+  --mode closed
+```
+
+Both commands are dry runs unless `--apply` and an admin password file are
+provided. Active-client mode requires reverse-confirmed Google Cloud egress,
+requires every registered client URI to match `grok.com`, allows only one new
+client, and exposes no send scope. Close the window immediately after the new
+client appears. A staging mode without `--activate-new-client` creates the one
+new client disabled for callback inspection.
+
+After resolving the exact new Keycloak client UUID, pin and harden only that
+client:
+
+```bash
+node scripts/production/finalize-keycloak-grok-client.mjs \
+  --client-uuid 00000000-0000-0000-0000-000000000000
+```
+
+The finalizer verifies the exact Grok callback and origin, enforces PKCE S256,
+keeps only the Beam audience plus optional `beam:read`, and rotates then
+discards the dynamic-registration management token. It never deletes older
+clients automatically; disable and review any failed registration separately.
+
 Before any general-availability decision, rescan all three exact images. The
 read-only pilot may document a time-bounded Keycloak risk exception, but an
 exception for the pilot is not a market-release security signoff.
