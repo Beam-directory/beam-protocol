@@ -6,6 +6,8 @@ primary_region = "fra"
 [env]
   PORT = "3100"
   DB_PATH = "/data/beam-directory.db"
+  BEAM_DIRECTORY_URL = "https://api.beam.directory"
+  PUBLIC_BASE_URL = "https://api.beam.directory"
   # Secret: JWT_SECRET (set via `fly secrets set JWT_SECRET=...`)
 
 [http_service]
