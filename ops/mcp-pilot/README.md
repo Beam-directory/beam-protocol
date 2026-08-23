@@ -12,10 +12,20 @@ two read-only tools, requires an exact resource audience, and refuses targets
 below Beam's independently reviewed `business` tier. Removing that last gate is
 not a valid way to complete pilot evidence.
 
+The pilot enables Keycloak's versioned `resource-indicators:v1` feature. The
+confidential resource-server client ID and its `resource_url` attribute are both
+the canonical `https://mcp.beam.directory/mcp` URL. This is required so RFC 8707
+post-processing preserves the exact URL audience while allowing that same
+resource server to introspect the token. `beam:read` is optional and must be
+requested explicitly; the audience mapper remains a default client scope.
+
 All credential values are Fly file secrets. Store the source files outside the
 repository with mode `0600`, base64-encode each file when importing it into Fly,
 and never pass a secret as a command-line argument. The `*_B64` Fly secret is
 decoded into the corresponding `guest_path` before the container entrypoint.
+Fly initially materializes injected files with broad execute/read bits, so each
+pilot image starts through a minimal root entrypoint that changes ownership and
+mode to `0400`, then drops to the normal PostgreSQL, Keycloak, or Node user.
 
 Deployment order is PostgreSQL, Keycloak, then MCP. Do not add the public DNS
 records until the Fly hostnames are healthy. Keep the pull request in draft and
@@ -36,6 +46,25 @@ Both commands are dry-run-only unless `--apply` is present. The secret helper
 refuses a path inside the repository or a non-empty target and never prints a
 credential. The Keycloak helper creates only `beam:read`; it does not create a
 send scope.
+
+During initial DNS propagation, `--base-url` may point to the app's Fly hostname
+while `--public-base-url https://identity.beam.directory` keeps every issuer and
+token endpoint assertion pinned to the final public origin.
+
+After both public endpoints are healthy, `mcp-oauth-pkce-smoke.mjs` runs a real
+browser authorization-code login with PKCE S256, introspects the short-lived
+token, verifies the exact MCP audience and `beam:read` scope, then connects with
+the official MCP client and rejects any tool surface other than the two
+read-only tools. Passwords and tokens are never written to its output.
+
+The hosted pilot smoke does not prove a Grok connection by itself. Grok cloud
+connector creation, an external operator run, and a lookup of a real
+business-assurance target remain separate release evidence. Do not create the
+release-gate evidence file from an internal smoke or fixture.
+
+Before any general-availability decision, rescan all three exact images. The
+read-only pilot may document a time-bounded Keycloak risk exception, but an
+exception for the pilot is not a market-release security signoff.
 
 Expected steady-state Fly cost in Frankfurt is approximately USD 11.41 per
 month before bandwidth: 256 MB MCP, 1 GB Keycloak, 512 MB PostgreSQL, and one

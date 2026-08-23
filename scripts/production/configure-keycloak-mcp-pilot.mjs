@@ -32,6 +32,7 @@ function safeBaseUrl(raw) {
 
 const apply = process.argv.includes('--apply')
 const baseUrl = safeBaseUrl(valueAfter('--base-url') ?? 'https://identity.beam.directory')
+const publicBaseUrl = safeBaseUrl(valueAfter('--public-base-url') ?? baseUrl)
 const realm = (valueAfter('--realm') ?? 'beam-mcp-pilot').trim()
 const adminUsername = (valueAfter('--admin-username') ?? 'beam-bootstrap').trim()
 const adminPasswordFile = valueAfter('--admin-password-file')
@@ -39,21 +40,27 @@ const mcpClientSecretFile = valueAfter('--mcp-client-secret-file')
 const pilotUserPasswordFile = valueAfter('--pilot-user-password-file')
 const pilotUsername = (valueAfter('--pilot-username') ?? 'pilot-operator').trim()
 const mcpResource = valueAfter('--mcp-resource') ?? 'https://mcp.beam.directory/mcp'
+const introspectionClientId = mcpResource
 
 if (!/^[a-z0-9-]{1,63}$/.test(realm)) fail('--realm is invalid')
 if (!/^[a-zA-Z0-9._-]{1,64}$/.test(adminUsername)) fail('--admin-username is invalid')
 if (!/^[a-zA-Z0-9._-]{1,64}$/.test(pilotUsername)) fail('--pilot-username is invalid')
 if (mcpResource !== 'https://mcp.beam.directory/mcp') fail('the pilot MCP resource is pinned to https://mcp.beam.directory/mcp')
+if (publicBaseUrl !== 'https://identity.beam.directory') {
+  fail('the public OAuth issuer is pinned to https://identity.beam.directory')
+}
 
 const plan = {
   apply,
   baseUrl,
+  publicBaseUrl,
   realm,
   pilotUsername,
   mcpResource,
   readOnlyScope: 'beam:read',
   sendScopeCreated: false,
-  confidentialClients: ['beam-mcp-resource-server'],
+  confidentialClients: [introspectionClientId],
+  disabledLegacyClients: ['beam-mcp-resource-server'],
   publicClients: ['beam-grok-pilot'],
   tokenLifespanSeconds: 300,
 }
@@ -203,7 +210,7 @@ const audienceScopeId = await ensureClientScope({
       protocolMapper: 'oidc-audience-mapper',
       consentRequired: false,
       config: {
-        'included.client.audience': 'beam-mcp-resource-server',
+        'included.client.audience': introspectionClientId,
         'access.token.claim': 'true',
         'introspection.token.claim': 'true',
         'id.token.claim': 'false',
@@ -213,8 +220,14 @@ const audienceScopeId = await ensureClientScope({
   ],
 })
 
-for (const scopeId of [readScopeId, audienceScopeId]) {
-  await request(`${realmPath}/default-default-client-scopes/${encodeURIComponent(scopeId)}`, {
+const realmDefaultScopes = await request(`${realmPath}/default-default-client-scopes`, { token: adminToken })
+if (realmDefaultScopes.some((scope) => scope.id === readScopeId)) {
+  await request(`${realmPath}/default-default-client-scopes/${encodeURIComponent(readScopeId)}`, {
+    method: 'DELETE', token: adminToken, expected: [204],
+  })
+}
+if (!realmDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
+  await request(`${realmPath}/default-default-client-scopes/${encodeURIComponent(audienceScopeId)}`, {
     method: 'PUT', token: adminToken, expected: [204],
   })
 }
@@ -224,7 +237,11 @@ async function ensureClient(representation) {
   const existing = clients.find((client) => client.clientId === representation.clientId)
   if (existing) {
     await request(`${realmPath}/clients/${encodeURIComponent(existing.id)}`, {
-      method: 'PUT', token: adminToken, body: { ...existing, ...representation }, expected: [204],
+      method: 'PUT', token: adminToken, body: {
+        ...existing,
+        ...representation,
+        attributes: { ...existing.attributes, ...representation.attributes },
+      }, expected: [204],
     })
     return existing.id
   }
@@ -238,7 +255,7 @@ async function ensureClient(representation) {
 }
 
 await ensureClient({
-  clientId: 'beam-mcp-resource-server',
+  clientId: introspectionClientId,
   name: 'Beam MCP resource server introspection',
   enabled: true,
   protocol: 'openid-connect',
@@ -250,9 +267,20 @@ await ensureClient({
   directAccessGrantsEnabled: false,
   serviceAccountsEnabled: false,
   fullScopeAllowed: false,
+  attributes: {
+    resource_url: mcpResource,
+  },
 })
 
-await ensureClient({
+const legacyResourceClients = await request(`${realmPath}/clients?clientId=beam-mcp-resource-server`, { token: adminToken })
+const legacyResourceClient = legacyResourceClients.find((client) => client.clientId === 'beam-mcp-resource-server')
+if (legacyResourceClient?.enabled !== false) {
+  await request(`${realmPath}/clients/${encodeURIComponent(legacyResourceClient.id)}`, {
+    method: 'PUT', token: adminToken, body: { ...legacyResourceClient, enabled: false }, expected: [204],
+  })
+}
+
+const grokClientInternalId = await ensureClient({
   clientId: 'beam-grok-pilot',
   name: 'Beam Grok read-only pilot',
   enabled: true,
@@ -265,27 +293,56 @@ await ensureClient({
   fullScopeAllowed: false,
   redirectUris: ['http://127.0.0.1:*', 'http://localhost:*'],
   webOrigins: ['+'],
-  defaultClientScopes: ['beam:read', 'beam-mcp-audience'],
+  defaultClientScopes: ['beam-mcp-audience'],
+  optionalClientScopes: ['beam:read'],
   attributes: {
     'pkce.code.challenge.method': 'S256',
     'post.logout.redirect.uris': '+',
   },
 })
 
+const clientDefaultScopes = await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes`, { token: adminToken })
+if (clientDefaultScopes.some((scope) => scope.id === readScopeId)) {
+  await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes/${encodeURIComponent(readScopeId)}`, {
+    method: 'DELETE', token: adminToken, expected: [204],
+  })
+}
+if (!clientDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
+  await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes/${encodeURIComponent(audienceScopeId)}`, {
+    method: 'PUT', token: adminToken, expected: [204],
+  })
+}
+
+const clientOptionalScopes = await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/optional-client-scopes`, { token: adminToken })
+if (!clientOptionalScopes.some((scope) => scope.id === readScopeId)) {
+  await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/optional-client-scopes/${encodeURIComponent(readScopeId)}`, {
+    method: 'PUT', token: adminToken, expected: [204],
+  })
+}
+
 const users = await request(`${realmPath}/users?username=${encodeURIComponent(pilotUsername)}&exact=true`, { token: adminToken })
-let userId = users.find((user) => user.username === pilotUsername)?.id
+const existingPilotUser = users.find((user) => user.username === pilotUsername)
+let userId = existingPilotUser?.id
+const pilotUserRepresentation = {
+  username: pilotUsername,
+  firstName: 'Beam',
+  lastName: 'Pilot',
+  email: 'pilot-operator@beam.directory',
+  enabled: true,
+  emailVerified: false,
+  attributes: { tenant: ['beam-pilot'] },
+  requiredActions: [],
+}
 if (!userId) {
   await request(`${realmPath}/users`, {
-    method: 'POST', token: adminToken, expected: [201], body: {
-      username: pilotUsername,
-      enabled: true,
-      emailVerified: false,
-      attributes: { tenant: ['beam-pilot'] },
-      requiredActions: [],
-    },
+    method: 'POST', token: adminToken, expected: [201], body: pilotUserRepresentation,
   })
   const refreshedUsers = await request(`${realmPath}/users?username=${encodeURIComponent(pilotUsername)}&exact=true`, { token: adminToken })
   userId = refreshedUsers.find((user) => user.username === pilotUsername)?.id
+} else {
+  await request(`${realmPath}/users/${encodeURIComponent(userId)}`, {
+    method: 'PUT', token: adminToken, expected: [204], body: { ...existingPilotUser, ...pilotUserRepresentation },
+  })
 }
 if (!userId) throw new Error(`pilot user ${pilotUsername} was not created`)
 await request(`${realmPath}/users/${encodeURIComponent(userId)}/reset-password`, {
@@ -295,10 +352,10 @@ await request(`${realmPath}/users/${encodeURIComponent(userId)}/reset-password`,
 })
 
 const metadata = await request(`/realms/${encodeURIComponent(realm)}/.well-known/openid-configuration`)
-if (metadata.issuer !== `${baseUrl}/realms/${realm}`) throw new Error('issuer metadata does not match the configured realm')
+if (metadata.issuer !== `${publicBaseUrl}/realms/${realm}`) throw new Error('issuer metadata does not match the configured realm')
 if (!metadata.response_types_supported?.includes('code')) throw new Error('authorization code flow is not advertised')
 if (!metadata.code_challenge_methods_supported?.includes('S256')) throw new Error('PKCE S256 is not advertised')
-if (metadata.introspection_endpoint !== `${baseUrl}/realms/${realm}/protocol/openid-connect/token/introspect`) {
+if (metadata.introspection_endpoint !== `${publicBaseUrl}/realms/${realm}/protocol/openid-connect/token/introspect`) {
   throw new Error('introspection endpoint is not the expected public URL')
 }
 

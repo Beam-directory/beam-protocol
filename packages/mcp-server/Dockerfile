@@ -35,10 +35,12 @@ COPY --from=builder /workspace/packages/sdk-typescript/dist ./packages/sdk-types
 COPY --from=builder /workspace/packages/mcp-server/package.json ./packages/mcp-server/package.json
 COPY --from=builder /workspace/packages/mcp-server/dist ./packages/mcp-server/dist
 COPY LICENSE ./LICENSE
+COPY --chmod=0555 packages/mcp-server/beam-entrypoint.sh /app/beam-entrypoint.sh
 
 # The runtime executes prebuilt JavaScript only. Removing package managers and
 # their global dependency trees reduces both attack surface and image CVEs.
-RUN rm -rf \
+RUN apk add --no-cache su-exec=0.3-r0 \
+  && rm -rf \
       /usr/local/lib/node_modules/npm \
       /usr/local/lib/node_modules/corepack \
       /opt/yarn-v1.22.22 \
@@ -54,11 +56,13 @@ ENV NODE_ENV=production \
   BEAM_MCP_HTTP_HOST=0.0.0.0 \
   BEAM_MCP_HTTP_PORT=3333
 
-USER node
+ARG RUNTIME_USER=node
+USER ${RUNTIME_USER}
 EXPOSE 3333
 STOPSIGNAL SIGTERM
 
 HEALTHCHECK --interval=30s --timeout=3s --start-period=10s --retries=3 \
   CMD ["node", "-e", "const http=require('node:http');const target=new URL(process.env.BEAM_MCP_PUBLIC_URL);const request=http.get({host:'127.0.0.1',port:process.env.BEAM_MCP_HTTP_PORT||'3333',path:'/health',headers:{host:target.host}},response=>process.exit(response.statusCode===200?0:1));request.setTimeout(2000,()=>request.destroy(new Error('health timeout')));request.on('error',()=>process.exit(1));"]
 
+ENTRYPOINT ["/app/beam-entrypoint.sh"]
 CMD ["node", "packages/mcp-server/dist/index.js"]

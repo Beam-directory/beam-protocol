@@ -22,4 +22,7 @@ read_required_secret() {
 export KC_DB_PASSWORD="$(read_required_secret "${KC_DB_PASSWORD_FILE:-}" KC_DB_PASSWORD_FILE)"
 export KC_BOOTSTRAP_ADMIN_PASSWORD="$(read_required_secret "${KC_BOOTSTRAP_ADMIN_PASSWORD_FILE:-}" KC_BOOTSTRAP_ADMIN_PASSWORD_FILE)"
 
-exec /opt/keycloak/bin/kc.sh "$@"
+chown 1000:0 "$KC_DB_PASSWORD_FILE" "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"
+chmod 0400 "$KC_DB_PASSWORD_FILE" "$KC_BOOTSTRAP_ADMIN_PASSWORD_FILE"
+
+exec /opt/beam/bin/su-exec 1000:0 /opt/keycloak/bin/kc.sh "$@"

@@ -4,7 +4,10 @@ kill_signal = "SIGTERM"
 kill_timeout = 20
 
 [build]
-  dockerfile = "packages/mcp-server/Dockerfile"
+  dockerfile = "../../../packages/mcp-server/Dockerfile"
+
+  [build.args]
+    RUNTIME_USER = "root"
 
 [env]
   NODE_ENV = "production"
@@ -15,7 +18,7 @@ kill_timeout = 20
   BEAM_MCP_OAUTH_ISSUER = "https://identity.beam.directory/realms/beam-mcp-pilot"
   BEAM_MCP_OAUTH_METADATA_URL = "https://identity.beam.directory/realms/beam-mcp-pilot/.well-known/openid-configuration"
   BEAM_MCP_OAUTH_INTROSPECTION_URL = "https://identity.beam.directory/realms/beam-mcp-pilot/protocol/openid-connect/token/introspect"
-  BEAM_MCP_OAUTH_CLIENT_ID = "beam-mcp-resource-server"
+  BEAM_MCP_OAUTH_CLIENT_ID = "https://mcp.beam.directory/mcp"
   BEAM_MCP_OAUTH_CLIENT_SECRET_FILE = "/run/secrets/oauth_client_secret"
   BEAM_ID = "grok-pilot@beam.directory"
   BEAM_PUBLIC_KEY_BASE64_FILE = "/run/secrets/beam_public_key"
@@ -57,6 +60,7 @@ kill_timeout = 20
     timeout = "5s"
     method = "GET"
     path = "/health"
+    headers = { Host = "mcp.beam.directory" }
 
 [[vm]]
   size = "shared-cpu-1x"
