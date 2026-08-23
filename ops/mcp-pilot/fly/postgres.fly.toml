@@ -1,0 +1,32 @@
+app = "beam-identity-db"
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = 30
+
+[build]
+  image = "postgres:17-alpine@sha256:18cfe3ef5e6815560c98237d6216d1e5119702fb0f3894c8785dd58b8bbe5d73"
+
+[env]
+  PGDATA = "/data/postgres"
+  POSTGRES_DB = "keycloak"
+  POSTGRES_USER = "keycloak"
+  POSTGRES_PASSWORD_FILE = "/run/secrets/postgres_password"
+
+[[files]]
+  guest_path = "/run/secrets/postgres_password"
+  secret_name = "POSTGRES_PASSWORD_B64"
+
+[[mounts]]
+  source = "beam_identity_db_data"
+  destination = "/data"
+
+[checks.postgres]
+  type = "tcp"
+  port = 5432
+  interval = "15s"
+  timeout = "3s"
+  grace_period = "30s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"

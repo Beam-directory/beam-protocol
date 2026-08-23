@@ -308,7 +308,7 @@ export class BeamDirectory {
   async browse(page = 1, filters: BrowseFilters = {}): Promise<BrowseResult> {
     const params = new URLSearchParams({ page: String(page) })
     if (filters.capability) params.set('capability', filters.capability)
-    if (filters.tier) params.set('tier', filters.tier)
+    if (filters.tier) params.set('verification_tier', filters.tier)
     if (filters.verified_only) params.set('verified_only', String(filters.verified_only))
 
     try {
@@ -318,7 +318,7 @@ export class BeamDirectory {
         : []
       return {
         page: getNumber(body, 'page') ?? page,
-        pageSize: getNumber(body, 'pageSize', 'page_size') ?? agentsRaw.length,
+        pageSize: getNumber(body, 'pageSize', 'page_size', 'limit') ?? agentsRaw.length,
         total: getNumber(body, 'total') ?? agentsRaw.length,
         agents: agentsRaw.map(normalizeProfile),
       }

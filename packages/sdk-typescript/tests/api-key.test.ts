@@ -123,6 +123,30 @@ describe('SDK API key auth', () => {
     expect(record?.domain).toBe('verified.example')
   })
 
+  it('uses the Directory browse assurance filter and response page size', async () => {
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({
+      page: 1,
+      limit: 20,
+      total: 0,
+      agents: [],
+    }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    }))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await new BeamDirectory({ baseUrl: 'https://api.beam.directory' }).browse(1, {
+      tier: 'business',
+      verified_only: true,
+    })
+
+    expect(result.pageSize).toBe(20)
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://api.beam.directory/agents/browse?page=1&verification_tier=business&verified_only=true',
+      expect.any(Object),
+    )
+  })
+
   it('exchanges the long-lived API key for a short-lived WebSocket ticket', async () => {
     const beamId = 'agent@acme.beam.directory'
     const apiKey = makeApiKey(beamId)
