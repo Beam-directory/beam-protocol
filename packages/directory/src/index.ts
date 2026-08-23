@@ -1,5 +1,6 @@
 import { createDatabase, cleanExpiredNonces } from './db.js'
 import { startServer } from './server.js'
+import { seedDemoFixturesFromEnvironment } from './demo-fixtures.js'
 
 const PORT = parseInt(process.env['PORT'] ?? '3100', 10)
 const DB_PATH = process.env['DB_PATH'] ?? './beam-directory.db'
@@ -9,6 +10,10 @@ if (!process.env['JWT_SECRET']) {
 }
 
 const db = createDatabase(DB_PATH)
+
+if (seedDemoFixturesFromEnvironment(db)) {
+  console.log('Seeded loopback-only demo fixtures')
+}
 
 console.log(`Using database: ${DB_PATH}`)
 

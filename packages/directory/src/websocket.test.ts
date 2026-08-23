@@ -9,25 +9,33 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { WebSocket } from 'ws'
 import { createAcl } from './acl.js'
-import { createDatabase, getIntentLogByNonce, listIntentTraceEvents, registerAgent, rotateAgentKey } from './db.js'
+import { createAdminSession } from './admin-auth.js'
+import { createAgentApiKey, hashApiKey } from './api-key.js'
+import { createDatabase, getIntentLogByNonce, listIntentTraceEvents, registerAgent, rotateAgentKey, assignDirectoryRole } from './db.js'
+import { canonicalizeJson } from './crypto.js'
+import { getLocalDirectoryUrl } from './federation.js'
 import {
   createWebSocketServer,
   expireRecoveredIntentTimeouts,
+  isAgentConnected,
   recoverInterruptedIntentsOnStartup,
   relayIntentFromHttp,
   RelayError,
   resetRelayRuntimeState,
 } from './websocket.js'
-import type { IntentFrame } from './types.js'
+import type { IntentFrame, ResultFrame } from './types.js'
+import { issueWebSocketTicket, resetWebSocketTickets } from './websocket-ticket.js'
 
 const TEST_INTENT = 'agent.ping'
 
 afterEach(() => {
   resetRelayRuntimeState({ closeConnections: true })
+  resetWebSocketTickets()
 })
 
 type FixtureAgent = {
   beamId: string
+  apiKey: string
   privateKey: ReturnType<typeof generateKeyPairSync>['privateKey']
   publicKeyBase64: string
 }
@@ -36,6 +44,7 @@ function createFixtureAgent(beamId: string): FixtureAgent {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
   return {
     beamId,
+    apiKey: createAgentApiKey(beamId),
     privateKey,
     publicKeyBase64: (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64'),
   }
@@ -51,6 +60,7 @@ function registerFixtureAgent(
     displayName: options.displayName,
     capabilities: [TEST_INTENT],
     publicKey: agent.publicKeyBase64,
+    apiKeyHash: hashApiKey(agent.apiKey),
     org: 'local',
     httpEndpoint: options.httpEndpoint ?? null,
   })
@@ -112,6 +122,37 @@ function createSignedFrameWithIntent(
   }, sender.privateKey)
 }
 
+function createSignedResultFrame(
+  responder: FixtureAgent,
+  options: {
+    nonce: string
+    success: boolean
+    payload?: Record<string, unknown>
+    error?: string
+    errorCode?: string
+    latency?: number
+    timestamp?: string
+    extensions?: Record<string, unknown>
+  },
+): ResultFrame {
+  const unsigned = {
+    v: '1' as const,
+    success: options.success,
+    nonce: options.nonce,
+    timestamp: options.timestamp ?? new Date().toISOString(),
+    ...(options.payload !== undefined ? { payload: options.payload } : {}),
+    ...(options.error !== undefined ? { error: options.error } : {}),
+    ...(options.errorCode !== undefined ? { errorCode: options.errorCode } : {}),
+    ...(options.latency !== undefined ? { latency: options.latency } : {}),
+    ...options.extensions,
+  }
+
+  return {
+    ...unsigned,
+    signature: sign(null, Buffer.from(canonicalizeJson(unsigned), 'utf8'), responder.privateKey).toString('base64'),
+  }
+}
+
 async function withFetchStub<T>(
   handler: (url: string, init?: RequestInit) => Promise<Response> | Response,
   run: () => Promise<T>,
@@ -161,11 +202,17 @@ async function createWsHarness(db: ReturnType<typeof createDatabase>) {
   }
 }
 
-async function connectClient(url: string, beamId: string): Promise<WebSocket> {
-  const ws = new WebSocket(`${url}?beamId=${encodeURIComponent(beamId)}`)
+async function connectClient(url: string, agent: FixtureAgent): Promise<WebSocket> {
+  const ticket = issueWebSocketTicket(agent.beamId).ticket
+  const ws = new WebSocket(
+    `${url}?beamId=${encodeURIComponent(agent.beamId)}&ticket=${encodeURIComponent(ticket)}`,
+  )
   const connectedPromise = waitForJson(ws)
   await once(ws, 'open')
-  await connectedPromise
+  const connected = await connectedPromise
+  assert.equal(connected.type, 'connected')
+  assert.equal(connected.beamId, agent.beamId)
+  assert.equal(connected.auth, 'ws_ticket')
   return ws
 }
 
@@ -334,7 +381,7 @@ test('websocket intent falls back to the built-in public echo responder', async 
 
   try {
     registerFixtureAgent(db, sender, { displayName: 'Sender' })
-    const senderWs = await connectClient(harness.url, sender.beamId)
+    const senderWs = await connectClient(harness.url, sender)
 
     senderWs.send(JSON.stringify({
       type: 'intent',
@@ -357,6 +404,189 @@ test('websocket intent falls back to the built-in public echo responder', async 
   }
 })
 
+test('websocket requires a Beam-bound credential and an invalid reconnect cannot displace the active session', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const otherAgent = createFixtureAgent('other@local.beam.directory')
+  const harness = await createWsHarness(db)
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, otherAgent, { displayName: 'Other' })
+    const senderWs = await connectClient(harness.url, sender)
+
+    const invalidWs = new WebSocket(
+      `${harness.url}?beamId=${encodeURIComponent(sender.beamId)}&apiKey=${encodeURIComponent(otherAgent.apiKey)}`,
+    )
+    const invalidClosed = once(invalidWs, 'close') as Promise<[number, Buffer]>
+    await once(invalidWs, 'open')
+    const [closeCode, closeReason] = await invalidClosed
+    assert.equal(closeCode, 1008)
+    assert.equal(closeReason.toString(), 'Valid WebSocket credential required')
+    assert.equal(isAgentConnected(sender.beamId), true)
+    assert.equal(senderWs.readyState, WebSocket.OPEN)
+
+    const echoResultPromise = waitForJson(senderWs)
+    senderWs.send(JSON.stringify({
+      type: 'intent',
+      frame: createSignedFrameWithIntent(sender, {
+        to: 'echo@beam.directory',
+        intent: 'conversation.message',
+        payload: { message: 'still connected' },
+      }),
+    }))
+    const echoResult = await echoResultPromise
+    assert.equal(echoResult.type, 'result')
+    assert.equal((echoResult.frame as { success: boolean }).success, true)
+
+    const missingKeyWs = new WebSocket(`${harness.url}?beamId=${encodeURIComponent(sender.beamId)}`)
+    const missingKeyClosed = once(missingKeyWs, 'close') as Promise<[number, Buffer]>
+    await once(missingKeyWs, 'open')
+    const [missingKeyCode] = await missingKeyClosed
+    assert.equal(missingKeyCode, 1008)
+    assert.equal(isAgentConnected(sender.beamId), true)
+
+    await closeSocket(senderWs)
+  } finally {
+    await harness.close()
+    db.close()
+  }
+})
+
+test('intent feed requires an authenticated directory admin session', async () => {
+  const db = createDatabase(':memory:')
+  const harness = await createWsHarness(db)
+
+  try {
+    const unauthenticatedWs = new WebSocket(`${harness.url}?feed=intents`)
+    const unauthenticatedClosed = once(unauthenticatedWs, 'close') as Promise<[number, Buffer]>
+    await once(unauthenticatedWs, 'open')
+    const [closeCode, closeReason] = await unauthenticatedClosed
+    assert.equal(closeCode, 1008)
+    assert.equal(closeReason.toString(), 'Admin authentication required')
+
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'websocket-test-secret'
+    const email = 'feed-viewer@example.com'
+    assignDirectoryRole(db, {
+      userId: email,
+      role: 'viewer',
+      directoryUrl: getLocalDirectoryUrl(),
+    })
+    const session = createAdminSession(db, { email, role: 'viewer' })
+    const authenticatedWs = new WebSocket(`${harness.url}?feed=intents`, {
+      headers: { Authorization: `Bearer ${session.token}` },
+    })
+    const connectedPromise = waitForJson(authenticatedWs)
+    await once(authenticatedWs, 'open')
+    const connected = await connectedPromise
+    assert.equal(connected.type, 'feed_connected')
+    assert.equal(connected.role, 'viewer')
+
+    await closeSocket(authenticatedWs)
+  } finally {
+    await harness.close()
+    db.close()
+  }
+})
+
+test('websocket finalizes only a fresh signed result from the intended responder', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const receiver = createFixtureAgent('receiver@local.beam.directory')
+  const attacker = createFixtureAgent('attacker@local.beam.directory')
+  const harness = await createWsHarness(db)
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, receiver, { displayName: 'Receiver' })
+    registerFixtureAgent(db, attacker, { displayName: 'Attacker' })
+    createAcl(db, {
+      targetBeamId: receiver.beamId,
+      intentType: TEST_INTENT,
+      allowedFrom: sender.beamId,
+    })
+
+    const senderWs = await connectClient(harness.url, sender)
+    const receiverWs = await connectClient(harness.url, receiver)
+    const attackerWs = await connectClient(harness.url, attacker)
+    const nonce = randomUUID()
+    const deliveryPromise = waitForJson(receiverWs)
+    const senderResultPromise = waitForJson(senderWs)
+
+    senderWs.send(JSON.stringify({
+      type: 'intent',
+      frame: createSignedFrame(sender, receiver.beamId, nonce),
+    }))
+    const delivery = await deliveryPromise
+    assert.equal(delivery.type, 'intent')
+
+    let rejectionPromise = waitForJson(attackerWs)
+    attackerWs.send(JSON.stringify({
+      type: 'result',
+      frame: createSignedResultFrame(attacker, {
+        nonce,
+        success: true,
+        payload: { forged: 'wrong responder' },
+      }),
+    }))
+    let rejection = await rejectionPromise
+    assert.equal(rejection.type, 'error')
+    assert.equal(rejection.errorCode, 'FORBIDDEN')
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'delivered')
+
+    rejectionPromise = waitForJson(receiverWs)
+    receiverWs.send(JSON.stringify({
+      type: 'result',
+      frame: createSignedResultFrame(attacker, {
+        nonce,
+        success: true,
+        payload: { forged: 'bad signature' },
+      }),
+    }))
+    rejection = await rejectionPromise
+    assert.equal(rejection.type, 'error')
+    assert.equal(rejection.errorCode, 'BAD_REQUEST')
+    assert.match(String(rejection.message), /signature verification failed/i)
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'delivered')
+
+    rejectionPromise = waitForJson(receiverWs)
+    receiverWs.send(JSON.stringify({
+      type: 'result',
+      frame: createSignedResultFrame(receiver, {
+        nonce,
+        success: true,
+        payload: { stale: true },
+        timestamp: new Date(Date.now() - 6 * 60 * 1000).toISOString(),
+      }),
+    }))
+    rejection = await rejectionPromise
+    assert.equal(rejection.type, 'error')
+    assert.equal(rejection.errorCode, 'BAD_REQUEST')
+    assert.match(String(rejection.message), /replay window/i)
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'delivered')
+
+    receiverWs.send(JSON.stringify({
+      type: 'result',
+      frame: createSignedResultFrame(receiver, {
+        nonce,
+        success: true,
+        payload: { ok: true },
+      }),
+    }))
+    const accepted = await senderResultPromise
+    assert.equal(accepted.type, 'result')
+    assert.deepEqual((accepted.frame as ResultFrame).payload, { ok: true })
+    assert.equal(getIntentLogByNonce(db, nonce)?.status, 'acked')
+
+    await closeSocket(senderWs)
+    await closeSocket(receiverWs)
+    await closeSocket(attackerWs)
+  } finally {
+    await harness.close()
+    db.close()
+  }
+})
+
 test('websocket reconnect does not redeliver an in-flight nonce', async () => {
   const db = createDatabase(':memory:')
   const sender = createFixtureAgent('sender@local.beam.directory')
@@ -372,8 +602,8 @@ test('websocket reconnect does not redeliver an in-flight nonce', async () => {
       allowedFrom: sender.beamId,
     })
 
-    const receiverWs = await connectClient(harness.url, receiver.beamId)
-    const senderWs = await connectClient(harness.url, sender.beamId)
+    const receiverWs = await connectClient(harness.url, receiver)
+    const senderWs = await connectClient(harness.url, sender)
     const nonce = randomUUID()
     const firstDeliveryPromise = waitForJson(receiverWs)
 
@@ -388,7 +618,7 @@ test('websocket reconnect does not redeliver an in-flight nonce', async () => {
 
     await closeSocket(senderWs)
 
-    const senderReconnect = await connectClient(harness.url, sender.beamId)
+    const senderReconnect = await connectClient(harness.url, sender)
     const duplicateAttemptPromise = waitForJson(senderReconnect)
     senderReconnect.send(JSON.stringify({
       type: 'intent',
@@ -404,13 +634,11 @@ test('websocket reconnect does not redeliver an in-flight nonce', async () => {
 
     receiverWs.send(JSON.stringify({
       type: 'result',
-      frame: {
-        v: '1',
+      frame: createSignedResultFrame(receiver, {
         success: true,
         nonce,
-        timestamp: new Date().toISOString(),
         payload: { ok: true },
-      },
+      }),
     }))
 
     await closeSocket(senderReconnect)
@@ -436,7 +664,7 @@ test('relayIntentFromHttp records a retryable timeout for unanswered websocket d
       allowedFrom: sender.beamId,
     })
 
-    const receiverWs = await connectClient(harness.url, receiver.beamId)
+    const receiverWs = await connectClient(harness.url, receiver)
     const frame = createSignedFrame(sender, receiver.beamId)
     const deliveredIntentPromise = waitForJson(receiverWs)
 
@@ -478,8 +706,8 @@ test('directory restart resumes delivered intents and serves a cached late resul
       allowedFrom: sender.beamId,
     })
 
-    const receiverWs = await connectClient(harness.url, receiver.beamId)
-    const senderWs = await connectClient(harness.url, sender.beamId)
+    const receiverWs = await connectClient(harness.url, receiver)
+    const senderWs = await connectClient(harness.url, sender)
     const nonce = randomUUID()
 
     senderWs.send(JSON.stringify({
@@ -507,22 +735,20 @@ test('directory restart resumes delivered intents and serves a cached late resul
     })
 
     harness = await createWsHarness(db)
-    const restartedReceiverWs = await connectClient(harness.url, receiver.beamId)
+    const restartedReceiverWs = await connectClient(harness.url, receiver)
     restartedReceiverWs.send(JSON.stringify({
       type: 'result',
-      frame: {
-        v: '1',
+      frame: createSignedResultFrame(receiver, {
         success: true,
         nonce,
-        timestamp: new Date().toISOString(),
         payload: { ok: true },
-      },
+      }),
     }))
 
     await new Promise((resolve) => setTimeout(resolve, 30))
     assert.equal(getIntentLogByNonce(db, nonce)?.status, 'acked')
 
-    const restartedSenderWs = await connectClient(harness.url, sender.beamId)
+    const restartedSenderWs = await connectClient(harness.url, sender)
     const cachedResultPromise = waitForJson(restartedSenderWs)
     restartedSenderWs.send(JSON.stringify({
       type: 'intent',
@@ -566,7 +792,7 @@ test('directory restart expires recovered delivered intents after the original t
       allowedFrom: sender.beamId,
     })
 
-    const receiverWs = await connectClient(harness.url, receiver.beamId)
+    const receiverWs = await connectClient(harness.url, receiver)
     const nonce = randomUUID()
     const frame = createSignedFrame(sender, receiver.beamId, nonce)
     const deliveryPromise = waitForJson(receiverWs)

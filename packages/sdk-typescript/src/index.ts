@@ -15,6 +15,7 @@ export {
 } from './frames.js'
 export type {
   AgentProfile,
+  AssuranceScope,
   AgentKeyRecord,
   AgentKeyState,
   AgentRegistration,
@@ -34,8 +35,10 @@ export type {
   KeyRotationResult,
   KeyRevocationResult,
   Report,
+  RemoteAssuranceAssertion,
   ResultFrame,
   VerificationTier,
+  WebSocketTicket,
 } from './types.js'
 export type {
   DIDDocument,

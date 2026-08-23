@@ -61,8 +61,8 @@ async function openWebSocket(url: string): Promise<WebSocketLike> {
 export class BeamClient {
   private _identity: BeamIdentity | null
   private readonly _beamId: BeamIdString
-  private readonly _apiKey?: string
-  private readonly _directory: BeamDirectory
+  private _apiKey?: string
+  private _directory: BeamDirectory
   private readonly _did: BeamDID
   private readonly _credentials: BeamCredentialsClient
   private readonly _directoryUrl: string
@@ -99,6 +99,10 @@ export class BeamClient {
     return this._directory
   }
 
+  get apiKey(): string | undefined {
+    return this._apiKey
+  }
+
   get did(): BeamDID {
     return this._did
   }
@@ -115,13 +119,18 @@ export class BeamClient {
     const parsed = BeamIdentity.parseBeamId(this._identity.beamId)
     if (!parsed) throw new Error('Invalid beam ID on identity')
 
-    return this._directory.register({
+    const record = await this._directory.register({
       beamId: this._identity.beamId,
       displayName,
       capabilities,
       publicKey: this._identity.publicKeyBase64,
       org: parsed.org,
     })
+    if (record.apiKey) {
+      this._apiKey = record.apiKey
+      this._directory = new BeamDirectory({ baseUrl: this._directoryUrl, apiKey: record.apiKey })
+    }
+    return record
   }
 
   async updateProfile(fields: { description?: string; logo_url?: string; website?: string }): Promise<AgentProfile> {
@@ -198,11 +207,15 @@ export class BeamClient {
 
   async connect(): Promise<void> {
     if (this._ws && this._wsConnected) return
-
-    const params = new URLSearchParams({ beamId: this._beamId })
-    if (this._apiKey) {
-      params.set('apiKey', this._apiKey)
+    if (!this._apiKey) {
+      throw new Error('connect() requires the agent API key returned by register()')
     }
+    if (!this._identity) {
+      throw new Error('connect() requires an Ed25519 identity to sign ResultFrames')
+    }
+
+    const ticket = await this._directory.createWebSocketTicket(this._beamId)
+    const params = new URLSearchParams({ beamId: this._beamId, ticket: ticket.ticket })
 
     const wsUrl = this._directoryUrl
       .replace(/^http:\/\//, 'ws://')
@@ -221,12 +234,16 @@ export class BeamClient {
         }
 
         ws.onclose = () => {
+          const authenticated = this._wsConnected
           this._wsConnected = false
           this._ws = null
           for (const [nonce, pending] of this._pendingResults) {
             clearTimeout(pending.timer)
             pending.reject(new Error('WebSocket connection closed'))
             this._pendingResults.delete(nonce)
+          }
+          if (!authenticated) {
+            reject(new Error('WebSocket connection closed before Beam authenticated the session'))
           }
         }
 
@@ -346,10 +363,6 @@ export class BeamClient {
       signFrame(frame, this._identity.export().privateKeyBase64)
     }
 
-    if (!this._identity && !this._wsConnected) {
-      await this.connect()
-    }
-
     if (this._ws && this._wsConnected) {
       return this._sendViaWebSocket(frame, timeoutMs)
     }
@@ -393,6 +406,9 @@ export class BeamClient {
   }
 
   on(intent: string, handler: IntentHandler): this {
+    if (!this._identity) {
+      throw new Error('on() requires an Ed25519 identity to sign ResultFrames')
+    }
     this._intentHandlers.set(intent, handler)
     return this
   }

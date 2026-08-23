@@ -1,26 +1,32 @@
 /**
- * Stripe billing routes for verification tier upgrades.
+ * Stripe billing routes for product plans.
+ *
+ * Billing and identity assurance are deliberately independent: paying for a
+ * plan must never grant a verification badge or raise an identity tier.
  * Requires: STRIPE_SECRET_KEY, STRIPE_WEBHOOK_SECRET env vars
- * Optional: STRIPE_PRICE_VERIFIED, STRIPE_PRICE_BUSINESS, STRIPE_PRICE_ENTERPRISE (override default prices)
+ * Optional: STRIPE_PRICE_PRO, STRIPE_PRICE_BUSINESS, STRIPE_PRICE_ENTERPRISE
  */
 import { Hono } from 'hono'
+import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
+import Stripe from 'stripe'
 import { getAgent } from '../db.js'
+import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
 import { BEAM_ID_RE } from '../validation.js'
 
 type DB = Database
 
 // Price IDs can be overridden via env vars, or created dynamically
-const TIER_AMOUNTS: Record<string, number> = {
-  verified: 900,     // €9/year in cents
+const PLAN_AMOUNTS = {
+  pro: 900,          // €9/year in cents
   business: 4900,    // €49/year
   enterprise: 19900, // €199/year
-}
+} as const
 
-const TIER_NAMES: Record<string, string> = {
-  verified: 'Beam Verified (🔵)',
-  business: 'Beam Business (🟢)',
-  enterprise: 'Beam Enterprise (🟠)',
+const PLAN_NAMES: Record<string, string> = {
+  pro: 'Beam Pro',
+  business: 'Beam Business',
+  enterprise: 'Beam Enterprise',
 }
 
 interface BillingRow {
@@ -34,35 +40,69 @@ interface BillingRow {
   created_at: string
 }
 
-export function billingRouter(db: DB) {
+export function billingRouter(db: DB, stripeClient?: Stripe) {
   const app = new Hono()
 
   // Lazy-init Stripe
-  let _stripe: any = null
-  function getStripe() {
+  let _stripe: Stripe | null = stripeClient ?? null
+  function getStripe(): Stripe {
     if (_stripe) return _stripe
     const key = process.env.STRIPE_SECRET_KEY
     if (!key) throw new Error('STRIPE_SECRET_KEY not configured')
-    // Dynamic import would be cleaner but Hono routes are sync
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    _stripe = new Stripe(key)
+    return _stripe
+  }
+
+  function requireAgentApiKey(c: Context, beamId: string): Response | null {
+    const agent = getAgent(db, beamId)
+    if (!agent) {
+      return c.json({ error: 'Agent not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+
+    return agentApiKeyMatches(agent, getSuppliedApiKey(c.req.raw))
+      ? null
+      : c.json({ error: 'Missing or invalid API key', errorCode: 'UNAUTHORIZED' }, 401)
+  }
+
+  function normalizePlan(value: unknown): keyof typeof PLAN_AMOUNTS | null {
+    // `verified` was the legacy paid tier. Preserve checkout compatibility,
+    // but map it to a product plan without changing identity assurance.
+    const normalized = String(value ?? '').trim().toLowerCase()
+    if (normalized === 'verified') return 'pro'
+    return normalized in PLAN_AMOUNTS ? normalized as keyof typeof PLAN_AMOUNTS : null
+  }
+
+  function safeReturnUrl(value: unknown, fallback: string, appUrl: string): string {
+    if (typeof value !== 'string' || !value.trim()) return fallback
+
     try {
-      const Stripe = require('stripe').default || require('stripe')
-      _stripe = new Stripe(key, { apiVersion: '2024-12-18.acacia' })
-      return _stripe
+      const base = new URL(appUrl)
+      const candidate = new URL(value, base)
+      const allowedOrigins = new Set([
+        base.origin,
+        ...(process.env['BILLING_RETURN_ORIGINS'] ?? '')
+          .split(',')
+          .map((origin) => origin.trim())
+          .filter(Boolean),
+      ])
+      return candidate.protocol === 'https:' && allowedOrigins.has(candidate.origin)
+        ? candidate.toString()
+        : fallback
     } catch {
-      throw new Error('stripe package not installed — run: npm install stripe')
+      return fallback
     }
   }
 
   /**
    * POST /billing/checkout
-   * Creates a Stripe Checkout Session for tier upgrade
-   * Body: { beamId: string, tier: 'verified'|'business'|'enterprise', successUrl?: string, cancelUrl?: string }
+   * Creates a Stripe Checkout Session for a product plan.
+   * Body: { beamId: string, plan: 'pro'|'business'|'enterprise', successUrl?: string, cancelUrl?: string }
    */
   app.post('/checkout', async (c) => {
     const body = await c.req.json<{
       beamId: string
-      tier: string
+      plan?: string
+      tier?: string
       successUrl?: string
       cancelUrl?: string
     }>()
@@ -70,13 +110,14 @@ export function billingRouter(db: DB) {
     if (!body.beamId || !BEAM_ID_RE.test(body.beamId)) {
       return c.json({ error: 'Invalid beamId' }, 400)
     }
-    if (!TIER_AMOUNTS[body.tier]) {
-      return c.json({ error: 'Invalid tier. Must be: verified, business, or enterprise' }, 400)
+    const plan = normalizePlan(body.plan ?? body.tier)
+    if (!plan) {
+      return c.json({ error: 'Invalid plan. Must be: pro, business, or enterprise', errorCode: 'INVALID_PLAN' }, 400)
     }
 
-    const agent = getAgent(db, body.beamId)
-    if (!agent) {
-      return c.json({ error: 'Agent not found' }, 404)
+    const authError = requireAgentApiKey(c, body.beamId)
+    if (authError) {
+      return authError
     }
 
     const stripe = getStripe()
@@ -90,21 +131,25 @@ export function billingRouter(db: DB) {
       line_items: [{
         price_data: {
           currency: 'eur',
-          unit_amount: TIER_AMOUNTS[body.tier],
+          unit_amount: PLAN_AMOUNTS[plan],
           recurring: { interval: 'year' as const },
           product_data: {
-            name: TIER_NAMES[body.tier] || body.tier,
-            description: `Beam Protocol ${body.tier} verification for ${body.beamId}`,
+            name: PLAN_NAMES[plan],
+            description: `Beam Protocol ${plan} plan for ${body.beamId}`,
           },
         },
         quantity: 1,
       }],
       metadata: {
         beam_id: body.beamId,
-        tier: body.tier,
+        plan,
       },
-      success_url: body.successUrl || `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: body.cancelUrl || `${appUrl}/#pricing`,
+      success_url: safeReturnUrl(
+        body.successUrl,
+        `${appUrl}/billing/success?session_id={CHECKOUT_SESSION_ID}`,
+        appUrl,
+      ),
+      cancel_url: safeReturnUrl(body.cancelUrl, `${appUrl}/#pricing`, appUrl),
     }
 
     if (existing?.stripe_customer_id) {
@@ -112,7 +157,7 @@ export function billingRouter(db: DB) {
     }
 
     // Use env-configured price IDs if available
-    const priceEnvKey = `STRIPE_PRICE_${body.tier.toUpperCase()}`
+    const priceEnvKey = `STRIPE_PRICE_${plan.toUpperCase()}`
     const priceId = process.env[priceEnvKey]
     if (priceId) {
       sessionParams.line_items = [{ price: priceId, quantity: 1 }]
@@ -152,9 +197,9 @@ export function billingRouter(db: DB) {
       case 'checkout.session.completed': {
         const session = event.data.object
         const beamId = session.metadata?.beam_id
-        const tier = session.metadata?.tier
+        const plan = normalizePlan(session.metadata?.plan ?? session.metadata?.tier)
 
-        if (!beamId || !tier) break
+        if (!beamId || !BEAM_ID_RE.test(beamId) || !plan || !getAgent(db, beamId)) break
 
         // Upsert billing record
         db.prepare(`
@@ -166,15 +211,12 @@ export function billingRouter(db: DB) {
             tier = excluded.tier,
             status = 'active',
             created_at = excluded.created_at
-        `).run(beamId, session.customer, session.subscription, tier, now)
+        `).run(beamId, session.customer, session.subscription, plan, now)
 
-        // Upgrade agent verification tier
-        db.prepare(`
-          UPDATE agents SET verification_tier = ?, verified = 1, flagged = 0, last_seen = ?
-          WHERE beam_id = ?
-        `).run(tier, now, beamId)
+        // A commercial plan grants capacity/features, never identity assurance.
+        db.prepare('UPDATE agents SET plan = ?, last_seen = ? WHERE beam_id = ?').run(plan, now, beamId)
 
-        console.log(`✅ Agent ${beamId} upgraded to ${tier} via Stripe`)
+        console.log(`Agent ${beamId} subscribed to the ${plan} plan via Stripe`)
         break
       }
 
@@ -184,8 +226,8 @@ export function billingRouter(db: DB) {
         const billing = db.prepare('SELECT beam_id FROM billing WHERE stripe_subscription_id = ?').get(sub.id) as { beam_id: string } | undefined
         if (billing) {
           db.prepare("UPDATE billing SET status = 'canceled' WHERE stripe_subscription_id = ?").run(sub.id)
-          db.prepare("UPDATE agents SET verification_tier = 'basic' WHERE beam_id = ?").run(billing.beam_id)
-          console.log(`⚠️ Agent ${billing.beam_id} downgraded — subscription canceled`)
+          db.prepare("UPDATE agents SET plan = 'free' WHERE beam_id = ?").run(billing.beam_id)
+          console.log(`Agent ${billing.beam_id} returned to the free plan — subscription canceled`)
         }
         break
       }
@@ -214,21 +256,23 @@ export function billingRouter(db: DB) {
       return c.json({ error: 'Invalid beamId' }, 400)
     }
 
+    const authError = requireAgentApiKey(c, beamId)
+    if (authError) return authError
+
     const row = db.prepare(`
       SELECT * FROM billing WHERE beam_id = ? ORDER BY created_at DESC LIMIT 1
     `).get(beamId) as BillingRow | undefined
 
     if (!row) {
-      return c.json({ tier: 'basic', active: true, paid: false })
+      return c.json({ plan: 'free', active: true, paid: false })
     }
 
     return c.json({
-      tier: row.tier,
+      plan: row.tier,
       active: row.status === 'active',
       paid: true,
       status: row.status,
       currentPeriodEnd: row.current_period_end,
-      stripeCustomerId: row.stripe_customer_id,
     })
   })
 
@@ -244,7 +288,7 @@ export function billingRouter(db: DB) {
 .box{text-align:center;padding:48px;max-width:480px}h1{color:#10b981;margin-bottom:12px}a{color:#00d4ff}</style></head>
 <body><div class="box">
 <h1>✅ Payment Successful</h1>
-<p>Your agent has been upgraded. Verification badge is now active.</p>
+<p>Your Beam plan is active. Identity verification remains an independent evidence-based process.</p>
 <p style="margin-top:24px"><a href="/">← Back to Directory</a></p>
 </div></body></html>`)
   })
@@ -256,6 +300,8 @@ export function billingRouter(db: DB) {
 
     const agent = getAgent(db, beamId)
     if (!agent) return c.json({ error: 'Agent not found' }, 404)
+    const authError = requireAgentApiKey(c, beamId)
+    if (authError) return authError
 
     const period = c.req.query('period') || new Date().toISOString().slice(0, 7) // YYYY-MM
     const usage = db.prepare(

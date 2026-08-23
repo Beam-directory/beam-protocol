@@ -5,10 +5,12 @@ import { promisify } from 'node:util'
 import { pathToFileURL } from 'node:url'
 import { createDashboardProductionGoConfig, runDashboardProductionGo } from './dashboard-production-go.mjs'
 import { createExternalDogfoodConfig, evaluateExternalDogfoodEvidence } from './external-dogfood-evidence-check.mjs'
+import { createMcpPilotConfig, evaluateMcpPilotEvidence } from './mcp-pilot-evidence-check.mjs'
 import { formatDate, formatDateTime, optionalFlag, repoRoot, toJsonBlock, writeMarkdownReport } from './shared.mjs'
 
 const execFile = promisify(execFileCallback)
 const defaultEvidencePath = path.join(repoRoot, 'reports/1.7.0-external-dogfood-evidence.json')
+const defaultMcpEvidencePath = path.join(repoRoot, 'reports/1.7.0-mcp-pilot-evidence.json')
 
 export function createProductionReadinessConfig({ argv = process.argv, env = process.env } = {}) {
   const optional = (name, fallback = null) => {
@@ -38,6 +40,7 @@ export function createProductionReadinessConfig({ argv = process.argv, env = pro
   return {
     release: optional('--release', '1.7.0'),
     evidencePath: optional('--evidence', defaultEvidencePath),
+    mcpEvidencePath: optional('--mcp-evidence', defaultMcpEvidencePath),
     godaddyEnvPath: optional('--godaddy-env', env.GODADDY_ENV ?? null),
     dashboardDomain: optional('--dashboard-domain', 'dashboard.beam.directory'),
     dashboardBase: optional('--dashboard-base', 'https://dashboard.beam.directory'),
@@ -103,6 +106,19 @@ function externalDogfoodConfigFor(config) {
   })
 }
 
+function mcpPilotConfigFor(config) {
+  return createMcpPilotConfig({
+    argv: [
+      'node',
+      'mcp-pilot-evidence-check.mjs',
+      '--release',
+      config.release,
+      '--evidence',
+      config.mcpEvidencePath,
+    ],
+  })
+}
+
 async function runExternalDogfoodGate(config, dependencies = {}) {
   const readFileImpl = dependencies.readFile ?? readFile
   const dogfoodConfig = externalDogfoodConfigFor(config)
@@ -128,11 +144,39 @@ async function runExternalDogfoodGate(config, dependencies = {}) {
   }
 }
 
-async function ghJson(args, dependencies = {}) {
+async function runMcpPilotGate(config, dependencies = {}) {
+  const readFileImpl = dependencies.readFile ?? readFile
+  const mcpConfig = mcpPilotConfigFor(config)
+  const evidencePath = path.resolve(mcpConfig.evidencePath)
+  let evidence
+  try {
+    evidence = JSON.parse(await readFileImpl(evidencePath, 'utf8'))
+  } catch (error) {
+    return {
+      ok: false,
+      evidencePath,
+      counts: {},
+      failures: [`Could not read hosted MCP pilot evidence at ${evidencePath}: ${error.message}`],
+    }
+  }
+
+  const evaluation = evaluateMcpPilotEvidence(evidence, mcpConfig)
+  return {
+    ok: evaluation.ok,
+    evidencePath,
+    counts: evaluation.counts,
+    failures: evaluation.failures,
+  }
+}
+
+async function ghJson(args, dependencies = {}, timeoutMs = 15_000) {
   const execFileImpl = dependencies.execFile ?? execFile
   const result = await execFileImpl('gh', args, {
     encoding: 'utf8',
     env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    timeout: timeoutMs,
+    killSignal: 'SIGTERM',
+    maxBuffer: 1024 * 1024,
   })
   return JSON.parse(String(result.stdout ?? 'null'))
 }
@@ -163,7 +207,7 @@ export async function inspectGithubReadiness(config, dependencies = {}) {
         String(config.githubIssue),
         '--json',
         'number,state,title,url,updatedAt',
-      ], dependencies),
+      ], dependencies, config.requestTimeoutMs),
       ghJson([
         'run',
         'list',
@@ -173,7 +217,7 @@ export async function inspectGithubReadiness(config, dependencies = {}) {
         '1',
         '--json',
         'databaseId,status,conclusion,headSha,createdAt,updatedAt,displayTitle,url',
-      ], dependencies),
+      ], dependencies, config.requestTimeoutMs),
     ])
     const latestRun = Array.isArray(runs) ? runs[0] ?? null : null
     const failures = []
@@ -219,14 +263,26 @@ function dashboardBlockers(dashboard) {
     failures.push(`Dashboard production domain is not ready: public DNS=${publicStatus}; GoDaddy=${godaddyStatus}; shell=${shellStatus}.`)
   }
   const vercel = dashboard.vercelBefore
-  if (vercel?.domain?.checked && vercel.domain.configuredProperly !== true) {
+  if (vercel?.checked !== true) {
+    failures.push(`Vercel inspection is incomplete${vercel?.reason ? `: ${vercel.reason}` : ''}.`)
+  }
+  if (vercel?.domain?.checked !== true) {
+    failures.push('Vercel domain inspection did not complete.')
+  } else if (vercel.domain.configuredProperly !== true) {
     failures.push(`Vercel domain is not configured properly${vercel.domain.recommendedRecord ? `; recommended record is ${vercel.domain.recommendedRecord}` : ''}.`)
   }
-  if (vercel?.protection?.checked && vercel.protection.customDomainsBypassSso !== true) {
+  if (vercel?.project?.checked !== true) {
+    failures.push('Vercel project inspection did not complete.')
+  }
+  if (vercel?.protection?.checked !== true) {
+    failures.push('Vercel project-protection inspection did not complete.')
+  } else if (vercel.protection.customDomainsBypassSso !== true) {
     failures.push('Vercel project protection does not currently exempt custom domains from SSO.')
   }
   const deployment = vercel?.latestProductionDeployment
-  if (deployment?.checked && deployment.packageVersionMatches !== true) {
+  if (deployment?.checked !== true) {
+    failures.push('Latest Vercel production deployment inspection did not complete.')
+  } else if (deployment.packageVersionMatches !== true) {
     failures.push(`Latest Vercel production dashboard deployment version is ${deployment.packageVersion ?? 'unknown'}; expected ${deployment.expectedPackageVersion}.`)
   }
   if (deployment?.checked && deployment.latest?.dashboardVersionMeta !== deployment.expectedPackageVersion) {
@@ -241,17 +297,20 @@ function dashboardBlockers(dashboard) {
 export async function runProductionReadinessGate(config = createProductionReadinessConfig(), dependencies = {}) {
   const runDashboard = dependencies.runDashboardProductionGo ?? runDashboardProductionGo
   const runDogfood = dependencies.runExternalDogfoodGate ?? runExternalDogfoodGate
+  const runMcpPilot = dependencies.runMcpPilotGate ?? runMcpPilotGate
   const inspectGithub = dependencies.inspectGithubReadiness ?? inspectGithubReadiness
 
-  const [dashboard, dogfood, github] = await Promise.all([
+  const [dashboard, dogfood, mcpPilot, github] = await Promise.all([
     runDashboard(dashboardConfigFor(config), dependencies),
     runDogfood(config, dependencies),
+    runMcpPilot(config, dependencies),
     inspectGithub(config, dependencies),
   ])
 
   const blockers = [
     ...dashboardBlockers(dashboard),
     ...dogfood.failures.map((failure) => `External dogfood: ${failure}`),
+    ...mcpPilot.failures.map((failure) => `Hosted MCP pilot: ${failure}`),
     ...github.failures.map((failure) => `GitHub: ${failure}`),
   ]
 
@@ -262,6 +321,7 @@ export async function runProductionReadinessGate(config = createProductionReadin
     release: config.release,
     dashboard,
     externalDogfood: dogfood,
+    mcpPilot,
     github,
     blockers,
   }
@@ -280,6 +340,7 @@ async function main() {
 - release: \`${config.release}\`
 - dashboard domain: \`${config.dashboardDomain}\`
 - evidence path: \`${path.resolve(config.evidencePath)}\`
+- MCP pilot evidence path: \`${path.resolve(config.mcpEvidencePath)}\`
 
 ## Result
 

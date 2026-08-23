@@ -35,10 +35,14 @@ function dashboardResult(ready) {
       },
     },
     vercelBefore: {
+      checked: true,
       domain: {
         checked: true,
         configuredProperly: ready,
         recommendedRecord: ready ? null : 'A dashboard.beam.directory 76.76.21.21',
+      },
+      project: {
+        checked: true,
       },
       protection: {
         checked: true,
@@ -77,10 +81,20 @@ function githubResult(ok) {
   }
 }
 
+function mcpPilotResult(ok) {
+  return {
+    ok,
+    evidencePath: '/tmp/mcp-pilot-evidence.json',
+    counts: ok ? { tools: 2, hashedArtifacts: 6, externalOperators: 1 } : {},
+    failures: ok ? [] : ['A real external read-only Grok MCP pilot is missing.'],
+  }
+}
+
 test('production readiness gate aggregates blockers without mutating production', async () => {
   const result = await runProductionReadinessGate(config(), {
     runDashboardProductionGo: async () => dashboardResult(false),
     runExternalDogfoodGate: async () => dogfoodResult(false),
+    runMcpPilotGate: async () => mcpPilotResult(false),
     inspectGithubReadiness: async () => githubResult(false),
   })
 
@@ -91,13 +105,15 @@ test('production readiness gate aggregates blockers without mutating production'
   assert.equal(result.blockers.some((blocker) => blocker.includes('metadata beamDashboardVersion is 1.1.0')), true)
   assert.equal(result.blockers.some((blocker) => blocker.includes('does not list dashboard.beam.directory')), true)
   assert.equal(result.blockers.some((blocker) => blocker.includes('External dogfood')), true)
+  assert.equal(result.blockers.some((blocker) => blocker.includes('Hosted MCP pilot')), true)
   assert.equal(result.blockers.some((blocker) => blocker.includes('GitHub issue #196')), true)
 })
 
-test('production readiness gate passes only when dashboard, dogfood, and GitHub are ready', async () => {
+test('production readiness gate passes only when dashboard, dogfood, MCP pilot, and GitHub are ready', async () => {
   const result = await runProductionReadinessGate(config(), {
     runDashboardProductionGo: async () => dashboardResult(true),
     runExternalDogfoodGate: async () => dogfoodResult(true),
+    runMcpPilotGate: async () => mcpPilotResult(true),
     inspectGithubReadiness: async () => githubResult(true),
   })
 
@@ -107,9 +123,11 @@ test('production readiness gate passes only when dashboard, dogfood, and GitHub 
 
 test('GitHub readiness requires issue closure and successful dashboard deploy run', async () => {
   const calls = []
+  const cliOptions = []
   const result = await inspectGithubReadiness(config(), {
-    execFile: async (command, args) => {
+    execFile: async (command, args, options) => {
       calls.push([command, ...args])
+      cliOptions.push(options)
       if (args[0] === 'issue') {
         return {
           stdout: JSON.stringify({
@@ -139,4 +157,21 @@ test('GitHub readiness requires issue closure and successful dashboard deploy ru
   assert.equal(result.failures.some((failure) => failure.includes('#196')), true)
   assert.equal(result.failures.some((failure) => failure.includes('completed/failure')), true)
   assert.equal(calls.every((call) => call[0] === 'gh'), true)
+  assert.equal(cliOptions.every((options) => options.timeout === 15_000), true)
+  assert.equal(cliOptions.every((options) => options.maxBuffer === 1024 * 1024), true)
+})
+
+test('production readiness fails closed when Vercel inspection is unavailable', async () => {
+  const dashboard = dashboardResult(true)
+  dashboard.vercelBefore = { checked: false, reason: 'timed out' }
+  const result = await runProductionReadinessGate(config(), {
+    runDashboardProductionGo: async () => dashboard,
+    runExternalDogfoodGate: async () => dogfoodResult(true),
+    runMcpPilotGate: async () => mcpPilotResult(true),
+    inspectGithubReadiness: async () => githubResult(true),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.blockers.some((blocker) => blocker.includes('Vercel inspection is incomplete: timed out')), true)
+  assert.equal(result.blockers.some((blocker) => blocker.includes('production deployment inspection did not complete')), true)
 })

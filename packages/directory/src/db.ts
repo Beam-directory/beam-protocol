@@ -53,9 +53,14 @@ import type {
   TrustScoreRow,
   VerificationTier,
   WorkspaceIdentityBindingRow,
+  WorkspaceMemberInvitationRow,
+  WorkspaceMemberGrant,
+  WorkspaceMemberRole,
+  WorkspaceMemberRow,
   WorkspacePartnerChannelRow,
   WorkspacePolicy,
   WorkspacePolicyRow,
+  WorkspacePrincipalType,
   WorkspaceRow,
   WorkspaceThreadParticipantRow,
   WorkspaceThreadRow,
@@ -99,6 +104,7 @@ function initSchema(db: DB): void {
       api_key_hash TEXT NOT NULL,
       verification_token TEXT NOT NULL,
       verified INTEGER NOT NULL DEFAULT 0,
+      claim_expires_at TEXT,
       created_at TEXT NOT NULL,
       verified_at TEXT
     );
@@ -246,6 +252,34 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_workspace_members_workspace
       ON workspace_members(workspace_id, role, principal_id);
 
+    CREATE TABLE IF NOT EXISTS workspace_member_invitations (
+      id TEXT PRIMARY KEY,
+      workspace_id INTEGER NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'operator', 'viewer')),
+      token_hash TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL DEFAULT 'pending' CHECK(status IN ('pending', 'accepted', 'revoked', 'expired')),
+      invited_by TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      accepted_at TEXT,
+      accepted_by TEXT,
+      revoked_at TEXT,
+      revoked_by TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (workspace_id) REFERENCES workspaces(id) ON DELETE CASCADE
+    );
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_member_invitations_pending_email
+      ON workspace_member_invitations(workspace_id, email)
+      WHERE status = 'pending';
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_member_invitations_workspace
+      ON workspace_member_invitations(workspace_id, status, created_at DESC);
+
+    CREATE INDEX IF NOT EXISTS idx_workspace_member_invitations_email
+      ON workspace_member_invitations(email, status, expires_at);
+
     CREATE TABLE IF NOT EXISTS workspace_identity_bindings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       workspace_id INTEGER NOT NULL,
@@ -256,6 +290,7 @@ function initSchema(db: DB): void {
       policy_profile TEXT,
       default_thread_scope TEXT NOT NULL DEFAULT 'internal' CHECK(default_thread_scope IN ('internal', 'handoff')),
       can_initiate_external INTEGER NOT NULL DEFAULT 0,
+      credential_managed INTEGER NOT NULL DEFAULT 0 CHECK(credential_managed IN (0, 1)),
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused')),
       notes TEXT,
       created_at TEXT NOT NULL,
@@ -711,6 +746,8 @@ function initSchema(db: DB): void {
       token TEXT PRIMARY KEY,
       email TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')),
+      auth_scope TEXT NOT NULL DEFAULT 'platform' CHECK(auth_scope IN ('platform', 'workspace')),
+      return_to TEXT,
       created_at TEXT NOT NULL,
       expires_at TEXT NOT NULL,
       used INTEGER NOT NULL DEFAULT 0
@@ -723,6 +760,7 @@ function initSchema(db: DB): void {
       id TEXT PRIMARY KEY,
       email TEXT NOT NULL,
       role TEXT NOT NULL CHECK(role IN ('admin', 'operator', 'viewer')),
+      auth_scope TEXT NOT NULL DEFAULT 'platform' CHECK(auth_scope IN ('platform', 'workspace')),
       created_at TEXT NOT NULL,
       last_seen_at TEXT NOT NULL,
       expires_at TEXT NOT NULL,
@@ -900,6 +938,9 @@ function initSchema(db: DB): void {
   `)
 
   ensureColumn(db, 'agents', 'email', 'TEXT')
+  ensureColumn(db, 'admin_magic_links', 'auth_scope', "TEXT NOT NULL DEFAULT 'platform'")
+  ensureColumn(db, 'admin_magic_links', 'return_to', 'TEXT')
+  ensureColumn(db, 'admin_sessions', 'auth_scope', "TEXT NOT NULL DEFAULT 'platform'")
   ensureColumn(db, 'agents', 'email_verified', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'agents', 'description', 'TEXT')
   ensureColumn(db, 'agents', 'logo_url', 'TEXT')
@@ -980,8 +1021,25 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'shield_audit_log', 'nonce', 'TEXT')
   db.exec('CREATE INDEX IF NOT EXISTS idx_shield_audit_nonce ON shield_audit_log(nonce)')
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
+  ensureColumn(db, 'orgs', 'claim_expires_at', 'TEXT')
+  const pendingOrgClaims = db.prepare(`
+    SELECT name, created_at
+    FROM orgs
+    WHERE verified = 0
+      AND claim_expires_at IS NULL
+      AND NOT EXISTS (SELECT 1 FROM org_agents WHERE org_agents.org_name = orgs.name)
+      AND NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.org_name = orgs.name)
+  `).all() as Array<{ name: string; created_at: string }>
+  const backfillOrgClaimExpiry = db.prepare('UPDATE orgs SET claim_expires_at = ? WHERE name = ? AND verified = 0')
+  for (const claim of pendingOrgClaims) {
+    const createdAt = Date.parse(claim.created_at)
+    const baseTime = Number.isFinite(createdAt) ? createdAt : Date.now()
+    backfillOrgClaimExpiry.run(new Date(baseTime + (72 * 60 * 60 * 1000)).toISOString(), claim.name)
+  }
+  db.exec('CREATE INDEX IF NOT EXISTS idx_orgs_claim_expiry ON orgs(verified, claim_expires_at)')
   ensureColumn(db, 'workspace_threads', 'draft_intent_type', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_payload_json', 'TEXT')
+  ensureColumn(db, 'workspace_identity_bindings', 'credential_managed', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'openclaw_hosts', 'credential_nonce', 'TEXT')
   ensureColumn(db, 'openclaw_hosts', 'credential_state', "TEXT NOT NULL DEFAULT 'missing'")
   ensureColumn(db, 'openclaw_hosts', 'credential_issued_at', 'TEXT')
@@ -1233,6 +1291,7 @@ export function createOrg(
     domain?: string | null
     apiKeyHash: string
     verificationToken: string
+    claimExpiresAt?: string | null
   }
 ): OrgRow {
   const now = nowIso()
@@ -1247,9 +1306,10 @@ export function createOrg(
       api_key_hash,
       verification_token,
       verified,
+      claim_expires_at,
       created_at,
       verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, NULL)
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
   `).run(
     input.name,
     input.displayName,
@@ -1257,6 +1317,7 @@ export function createOrg(
     beamDomain,
     input.apiKeyHash,
     input.verificationToken,
+    input.claimExpiresAt ?? new Date(Date.now() + (72 * 60 * 60 * 1000)).toISOString(),
     now,
   )
 
@@ -1266,6 +1327,24 @@ export function createOrg(
 export function getOrg(db: DB, name: string): OrgRow | null {
   const row = db.prepare('SELECT * FROM orgs WHERE name = ?').get(name) as OrgRow | undefined
   return row ?? null
+}
+
+export function getOrgByDomain(db: DB, domain: string): OrgRow | null {
+  const row = db.prepare('SELECT * FROM orgs WHERE domain = ?').get(domain) as OrgRow | undefined
+  return row ?? null
+}
+
+export function deleteExpiredOrgClaim(db: DB, name: string, at = nowIso()): boolean {
+  const result = db.prepare(`
+    DELETE FROM orgs
+    WHERE name = ?
+      AND verified = 0
+      AND claim_expires_at IS NOT NULL
+      AND claim_expires_at <= ?
+      AND NOT EXISTS (SELECT 1 FROM org_agents WHERE org_agents.org_name = orgs.name)
+      AND NOT EXISTS (SELECT 1 FROM workspaces WHERE workspaces.org_name = orgs.name)
+  `).run(name, at)
+  return result.changes === 1
 }
 
 function ensureWorkspacePolicyRecord(db: DB, workspaceId: number, updatedAt: string, updatedBy: string | null = null): void {
@@ -1285,41 +1364,51 @@ export function createWorkspace(
     status?: WorkspaceRow['status']
     defaultThreadScope?: WorkspaceRow['default_thread_scope']
     externalHandoffsEnabled?: boolean
+    ownerPrincipalId: string
   },
 ): WorkspaceRow {
-  const now = nowIso()
+  const create = db.transaction(() => {
+    const now = nowIso()
+    const result = db.prepare(`
+      INSERT INTO workspaces (
+        slug,
+        name,
+        org_name,
+        description,
+        status,
+        default_thread_scope,
+        external_handoffs_enabled,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      input.slug,
+      input.name,
+      input.orgName ?? null,
+      input.description ?? null,
+      input.status ?? 'active',
+      input.defaultThreadScope ?? 'internal',
+      input.externalHandoffsEnabled ? 1 : 0,
+      now,
+      now,
+    )
 
-  const result = db.prepare(`
-    INSERT INTO workspaces (
-      slug,
-      name,
-      org_name,
-      description,
-      status,
-      default_thread_scope,
-      external_handoffs_enabled,
-      created_at,
-      updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    input.slug,
-    input.name,
-    input.orgName ?? null,
-    input.description ?? null,
-    input.status ?? 'active',
-    input.defaultThreadScope ?? 'internal',
-    input.externalHandoffsEnabled ? 1 : 0,
-    now,
-    now,
-  )
+    const workspace = getWorkspaceById(db, Number(result.lastInsertRowid))
+    if (!workspace) {
+      throw new Error('Workspace insert succeeded but row was not found')
+    }
 
-  const workspace = getWorkspaceById(db, Number(result.lastInsertRowid))
-  if (!workspace) {
-    throw new Error('Workspace insert succeeded but row was not found')
-  }
+    ensureWorkspacePolicyRecord(db, workspace.id, now)
+    createWorkspaceMember(db, {
+      workspaceId: workspace.id,
+      principalId: input.ownerPrincipalId,
+      principalType: 'human',
+      role: 'owner',
+    })
+    return workspace
+  })
 
-  ensureWorkspacePolicyRecord(db, workspace.id, now)
-  return workspace
+  return create()
 }
 
 export function getWorkspaceById(db: DB, id: number): WorkspaceRow | null {
@@ -1350,6 +1439,419 @@ export function listWorkspaces(db: DB): WorkspaceRow[] {
     FROM workspaces
     ORDER BY datetime(updated_at) DESC, slug ASC
   `).all() as WorkspaceRow[]
+}
+
+export function listWorkspacesForHumanPrincipal(db: DB, principalId: string): WorkspaceRow[] {
+  return db.prepare(`
+    SELECT workspaces.*
+    FROM workspaces
+    INNER JOIN workspace_members
+      ON workspace_members.workspace_id = workspaces.id
+    WHERE workspace_members.principal_type = 'human'
+      AND workspace_members.principal_id = ?
+    ORDER BY datetime(workspaces.updated_at) DESC, workspaces.slug ASC
+  `).all(principalId) as WorkspaceRow[]
+}
+
+export class WorkspaceOwnerRequiredError extends Error {
+  readonly code = 'WORKSPACE_OWNER_REQUIRED'
+
+  constructor(message = 'A workspace must retain at least one owner') {
+    super(message)
+    this.name = 'WorkspaceOwnerRequiredError'
+  }
+}
+
+export class WorkspaceInvitationError extends Error {
+  readonly code: 'WORKSPACE_INVITATION_INVALID' | 'WORKSPACE_INVITATION_EXPIRED' | 'WORKSPACE_INVITATION_EMAIL_MISMATCH' | 'WORKSPACE_INVITATION_NOT_PENDING'
+
+  constructor(
+    code: WorkspaceInvitationError['code'],
+    message: string,
+  ) {
+    super(message)
+    this.name = 'WorkspaceInvitationError'
+    this.code = code
+  }
+}
+
+export function hasWorkspaceSessionAccess(db: DB, email: string, at = nowIso()): boolean {
+  const normalizedEmail = email.trim().toLowerCase()
+  if (!normalizedEmail) {
+    return false
+  }
+
+  const row = db.prepare(`
+    SELECT 1 AS allowed
+    FROM workspace_members
+    WHERE principal_type = 'human' AND principal_id = ?
+    UNION ALL
+    SELECT 1 AS allowed
+    FROM workspace_member_invitations
+    WHERE email = ? AND status = 'pending' AND expires_at > ?
+    LIMIT 1
+  `).get(normalizedEmail, normalizedEmail, at) as { allowed: number } | undefined
+
+  return row?.allowed === 1
+}
+
+export function getWorkspaceMemberById(db: DB, id: number): WorkspaceMemberRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_members
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspaceMemberRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspaceMember(
+  db: DB,
+  workspaceId: number,
+  principalId: string,
+  principalType: WorkspacePrincipalType = 'human',
+): WorkspaceMemberRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_members
+    WHERE workspace_id = ? AND principal_id = ? AND principal_type = ?
+    LIMIT 1
+  `).get(workspaceId, principalId, principalType) as WorkspaceMemberRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspaceMembers(db: DB, workspaceId: number): WorkspaceMemberRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM workspace_members
+    WHERE workspace_id = ?
+    ORDER BY
+      CASE role
+        WHEN 'owner' THEN 0
+        WHEN 'operator' THEN 1
+        ELSE 2
+      END ASC,
+      principal_type ASC,
+      principal_id ASC
+  `).all(workspaceId) as WorkspaceMemberRow[]
+}
+
+export function expireWorkspaceMemberInvitations(
+  db: DB,
+  input: { workspaceId?: number; at?: string } = {},
+): number {
+  const at = input.at ?? nowIso()
+  const result = input.workspaceId === undefined
+    ? db.prepare(`
+      UPDATE workspace_member_invitations
+      SET status = 'expired', updated_at = ?
+      WHERE status = 'pending' AND expires_at <= ?
+    `).run(at, at)
+    : db.prepare(`
+      UPDATE workspace_member_invitations
+      SET status = 'expired', updated_at = ?
+      WHERE workspace_id = ? AND status = 'pending' AND expires_at <= ?
+    `).run(at, input.workspaceId, at)
+
+  return result.changes
+}
+
+export function getWorkspaceMemberInvitationById(
+  db: DB,
+  id: string,
+): WorkspaceMemberInvitationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_member_invitations
+    WHERE id = ?
+    LIMIT 1
+  `).get(id) as WorkspaceMemberInvitationRow | undefined
+
+  return row ?? null
+}
+
+export function getWorkspaceMemberInvitationByTokenHash(
+  db: DB,
+  tokenHash: string,
+): WorkspaceMemberInvitationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM workspace_member_invitations
+    WHERE token_hash = ?
+    LIMIT 1
+  `).get(tokenHash) as WorkspaceMemberInvitationRow | undefined
+
+  return row ?? null
+}
+
+export function listWorkspaceMemberInvitations(
+  db: DB,
+  workspaceId: number,
+): WorkspaceMemberInvitationRow[] {
+  expireWorkspaceMemberInvitations(db, { workspaceId })
+  return db.prepare(`
+    SELECT *
+    FROM workspace_member_invitations
+    WHERE workspace_id = ?
+    ORDER BY
+      CASE status
+        WHEN 'pending' THEN 0
+        WHEN 'accepted' THEN 1
+        WHEN 'expired' THEN 2
+        ELSE 3
+      END,
+      datetime(created_at) DESC,
+      email ASC
+  `).all(workspaceId) as WorkspaceMemberInvitationRow[]
+}
+
+export function createWorkspaceMemberInvitation(
+  db: DB,
+  input: {
+    id: string
+    workspaceId: number
+    email: string
+    role: WorkspaceMemberRole
+    tokenHash: string
+    invitedBy: string
+    expiresAt: string
+  },
+): WorkspaceMemberInvitationRow {
+  const create = db.transaction(() => {
+    const now = nowIso()
+    expireWorkspaceMemberInvitations(db, { workspaceId: input.workspaceId, at: now })
+    db.prepare(`
+      INSERT INTO workspace_member_invitations (
+        id,
+        workspace_id,
+        email,
+        role,
+        token_hash,
+        status,
+        invited_by,
+        expires_at,
+        accepted_at,
+        accepted_by,
+        revoked_at,
+        revoked_by,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, NULL, NULL, ?, ?)
+    `).run(
+      input.id,
+      input.workspaceId,
+      input.email.trim().toLowerCase(),
+      input.role,
+      input.tokenHash,
+      input.invitedBy.trim().toLowerCase(),
+      input.expiresAt,
+      now,
+      now,
+    )
+
+    const invitation = getWorkspaceMemberInvitationById(db, input.id)
+    if (!invitation) {
+      throw new Error('Workspace invitation insert succeeded but row was not found')
+    }
+    return invitation
+  })
+
+  return create()
+}
+
+export function revokeWorkspaceMemberInvitation(
+  db: DB,
+  input: { id: string; workspaceId: number; revokedBy: string },
+): WorkspaceMemberInvitationRow | null {
+  const revoke = db.transaction(() => {
+    const existing = getWorkspaceMemberInvitationById(db, input.id)
+    if (!existing || existing.workspace_id !== input.workspaceId || existing.status !== 'pending') {
+      return null
+    }
+
+    const now = nowIso()
+    db.prepare(`
+      UPDATE workspace_member_invitations
+      SET status = 'revoked', revoked_at = ?, revoked_by = ?, updated_at = ?
+      WHERE id = ? AND workspace_id = ? AND status = 'pending'
+    `).run(now, input.revokedBy.trim().toLowerCase(), now, existing.id, input.workspaceId)
+    return getWorkspaceMemberInvitationById(db, existing.id)
+  })
+
+  return revoke()
+}
+
+export function acceptWorkspaceMemberInvitation(
+  db: DB,
+  input: { tokenHash: string; email: string },
+): { invitation: WorkspaceMemberInvitationRow; member: WorkspaceMemberRow } {
+  const accept = db.transaction(() => {
+    const invitation = getWorkspaceMemberInvitationByTokenHash(db, input.tokenHash)
+    if (!invitation) {
+      throw new WorkspaceInvitationError('WORKSPACE_INVITATION_INVALID', 'Invitation is invalid or no longer available')
+    }
+
+    if (invitation.status !== 'pending') {
+      throw new WorkspaceInvitationError('WORKSPACE_INVITATION_NOT_PENDING', 'Invitation is invalid or no longer available')
+    }
+
+    const now = nowIso()
+    if (invitation.expires_at <= now) {
+      db.prepare(`
+        UPDATE workspace_member_invitations
+        SET status = 'expired', updated_at = ?
+        WHERE id = ? AND status = 'pending'
+      `).run(now, invitation.id)
+      throw new WorkspaceInvitationError('WORKSPACE_INVITATION_EXPIRED', 'Invitation is invalid or no longer available')
+    }
+
+    const normalizedEmail = input.email.trim().toLowerCase()
+    if (normalizedEmail !== invitation.email) {
+      throw new WorkspaceInvitationError('WORKSPACE_INVITATION_EMAIL_MISMATCH', 'Invitation belongs to a different signed-in email')
+    }
+
+    const existing = getWorkspaceMember(db, invitation.workspace_id, normalizedEmail, 'human')
+    let member: WorkspaceMemberRow
+    if (existing) {
+      const updated = updateWorkspaceMemberRole(db, { id: existing.id, role: invitation.role })
+      if (!updated) {
+        throw new Error('Workspace member disappeared while accepting invitation')
+      }
+      member = updated
+    } else {
+      member = createWorkspaceMember(db, {
+        workspaceId: invitation.workspace_id,
+        principalId: normalizedEmail,
+        principalType: 'human',
+        role: invitation.role,
+      })
+    }
+
+    db.prepare(`
+      UPDATE workspace_member_invitations
+      SET status = 'accepted', accepted_at = ?, accepted_by = ?, updated_at = ?
+      WHERE id = ? AND status = 'pending'
+    `).run(now, normalizedEmail, now, invitation.id)
+
+    const acceptedInvitation = getWorkspaceMemberInvitationById(db, invitation.id)
+    if (!acceptedInvitation) {
+      throw new Error('Workspace invitation disappeared after acceptance')
+    }
+
+    return { invitation: acceptedInvitation, member }
+  })
+
+  return accept()
+}
+
+export function createWorkspaceMember(
+  db: DB,
+  input: { workspaceId: number } & WorkspaceMemberGrant,
+): WorkspaceMemberRow {
+  const create = db.transaction(() => {
+    if (input.role === 'owner' && input.principalType !== 'human') {
+      throw new WorkspaceOwnerRequiredError('Workspace owners must be human principals')
+    }
+
+    const ownerCount = (db.prepare(`
+      SELECT COUNT(*) AS count
+      FROM workspace_members
+      WHERE workspace_id = ? AND principal_type = 'human' AND role = 'owner'
+    `).get(input.workspaceId) as { count: number } | undefined)?.count ?? 0
+    if (ownerCount === 0 && input.role !== 'owner') {
+      throw new WorkspaceOwnerRequiredError('The first workspace member must be an owner')
+    }
+
+    const now = nowIso()
+    const result = db.prepare(`
+      INSERT INTO workspace_members (
+        workspace_id,
+        principal_id,
+        principal_type,
+        role,
+        created_at,
+        updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?)
+    `).run(
+      input.workspaceId,
+      input.principalId,
+      input.principalType,
+      input.role,
+      now,
+      now,
+    )
+
+    const member = getWorkspaceMemberById(db, Number(result.lastInsertRowid))
+    if (!member) {
+      throw new Error('Workspace member insert succeeded but row was not found')
+    }
+    return member
+  })
+
+  return create()
+}
+
+export function updateWorkspaceMemberRole(
+  db: DB,
+  input: { id: number; role: WorkspaceMemberRole },
+): WorkspaceMemberRow | null {
+  const update = db.transaction(() => {
+    const existing = getWorkspaceMemberById(db, input.id)
+    if (!existing) {
+      return null
+    }
+
+    if (input.role === 'owner' && existing.principal_type !== 'human') {
+      throw new WorkspaceOwnerRequiredError('Workspace owners must be human principals')
+    }
+
+    if (existing.principal_type === 'human' && existing.role === 'owner' && input.role !== 'owner') {
+      const ownerCount = (db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM workspace_members
+        WHERE workspace_id = ? AND principal_type = 'human' AND role = 'owner'
+      `).get(existing.workspace_id) as { count: number } | undefined)?.count ?? 0
+      if (ownerCount <= 1) {
+        throw new WorkspaceOwnerRequiredError()
+      }
+    }
+
+    db.prepare(`
+      UPDATE workspace_members
+      SET role = ?, updated_at = ?
+      WHERE id = ?
+    `).run(input.role, nowIso(), existing.id)
+    return getWorkspaceMemberById(db, existing.id)
+  })
+
+  return update()
+}
+
+export function deleteWorkspaceMember(db: DB, id: number): WorkspaceMemberRow | null {
+  const remove = db.transaction(() => {
+    const existing = getWorkspaceMemberById(db, id)
+    if (!existing) {
+      return null
+    }
+
+    if (existing.principal_type === 'human' && existing.role === 'owner') {
+      const ownerCount = (db.prepare(`
+        SELECT COUNT(*) AS count
+        FROM workspace_members
+        WHERE workspace_id = ? AND principal_type = 'human' AND role = 'owner'
+      `).get(existing.workspace_id) as { count: number } | undefined)?.count ?? 0
+      if (ownerCount <= 1) {
+        throw new WorkspaceOwnerRequiredError()
+      }
+    }
+
+    db.prepare('DELETE FROM workspace_members WHERE id = ?').run(existing.id)
+    return existing
+  })
+
+  return remove()
 }
 
 export function updateWorkspace(
@@ -1663,6 +2165,7 @@ export function createWorkspaceIdentityBinding(
     policyProfile?: string | null
     defaultThreadScope?: WorkspaceIdentityBindingRow['default_thread_scope']
     canInitiateExternal?: boolean
+    credentialManaged?: boolean
     status?: WorkspaceIdentityBindingRow['status']
     notes?: string | null
   },
@@ -1678,11 +2181,12 @@ export function createWorkspaceIdentityBinding(
       policy_profile,
       default_thread_scope,
       can_initiate_external,
+      credential_managed,
       status,
       notes,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.workspaceId,
     input.beamId,
@@ -1692,6 +2196,7 @@ export function createWorkspaceIdentityBinding(
     input.policyProfile ?? null,
     input.defaultThreadScope ?? 'internal',
     input.canInitiateExternal ? 1 : 0,
+    input.credentialManaged ? 1 : 0,
     input.status ?? 'active',
     input.notes ?? null,
     now,
@@ -2021,7 +2526,7 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
 
 export function markOrgVerified(db: DB, name: string): OrgRow | null {
   const now = nowIso()
-  db.prepare('UPDATE orgs SET verified = 1, verified_at = ? WHERE name = ?').run(now, name)
+  db.prepare('UPDATE orgs SET verified = 1, verified_at = ?, claim_expires_at = NULL WHERE name = ?').run(now, name)
   return getOrg(db, name)
 }
 
@@ -2159,7 +2664,9 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const emailVerified = normalizedEmail
     ? (data.emailVerified ? 1 : emailChanged ? 0 : existing?.email_verified ?? 0)
     : 0
-  const verificationTier: VerificationTier = data.verificationTier ?? (emailVerified === 1 ? 'verified' : 'basic')
+  const verificationTier: VerificationTier = data.verificationTier
+    ?? existing?.verification_tier
+    ?? (emailVerified === 1 ? 'verified' : 'basic')
   const verified = verificationTier !== 'basic' || emailVerified === 1 ? 1 : 0
   const emailToken = normalizedEmail ? (emailChanged ? null : existing?.email_token ?? null) : null
 
@@ -2742,6 +3249,52 @@ export function getLatestBusinessVerification(db: DB, beamId: string): BusinessV
   `).get(beamId) as BusinessVerificationRow | undefined
 
   return row ?? null
+}
+
+export function getBusinessVerificationById(db: DB, id: number): BusinessVerificationRow | null {
+  const row = db.prepare('SELECT * FROM business_verifications WHERE id = ? LIMIT 1').get(id) as BusinessVerificationRow | undefined
+  return row ?? null
+}
+
+export function listBusinessVerifications(
+  db: DB,
+  status: string = 'pending',
+  limit: number = 100,
+): BusinessVerificationRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM business_verifications
+    WHERE status = ?
+    ORDER BY datetime(created_at) ASC, id ASC
+    LIMIT ?
+  `).all(status, Math.max(1, Math.min(250, limit))) as BusinessVerificationRow[]
+}
+
+export function reviewBusinessVerification(
+  db: DB,
+  input: {
+    id: number
+    status: 'verified' | 'rejected'
+    evidence: unknown
+  },
+): BusinessVerificationRow | null {
+  const existing = getBusinessVerificationById(db, input.id)
+  if (!existing || existing.status !== 'pending') {
+    return null
+  }
+
+  db.prepare(`
+    UPDATE business_verifications
+    SET status = ?, evidence = ?, verified_at = ?
+    WHERE id = ? AND status = 'pending'
+  `).run(
+    input.status,
+    JSON.stringify(input.evidence),
+    input.status === 'verified' ? nowIso() : null,
+    input.id,
+  )
+
+  return getBusinessVerificationById(db, input.id)
 }
 
 export function markAgentBusinessVerified(db: DB, beamId: string): AgentRow | null {

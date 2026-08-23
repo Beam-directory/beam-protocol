@@ -7,8 +7,10 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
+import { createHash } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { BeamClient, BeamIdentity } from '../../packages/sdk-typescript/dist/index.js'
+import { createDatabase, createOrg, markOrgVerified } from '../../packages/directory/dist/db.js'
 
 const execFileAsync = promisify(execFile)
 const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
@@ -121,12 +123,39 @@ async function requestJson(url, init) {
   return parsed
 }
 
-async function allowIntent(directoryUrl, targetBeamId, intentType, allowedFrom) {
+async function allowIntent(directoryUrl, adminToken, targetBeamId, intentType, allowedFrom) {
   await requestJson(`${directoryUrl}/acl`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
     body: JSON.stringify({ targetBeamId, intentType, allowedFrom }),
   })
+}
+
+async function createAdminToken(directoryUrl, adminEmail) {
+  const challenge = await requestJson(`${directoryUrl}/admin/auth/magic-link`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Origin: 'http://localhost:5173',
+    },
+    body: JSON.stringify({ email: adminEmail }),
+  })
+  if (typeof challenge.token !== 'string' || challenge.token.length === 0) {
+    throw new Error('Local E2E admin flow did not return a magic-link token')
+  }
+
+  const verified = await requestJson(`${directoryUrl}/admin/auth/verify`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token: challenge.token }),
+  })
+  if (typeof verified.token !== 'string' || verified.token.length === 0) {
+    throw new Error('Local E2E admin flow did not return a session token')
+  }
+  return verified.token
 }
 
 async function runCli(args, cwd, env = {}) {
@@ -183,6 +212,8 @@ async function main() {
   const directoryUrl = `http://127.0.0.1:${directoryPort}`
   const messageBusUrl = `http://127.0.0.1:${messageBusPort}/v1/beam`
   const beamBusApiKey = 'beam-bus-e2e-key'
+  const orgApiKey = 'beam_org_e2e_local_test_only'
+  const adminEmail = 'ops@beam.local'
 
   await mkdir(cliRoot, { recursive: true })
 
@@ -201,6 +232,17 @@ async function main() {
   let receiver
 
   try {
+    const bootstrapDb = createDatabase(directoryDb)
+    createOrg(bootstrapDb, {
+      name: 'e2e',
+      displayName: 'Beam E2E',
+      domain: 'e2e.example',
+      apiKeyHash: createHash('sha256').update(orgApiKey).digest('hex'),
+      verificationToken: 'e2e-local-test-only',
+    })
+    markOrgVerified(bootstrapDb, 'e2e')
+    bootstrapDb.close()
+
     directoryProcess = spawnProcess({
       name: 'directory',
       command: process.execPath,
@@ -209,10 +251,12 @@ async function main() {
         PORT: String(directoryPort),
         DB_PATH: directoryDb,
         JWT_SECRET: 'beam-e2e-jwt-secret',
+        BEAM_ADMIN_EMAILS: adminEmail,
       },
     })
 
     await waitForHealth(`${directoryUrl}/health`, 'directory')
+    const adminToken = await createAdminToken(directoryUrl, adminEmail)
 
     messageBusProcess = spawnProcess({
       name: 'message-bus',
@@ -237,6 +281,7 @@ async function main() {
     receiver = new BeamClient({
       identity: receiverIdentity.export(),
       directoryUrl,
+      apiKey: orgApiKey,
     })
 
     await step('registering the TypeScript receiver', async () => {
@@ -249,13 +294,14 @@ async function main() {
         })
       })
       await receiver.connect()
-      await allowIntent(directoryUrl, receiver.beamId, 'conversation.message', '*')
+      await allowIntent(directoryUrl, adminToken, receiver.beamId, 'conversation.message', '*')
     })
 
     await step('validating the TypeScript SDK flow', async () => {
       const sender = new BeamClient({
         identity: tsSenderIdentity.export(),
         directoryUrl,
+        apiKey: orgApiKey,
       })
 
       await sender.register('TypeScript Sender', [])
@@ -280,6 +326,7 @@ async function main() {
         BEAM_RECEIVER_BEAM_ID: receiver.beamId,
         BEAM_SEARCH_ORG: 'e2e',
         BEAM_MESSAGE: 'hello from python',
+        BEAM_ORG_API_KEY: orgApiKey,
       })
 
       if (stderr.trim().length > 0) {
@@ -294,7 +341,9 @@ async function main() {
 
     await step('validating the CLI flow', async () => {
       await runCli(['init', '--agent', 'cli-sender', '--org', 'e2e', '--directory', directoryUrl, '--force'], cliRoot)
-      await runCli(['register', '--display-name', 'CLI Sender', '--capabilities', 'conversation.message', '--directory', directoryUrl], cliRoot)
+      await runCli(['register', '--display-name', 'CLI Sender', '--capabilities', 'conversation.message', '--directory', directoryUrl], cliRoot, {
+        BEAM_ORG_API_KEY: orgApiKey,
+      })
 
       const lookup = JSON.parse((await runCli(['lookup', receiver.beamId, '--directory', directoryUrl, '--json'], cliRoot)).stdout)
       assert.equal(lookup.beamId, receiver.beamId, 'CLI lookup did not resolve the receiver')
@@ -310,6 +359,7 @@ async function main() {
       const busSender = new BeamClient({
         identity: busSenderIdentity.export(),
         directoryUrl,
+        apiKey: orgApiKey,
       })
       await busSender.register('Bus Sender', [])
 

@@ -8,12 +8,13 @@
   ],
   "scripts": {
     "build": "npm run build:workspaces",
-    "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus",
+    "build:workspaces": "npm run build --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus --workspace=packages/a2a-adapter --workspace=packages/mcp-server",
     "demo:seed": "node scripts/demo/seed-hosted-demo.mjs",
     "demo:run": "node scripts/demo/run-hosted-demo.mjs",
     "dogfood:partner-handoff": "node scripts/dogfood/partner-handoff.mjs",
     "dogfood:hosted-demo": "node scripts/demo/dogfood-hosted-demo.mjs",
     "production:buyer-dry-run": "node scripts/production/buyer-dry-run.mjs",
+    "production:claim-organization": "node scripts/production/claim-organization.mjs",
     "production:digest": "node scripts/production/operator-digest.mjs",
     "production:dashboard-domain": "node scripts/production/dashboard-domain-preflight.mjs",
     "production:dashboard-deployment": "node scripts/production/dashboard-deployment-truth-check.mjs",
@@ -21,12 +22,15 @@
     "production:dashboard-shell": "node scripts/production/dashboard-shell-check.mjs",
     "production:external-dogfood-assemble": "node scripts/production/external-dogfood-evidence-assemble.mjs",
     "production:external-dogfood": "node scripts/production/external-dogfood-evidence-check.mjs",
+    "production:mcp-pilot": "node scripts/production/mcp-pilot-evidence-check.mjs",
     "production:extract-vercel-url": "node scripts/production/extract-vercel-deployment-url.mjs",
     "production:parity": "node scripts/production/environment-parity-check.mjs",
     "production:readiness": "node scripts/production/production-readiness-gate.mjs",
     "production:workflow-guards": "node scripts/production/workflow-production-guard-check.mjs",
     "production:backup-restore": "node scripts/production/backup-restore-drill.mjs",
     "production:fire-drill": "node scripts/production/fire-drill.mjs",
+    "production:godaddy-txt": "node scripts/production/godaddy-txt-record.mjs",
+    "production:issue-organization-agent": "node scripts/production/issue-organization-agent.mjs",
     "production:operator-dry-run": "node scripts/production/operator-dry-run.mjs",
     "production:partner-dry-run": "node scripts/production/production-partner-dry-run.mjs",
     "quickstart:smoke": "node scripts/quickstart/smoke.mjs",
@@ -37,10 +41,13 @@
     "quickstart:ui-smoke:install": "playwright install chromium",
     "release:admin-auth": "node scripts/release/live-admin-auth-smoke.mjs",
     "release:smoke": "node scripts/release/release-smoke.mjs",
+    "pretest": "npm run build --workspace=packages/sdk-typescript",
     "test": "npm run test:workspaces && npm run test:scripts",
     "test:workspaces": "npm run test --workspaces --if-present",
     "test:scripts": "node --test scripts/production/*.test.mjs scripts/workspace/*.test.mjs",
-    "test:e2e": "node scripts/e2e/run.mjs",
+    "test:e2e": "npm run build && node scripts/e2e/run.mjs",
+    "test:mcp-e2e": "npm run build --workspace=beam-protocol-sdk && npm run build --workspace=@beam-protocol/directory && npm run build --workspace=@beam-protocol/mcp-server && node scripts/e2e/mcp-grok-handoff.mjs",
+    "test:mcp-container-e2e": "npm run build --workspace=beam-protocol-sdk && npm run build --workspace=@beam-protocol/mcp-server && node scripts/e2e/mcp-container-remote.mjs",
     "workspace:buyer-dry-run": "node scripts/workspace/buyer-dry-run.mjs",
     "workspace:digest": "node scripts/workspace/operator-digest.mjs",
     "workspace:external-dogfood-pack": "node scripts/workspace/external-dogfood-pack.mjs",
@@ -76,8 +83,9 @@
     "workspace:operator-dry-run": "node scripts/workspace/operator-dry-run.mjs",
     "workspace:sync-demo": "node scripts/workspace/sync-demo.mjs",
     "dev:directory": "npm run dev --workspace=packages/directory",
+    "pretypecheck": "npm run build --workspace=packages/sdk-typescript",
     "typecheck": "npm run typecheck:workspaces",
-    "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus"
+    "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus --workspace=packages/a2a-adapter --workspace=packages/mcp-server"
   },
   "engines": {
     "node": ">=20.19.0"
@@ -102,5 +110,15 @@
     "playwright": "^1.60.0",
     "pngjs": "^7.0.0",
     "vite": "^6.4.3"
+  },
+  "overrides": {
+    "@babel/core": "7.29.7",
+    "fast-uri": "3.1.5",
+    "nanoid": "3.3.18"
+  },
+  "allowScripts": {
+    "better-sqlite3@12.10.0": true,
+    "esbuild@0.25.12": true,
+    "fsevents": false
   }
 }

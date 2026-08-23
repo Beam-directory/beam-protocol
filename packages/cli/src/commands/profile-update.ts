@@ -17,7 +17,7 @@ export async function cmdProfileUpdate(options: ProfileUpdateOptions): Promise<v
   const spinner = ora(`Updating profile for ${chalk.bold(config.identity.beamId)}...`).start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const profile = await client.updateProfile({
       description: options.description,
       logo_url: options.logoUrl,

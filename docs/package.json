@@ -12,7 +12,8 @@
   },
   "overrides": {
     "vite": "6.4.3",
-    "postcss": "8.5.15",
+    "postcss": "8.5.26",
+    "nanoid": "3.3.18",
     "@vitejs/plugin-vue": "6.0.1",
     "esbuild": "0.25.0"
   },

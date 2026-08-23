@@ -7,6 +7,16 @@ on:
     tags:
       - 'v*'
   pull_request:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Release whose hosted MCP pilot evidence should be checked
+        required: true
+        default: 1.7.0
+        type: string
+
+permissions:
+  contents: read
 
 jobs:
   monorepo:
@@ -16,10 +26,10 @@ jobs:
         node: [20, 22]
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node }}
           registry-url: https://registry.npmjs.org
@@ -46,6 +56,7 @@ jobs:
           node --check scripts/production/environment-parity-check.mjs
           node --check scripts/production/extract-vercel-deployment-url.mjs
           node --check scripts/production/external-dogfood-evidence-check.mjs
+          node --check scripts/production/mcp-pilot-evidence-check.mjs
           node --check scripts/production/production-readiness-gate.mjs
           node --check scripts/production/workflow-production-guard-check.mjs
           node --check scripts/release/release-smoke.mjs
@@ -59,16 +70,16 @@ jobs:
         python: ['3.10', '3.12']
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: ${{ matrix.node }}
           cache: npm
 
       - name: Setup Python
-        uses: actions/setup-python@v6
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: ${{ matrix.python }}
 
@@ -88,10 +99,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -114,10 +125,10 @@ jobs:
     needs: monorepo
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           cache: npm
@@ -154,7 +165,7 @@ jobs:
 
       - name: Upload quickstart UI smoke artifacts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: quickstart-ui-smoke
           path: tmp/dashboard-ui-smoke
@@ -164,16 +175,142 @@ jobs:
         if: always()
         run: docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env down -v --remove-orphans
 
-  publish:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [monorepo, e2e, docs, quickstart]
+  mcp-container:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build hardened MCP image
+        run: npm run container:build --workspace=@beam-protocol/mcp-server
+
+      - name: Run remote MCP container E2E
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p tmp/mcp-release-candidate
+          npm run test:mcp-container-e2e | tee tmp/mcp-release-candidate/container-e2e.json
+
+      - name: Record immutable local image identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker image inspect beam-mcp:local > tmp/mcp-release-candidate/image-inspect.json
+
+      - name: Scan image for High and Critical vulnerabilities
+        shell: bash
+        env:
+          TRIVY_IMAGE: aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+        run: |
+          set -euo pipefail
+          mkdir -p "${RUNNER_TEMP}/trivy-cache"
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            "$TRIVY_IMAGE" image \
+            --scanners vuln \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --skip-version-check \
+            --no-progress \
+            --format json \
+            --output tmp/mcp-release-candidate/vulnerability-scan.json \
+            beam-mcp:local
+
+      - name: Generate CycloneDX SBOM
+        shell: bash
+        env:
+          TRIVY_IMAGE: aquasec/trivy:0.70.0@sha256:be1190afcb28352bfddc4ddeb71470835d16462af68d310f9f4bca710961a41e
+        run: |
+          set -euo pipefail
+          docker run --rm \
+            --volume /var/run/docker.sock:/var/run/docker.sock \
+            --volume "${RUNNER_TEMP}/trivy-cache:/root/.cache/trivy" \
+            --volume "${GITHUB_WORKSPACE}:/workspace" \
+            --workdir /workspace \
+            "$TRIVY_IMAGE" image \
+            --skip-version-check \
+            --no-progress \
+            --format cyclonedx \
+            --output tmp/mcp-release-candidate/beam-mcp.cdx.json \
+            beam-mcp:local
+
+      - name: Hash candidate evidence
+        shell: bash
+        run: sha256sum tmp/mcp-release-candidate/* > tmp/mcp-release-candidate/SHA256SUMS
+
+      - name: Upload MCP candidate evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: mcp-release-candidate-${{ github.sha }}
+          path: tmp/mcp-release-candidate
+          if-no-files-found: error
+          retention-days: 30
+
+  mcp-pilot-evidence:
+    if: startsWith(github.ref, 'refs/tags/v') || github.event_name == 'workflow_dispatch'
+    needs: mcp-container
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+
+      - name: Verify external hosted MCP pilot evidence
+        shell: bash
+        env:
+          DISPATCH_RELEASE: ${{ inputs.release }}
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${TAG_NAME#v}"
+            PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+            test "$VERSION" = "$PACKAGE_VERSION" || {
+              echo "Tag version $VERSION does not match package.json version $PACKAGE_VERSION" >&2
+              exit 1
+            }
+          else
+            VERSION="$DISPATCH_RELEASE"
+          fi
+          test -n "$VERSION" || { echo "MCP pilot release cannot be empty" >&2; exit 1; }
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]] || {
+            echo "MCP pilot release must be a safe semantic version: $VERSION" >&2
+            exit 1
+          }
+          EVIDENCE="reports/${VERSION}-mcp-pilot-evidence.json"
+          test -f "$EVIDENCE" || { echo "Required hosted MCP pilot evidence is missing: $EVIDENCE" >&2; exit 1; }
+          npm run production:mcp-pilot -- \
+            --release "$VERSION" \
+            --evidence "$EVIDENCE" \
+            --output "tmp/${VERSION}-mcp-pilot-evidence-check.md"
+
+  publish:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [monorepo, e2e, docs, quickstart, mcp-container, mcp-pilot-evidence]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
@@ -201,10 +338,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Setup Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
 
@@ -275,7 +412,7 @@ jobs:
       contents: write
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
 
       - name: Publish GitHub release
         env:

@@ -2,85 +2,58 @@
 layout: home
 hero:
   name: Beam Protocol
-  text: "Safe AI Work Between Companies"
-  tagline: "Beam helps one company's AI ask another company to do work without losing who asked, who answered, or where it got stuck. Start with one real handoff and a visible paper trail."
+  text: "The Trust Layer for AI Agents"
+  tagline: "Verified identity, scoped authority, human approval, and an auditable handoff when agents work across company lines."
   actions:
     - theme: brand
       text: Guided Evaluation
       link: https://beam.directory/guided-evaluation.html
     - theme: alt
-      text: Request Hosted Beta
+      text: Request Pilot
       link: https://beam.directory/hosted-beta.html
     - theme: alt
-      text: Hosted Quickstart
-      link: /guide/hosted-quickstart
+      text: Browser Playground
+      link: https://beam.directory/playground.html
 features:
-  - icon: 🤝
-    title: One Real Workflow
-    details: "Beam starts with one concrete job: one company asks another company to do work and both sides can still see the same trail."
-  - icon: 🆔
-    title: Known Senders And Receivers
-    details: "Beam keeps company and agent identity explicit, so both sides know who asked for the work and who answered it."
-  - icon: 🔐
-    title: Visible Paper Trail
-    details: "Requests and replies stay attached to one trace, so operators can see what happened instead of guessing."
-  - icon: 📊
-    title: Operator Visibility
-    details: "The dashboard exposes traces, alerts, dead letters, audit history, and recovery context for the same handoff."
-  - icon: 🔁
-    title: Recovery Built In
-    details: "Retries, restart recovery, and dead-letter handling are part of the product surface, not hidden glue code."
-  - icon: 🧩
-    title: Proof First, Depth Second
-    details: "Start with the guided evaluation and only go deeper into quickstart, SDKs, compatibility, and rollout details once the use case is real."
+  - icon: ◎
+    title: Verified Identity
+    details: "Beam IDs, signing keys, and company assurance make the sender and recipient explicit."
+  - icon: ◇
+    title: Scoped Authority
+    details: "Intent allowlists and policy checks decide what an agent may request before work is handed off."
+  - icon: ✓
+    title: Human Approval
+    details: "High-impact actions can remain pending until a named operator reviews the exact handoff."
+  - icon: ↗
+    title: Operational Proof
+    details: "Traces, retries, failures, and audit context stay attached to the original request."
 ---
 
-## Start Here
+## Start with the question you need answered
 
-If you only do one thing, open the public [Guided Evaluation](https://beam.directory/guided-evaluation.html). That is now the canonical buyer path from landing page to proof and hosted pilot intake.
+Beam has one public evaluation journey. Choose the first step that matches your current question:
 
-Use the docs when you need one of these supporting paths:
+1. **Does the trust model make sense?** Open the [Guided Evaluation](https://beam.directory/guided-evaluation.html). It explains identity, policy, trace, and operator evidence around one controlled handoff.
+2. **Can I see a message move?** Use the [Browser Playground](https://beam.directory/playground.html). It creates a temporary Beam ID and shows the protocol events for one test message.
+3. **Can this operate one real workflow?** [Request a Hosted Pilot](https://beam.directory/hosted-beta.html) with one sender, one recipient, one owner, and one measurable outcome.
+4. **Am I ready to integrate?** [Register a Real Agent](https://beam.directory/register.html), then continue with the SDK or CLI.
 
-1. The [First Production Partner Workflow Contract](/guide/production-partner-workflow) if you want the exact `1.0.0` workflow Beam is anchoring on.
-2. The [Production Partner Onboarding Pack](/guide/design-partner-onboarding) for prerequisites, proof expectations, and operator follow-up templates.
-3. The [Production Go-Live Checklist](/guide/production-go-live-checklist) if the workflow is moving from pilot to production.
-4. The [Hosted Quickstart](/guide/hosted-quickstart) if you want to run the same proof stack locally.
-5. The [Beam Workspaces guide](/guide/beam-workspaces) if you want the first identity and control-plane model for teams, agents, and partner-facing access.
-6. The [Beam Workspaces guide](/guide/beam-workspaces) also covers the new OpenClaw Fleet model when you want one central Beam control plane managing multiple OpenClaw hosts.
-7. The [Register page](https://beam.directory/register.html) once the use case is real and you want to wire your own agent.
+## Technical paths
 
-## Choose Your Path
+- [Getting Started](/guide/getting-started) for local setup and the first SDK flow.
+- [Hosted Quickstart](/guide/hosted-quickstart) for a self-run demonstration environment.
+- [Grok MCP Connector](/guide/grok-mcp-connector) for connecting a Grok-compatible MCP client through Beam.
+- [Identity Onboarding](/guide/identity-onboarding) for Beam IDs, keys, and organization namespaces.
+- [Intent Lifecycle](/guide/intent-lifecycle) for request states, retries, and delivery semantics.
+- [Operator Observability](/guide/operator-observability) for traces, alerts, audit history, and support evidence.
+- [Trust and Assurance](/guide/trust-assurance) for the boundary between a person, organization, agent, runtime, delegation, and payment.
 
-1. **See the proof first.** Open the [Guided Evaluation](https://beam.directory/guided-evaluation.html), inspect the real screenshots and operator evidence, then decide whether Beam is worth more time.
-2. **Check the exact workflow contract.** Open the [First Production Partner Workflow Contract](/guide/production-partner-workflow) to see the named sender, recipient, latency, failure handling, and proof contract for `1.0.0`.
-3. **Prepare the evaluation properly.** Use the [Production Partner Onboarding Pack](/guide/design-partner-onboarding) to align prerequisites, proof expectations, and next-step language before the call starts.
-4. **Request hosted beta.** If you want a guided rollout around one real partner workflow, use the [Hosted Beta page](https://beam.directory/hosted-beta.html).
-5. **Run the technical proof yourself.** Use the [Hosted Quickstart](/guide/hosted-quickstart) when you want to self-run the same baseline locally.
+## Demo context
 
-## What Beam Is For
+Some technical guides use **Acme** and **Northwind** as clearly labeled sample organizations. They are demo fixtures for reproducible examples—not customer claims and not the public product narrative.
 
-Beam is not trying to be every possible agent standard at once. The current release direction is narrower and more useful:
+## What Beam is for
 
-1. A company agent needs to hand work to another company's agent.
-2. Both sides need identity, signatures, replay protection, and policy controls.
-3. Operators need traces, retries, and audit logs when the handoff goes wrong.
+Beam complements agent runtimes and connectivity protocols. MCP connects an AI system to tools. A2A-style protocols move messages between agents. Beam focuses on the trust boundary: who initiated the work, what was allowed, whether human approval was required, and which evidence remains after the handoff.
 
-If that is your problem, Beam is aimed directly at it. If it is not, Beam should probably not be your first tool.
-
-## Continue
-
-- [Guided Evaluation](https://beam.directory/guided-evaluation.html)
-- [First Production Partner Workflow Contract](/guide/production-partner-workflow)
-- [Production Partner Onboarding Pack](/guide/design-partner-onboarding)
-- [Production Go-Live Checklist](/guide/production-go-live-checklist)
-- [Beam Workspaces](/guide/beam-workspaces)
-- [OpenClaw Fleet via Beam Workspaces](/guide/beam-workspaces)
-- [Hosted Quickstart](/guide/hosted-quickstart)
-- [Register a Real Agent](https://beam.directory/register.html)
-- [Partner Handoff Guide](/guide/partner-handoff)
-- [Operator Runbook](/guide/operator-runbook)
-- [Getting Started](/guide/getting-started)
-- [Compatibility Policy](/guide/compatibility)
-- [Hosted Beta Request](https://beam.directory/hosted-beta.html)
-- [0.8.0 Buyer Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-buyer-final-pass.md)
-- [0.8.0 Operator Final Pass](https://github.com/Beam-directory/beam-protocol/blob/main/reports/0.8.0-operator-final-pass.md)
+Start narrow: one sender, one recipient, one intent, and one operator who needs the truth.

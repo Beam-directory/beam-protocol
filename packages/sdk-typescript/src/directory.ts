@@ -16,6 +16,7 @@ import type {
   Delegation,
   Report,
   VerificationTier,
+  WebSocketTicket,
 } from './types.js'
 
 function getString(raw: Record<string, unknown>, ...keys: string[]): string | undefined {
@@ -59,6 +60,10 @@ function getStringArray(raw: Record<string, unknown>, ...keys: string[]): string
 }
 
 function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
+  const remoteAssuranceRaw = raw['remoteAssurance'] ?? raw['remote_assurance']
+  const remoteAssurance = remoteAssuranceRaw && typeof remoteAssuranceRaw === 'object' && !Array.isArray(remoteAssuranceRaw)
+    ? remoteAssuranceRaw as Record<string, unknown>
+    : null
   return {
     beamId: (raw.beamId ?? raw.beam_id) as AgentRecord['beamId'],
     did: (raw.did ?? '') as string,
@@ -69,6 +74,18 @@ function normalizeAgent(raw: Record<string, unknown>): AgentRecord {
     org: (raw.org ?? '') as string,
     trustScore: (raw.trustScore ?? raw.trust_score ?? 0) as number,
     verified: (raw.verified ?? false) as boolean,
+    verificationTier: getString(raw, 'verificationTier', 'verification_tier') as VerificationTier | undefined,
+    verificationStatus: getString(raw, 'verificationStatus', 'verification_status') as AgentRecord['verificationStatus'],
+    assuranceScope: getString(raw, 'assuranceScope', 'assurance_scope') as AgentRecord['assuranceScope'],
+    assuranceIssuer: getString(raw, 'assuranceIssuer', 'assurance_issuer'),
+    remoteAssurance: remoteAssurance ? {
+      issuer: getString(remoteAssurance, 'issuer') ?? '',
+      verified: getBoolean(remoteAssurance, 'verified') ?? false,
+      tier: (getString(remoteAssurance, 'tier') as VerificationTier | undefined) ?? null,
+      status: getString(remoteAssurance, 'status') ?? null,
+      trustScore: getNumber(remoteAssurance, 'trustScore', 'trust_score') ?? null,
+    } : undefined,
+    domain: getString(raw, 'domain'),
     createdAt: (raw.createdAt ?? raw.created_at ?? '') as string,
     lastSeen: (raw.lastSeen ?? raw.last_seen ?? '') as string,
     keyState: normalizeKeyState(raw['keyState']),
@@ -81,9 +98,6 @@ function normalizeProfile(raw: Record<string, unknown>): AgentProfile {
     description: getString(raw, 'description'),
     logoUrl: getString(raw, 'logoUrl', 'logo_url'),
     website: getString(raw, 'website'),
-    verificationTier: getString(raw, 'verificationTier', 'verification_tier') as VerificationTier | undefined,
-    verificationStatus: getString(raw, 'verificationStatus', 'verification_status') as AgentProfile['verificationStatus'],
-    domain: getString(raw, 'domain'),
     intentsHandled: getNumber(raw, 'intentsHandled', 'intents_handled'),
   }
 }
@@ -263,6 +277,12 @@ export class BeamDirectory {
     return normalizeAgent(body)
   }
 
+  async createWebSocketTicket(beamId: BeamIdString): Promise<WebSocketTicket> {
+    return this.request<WebSocketTicket>(`/agents/${encodeURIComponent(beamId)}/ws-ticket`, {
+      method: 'POST',
+    })
+  }
+
   async lookup(beamId: BeamIdString): Promise<AgentRecord | null> {
     const res = await fetch(`${this.baseUrl}/agents/${encodeURIComponent(beamId)}`, {
       headers: this.headers
@@ -288,7 +308,7 @@ export class BeamDirectory {
   async browse(page = 1, filters: BrowseFilters = {}): Promise<BrowseResult> {
     const params = new URLSearchParams({ page: String(page) })
     if (filters.capability) params.set('capability', filters.capability)
-    if (filters.tier) params.set('tier', filters.tier)
+    if (filters.tier) params.set('verification_tier', filters.tier)
     if (filters.verified_only) params.set('verified_only', String(filters.verified_only))
 
     try {
@@ -298,7 +318,7 @@ export class BeamDirectory {
         : []
       return {
         page: getNumber(body, 'page') ?? page,
-        pageSize: getNumber(body, 'pageSize', 'page_size') ?? agentsRaw.length,
+        pageSize: getNumber(body, 'pageSize', 'page_size', 'limit') ?? agentsRaw.length,
         total: getNumber(body, 'total') ?? agentsRaw.length,
         agents: agentsRaw.map(normalizeProfile),
       }

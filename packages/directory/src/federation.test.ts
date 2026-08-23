@@ -92,7 +92,56 @@ test('peer registration and sync cache federated agents', async () => {
     assert.ok(cached)
     assert.equal(cached.directoryUrl, 'https://peer.example')
     assert.equal(cached.agent.public_key, 'remote-public-key')
+    assert.equal(cached.agent.verified, false)
+    assert.equal(cached.agent.verificationTier, 'basic')
+    assert.equal(cached.agent.assuranceScope, 'federated-untrusted')
+    assert.equal(cached.agent.trust_score, 0.4)
     assert.equal(getEffectiveFederatedTrust(db, 'remote@peer.beam.directory'), 0.4)
+  } finally {
+    db.close()
+  }
+})
+
+test('federated assurance is retained as an assertion but cannot become local KYB', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    registerPeer(db, 'https://malicious-peer.example', 'peer-public-key')
+
+    const resolved = await resolveAgentAcrossFederation(db, 'remote@peer.beam.directory', {
+      fetchImpl: async () => jsonResponse({
+        agent: {
+          beam_id: 'remote@peer.beam.directory',
+          display_name: 'Remote Agent',
+          capabilities: ['conversation.message'],
+          public_key: 'remote-public-key',
+          trust_score: 1,
+          verified: true,
+          verificationTier: 'enterprise',
+          verificationStatus: 'verified',
+          ttl: 300,
+        },
+      }),
+      autoDiscover: false,
+    })
+
+    assert.ok(resolved)
+    assert.equal(resolved.agent.verified, false)
+    assert.equal(resolved.agent.verificationTier, 'basic')
+    assert.equal(resolved.agent.verificationStatus, 'unverified')
+    assert.equal(resolved.agent.assuranceScope, 'federated-untrusted')
+    assert.equal(resolved.agent.trust_score, 0.5)
+    assert.deepEqual(resolved.agent.remoteAssurance, {
+      issuer: 'https://malicious-peer.example',
+      verified: true,
+      tier: 'enterprise',
+      status: 'verified',
+      trustScore: 1,
+    })
+
+    const cached = getCachedFederatedAgent(db, 'remote@peer.beam.directory')
+    assert.deepEqual(cached?.agent.remoteAssurance, resolved.agent.remoteAssurance)
+    assert.equal(cached?.agent.verificationTier, 'basic')
   } finally {
     db.close()
   }
@@ -148,6 +197,54 @@ test('trust propagation decays over time', () => {
     assert.ok(decayed < 0.4)
     assert.equal(decayed, applyTrustDecay(0.4, assertedAt))
   } finally {
+    db.close()
+  }
+})
+
+test('federation auth rejects a spoofed mTLS marker and bounds received trust', async () => {
+  const db = createDatabase(':memory:')
+  const previousSharedSecret = process.env['BEAM_FEDERATION_SHARED_SECRET']
+  const previousProxySecret = process.env['BEAM_FEDERATION_PROXY_SECRET']
+  delete process.env['BEAM_FEDERATION_SHARED_SECRET']
+  process.env['BEAM_FEDERATION_PROXY_SECRET'] = 'trusted-proxy-secret'
+
+  try {
+    const app = createApp(db)
+    const spoofed = await app.request(new Request('http://localhost/federation/peers', {
+      headers: { 'X-Beam-mTLS-Verified': 'true' },
+    }))
+    assert.equal(spoofed.status, 401)
+
+    const proxied = await app.request(new Request('http://localhost/federation/peers', {
+      headers: {
+        'X-Beam-mTLS-Verified': 'true',
+        'X-Beam-Federation-Proxy-Secret': 'trusted-proxy-secret',
+      },
+    }))
+    assert.equal(proxied.status, 200)
+
+    process.env['BEAM_FEDERATION_SHARED_SECRET'] = 'shared-secret'
+    const trustResponse = await app.request(new Request('http://localhost/federation/trust', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Beam-Federation-Secret': 'shared-secret',
+      },
+      body: JSON.stringify({
+        beamId: 'remote@peer.beam.directory',
+        sourceDirectoryUrl: 'https://peer.example',
+        trustDelta: 99,
+      }),
+    }))
+    assert.equal(trustResponse.status, 200)
+    const trust = await trustResponse.json() as { effectiveTrust: number }
+    assert.equal(trust.effectiveTrust, 1)
+    assert.equal(getEffectiveFederatedTrust(db, 'remote@peer.beam.directory'), 1)
+  } finally {
+    if (previousSharedSecret === undefined) delete process.env['BEAM_FEDERATION_SHARED_SECRET']
+    else process.env['BEAM_FEDERATION_SHARED_SECRET'] = previousSharedSecret
+    if (previousProxySecret === undefined) delete process.env['BEAM_FEDERATION_PROXY_SECRET']
+    else process.env['BEAM_FEDERATION_PROXY_SECRET'] = previousProxySecret
     db.close()
   }
 })

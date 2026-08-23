@@ -136,9 +136,11 @@ const result = await client.send(
 )
 ```
 
-When you construct the client with `apiKey`, the SDK derives the Beam ID from the key and authenticates
-the WebSocket connection with that key. That makes quickstarts easier when you do not want to load a local
-Ed25519 private key immediately.
+The SDK adopts the `apiKey` returned once by `register()`. Existing agents pass both `identity` and
+`apiKey` when constructing a responder. Before connecting, the SDK exchanges the long-lived key for a
+30-second, single-use WebSocket ticket; the API key never enters the socket URL. The Ed25519 identity
+still signs every Result Frame. API-key-only clients can make authenticated HTTP requests, but cannot
+listen and respond without the signing identity.
 
 ### `talk(to, message, options?)`
 

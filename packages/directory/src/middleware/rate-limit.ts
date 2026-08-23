@@ -96,6 +96,23 @@ async function resolveBuckets(
     }
   }
 
+  if (method === 'POST' && (
+    path === '/orgs'
+    || /^\/orgs\/[^/]+\/(?:agents|verify)$/.test(path)
+  )) {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'organization-registration',
+        limit: policy.registrationPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.organization.register',
+        payload: { path },
+      }],
+    }
+  }
+
   if (method === 'GET' && path === '/agents/search') {
     return {
       trusted: isTrusted(policy, ip),

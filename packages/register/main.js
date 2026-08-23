@@ -1,15 +1,13 @@
 const API_URL = 'https://api.beam.directory/agents/register'
-const SPKI_ED25519_PREFIX = new Uint8Array([
-  0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65,
-  0x70, 0x03, 0x21, 0x00,
-])
 
 const state = {
   publicKeyBase64: '',
-  secretKeyBase64: '',
+  privateKeyBase64: '',
+  apiKey: '',
   beamId: '',
   did: '',
   verificationTier: '',
+  downloaded: false,
 }
 
 const elements = {
@@ -37,8 +35,9 @@ function getTypeScriptQuickstart(beamId) {
   return [
     "import { readFileSync } from 'node:fs'",
     "import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'",
-    "const identity = BeamIdentity.fromData(JSON.parse(readFileSync('./beam-identity.json', 'utf8')))",
-    "const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })",
+    "const bundle = JSON.parse(readFileSync('./beam-identity.json', 'utf8'))",
+    "const identity = BeamIdentity.fromData(bundle)",
+    "const client = new BeamClient({ identity: identity.export(), apiKey: bundle.apiKey, directoryUrl: 'https://api.beam.directory' })",
     `const reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'console.log(reply.message)',
   ].join('\n')
@@ -49,8 +48,9 @@ function getPythonQuickstart(beamId) {
     'import json',
     'from beam_directory import BeamClient, BeamIdentity',
     "with open('beam-identity.json', 'r', encoding='utf-8') as fh:",
-    "    identity = BeamIdentity.from_data(json.load(fh))",
-    "client = BeamClient(identity=identity, directory_url='https://api.beam.directory')",
+    "    bundle = json.load(fh)",
+    "identity = BeamIdentity.from_data(bundle)",
+    "client = BeamClient(identity=identity, api_key=bundle.get('apiKey'), directory_url='https://api.beam.directory')",
     `reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'print(reply.message)',
   ].join('\n')
@@ -80,17 +80,6 @@ function bytesToBase64(bytes) {
   }
 
   return btoa(binary)
-}
-
-function concatBytes(left, right) {
-  const merged = new Uint8Array(left.length + right.length)
-  merged.set(left, 0)
-  merged.set(right, left.length)
-  return merged
-}
-
-function rawPublicKeyToSpkiBase64(publicKey) {
-  return bytesToBase64(concatBytes(SPKI_ED25519_PREFIX, publicKey))
 }
 
 function getSelectedCapabilities() {
@@ -127,14 +116,16 @@ function maskBase64(value) {
 
 function updateKeyPreview() {
   elements.publicKeyPreview.textContent = state.publicKeyBase64 ? maskBase64(state.publicKeyBase64) : 'Noch kein Schlüssel erzeugt.'
-  elements.secretKeyPreview.textContent = state.secretKeyBase64 ? maskBase64(state.secretKeyBase64) : 'Wird lokal generiert und nie an die API gesendet.'
-  elements.downloadButton.disabled = !(state.beamId && state.publicKeyBase64 && state.secretKeyBase64)
+  elements.secretKeyPreview.textContent = state.privateKeyBase64 ? 'Lokal erzeugt – wird aus Sicherheitsgründen nicht angezeigt.' : 'Wird lokal generiert und nie an die API gesendet.'
+  elements.downloadButton.disabled = !(state.beamId && state.publicKeyBase64 && state.privateKeyBase64 && state.apiKey)
 }
 
 function updateResult(data) {
   state.beamId = data.beamId || data.beam_id || ''
   state.did = data.did || ''
   state.verificationTier = data.verificationTier || data.verification_tier || ''
+  state.apiKey = typeof data.apiKey === 'string' ? data.apiKey : ''
+  if (!state.apiKey) throw new Error('Die Directory API hat keinen einmaligen Agent-API-Schlüssel zurückgegeben.')
 
   elements.beamIdValue.textContent = state.beamId || '–'
   elements.didValue.textContent = state.did || '–'
@@ -148,28 +139,31 @@ function updateResult(data) {
   updateKeyPreview()
 }
 
-function generateKeyPair() {
-  if (!window.nacl) {
-    throw new Error('tweetnacl konnte nicht geladen werden.')
-  }
-
-  const keyPair = window.nacl.sign.keyPair()
-  state.publicKeyBase64 = rawPublicKeyToSpkiBase64(keyPair.publicKey)
-  state.secretKeyBase64 = bytesToBase64(keyPair.secretKey)
+async function generateKeyPair() {
+  const keyPair = await crypto.subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify'])
+  state.publicKeyBase64 = bytesToBase64(new Uint8Array(await crypto.subtle.exportKey('spki', keyPair.publicKey)))
+  state.privateKeyBase64 = bytesToBase64(new Uint8Array(await crypto.subtle.exportKey('pkcs8', keyPair.privateKey)))
+  state.apiKey = ''
+  state.downloaded = false
   updateKeyPreview()
   clearStatus()
 }
 
 function downloadIdentity() {
-  if (!state.beamId || !state.publicKeyBase64 || !state.secretKeyBase64) {
+  if (!state.beamId || !state.publicKeyBase64 || !state.privateKeyBase64 || !state.apiKey) {
     showStatus('Registriere den Agenten zuerst, bevor du die Identity-Datei herunterlädst.', 'error')
     return
   }
 
   const payload = {
+    format: 'beam-local-identity/v1',
     beamId: state.beamId,
     publicKey: state.publicKeyBase64,
-    secretKey: state.secretKeyBase64,
+    privateKey: state.privateKeyBase64,
+    publicKeyBase64: state.publicKeyBase64,
+    privateKeyBase64: state.privateKeyBase64,
+    apiKey: state.apiKey,
+    directoryUrl: 'https://api.beam.directory',
   }
 
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' })
@@ -181,6 +175,7 @@ function downloadIdentity() {
   anchor.click()
   anchor.remove()
   URL.revokeObjectURL(url)
+  state.downloaded = true
 }
 
 async function submitRegistration(event) {
@@ -191,8 +186,8 @@ async function submitRegistration(event) {
     return
   }
 
-  if (!state.publicKeyBase64 || !state.secretKeyBase64) {
-    generateKeyPair()
+  if (!state.publicKeyBase64 || !state.privateKeyBase64) {
+    await generateKeyPair()
   }
 
   const displayName = elements.displayName.value.trim()
@@ -237,9 +232,9 @@ async function submitRegistration(event) {
   }
 }
 
-elements.generateButton.addEventListener('click', () => {
+elements.generateButton.addEventListener('click', async () => {
   try {
-    generateKeyPair()
+    await generateKeyPair()
     showStatus('Neues Ed25519-Keypair lokal erzeugt.', 'success')
   } catch (error) {
     showStatus(error instanceof Error ? error.message : 'Schlüssel konnten nicht erzeugt werden.', 'error')
@@ -259,5 +254,11 @@ elements.testEchoButton.addEventListener('click', async () => {
 
 elements.downloadButton.addEventListener('click', downloadIdentity)
 elements.form.addEventListener('submit', submitRegistration)
+
+window.addEventListener('beforeunload', (event) => {
+  if (!state.apiKey || state.downloaded) return
+  event.preventDefault()
+  event.returnValue = ''
+})
 
 updateKeyPreview()

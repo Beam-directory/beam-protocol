@@ -1,0 +1,98 @@
+{
+  "schemaVersion": 1,
+  "release": "1.7.0",
+  "testedAt": "2026-08-23T10:12:42.000Z",
+  "gateEligible": false,
+  "gateIneligibilityReasons": [
+    "No external operator run has been completed",
+    "The public Directory currently has zero business-assurance targets"
+  ],
+  "pilot": {
+    "region": "fra",
+    "estimatedMonthlyCostUsd": 11.41,
+    "mcpUrl": "https://mcp.beam.directory/mcp",
+    "oauthIssuer": "https://identity.beam.directory/realms/beam-mcp-pilot",
+    "readOnly": true,
+    "sendEnabled": false,
+    "messageSent": false,
+    "minimumVerificationTier": "business",
+    "images": {
+      "postgres": "sha256:a2086534fb0d8f8cfd5efde02412ffcfdadfeaaf40e1e95c77608f37161e7967",
+      "keycloak": "sha256:3201ee379d9e3cd766eea24abcaccd321802179d580f3b2fbbca3b4571dc1c8c",
+      "mcp": "sha256:fc75f33105770f89ae6324d63a9ffc60d3ea0338f6ddee37523673ec9707a832"
+    }
+  },
+  "oauthMcpSmoke": {
+    "authorizationCodeFlow": true,
+    "pkceMethod": "S256",
+    "exactAudience": "https://mcp.beam.directory/mcp",
+    "scopes": [
+      "beam:read"
+    ],
+    "tokenActive": true,
+    "tools": [
+      "beam_prepare_handoff",
+      "beam_status"
+    ],
+    "statusCallSucceeded": true,
+    "beamSendAdvertised": false,
+    "artifactSha256": "068a0a2b5303c17a9415df432865ae4f2fce830f46161dbb26f82cffcda445f8"
+  },
+  "publicChecks": {
+    "healthStatus": 200,
+    "healthSha256": "0cde202bbb71b300c3fcdc26dc8670fe44b84e6e1ab34c461f1f54576a24a887",
+    "oauthMetadataStatus": 200,
+    "oauthMetadataSha256": "d419262de3863f400ebd13bfe92029ef26bdc809a271a54199970ad47e9dedbd",
+    "protectedResourceMetadataStatus": 200,
+    "protectedResourceMetadataSha256": "5b9a2943f57dde8333647cb7971c1a1ff7ea0ef79c278d492197bce326e4c443",
+    "unauthenticatedMcpStatus": 401
+  },
+  "runtime": {
+    "nodeUid": 1000,
+    "secretFileMode": "0400",
+    "secretInContainerEnvironment": false
+  },
+  "securityScans": {
+    "severity": [
+      "HIGH",
+      "CRITICAL"
+    ],
+    "mcpUniqueFindings": 0,
+    "mcpSummarySha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "postgresUniqueFindings": 0,
+    "postgresSummarySha256": "37517e5f3dc66819f61f5a7bb8ace1921282415f10551d2defa5c3eb0985b570",
+    "keycloakUniqueFindings": 14,
+    "keycloakSummarySha256": "d06e806745cbbd7d3f16cd6bfc411793d32de87e68c2f960bddf9ca0123e878e",
+    "keycloakRiskDecisionPending": true
+  },
+  "grok": {
+    "cliVersion": "1.0.5",
+    "localMcpConfigAdded": true,
+    "oauthChallengeDetected": true,
+    "webConnectorFormPrepared": true,
+    "persistentOAuthApprovalPending": false,
+    "connectionVerified": true,
+    "connectorStatus": "Connected",
+    "authorizationCodeTokenIssued": true,
+    "issuedScopes": [
+      "beam:read"
+    ],
+    "sendScopeAssigned": false,
+    "pkceMethod": "S256",
+    "redirectUri": "https://grok.com/connectors-oauth-exchange-code/",
+    "dynamicClientRegistrationClosed": true,
+    "registrationAccessTokenRotatedAndDiscarded": true,
+    "toolInvocationVerified": true,
+    "invokedTool": "beam_status",
+    "toolCardObserved": true,
+    "beamSendAdvertised": false,
+    "handoffPrepared": false,
+    "messageSent": false
+  },
+  "directory": {
+    "publicRelease": "1.6.0",
+    "publicGitSha": "28d5fef66450a5a22dbc6d7229fe7f90ffa573c3",
+    "agents": 11,
+    "businessTargets": 0
+  }
+}

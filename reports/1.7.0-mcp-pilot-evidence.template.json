@@ -1,0 +1,69 @@
+{
+  "template": true,
+  "release": "1.7.0",
+  "testedAt": "YYYY-MM-DDTHH:mm:ss.sssZ",
+  "connector": {
+    "type": "grok-custom-connector",
+    "mcpUrl": "https://mcp.partner.invalid/mcp",
+    "oauthIssuer": "https://identity.partner.invalid",
+    "externalNetwork": true,
+    "authorizationCodeFlow": true,
+    "pkceMethod": "S256",
+    "grokConnectionVerified": true
+  },
+  "tenant": {
+    "dedicated": true,
+    "readOnly": true,
+    "sendEnabled": false,
+    "secretDelivery": "mounted-files",
+    "minimumVerificationTier": "business",
+    "imageDigest": "sha256:REPLACE_WITH_64_HEX_CHARACTERS"
+  },
+  "observations": {
+    "healthStatus": 200,
+    "protectedResourceMetadataStatus": 200,
+    "unauthenticatedMcpStatus": 401,
+    "toolNames": [
+      "beam_status",
+      "beam_prepare_handoff"
+    ],
+    "beamSendAdvertised": false,
+    "messageSent": false,
+    "targetLookupSucceeded": true,
+    "targetAssuranceTier": "business",
+    "auditContentFree": true,
+    "tokenInAudit": false,
+    "secretInContainerEnvironment": false
+  },
+  "operator": {
+    "operatorRef": "PSEUDONYMOUS_EXTERNAL_OPERATOR_REFERENCE",
+    "organization": "EXTERNAL_ORGANIZATION",
+    "external": true
+  },
+  "artifacts": [
+    {
+      "kind": "container-e2e",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    },
+    {
+      "kind": "container-sbom",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    },
+    {
+      "kind": "grok-diagnostics",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    },
+    {
+      "kind": "oauth-metadata",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    },
+    {
+      "kind": "redacted-audit",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    },
+    {
+      "kind": "vulnerability-scan",
+      "sha256": "REPLACE_WITH_64_HEX_CHARACTERS"
+    }
+  ]
+}

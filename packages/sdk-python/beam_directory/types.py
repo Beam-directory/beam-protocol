@@ -162,6 +162,7 @@ class AgentRecord(AgentRegistration):
     created_at: str = ""
     last_seen: str = ""
     key_state: Optional["AgentKeyState"] = None
+    api_key: Optional[str] = None
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AgentRecord":
@@ -176,6 +177,7 @@ class AgentRecord(AgentRegistration):
             created_at=data.get("createdAt", data.get("created_at", "")),
             last_seen=data.get("lastSeen", data.get("last_seen", "")),
             key_state=AgentKeyState.from_dict(data.get("keyState")) if isinstance(data.get("keyState"), dict) else None,
+            api_key=data.get("apiKey", data.get("api_key")),
         )
 
 
@@ -438,3 +440,4 @@ class DirectoryConfig:
 class BeamClientConfig:
     identity: BeamIdentityData
     directory_url: str
+    api_key: Optional[str] = None

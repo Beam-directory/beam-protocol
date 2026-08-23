@@ -3,17 +3,22 @@ import { resolveTxt } from 'node:dns/promises'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
+import { getDomain, getDomainWithoutSuffix } from 'tldts'
 import type { AgentRow, OrgAgentRow, OrgRow, RegisterRequest } from '../types.js'
 import { toBeamDID } from '../did.js'
 import {
   buildBeamDomain,
   createOrg,
+  deleteExpiredOrgClaim,
   getOrg,
+  getOrgByDomain,
   listOrgAgents,
+  logAuditEvent,
   markOrgVerified,
   registerAgent,
 } from '../db.js'
 import { seedAclsFromCatalog } from '../acl.js'
+import { createAgentApiKey, hashApiKey as hashAgentApiKey } from '../api-key.js'
 
 const ORG_NAME_RE = /^[a-z0-9_-]+$/
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
@@ -25,6 +30,16 @@ function normalizeOrgName(value: string): string {
 
 function normalizeDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
+}
+
+function namespaceFromDomain(domain: string): string | null {
+  return getDomainWithoutSuffix(domain, { allowPrivateDomains: true })?.toLowerCase() ?? null
+}
+
+function claimExpired(org: OrgRow, now = Date.now()): boolean {
+  return org.verified !== 1
+    && org.claim_expires_at !== null
+    && Date.parse(org.claim_expires_at) <= now
 }
 
 function hashApiKey(apiKey: string): string {
@@ -77,6 +92,7 @@ function serializeOrg(row: OrgRow): object {
     domain: row.domain,
     beamDomain: row.beam_domain,
     verified: row.verified === 1,
+    claimExpiresAt: row.claim_expires_at,
     createdAt: row.created_at,
     verifiedAt: row.verified_at,
     verification: row.domain
@@ -125,9 +141,9 @@ export function orgsRouter(db: Database): Hono {
     const displayName = typeof raw['displayName'] === 'string' && raw['displayName'].trim()
       ? raw['displayName'].trim()
       : name
-    const domain = typeof raw['domain'] === 'string' && raw['domain'].trim()
+    const suppliedDomain = typeof raw['domain'] === 'string' && raw['domain'].trim()
       ? normalizeDomain(raw['domain'])
-      : null
+      : ''
 
     if (!ORG_NAME_RE.test(name)) {
       return c.json({
@@ -136,37 +152,79 @@ export function orgsRouter(db: Database): Hono {
       }, 400)
     }
 
-    if (domain && !DOMAIN_RE.test(domain)) {
+    if (!suppliedDomain || !DOMAIN_RE.test(suppliedDomain)) {
       return c.json({ error: 'domain must be a valid DNS hostname', errorCode: 'INVALID_DOMAIN' }, 400)
     }
 
-    if (getOrg(db, name)) {
-      return c.json({ error: `Organization ${name} already exists`, errorCode: 'ORG_EXISTS' }, 409)
+    // Claims are always anchored at the registrable domain. This prevents a
+    // delegated subdomain such as team.example.com from claiming the broader
+    // example namespace while still accepting common www-prefixed input.
+    const domain = getDomain(suppliedDomain, { allowPrivateDomains: true })?.toLowerCase() ?? ''
+    const domainNamespace = namespaceFromDomain(domain)
+    if (!domainNamespace) {
+      return c.json({ error: 'domain must have a registrable DNS suffix', errorCode: 'INVALID_DOMAIN' }, 400)
     }
 
-    if (domain) {
-      const existingDomain = db.prepare('SELECT name FROM orgs WHERE domain = ? LIMIT 1').get(domain) as { name: string } | undefined
-      if (existingDomain) {
-        return c.json({ error: `Domain ${domain} is already claimed`, errorCode: 'DOMAIN_EXISTS' }, 409)
-      }
+    if (name.replaceAll('_', '-') !== domainNamespace.replaceAll('_', '-')) {
+      return c.json({
+        error: `Organization namespace ${name} must match the registrable domain name ${domainNamespace}`,
+        errorCode: 'ORG_NAMESPACE_DOMAIN_MISMATCH',
+      }, 403)
     }
 
     const apiKey = createApiKey()
     const verificationToken = createVerificationToken()
+    let reclaimedExpiredClaim = false
 
     try {
-      const org = createOrg(db, {
-        name,
-        displayName,
-        domain,
-        apiKeyHash: hashApiKey(apiKey),
-        verificationToken,
+      const org = db.transaction(() => {
+        const existingOrg = getOrg(db, name)
+        if (existingOrg) {
+          const released = claimExpired(existingOrg) && deleteExpiredOrgClaim(db, existingOrg.name)
+          reclaimedExpiredClaim ||= released
+          if (!released) {
+            throw new OrgClaimConflictError(
+              existingOrg.verified === 1 ? 'ORG_EXISTS' : 'ORG_CLAIM_PENDING',
+              `Organization ${name} already exists`,
+            )
+          }
+        }
+
+        const existingDomain = getOrgByDomain(db, domain)
+        if (existingDomain) {
+          const released = claimExpired(existingDomain) && deleteExpiredOrgClaim(db, existingDomain.name)
+          reclaimedExpiredClaim ||= released
+          if (!released) {
+            throw new OrgClaimConflictError(
+              existingDomain.verified === 1 ? 'DOMAIN_EXISTS' : 'DOMAIN_CLAIM_PENDING',
+              `Domain ${domain} is already claimed`,
+            )
+          }
+        }
+
+        return createOrg(db, {
+          name,
+          displayName,
+          domain,
+          apiKeyHash: hashApiKey(apiKey),
+          verificationToken,
+        })
+      })()
+      logAuditEvent(db, {
+        action: reclaimedExpiredClaim ? 'org.claim.reclaimed' : 'org.claim.created',
+        actor: `org:${name}`,
+        target: name,
+        details: { domain, claimExpiresAt: org.claim_expires_at },
       })
+      c.header('Cache-Control', 'no-store')
       return c.json({
         ...serializeOrg(org),
         apiKey,
       }, 201)
     } catch (err) {
+      if (err instanceof OrgClaimConflictError) {
+        return c.json({ error: err.message, errorCode: err.errorCode }, 409)
+      }
       console.error('Org registration error:', err)
       return c.json({ error: 'Failed to register organization', errorCode: 'DB_ERROR' }, 500)
     }
@@ -207,6 +265,20 @@ export function orgsRouter(db: Database): Hono {
     const auth = requireOrgApiKey(c, org)
     if (auth) {
       return auth
+    }
+
+    if (claimExpired(org)) {
+      return c.json({
+        error: 'Organization claim has expired; register the namespace again',
+        errorCode: 'ORG_CLAIM_EXPIRED',
+      }, 410)
+    }
+
+    if (org.verified !== 1) {
+      return c.json({
+        error: 'Organization domain must be verified before creating organization Beam IDs',
+        errorCode: 'ORG_VERIFICATION_REQUIRED',
+      }, 403)
     }
 
     let body: unknown
@@ -251,18 +323,27 @@ export function orgsRouter(db: Database): Hono {
     const beamId = `${agentName}@${buildBeamDomain(name)}`
     const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
     const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    const apiKey = createAgentApiKey(beamId)
 
     const request: RegisterRequest = {
       beamId,
       displayName,
       capabilities,
       publicKey: publicKeyBase64,
+      apiKeyHash: hashAgentApiKey(apiKey),
       org: name,
     }
 
     try {
       const agent = registerAgent(db, request)
       seedAclsFromCatalog(db)
+      logAuditEvent(db, {
+        action: 'org.agent.created',
+        actor: `org:${name}`,
+        target: beamId,
+        details: { org: name, capabilities },
+      })
+      c.header('Cache-Control', 'no-store')
       return c.json({
         beamId,
         did: toBeamDID(beamId),
@@ -271,6 +352,9 @@ export function orgsRouter(db: Database): Hono {
         capabilities,
         publicKey: publicKeyBase64,
         privateKey: privateKeyBase64,
+        publicKeyBase64,
+        privateKeyBase64,
+        apiKey,
         trustScore: agent.trust_score,
         verified: agent.verified === 1,
         createdAt: agent.created_at,
@@ -292,6 +376,13 @@ export function orgsRouter(db: Database): Hono {
     const auth = requireOrgApiKey(c, org)
     if (auth) {
       return auth
+    }
+
+    if (claimExpired(org)) {
+      return c.json({
+        error: 'Organization claim has expired; register the namespace again',
+        errorCode: 'ORG_CLAIM_EXPIRED',
+      }, 410)
     }
 
     if (!org.domain) {
@@ -318,6 +409,12 @@ export function orgsRouter(db: Database): Hono {
       }
 
       const updated = markOrgVerified(db, name)
+      logAuditEvent(db, {
+        action: 'org.domain.verified',
+        actor: `org:${name}`,
+        target: name,
+        details: { domain: org.domain, txtName },
+      })
       return c.json({
         verified: true,
         txtName,
@@ -337,4 +434,14 @@ export function orgsRouter(db: Database): Hono {
   })
 
   return router
+}
+
+class OrgClaimConflictError extends Error {
+  constructor(
+    readonly errorCode: 'ORG_EXISTS' | 'ORG_CLAIM_PENDING' | 'DOMAIN_EXISTS' | 'DOMAIN_CLAIM_PENDING',
+    message: string,
+  ) {
+    super(message)
+    this.name = 'OrgClaimConflictError'
+  }
 }

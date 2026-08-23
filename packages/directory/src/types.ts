@@ -106,10 +106,14 @@ export interface DirectoryRoleRow {
   directory_url: string
 }
 
+export type AdminAuthScope = 'platform' | 'workspace'
+
 export interface AdminMagicLinkRow {
   token: string
   email: string
   role: 'admin' | 'operator' | 'viewer'
+  auth_scope: AdminAuthScope
+  return_to: string | null
   created_at: string
   expires_at: string
   used: number
@@ -119,6 +123,7 @@ export interface AdminSessionRow {
   id: string
   email: string
   role: 'admin' | 'operator' | 'viewer'
+  auth_scope: AdminAuthScope
   created_at: string
   last_seen_at: string
   expires_at: string
@@ -162,6 +167,7 @@ export interface OperatorNotificationRow {
 export type WorkspaceStatus = 'active' | 'paused' | 'archived'
 export type WorkspaceThreadScope = 'internal' | 'handoff'
 export type WorkspaceMemberRole = 'owner' | 'operator' | 'viewer'
+export type WorkspaceMemberInvitationStatus = 'pending' | 'accepted' | 'revoked' | 'expired'
 export type WorkspacePrincipalType = 'human' | 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingType = 'agent' | 'service' | 'partner'
 export type WorkspaceIdentityBindingStatus = 'active' | 'paused'
@@ -213,6 +219,29 @@ export interface WorkspaceMemberRow {
   updated_at: string
 }
 
+export interface WorkspaceMemberGrant {
+  principalId: string
+  principalType: WorkspacePrincipalType
+  role: WorkspaceMemberRole
+}
+
+export interface WorkspaceMemberInvitationRow {
+  id: string
+  workspace_id: number
+  email: string
+  role: WorkspaceMemberRole
+  token_hash: string
+  status: WorkspaceMemberInvitationStatus
+  invited_by: string
+  expires_at: string
+  accepted_at: string | null
+  accepted_by: string | null
+  revoked_at: string | null
+  revoked_by: string | null
+  created_at: string
+  updated_at: string
+}
+
 export interface WorkspaceIdentityBindingRow {
   id: number
   workspace_id: number
@@ -223,6 +252,7 @@ export interface WorkspaceIdentityBindingRow {
   policy_profile: string | null
   default_thread_scope: WorkspaceThreadScope
   can_initiate_external: number
+  credential_managed: number
   status: WorkspaceIdentityBindingStatus
   notes: string | null
   created_at: string
@@ -601,6 +631,7 @@ export interface OrgRow {
   api_key_hash: string
   verification_token: string
   verified: number
+  claim_expires_at: string | null
   created_at: string
   verified_at: string | null
 }

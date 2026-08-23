@@ -1,7 +1,7 @@
 import chalk from 'chalk'
 import ora from 'ora'
 import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
-import { loadConfig } from '../config.js'
+import { loadConfig, saveConfig } from '../config.js'
 
 interface RegisterOptions {
   displayName?: string
@@ -27,12 +27,22 @@ export async function cmdRegister(options: RegisterOptions): Promise<void> {
   const spinner = ora(`Registering ${chalk.bold(config.identity.beamId)}...`).start()
 
   try {
+    const orgApiKey = parsed.kind === 'organization' ? process.env['BEAM_ORG_API_KEY']?.trim() : undefined
+    if (parsed.kind === 'organization' && !orgApiKey) {
+      throw new Error('Organization registration requires BEAM_ORG_API_KEY in the environment')
+    }
+
     const client = new BeamClient({
       identity: config.identity,
-      directoryUrl
+      directoryUrl,
+      apiKey: orgApiKey,
     })
 
     const record = await client.register(displayName, capabilities)
+    if (!record.apiKey) {
+      throw new Error('Directory did not return the one-time agent API key')
+    }
+    saveConfig({ ...config, directoryUrl, apiKey: record.apiKey })
 
     spinner.succeed('Agent registered successfully')
 
@@ -48,6 +58,7 @@ export async function cmdRegister(options: RegisterOptions): Promise<void> {
       console.log(`${chalk.cyan('Capabilities:')} ${record.capabilities.join(', ')}`)
     }
     console.log(`${chalk.cyan('Registered:')}  ${new Date(record.createdAt).toLocaleString()}`)
+    console.log(`${chalk.cyan('Credential:')}  stored in .beam/identity.json (mode 0600)`)
     console.log('')
     console.log(chalk.green('Next step:'), `beam lookup ${record.beamId}`)
   } catch (err) {

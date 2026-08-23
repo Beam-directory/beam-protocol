@@ -3,8 +3,6 @@ import {
   adminAuthApi,
   ApiError,
   clearStoredAdminSessionToken,
-  getStoredAdminSessionToken,
-  setStoredAdminSessionToken,
   type AdminAuthConfig,
   type AdminMagicLinkResponse,
   type AdminSessionInfo,
@@ -14,8 +12,8 @@ type AdminAuthContextValue = {
   session: AdminSessionInfo | null
   config: AdminAuthConfig | null
   loading: boolean
-  login: (email: string) => Promise<AdminMagicLinkResponse>
-  verify: (token: string) => Promise<boolean>
+  login: (email: string, returnTo?: string) => Promise<AdminMagicLinkResponse>
+  verify: (token: string) => Promise<string>
   logout: () => Promise<void>
   refresh: () => Promise<void>
 }
@@ -77,26 +75,26 @@ export function AdminAuthProvider({ children }: { children: ReactNode }) {
     }
   }, [])
 
-  async function login(email: string) {
-    const response = await adminAuthApi.requestMagicLink(email)
+  async function login(email: string, returnTo?: string) {
+    const response = await adminAuthApi.requestMagicLink(email, returnTo)
     await loadConfig()
     return response
   }
 
   async function verify(token: string) {
     const sessionResponse = await adminAuthApi.verify(token)
-    if (sessionResponse.token) {
-      setStoredAdminSessionToken(sessionResponse.token)
-    } else if (!getStoredAdminSessionToken()) {
-      clearStoredAdminSessionToken()
-    }
+    // Browser sessions use the HttpOnly cookie. Remove any legacy bearer token
+    // so an XSS bug cannot read a long-lived admin credential from localStorage.
+    clearStoredAdminSessionToken()
     setSession({
       email: sessionResponse.email,
       role: sessionResponse.role,
+      scope: sessionResponse.scope,
       expiresAt: sessionResponse.expiresAt,
     })
     await loadConfig()
-    return true
+    return sessionResponse.returnTo
+      ?? (sessionResponse.scope === 'workspace' ? '/workspaces' : '/')
   }
 
   async function logout() {

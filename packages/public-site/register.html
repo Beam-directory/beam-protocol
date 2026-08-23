@@ -4,7 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Register a Real Agent — Beam Protocol</title>
-  <meta name="description" content="Register a real Beam agent after you have evaluated the hosted demo. Create a Beam ID, attach signing keys, and get SDK-ready snippets." />
+  <meta name="description" content="Register a real Beam agent after the guided evaluation. Create a Beam ID, attach signing keys, and get SDK-ready snippets." />
+  <meta property="og:title" content="Register a Beam Agent | Beam Protocol" />
+  <meta property="og:description" content="Create a public Beam identity, attach signing keys, and get SDK-ready integration snippets." />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/register.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://beam.directory/register.html" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -337,7 +344,8 @@
     }
     .register-header .logo span { color: var(--accent); }
 
-    .register-header h1 {
+    .register-header h1,
+    .register-header .register-title {
       font-size: clamp(1.8rem, 4vw, 2.6rem);
       font-weight: 800;
       margin-bottom: 10px;
@@ -854,9 +862,11 @@
     }
     .home-link a { color: var(--accent); }
   </style>
+  <link rel="stylesheet" href="/beam-pages.css" />
+  <script defer src="/beam-motion.js"></script>
 </head>
-<body>
-<div class="page-shell">
+<body class="beam-register">
+<main class="page-shell" id="main">
   <div class="topbar">
     <a class="brand-link" href="/">
       <div class="brand-mark">B</div>
@@ -868,24 +878,24 @@
     <div class="top-actions">
       <a href="/">Back to landing</a>
       <a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
-      <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run Hosted Demo</a>
+      <a class="primary" href="/guided-evaluation.html">Guided Evaluation</a>
     </div>
   </div>
 
   <section class="intro-grid">
     <div class="intro-copy">
       <div class="eyebrow">Recommended order</div>
-      <h1>Run the hosted demo first. Register a real agent when you are ready to integrate.</h1>
+      <h1>Evaluate first. Register when you are ready to integrate.</h1>
       <p>
-        Beam is easiest to evaluate through the Acme-to-Northwind partner handoff. This form is for creating a real directory identity after that hosted-demo path makes sense for your workflow.
+        Beam is easiest to evaluate through one concrete sender-to-recipient handoff. This form creates a real directory identity after that guided proof makes sense for your workflow.
       </p>
       <div class="intro-points">
-        <div><strong>Hosted demo first:</strong> prove the nonce trace, async finance preflight, alerts, and dead-letter path.</div>
+        <div><strong>Guided evaluation first:</strong> understand identity, policy, approval, and trace around one controlled handoff.</div>
         <div><strong>Register second:</strong> attach your signing key, optional HTTP endpoint, and optional X25519 encryption key.</div>
         <div><strong>Then integrate:</strong> use the generated Beam ID and SDK snippets to wire your own agent into the network.</div>
       </div>
       <div class="intro-actions">
-        <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch Hosted Demo</a>
+        <a class="primary" href="/guided-evaluation.html">Open Guided Evaluation</a>
         <a class="secondary" href="/playground.html">Open Browser Playground</a>
       </div>
     </div>
@@ -902,7 +912,7 @@
         <li>Attach a real Ed25519 signing key, and optionally direct-delivery and encryption keys.</li>
       </ol>
       <div class="intro-note">
-        If you still need to understand what Beam is for, stop here and run the hosted quickstart first. The canonical proof path is the partner handoff, not raw registration.
+        If you still need to understand what Beam is for, stop here and run the guided evaluation first. The proof path is the controlled handoff, not raw registration.
       </div>
     </aside>
   </section>
@@ -910,8 +920,8 @@
 <div class="register-card" id="register-card">
   <div class="register-header">
     <div class="logo">beam<span>.directory</span> / registration</div>
-    <h1>Register a real Beam agent</h1>
-    <p>Create a directory identity, attach your signing key, and get SDK-ready snippets. If you are still evaluating Beam, use the hosted demo above first.</p>
+    <h2 class="register-title">Register a real Beam agent</h2>
+    <p>Create a directory identity, attach your signing key, and get SDK-ready snippets. If you are still evaluating Beam, use the guided evaluation above first.</p>
   </div>
 
   <!-- Step Indicator -->
@@ -961,8 +971,11 @@
     <div class="step-panel" id="step-2">
       <div class="form-group" id="org-group" style="display:none;">
         <label>Organization Name</label>
-        <input type="text" id="org-name" placeholder="e.g. acme" oninput="updateBeamPreview()" />
-        <div class="hint">Lowercase, alphanumeric. This becomes your org namespace.</div>
+        <input type="text" id="org-name" placeholder="e.g. your-company" oninput="updateBeamPreview()" />
+        <div class="hint">Use an organization namespace that is already registered with Beam.</div>
+        <label style="margin-top: 12px;">Organization API Key</label>
+        <input type="password" id="org-api-key" autocomplete="off" placeholder="beam_org_…" />
+        <div class="hint">Required once to prove control of the namespace. It is sent only to the registration API and is not stored in this page.</div>
         <div class="error" id="org-error"></div>
       </div>
 
@@ -1041,11 +1054,9 @@
       <div id="generated-keys" style="display:none;">
         <div style="background: var(--green-bg); border: 1px solid rgba(34,197,94,0.2); border-radius: 10px; padding: 14px; margin-bottom: 16px;">
           <div style="font-size: 0.75rem; font-weight: 600; color: var(--green); margin-bottom: 6px;">🔑 Keys Generated</div>
-          <div style="font-size: 0.78rem; color: var(--text-secondary); margin-bottom: 8px;">
-            <strong>Private Key</strong> — save this securely, it cannot be recovered!
+          <div style="font-size: 0.78rem; color: var(--text-secondary);">
+            The private key is held only in memory and will be included in the one-time identity download after registration. It is never written to browser storage or displayed on screen.
           </div>
-          <div style="background: white; border: 1px solid var(--border); border-radius: 6px; padding: 8px; font-family: monospace; font-size: 0.72rem; word-break: break-all; margin-bottom: 8px;" id="private-key-display"></div>
-          <button style="font-size: 0.75rem; padding: 6px 12px; border: 1px solid var(--border); border-radius: 6px; cursor: pointer; background: white;" onclick="copyPrivateKey()">📋 Copy Private Key</button>
         </div>
       </div>
 
@@ -1078,12 +1089,13 @@
         <div class="success-beam-row">
           <div class="success-beam-id" id="success-beam-id"></div>
           <button class="copy-btn" type="button" id="copy-beam-id-btn">Copy</button>
+          <button class="copy-btn" type="button" id="download-identity-btn">Download identity</button>
         </div>
         <div id="success-details" class="success-section" style="font-size: 0.82rem; color: var(--text-secondary);">
         </div>
         <div class="success-section" style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.65;">
           <h3>Choose the next proof path</h3>
-          Registration proves identity, not the whole Beam story. Use the path below that matches what you need to confirm next: operator visibility, canonical demo proof, or a direct identity smoke test.
+          Registration proves identity, not the whole Beam story. Use the path below that matches what you need to confirm next: operator visibility, guided proof, or a direct identity smoke test.
         </div>
         <div class="success-paths">
           <div class="success-path">
@@ -1096,12 +1108,12 @@
             </div>
           </div>
           <div class="success-path">
-            <div class="path-label">02 · canonical proof</div>
-            <h3>Compare against the hosted demo</h3>
-            <p>The Acme-to-Northwind handoff is still the canonical Beam proof. Use it when you want to compare your new agent path against the full operator story.</p>
+            <div class="path-label">02 · guided proof</div>
+            <h3>Compare against the evaluation path</h3>
+            <p>Use one controlled handoff when you want to compare your new agent path against the complete identity, policy, trace, and operator story.</p>
             <div class="path-links">
-              <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run hosted demo</a>
-              <a href="https://docs.beam.directory/guide/partner-handoff" target="_blank" rel="noreferrer">Read partner handoff</a>
+              <a class="primary" href="/guided-evaluation.html">Review evaluation</a>
+              <a href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run technical quickstart</a>
             </div>
           </div>
           <div class="success-path">
@@ -1126,7 +1138,7 @@
         </div>
         <div class="success-links">
           <a href="https://docs.beam.directory/guide/getting-started" class="link-secondary" target="_blank" rel="noreferrer">Read SDK Docs</a>
-          <a href="/hosted-beta.html" class="link-secondary">Request Hosted Beta</a>
+          <a href="/hosted-beta.html" class="link-secondary">Request Pilot</a>
           <a href="/" class="link-secondary">Back to Landing</a>
         </div>
       </div>
@@ -1135,10 +1147,22 @@
 </div>
 
 <div class="home-link">
-  Just evaluating Beam? <a href="https://docs.beam.directory/guide/hosted-quickstart">Start from the hosted demo</a>.
+  Just evaluating Beam? <a href="/guided-evaluation.html">Start with the guided evaluation</a>.
 </div>
 
-</div>
+<footer class="beam-subfooter">
+  <span>Beam Protocol · real identity integration</span>
+  <nav aria-label="Footer navigation">
+    <a href="/guided-evaluation.html">Evaluation</a>
+    <a href="/playground.html">Playground</a>
+    <a href="/blog/">Blog</a>
+    <a href="/status.html">Status</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </nav>
+</footer>
+
+</main>
 
 <script>
 function resolveDirectoryApiBase() {
@@ -1158,6 +1182,8 @@ let currentStep = 1;
 let agentType = '';
 let selectedCaps = new Set();
 let generatedPrivateKey = '';
+let issuedCredential = null;
+let issuedCredentialDownloaded = false;
 
 function getTypeScriptQuickstart(beamId) {
   return [
@@ -1165,8 +1191,9 @@ function getTypeScriptQuickstart(beamId) {
     "// This is a direct smoke test against the public echo agent.",
     "import { readFileSync } from 'node:fs'",
     "import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'",
-    "const identity = BeamIdentity.fromData(JSON.parse(readFileSync('./beam-identity.json', 'utf8')))",
-    "const client = new BeamClient({ identity: identity.export(), directoryUrl: 'https://api.beam.directory' })",
+    "const bundle = JSON.parse(readFileSync('./beam-identity.json', 'utf8'))",
+    "const identity = BeamIdentity.fromData(bundle)",
+    "const client = new BeamClient({ identity: identity.export(), apiKey: bundle.apiKey, directoryUrl: 'https://api.beam.directory' })",
     `const reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'console.log(reply.message)',
   ].join('\n');
@@ -1179,8 +1206,9 @@ function getPythonQuickstart(beamId) {
     'import json',
     'from beam_directory import BeamClient, BeamIdentity',
     "with open('beam-identity.json', 'r', encoding='utf-8') as fh:",
-    "    identity = BeamIdentity.from_data(json.load(fh))",
-    "client = BeamClient(identity=identity, directory_url='https://api.beam.directory')",
+    "    bundle = json.load(fh)",
+    "identity = BeamIdentity.from_data(bundle)",
+    "client = BeamClient(identity=identity, api_key=bundle.get('apiKey'), directory_url='https://api.beam.directory')",
     `reply = await client.talk('echo@beam.directory', 'Hello from ${beamId}')`,
     'print(reply.message)',
   ].join('\n');
@@ -1276,6 +1304,8 @@ function validateStep(step) {
     if (agentType === 'company') {
       const org = document.getElementById('org-name').value.trim();
       if (!org) { showError('Organization name is required for company agents'); return false; }
+      const orgApiKey = document.getElementById('org-api-key').value.trim();
+      if (!orgApiKey) { showError('Organization API key is required for company agents'); return false; }
     }
   }
   if (step === 3) {
@@ -1286,9 +1316,6 @@ function validateStep(step) {
 
 async function generateKey() {
   try {
-    const res = await fetch(`${API}/agents/keypair/x25519`);
-    // Actually we need Ed25519 for signing
-    // Generate locally
     const keyPair = await crypto.subtle.generateKey(
       { name: 'Ed25519' },
       true,
@@ -1301,17 +1328,50 @@ async function generateKey() {
 
     document.getElementById('public-key').value = pubB64;
     generatedPrivateKey = privB64;
-    document.getElementById('private-key-display').textContent = privB64;
     document.getElementById('generated-keys').style.display = 'block';
   } catch (e) {
     showError('Key generation failed: ' + e.message);
   }
 }
 
-function copyPrivateKey() {
-  navigator.clipboard.writeText(generatedPrivateKey);
-  event.target.textContent = '✅ Copied!';
-  setTimeout(() => event.target.textContent = '📋 Copy Private Key', 2000);
+function addSuccessDetail(container, label, value) {
+  const labelElement = document.createElement('span');
+  labelElement.style.color = 'var(--text-muted)';
+  labelElement.textContent = label;
+  const valueElement = document.createElement('span');
+  valueElement.textContent = value;
+  container.append(labelElement, valueElement);
+}
+
+function renderSuccessDetails(data, registeredBeamId) {
+  const details = document.getElementById('success-details');
+  details.replaceChildren();
+  const grid = document.createElement('div');
+  grid.style.display = 'grid';
+  grid.style.gridTemplateColumns = 'auto 1fr';
+  grid.style.gap = '4px 12px';
+  addSuccessDetail(grid, 'DID', String(data.did || `did:beam:${registeredBeamId.split('@')[0]}`));
+  addSuccessDetail(grid, 'Trust', String(data.trustScore ?? data.trust_score ?? 0.3));
+  addSuccessDetail(grid, 'Tier', String(data.verificationTier ?? data.verification_tier ?? 'basic'));
+  addSuccessDetail(grid, 'Caps', [...selectedCaps].join(', '));
+  if (data.httpEndpoint || data.http_endpoint) addSuccessDetail(grid, 'P2P', 'Direct delivery enabled');
+  if (data.dhPublicKey || data.dh_public_key) addSuccessDetail(grid, 'E2E', 'Encryption enabled');
+  details.append(grid);
+}
+
+function downloadIssuedCredential() {
+  if (!issuedCredential) return;
+  const blob = new Blob([JSON.stringify(issuedCredential, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = `${issuedCredential.beamId.replace(/[^a-z0-9._-]+/gi, '-')}.beam-identity.json`;
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 0);
+  issuedCredentialDownloaded = true;
+  document.getElementById('download-identity-btn').textContent = 'Download again';
 }
 
 async function submitRegistration() {
@@ -1321,11 +1381,12 @@ async function submitRegistration() {
   if (!publicKey) { showError('Public key is required'); return; }
 
   const btn = document.getElementById('btn-register');
-  btn.innerHTML = '<span class="loading-spinner"></span> Registering...';
+  btn.textContent = 'Registering…';
   btn.disabled = true;
 
   const agentName = document.getElementById('agent-name').value.trim().toLowerCase();
   const org = document.getElementById('org-name').value.trim().toLowerCase() || undefined;
+  const orgApiKey = document.getElementById('org-api-key').value.trim();
   const displayName = document.getElementById('display-name').value.trim();
   const description = document.getElementById('description').value.trim() || undefined;
   const email = document.getElementById('email').value.trim() || undefined;
@@ -1340,9 +1401,11 @@ async function submitRegistration() {
   }
 
   try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (agentType === 'company') headers['X-API-Key'] = orgApiKey;
     const res = await fetch(`${API}/agents/register`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         beamId,
         org: agentType === 'company' ? org : undefined,
@@ -1361,23 +1424,32 @@ async function submitRegistration() {
     if (!res.ok) {
       throw new Error(data.error || 'Registration failed');
     }
+    if (typeof data.apiKey !== 'string' || !data.apiKey) {
+      throw new Error('Registration did not return the one-time agent API key.');
+    }
 
     // Success!
-    const registeredBeamId = data.beam_id || beamId;
+    const registeredBeamId = data.beamId || data.beam_id || beamId;
+    issuedCredential = {
+      format: 'beam-local-identity/v1',
+      beamId: registeredBeamId,
+      did: data.did || `did:beam:${registeredBeamId.split('@')[0]}`,
+      directoryUrl: API,
+      generatedAt: new Date().toISOString(),
+      publicKey: publicKey,
+      privateKey: generatedPrivateKey || null,
+      publicKeyBase64: publicKey,
+      privateKeyBase64: generatedPrivateKey || null,
+      apiKey: data.apiKey,
+    };
+    issuedCredentialDownloaded = false;
+    document.getElementById('org-api-key').value = '';
     document.getElementById('success-beam-id').textContent = registeredBeamId;
-    document.getElementById('success-details').innerHTML = `
-      <div style="display: grid; grid-template-columns: auto 1fr; gap: 4px 12px;">
-        <span style="color: var(--text-muted);">DID</span><span>did:beam:${org ? org + ':' : ''}${agentName}</span>
-        <span style="color: var(--text-muted);">Trust</span><span>${data.trust_score ?? 0.5}</span>
-        <span style="color: var(--text-muted);">Tier</span><span>${data.verification_tier ?? 'basic'} ${data.email ? '→ verify email for 🔵' : ''}</span>
-        <span style="color: var(--text-muted);">Caps</span><span>${[...selectedCaps].join(', ')}</span>
-        ${data.http_endpoint ? `<span style="color: var(--text-muted);">P2P</span><span>✅ Direct delivery enabled</span>` : ''}
-        ${data.dh_public_key ? `<span style="color: var(--text-muted);">E2E</span><span>✅ Encryption enabled</span>` : ''}
-      </div>
-    `;
+    renderSuccessDetails(data, registeredBeamId);
     document.getElementById('ts-quickstart').textContent = getTypeScriptQuickstart(registeredBeamId);
     document.getElementById('py-quickstart').textContent = getPythonQuickstart(registeredBeamId);
     document.getElementById('copy-beam-id-btn').onclick = () => copyText(registeredBeamId, document.getElementById('copy-beam-id-btn'), 'Copied!');
+    document.getElementById('download-identity-btn').onclick = downloadIssuedCredential;
     document.getElementById('copy-cli-link').onclick = async (event) => {
       event.preventDefault();
       await copyText(getCliSmokeCommand(registeredBeamId), document.getElementById('copy-cli-link'), 'Copied CLI command');
@@ -1396,7 +1468,7 @@ async function submitRegistration() {
 
   } catch (e) {
     showError(e.message);
-    btn.innerHTML = 'Register Agent 🚀';
+    btn.textContent = 'Register Agent 🚀';
     btn.disabled = false;
   }
 }
@@ -1410,6 +1482,17 @@ function showError(msg) {
 function hideError() {
   document.getElementById('error-banner').classList.remove('visible');
 }
+
+window.addEventListener('beforeunload', (event) => {
+  if (!issuedCredential || issuedCredentialDownloaded) return;
+  event.preventDefault();
+  event.returnValue = '';
+});
+
+document.getElementById('public-key').addEventListener('input', () => {
+  generatedPrivateKey = '';
+  document.getElementById('generated-keys').style.display = 'none';
+});
 </script>
 </body>
 </html>

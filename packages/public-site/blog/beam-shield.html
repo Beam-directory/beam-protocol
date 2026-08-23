@@ -9,7 +9,9 @@
   <meta property="og:description" content="How we built a 5-layer security system that protects agents from prompt injection, PII leaks, and unauthorized access.">
   <meta property="og:type" content="article">
   <meta property="og:url" content="https://beam.directory/blog/beam-shield.html">
+  <meta property="og:image" content="https://beam.directory/og-image.png">
   <meta name="twitter:card" content="summary_large_image">
+  <link rel="canonical" href="https://beam.directory/blog/beam-shield.html">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>📡</text></svg>">
   <style>
     :root { --bg: #0a0a0f; --text: #e6edf3; --muted: #8b949e; --border: #21262d; --accent: #7c3aed; }
@@ -39,11 +41,13 @@
     .back-link:hover { text-decoration: underline; }
     @media (max-width: 768px) { h1 { font-size: 1.6rem; } article { padding: 48px 0 80px; } }
   </style>
+  <link rel="stylesheet" href="/beam-pages.css">
+  <script defer src="/beam-motion.js"></script>
 </head>
-<body>
-  <nav><div class="container"><a href="/">📡 Beam Protocol</a> <a href="/#blog">← Blog</a></div></nav>
+<body class="beam-blog">
+  <nav><div class="container"><a href="/"><span class="blog-mark">B</span> Beam</a> <a href="/blog/">Journal</a></div></nav>
 
-  <article>
+  <main><article>
     <div class="container">
       <div class="meta">
         <span class="tag">Security</span>
@@ -136,7 +140,7 @@ PATCH /shield/config/agent@org.beam.directory
       <p>But unlike email, Beam provides tools for content defense out of the box. The Content Sandbox and Output Filter are optional layers that agents can enable — rather than leaving every agent to build its own spam filter from scratch.</p>
 
       <h2>What's Next</h2>
-      <p>Beam Shield v1.0 is live today. Phase 2 (coming Q2 2026) adds:</p>
+      <p>Beam Shield v1.0 is live today. The next security roadmap includes:</p>
       <ul>
         <li>LLM-based injection classifier for adversarial patterns</li>
         <li>Anomaly detection dashboard with real-time alerts</li>
@@ -146,8 +150,12 @@ PATCH /shield/config/agent@org.beam.directory
 
       <p>If one agent gets compromised through Beam, the protocol is dead. That's why security isn't a feature — it's the foundation.</p>
 
-      <a href="/" class="back-link">← Back to beam.directory</a>
+      <a href="/blog/" class="back-link">← Back to the Beam Journal</a>
     </div>
-  </article>
+  </article></main>
+  <footer class="container beam-subfooter">
+    <span>Beam Protocol · Journal</span>
+    <nav aria-label="Footer navigation"><a href="/guided-evaluation.html">Evaluation</a><a href="/status.html">Status</a><a href="https://docs.beam.directory">Docs</a></nav>
+  </footer>
 </body>
 </html>

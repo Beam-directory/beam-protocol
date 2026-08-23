@@ -170,6 +170,7 @@ function cleanCliOutput(value) {
   return String(value ?? '')
     .replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, '')
     .replace(/\u0008/gu, '')
+    .replace(/([?&]user_code=)[A-Z0-9-]+/giu, '$1[redacted]')
     .trim()
 }
 
@@ -186,7 +187,16 @@ async function runVercelCli(args, config, dependencies = {}) {
   const execFileImpl = dependencies.execFile ?? execFile
   const result = await execFileImpl('vercel', args, {
     encoding: 'utf8',
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' },
+    env: {
+      ...process.env,
+      CI: '1',
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+      VERCEL_TELEMETRY_DISABLED: '1',
+    },
+    timeout: config.requestTimeoutMs,
+    killSignal: 'SIGTERM',
+    maxBuffer: 1024 * 1024,
   })
   return {
     command: ['vercel', ...args],

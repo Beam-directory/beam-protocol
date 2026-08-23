@@ -1,0 +1,69 @@
+name: beam-mcp-tenant
+
+services:
+  beam-mcp:
+    image: "${BEAM_MCP_IMAGE:?Set BEAM_MCP_IMAGE to an immutable image digest}"
+    pull_policy: "${BEAM_MCP_PULL_POLICY:-missing}"
+    restart: unless-stopped
+    init: true
+    user: "1000:1000"
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 512m
+    cpus: 1.0
+    stop_grace_period: 20s
+    ports:
+      - "127.0.0.1:${BEAM_MCP_BIND_PORT:-3333}:3333"
+    environment:
+      NODE_ENV: production
+      BEAM_MCP_TRANSPORT: http
+      BEAM_MCP_HTTP_HOST: 0.0.0.0
+      BEAM_MCP_HTTP_PORT: "3333"
+      BEAM_MCP_PUBLIC_URL: "${BEAM_MCP_PUBLIC_URL:?Set the exact public HTTPS MCP URL}"
+      BEAM_MCP_OAUTH_ISSUER: "${BEAM_MCP_OAUTH_ISSUER:?Set the OAuth issuer}"
+      BEAM_MCP_OAUTH_METADATA_URL: "${BEAM_MCP_OAUTH_METADATA_URL:?Set the OAuth metadata URL}"
+      BEAM_MCP_OAUTH_INTROSPECTION_URL: "${BEAM_MCP_OAUTH_INTROSPECTION_URL:?Set the OAuth introspection URL}"
+      BEAM_MCP_OAUTH_CLIENT_ID: "${BEAM_MCP_OAUTH_CLIENT_ID:?Set the introspection client ID}"
+      BEAM_MCP_OAUTH_CLIENT_SECRET_FILE: /run/secrets/oauth_client_secret
+      BEAM_ID: "${BEAM_ID:?Set the tenant Beam ID}"
+      BEAM_PUBLIC_KEY_BASE64_FILE: /run/secrets/beam_public_key
+      BEAM_PRIVATE_KEY_BASE64_FILE: /run/secrets/beam_private_key
+      BEAM_API_KEY_FILE: /run/secrets/beam_api_key
+      BEAM_DIRECTORY_URL: "${BEAM_DIRECTORY_URL:-https://api.beam.directory}"
+      BEAM_MCP_ALLOWED_INTENTS: conversation.message
+      BEAM_MCP_REQUIRE_VERIFIED_TARGET: "true"
+      BEAM_MCP_MIN_VERIFICATION_TIER: business
+      BEAM_MCP_MIN_TRUST_SCORE: "${BEAM_MCP_MIN_TRUST_SCORE:-0.5}"
+      BEAM_MCP_ENABLE_SEND: "false"
+      BEAM_MCP_ALLOWED_HOSTS: "${BEAM_MCP_ALLOWED_HOSTS:-}"
+      BEAM_MCP_ALLOWED_ORIGIN_HOSTS: "${BEAM_MCP_ALLOWED_ORIGIN_HOSTS:-}"
+    secrets:
+      - source: oauth_client_secret
+        target: oauth_client_secret
+      - source: beam_public_key
+        target: beam_public_key
+      - source: beam_private_key
+        target: beam_private_key
+      - source: beam_api_key
+        target: beam_api_key
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+secrets:
+  oauth_client_secret:
+    file: "${BEAM_MCP_OAUTH_CLIENT_SECRET_FILE:?Set an absolute host path to the OAuth client secret}"
+  beam_public_key:
+    file: "${BEAM_PUBLIC_KEY_BASE64_FILE:?Set an absolute host path to the Beam public key}"
+  beam_private_key:
+    file: "${BEAM_PRIVATE_KEY_BASE64_FILE:?Set an absolute host path to the Beam private key}"
+  beam_api_key:
+    file: "${BEAM_API_KEY_FILE:?Set an absolute host path to the Beam API key}"

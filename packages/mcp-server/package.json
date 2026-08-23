@@ -1,0 +1,43 @@
+{
+  "name": "@beam-protocol/mcp-server",
+  "version": "0.1.0",
+  "description": "MCP tools for trusted Beam handoffs from Grok and other assistants",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "beam-mcp": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "container:build": "docker build --file Dockerfile --tag beam-mcp:local ../..",
+    "container:scan": "trivy image --scanners vuln --severity HIGH,CRITICAL --exit-code 1 --skip-version-check --no-progress beam-mcp:local",
+    "container:sbom": "trivy image --format cyclonedx --skip-version-check --no-progress beam-mcp:local",
+    "typecheck": "tsc --noEmit",
+    "start": "node dist/index.js",
+    "test": "npm run build && node --test dist/*.test.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/node": "^2.0.0",
+    "@modelcontextprotocol/server": "2.0.0",
+    "beam-protocol-sdk": "1.6.0",
+    "zod": "^4.2.0"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/client": "^2.0.0",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.3.3"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Beam-directory/beam-protocol.git",
+    "directory": "packages/mcp-server"
+  }
+}

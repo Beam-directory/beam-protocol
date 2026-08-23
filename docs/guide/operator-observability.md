@@ -70,7 +70,7 @@ GET /admin/auth/session
 POST /admin/auth/logout
 ```
 
-The browser stores only the short-lived session token. The old static pasted admin key flow is no longer used.
+The browser stores no bearer credential. Verification sets an HttpOnly session cookie, and any legacy dashboard bearer value is removed from local storage. The old static pasted admin key flow is no longer used.
 
 ## Reproducible Live Admin Path
 

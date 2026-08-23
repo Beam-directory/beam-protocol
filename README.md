@@ -75,6 +75,16 @@ For the full three-agent flow, see [`examples/partner-handoff`](./examples/partn
 - **Retry and recovery** with a message bus for durable handoffs and restart safety
 - **Self-hostable building blocks** across Directory, Dashboard, CLI, and SDKs
 
+## Grok, MCP, and A2A
+
+Beam is the trust and delivery layer, not a replacement for an assistant protocol. The repository now includes:
+
+- [`@beam-protocol/mcp-server`](./packages/mcp-server/README.md) for local or dedicated-tenant, OAuth-protected, approval-gated handoffs from Grok and other MCP clients.
+- [`@beam-protocol/a2a-adapter`](./packages/a2a-adapter/README.md) for bounded mappings between current A2A v1 messages/tasks and signed Beam handoffs.
+- [Trust and assurance guidance](./docs/guide/trust-assurance.md) that separates human, organization, agent, runtime, and delegated authority.
+
+Local MCP keeps signing keys on the user's machine. The remote mode is intentionally one tenant and one Beam signing identity per deployment; it adds OAuth discovery, revocation-aware introspection, resource/scopes enforcement, and content-free audit events. A shared multi-tenant connector remains a separate security boundary.
+
 ## Architecture
 
 ```text
@@ -110,6 +120,8 @@ See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibilit
 - [`beam-protocol-cli`](./packages/cli/README.md) - command-line client
 - [`@beam-protocol/directory`](./packages/directory/README.md) - directory server
 - [`@beam-protocol/message-bus`](./packages/message-bus/README.md) - durable relay and retry service
+- [`@beam-protocol/a2a-adapter`](./packages/a2a-adapter/README.md) - A2A v1 compatibility mappings
+- [`@beam-protocol/mcp-server`](./packages/mcp-server/README.md) - approval-gated MCP tools for Grok and other assistants
 
 ## Examples
 
@@ -146,6 +158,8 @@ packages/
   sdk-typescript/  TypeScript SDK
   sdk-python/      Python SDK
   cli/             Beam CLI
+  a2a-adapter/     A2A v1 compatibility mappings
+  mcp-server/      Local or dedicated-tenant OAuth MCP bridge
   directory/       Directory server
   message-bus/     Persistent relay
 examples/          End-to-end runnable demos
@@ -162,6 +176,7 @@ npm run build
 npm test
 python3 -m pip install -e packages/sdk-python
 npm run test:e2e
+npm run test:mcp-e2e
 npm run dogfood:partner-handoff
 ```
 

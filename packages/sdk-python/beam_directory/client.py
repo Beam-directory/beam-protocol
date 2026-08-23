@@ -54,10 +54,12 @@ class BeamClient:
         self,
         identity: BeamIdentity,
         directory_url: str,
+        api_key: Optional[str] = None,
     ) -> None:
         self._identity = identity
         self._directory_url = directory_url.rstrip("/")
-        self._directory = BeamDirectory(DirectoryConfig(base_url=directory_url))
+        self._api_key = api_key.strip() if api_key and api_key.strip() else None
+        self._directory = BeamDirectory(DirectoryConfig(base_url=directory_url, api_key=self._api_key))
         self._intent_handlers: dict[str, IntentHandler] = {}
         self._ws_task: Optional[asyncio.Task[None]] = None
         self._ws_client: Any = None
@@ -65,7 +67,7 @@ class BeamClient:
     @classmethod
     def from_config(cls, config: BeamClientConfig) -> "BeamClient":
         identity = BeamIdentity.from_data(config.identity)
-        return cls(identity=identity, directory_url=config.directory_url)
+        return cls(identity=identity, directory_url=config.directory_url, api_key=config.api_key)
 
     @property
     def beam_id(self) -> BeamIdString:
@@ -75,11 +77,18 @@ class BeamClient:
     def directory(self) -> BeamDirectory:
         return self._directory
 
+    @property
+    def api_key(self) -> Optional[str]:
+        return self._api_key
+
     async def register(
         self, display_name: str, capabilities: Optional[list[str]] = None
     ) -> AgentRecord:
         reg = self._identity.to_registration(display_name, capabilities or [])
-        return await self._directory.register(reg)
+        record = await self._directory.register(reg)
+        if record.api_key:
+            self._set_api_key(record.api_key)
+        return record
 
     async def update_profile(
         self,
@@ -272,13 +281,15 @@ class BeamClient:
                 loop = asyncio.get_running_loop()
             except RuntimeError:
                 loop = None
-            if loop and (self._ws_task is None or self._ws_task.done()):
+            if loop and self._api_key and (self._ws_task is None or self._ws_task.done()):
                 self._ws_task = loop.create_task(self._ws_loop())
             return fn
 
         return decorator
 
     async def connect(self) -> None:
+        if not self._api_key:
+            raise RuntimeError("Listening for intents requires the agent API key returned by register()")
         if self._ws_task is None or self._ws_task.done():
             self._ws_task = asyncio.create_task(self._ws_loop())
         await asyncio.sleep(0)
@@ -310,9 +321,10 @@ class BeamClient:
                 error=f"No handler for intent: {frame.intent!r}",
                 error_code="INTENT_NOT_FOUND",
                 latency=int((time.time() - start) * 1000),
+                identity=self._identity,
             )
         try:
-            return await handler(frame)
+            return self._sign_result_frame(await handler(frame))
         except Exception as exc:
             return create_result_frame(
                 success=False,
@@ -320,6 +332,7 @@ class BeamClient:
                 error=str(exc),
                 error_code="INTENT_HANDLER_ERROR",
                 latency=int((time.time() - start) * 1000),
+                identity=self._identity,
             )
 
     def thread(
@@ -407,7 +420,7 @@ class BeamClient:
                 f"{self._directory_url}{path}",
                 params=params,
                 json=json,
-                headers={"Content-Type": "application/json"},
+                headers=self._request_headers(),
                 timeout=30.0,
             )
         response.raise_for_status()
@@ -424,6 +437,7 @@ class BeamClient:
             res = await client.post(
                 f"{self._directory_url}/intents/send",
                 json=frame.to_dict(),
+                headers=self._request_headers(),
                 timeout=timeout,
             )
         if not res.is_success:
@@ -437,6 +451,7 @@ class BeamClient:
                 nonce=frame.nonce,
                 error=f"HTTP {res.status_code}: {msg}",
                 error_code="DELIVERY_FAILED",
+                identity=self._identity,
             )
         data: Any = res.json()
         return ResultFrame.from_dict(data)
@@ -449,11 +464,8 @@ class BeamClient:
                 'Listening for intents requires the optional dependency: pip install "beam-directory[websocket]"'
             ) from exc
 
-        ws_url = (
-            self._directory_url.replace("https://", "wss://")
-            .replace("http://", "ws://")
-            .rstrip("/")
-        ) + f"/ws?{urlencode({'beamId': self._identity.beam_id})}"
+        ticket = await self._request_websocket_ticket()
+        ws_url = self._websocket_url(ticket)
 
         try:
             async with websockets.connect(ws_url) as websocket:
@@ -484,6 +496,50 @@ class BeamClient:
                     await websocket.send(json.dumps({"type": "result", "frame": result.to_dict()}))
         finally:
             self._ws_client = None
+
+    def _set_api_key(self, api_key: str) -> None:
+        normalized = api_key.strip()
+        if not normalized:
+            raise ValueError("Beam API key must be non-empty")
+        self._api_key = normalized
+        self._directory = BeamDirectory(DirectoryConfig(
+            base_url=self._directory_url,
+            api_key=normalized,
+        ))
+
+    def _request_headers(self) -> dict[str, str]:
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
+        return headers
+
+    async def _request_websocket_ticket(self) -> str:
+        if not self._api_key:
+            raise RuntimeError("Listening for intents requires the agent API key returned by register()")
+        data = await self._request(
+            "POST",
+            f"/agents/{self._identity.beam_id}/ws-ticket",
+        )
+        ticket = data.get("ticket")
+        if not isinstance(ticket, str) or not ticket.startswith("bwt_"):
+            raise RuntimeError("Directory returned an invalid WebSocket ticket")
+        return ticket
+
+    def _websocket_url(self, ticket: str) -> str:
+        if not ticket.startswith("bwt_"):
+            raise ValueError("A valid Beam WebSocket ticket is required")
+        base_url = (
+            self._directory_url.replace("https://", "wss://")
+            .replace("http://", "ws://")
+            .rstrip("/")
+        )
+        return f"{base_url}/ws?{urlencode({'beamId': self._identity.beam_id, 'ticket': ticket})}"
+
+    def _sign_result_frame(self, frame: ResultFrame) -> ResultFrame:
+        unsigned = frame.to_dict()
+        unsigned.pop("signature", None)
+        frame.signature = self._identity.sign(_canonicalize_json(unsigned))
+        return frame
 
 
 class BeamThread:

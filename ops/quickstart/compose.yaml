@@ -14,10 +14,13 @@ services:
       BEAM_DASHBOARD_URL: http://localhost:${DASHBOARD_PORT:-43173}
       BEAM_DIRECTORY_URL: http://localhost:${DIRECTORY_PORT:-43100}
       PUBLIC_BASE_URL: http://localhost:${DIRECTORY_PORT:-43100}
+      BEAM_ENABLE_DEMO_FIXTURES: "true"
+      BEAM_DEMO_FIXTURE_PATH: /app/demo-identities.json
     ports:
       - "${DIRECTORY_PORT:-43100}:3100"
     volumes:
       - directory-data:/data
+      - ./demo-identities.json:/app/demo-identities.json:ro
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3100/health').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 5s
@@ -87,6 +90,8 @@ services:
       BEAM_DIRECTORY_URL: http://directory:3100
       BEAM_BUS_URL: http://message-bus:8420/v1/beam
       BEAM_BUS_API_KEY: ${BEAM_BUS_API_KEY}
+      BEAM_ADMIN_EMAIL: ${BEAM_ADMIN_EMAIL:-ops@beam.local}
+      BEAM_ADMIN_TOKEN: ${BEAM_ADMIN_TOKEN:-}
       DEMO_IDENTITY_PATH: /app/demo-identities.json
     ports:
       - "${DEMO_AGENT_PORT:-43290}:8790"

@@ -1,10 +1,11 @@
-import { readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
+import { chmodSync, readFileSync, writeFileSync, mkdirSync, existsSync } from 'node:fs'
 import { join } from 'node:path'
 import type { BeamIdentityData } from 'beam-protocol-sdk'
 
 export interface BeamConfig {
   identity: BeamIdentityData
   directoryUrl: string
+  apiKey?: string
   createdAt: string
 }
 
@@ -43,8 +44,10 @@ export function resolveDirectoryUrl(override?: string, cwd = process.cwd()): str
 
 export function saveConfig(config: BeamConfig, cwd = process.cwd()): void {
   const dir = getConfigDir(cwd)
+  const path = getConfigPath(cwd)
   mkdirSync(dir, { recursive: true })
-  writeFileSync(getConfigPath(cwd), JSON.stringify(config, null, 2), 'utf8')
+  writeFileSync(path, JSON.stringify(config, null, 2), { encoding: 'utf8', mode: 0o600 })
+  chmodSync(path, 0o600)
 }
 
 export const DEFAULT_DIRECTORY_URL = process.env['BEAM_DIRECTORY_URL'] ?? 'https://api.beam.directory'

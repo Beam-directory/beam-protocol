@@ -1,4 +1,4 @@
-import { generateKeyPairSync, randomUUID, sign } from 'node:crypto'
+import { createHash, generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto'
 import { once } from 'node:events'
 import path from 'node:path'
 import { setTimeout as sleep } from 'node:timers/promises'
@@ -17,12 +17,18 @@ const directoryAdminAuthEntry = path.join(repoRoot, 'packages/directory/dist/adm
 
 function createFixtureAgent(beamId, displayName) {
   const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-  return {
+  const apiKey = `bk_${Buffer.from(beamId, 'utf8').toString('base64url')}.${randomBytes(24).toString('base64url')}`
+  const agent = {
     beamId,
     displayName,
     privateKey,
     publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
   }
+  Object.defineProperties(agent, {
+    apiKey: { value: apiKey, enumerable: false },
+    apiKeyHash: { value: createHash('sha256').update(apiKey).digest('hex'), enumerable: false },
+  })
+  return agent
 }
 
 async function loadDirectoryAdminAuthModule() {
@@ -96,19 +102,103 @@ async function requestJsonAllow(url, init = {}) {
 }
 
 async function waitForJson(ws, timeoutMs = 10_000) {
-  const timer = sleep(timeoutMs).then(() => {
-    throw new Error(`Timed out waiting for a WebSocket message after ${timeoutMs}ms`)
+  return new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer)
+      ws.off('message', onMessage)
+      ws.off('close', onClose)
+    }
+    const onMessage = (chunk) => {
+      cleanup()
+      try {
+        resolve(JSON.parse(Buffer.from(chunk).toString('utf8')))
+      } catch (error) {
+        reject(error)
+      }
+    }
+    const onClose = (code, reason) => {
+      cleanup()
+      const detail = Buffer.from(reason).toString('utf8') || 'no reason'
+      reject(new Error(`Beam WebSocket closed before authentication (${code}: ${detail})`))
+    }
+    const timer = setTimeout(() => {
+      cleanup()
+      reject(new Error(`Timed out waiting for a WebSocket message after ${timeoutMs}ms`))
+    }, timeoutMs)
+
+    ws.once('message', onMessage)
+    ws.once('close', onClose)
   })
-  const data = once(ws, 'message').then(([chunk]) => JSON.parse(Buffer.from(chunk).toString('utf8')))
-  return Promise.race([data, timer])
 }
 
-export async function connectFleetClient(directoryUrl, beamId) {
-  const wsUrl = directoryUrl.replace(/^http/u, 'ws') + `/ws?beamId=${encodeURIComponent(beamId)}`
+export function buildFleetWebSocketUrl(directoryUrl, beamId, ticket) {
+  if (typeof ticket !== 'string' || !ticket.startsWith('bwt_')) {
+    throw new Error(`Cannot connect Beam fleet client ${beamId}: WebSocket ticket is required`)
+  }
+
+  const wsUrl = new URL(directoryUrl.replace(/^http/u, 'ws'))
+  wsUrl.pathname = `${wsUrl.pathname.replace(/\/$/u, '')}/ws`
+  wsUrl.search = new URLSearchParams({ beamId, ticket }).toString()
+  return wsUrl.toString()
+}
+
+export async function connectFleetClient(directoryUrl, beamId, apiKey) {
+  if (typeof apiKey !== 'string' || !apiKey.trim()) {
+    throw new Error(`Cannot connect Beam fleet client ${beamId}: agent API key is required`)
+  }
+  const ticketResponse = await requestJson(
+    `${directoryUrl}/agents/${encodeURIComponent(beamId)}/ws-ticket`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey.trim() },
+    },
+  )
+  const ticket = ticketResponse?.ticket
+  const wsUrl = buildFleetWebSocketUrl(directoryUrl, beamId, ticket)
   const ws = new WebSocket(wsUrl)
   await once(ws, 'open')
-  await waitForJson(ws)
+  const connected = await waitForJson(ws)
+  if (connected?.type !== 'connected' || connected.beamId !== beamId || connected.auth !== 'ws_ticket') {
+    ws.terminate()
+    throw new Error(`Beam fleet client ${beamId} did not receive an authenticated connection acknowledgement`)
+  }
   return ws
+}
+
+function canonicalizeJson(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalizeJson)
+  }
+  if (value && typeof value === 'object') {
+    return Object.fromEntries(
+      Object.keys(value).sort().map((key) => [key, canonicalizeJson(value[key])]),
+    )
+  }
+  return value
+}
+
+export function sendSignedFleetResult(ws, responder, intentFrame, payload) {
+  if (!responder?.privateKey || responder.beamId !== intentFrame?.to) {
+    throw new Error('Cannot sign fleet result: responder does not match intent recipient')
+  }
+
+  const frame = {
+    v: '1',
+    success: true,
+    nonce: intentFrame.nonce,
+    timestamp: new Date().toISOString(),
+    payload,
+  }
+  const signature = sign(
+    null,
+    Buffer.from(JSON.stringify(canonicalizeJson(frame)), 'utf8'),
+    responder.privateKey,
+  ).toString('base64')
+
+  ws.send(JSON.stringify({
+    type: 'result',
+    frame: { ...frame, signature },
+  }))
 }
 
 export async function closeFleetClient(ws) {
@@ -276,6 +366,7 @@ export async function startOpenClawFleetHarness() {
             displayName: agent.displayName,
             capabilities: ['conversation.message'],
             publicKey: agent.publicKey,
+            apiKeyHash: agent.apiKeyHash,
             verificationTier: 'business',
             email: `${agent.displayName.toLowerCase()}@openclaw.example`,
             emailVerified: true,
@@ -304,6 +395,17 @@ export async function startOpenClawFleetHarness() {
     }),
   })
 
+  for (const member of [
+    { principalId: 'ops@example.com', role: 'operator' },
+    { principalId: 'viewer@example.com', role: 'viewer' },
+  ]) {
+    await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/members`, {
+      method: 'POST',
+      headers: adminHeaders,
+      body: JSON.stringify(member),
+    })
+  }
+
   for (const agent of Object.values(agents)) {
     await requestJson(`${harness.directoryUrl}/admin/workspaces/${workspaceSlug}/identities`, {
       method: 'POST',
@@ -322,7 +424,7 @@ export async function startOpenClawFleetHarness() {
   for (const agent of Object.values(agents)) {
     await requestJson(`${harness.directoryUrl}/acl`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: adminHeaders,
       body: JSON.stringify({
         targetBeamId: agent.beamId,
         intentType: 'conversation.message',
@@ -370,9 +472,9 @@ export async function startOpenClawFleetHarness() {
   }
 
   const clients = {
-    alpha: await connectFleetClient(harness.directoryUrl, agents.alpha.beamId),
-    beta: await connectFleetClient(harness.directoryUrl, agents.beta.beamId),
-    gamma: await connectFleetClient(harness.directoryUrl, agents.gamma.beamId),
+    alpha: await connectFleetClient(harness.directoryUrl, agents.alpha.beamId, agents.alpha.apiKey),
+    beta: await connectFleetClient(harness.directoryUrl, agents.beta.beamId, agents.beta.apiKey),
+    gamma: await connectFleetClient(harness.directoryUrl, agents.gamma.beamId, agents.gamma.apiKey),
   }
 
   return {
@@ -703,7 +805,11 @@ export async function startOpenClawFleetHarness() {
     },
     async reconnectHostClient(hostKey) {
       await closeFleetClient(clients[hostKey])
-      clients[hostKey] = await connectFleetClient(harness.directoryUrl, agents[hostKey].beamId)
+      clients[hostKey] = await connectFleetClient(
+        harness.directoryUrl,
+        agents[hostKey].beamId,
+        agents[hostKey].apiKey,
+      )
       return clients[hostKey]
     },
     async preferRoute(routeId, note = 'Preferred route owner') {

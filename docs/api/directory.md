@@ -32,6 +32,32 @@ The recommended application payload for accepted-but-not-terminal async work is:
 }
 ```
 
+## Organization namespace onboarding
+
+Organization namespaces are claimed before an organization Beam ID can be issued:
+
+```http
+POST /orgs
+Content-Type: application/json
+
+{
+  "name": "acme",
+  "displayName": "Acme GmbH",
+  "domain": "acme.com"
+}
+```
+
+`domain` is required. Beam canonicalizes it to the registrable domain and requires the namespace to match that domain label. For example, `www.acme.com` becomes `acme.com` and may claim `acme`; it cannot claim `northwind`. Brand names that do not match the legal domain need an administrator-reviewed override rather than automatic approval.
+
+The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish the TXT value, then call:
+
+```http
+POST /orgs/acme/verify
+x-api-key: beam_org_...
+```
+
+Until verification succeeds, organization agent issuance and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+
 ## `POST /register`
 
 In the current server implementation, agent registration is exposed as `POST /agents/register`.
@@ -48,9 +74,17 @@ Example request body:
 }
 ```
 
+Personal Beam IDs can be claimed without an organization credential. Organization IDs require a registered, DNS-verified organization and its API key:
+
+```text
+x-api-key: beam_org_...organization-key...
+```
+
+Registration is create-only. Reusing an existing Beam ID returns `409 BEAM_ID_ALREADY_REGISTERED`; profile updates and key rotation use their authenticated endpoints instead.
+
 Successful responses return the created agent record with trust and verification metadata.
 Registration responses also return an API key with the prefix `bk_`. Store it securely — it is only meant to
-be shown in plaintext at creation time.
+be shown in plaintext at creation time. Successful registration responses are marked `Cache-Control: no-store`.
 
 Detailed registration and lookup responses now also include `keyState` with:
 
@@ -133,7 +167,27 @@ Admin and operator access is session-based.
 - `GET /admin/auth/session`
 - `POST /admin/auth/logout`
 
-Successful verification returns a short-lived signed bearer token and also sets the admin session cookie for dashboard clients.
+Successful verification always sets an HttpOnly session cookie. The dashboard requests cookie-only transport and never stores the bearer token in browser storage. CLI and automation clients receive the short-lived bearer token by default; they can request cookie-only transport with `{"sessionTransport":"cookie"}`.
+
+New magic-link secrets are stored only as SHA-256 hashes. Unused legacy plaintext rows remain consumable during the migration window and are deleted by the normal used/expired cleanup.
+
+## Workspace access and invitations
+
+```text
+GET    /admin/workspaces/:slug/access
+GET    /admin/workspaces/:slug/members
+PATCH  /admin/workspaces/:slug/members/:id
+DELETE /admin/workspaces/:slug/members/:id
+
+GET    /admin/workspaces/:slug/invitations
+POST   /admin/workspaces/:slug/invitations
+DELETE /admin/workspaces/:slug/invitations/:id
+
+GET    /admin/workspaces/invitations/:token
+POST   /admin/workspaces/invitations/:token/accept
+```
+
+Member and invitation administration requires the workspace `owner` role. Invitation preview is token-authenticated and deliberately redacted. Acceptance also requires an authenticated session for the exact invited email. Raw invitation secrets and token hashes are never returned by list endpoints.
 
 ## Key lifecycle endpoints
 
@@ -358,17 +412,20 @@ Clears waitlist and hosted beta intake entries from the legacy admin surface.
 
 The real-time transport endpoint is `/ws`.
 
-Connect with a registered Beam-ID in the query string:
+Agent sockets require the registered Beam-ID and a short-lived, single-use WebSocket ticket. Obtain
+the ticket with `POST /agents/:beamId/ws-ticket` and the agent API key. The API key therefore stays
+in the authenticated HTTPS request instead of appearing in a WebSocket URL. Transport authentication
+and per-frame Ed25519 signatures serve different purposes; both remain required.
 
 ```text
-wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory
+wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory&ticket=bwt_...single-use...
 ```
 
-You can also authenticate the socket with an API key instead of relying on per-message Ed25519 signatures:
-
-```text
-wss://api.beam.directory/ws?beamId=assistant@demo.beam.directory&apiKey=bk_...your-key...
-```
+Non-browser clients may authenticate the WebSocket upgrade itself with
+`Authorization: Bearer <api-key>` or `X-API-Key`, but tickets are the portable default. Query-string API keys are disabled
+unless the explicit temporary migration flag `BEAM_ALLOW_LEGACY_WS_API_KEY_QUERY=true` is set.
+Result Frames must be signed by the connected recipient's Ed25519 identity. The `feed=intents`
+operator feed requires an authenticated directory admin session and is not a public status feed.
 
 Common message types:
 

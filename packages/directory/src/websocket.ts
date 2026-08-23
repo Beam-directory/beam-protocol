@@ -29,7 +29,10 @@ import {
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
+import { getAdminSessionFromRequest } from './admin-auth.js'
+import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
+import { consumeWebSocketTicket } from './websocket-ticket.js'
 import {
   isIntentLifecycleFailure,
   isIntentLifecycleInFlight,
@@ -777,8 +780,14 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     const feed = url.searchParams.get('feed')
 
     if (feed === 'intents') {
+      const adminSession = getAdminSessionFromRequest(db, toAdminAuthRequest(req))
+      if (!adminSession) {
+        ws.close(1008, 'Admin authentication required')
+        return
+      }
+
       intentFeedSubscribers.add(ws)
-      sendJson(ws, { type: 'feed_connected' })
+      sendJson(ws, { type: 'feed_connected', role: adminSession.role })
 
       ws.on('close', () => {
         intentFeedSubscribers.delete(ws)
@@ -799,15 +808,19 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     }
 
     const agent = getAgent(db, beamId)
-    if (!agent) {
-      ws.close(1008, `Agent ${beamId} is not registered`)
+    const authenticatedViaTicket = consumeWebSocketTicket(url.searchParams.get('ticket'), beamId)
+    const headerApiKey = getSuppliedApiKey(req)
+    const legacyQueryApiKey = process.env['BEAM_ALLOW_LEGACY_WS_API_KEY_QUERY'] === 'true'
+      ? url.searchParams.get('apiKey')?.trim() ?? ''
+      : ''
+    const authenticatedViaApiKey = authenticatedViaTicket || agentApiKeyMatches(
+      agent,
+      headerApiKey || legacyQueryApiKey,
+    )
+    if (!authenticatedViaApiKey) {
+      ws.close(1008, 'Valid WebSocket credential required')
       return
     }
-
-    const authenticatedViaApiKey = agentApiKeyMatches(
-      agent,
-      url.searchParams.get('apiKey')?.trim() || getSuppliedApiKey(req),
-    )
 
     const existingSession = connections.get(beamId)
     if (existingSession && existingSession.ws.readyState === WebSocket.OPEN) {
@@ -817,7 +830,7 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     connections.set(beamId, { ws, authenticatedViaApiKey })
     updateLastSeen(db, beamId)
 
-    sendJson(ws, { type: 'connected', beamId, auth: authenticatedViaApiKey ? 'api_key' : 'identity' })
+    sendJson(ws, { type: 'connected', beamId, auth: authenticatedViaTicket ? 'ws_ticket' : 'api_key' })
 
     ws.on('message', (data: Buffer) => {
       void handleMessage(db, beamId, ws, data, { authenticatedViaApiKey })
@@ -838,6 +851,21 @@ export function createWebSocketServer(db: Database): WebSocketServer {
   })
 
   return wss
+}
+
+function toAdminAuthRequest(req: IncomingMessage): Request {
+  const headers = new Headers()
+  const authorization = req.headers.authorization
+  const cookie = req.headers.cookie
+
+  if (typeof authorization === 'string') {
+    headers.set('authorization', authorization)
+  }
+  if (typeof cookie === 'string') {
+    headers.set('cookie', cookie)
+  }
+
+  return new Request('http://localhost/ws?feed=intents', { headers })
 }
 
 export function getConnectedCount(): number {
@@ -1065,6 +1093,11 @@ async function handleMessage(
   data: Buffer,
   auth: { authenticatedViaApiKey: boolean }
 ): Promise<void> {
+  if (connections.get(senderBeamId)?.ws !== senderWs) {
+    sendJson(senderWs, { type: 'error', errorCode: 'FORBIDDEN', message: 'WebSocket session is no longer active' })
+    return
+  }
+
   let msg: { type: string; frame: IntentFrame | ResultFrame }
 
   try {
@@ -1082,7 +1115,7 @@ async function handleMessage(
   if (msg.type === 'intent') {
     await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame, auth)
   } else if (msg.type === 'result') {
-    handleResult(db, msg.frame as ResultFrame)
+    handleResult(db, senderBeamId, senderWs, msg.frame as ResultFrame)
   } else {
     sendJson(senderWs, { type: 'error', message: `Unknown message type: ${msg.type}` })
   }
@@ -1122,7 +1155,7 @@ async function handleIntent(
   }
 
   try {
-    enforceSecurityChecks(db, prepared, senderAgent.public_key, { skipSignatureVerification: auth.authenticatedViaApiKey })
+    enforceSecurityChecks(db, prepared, senderAgent.public_key)
     recordShieldDecision(db, prepared, { timestamp: prepared.timestamp })
   } catch (err) {
     recordShieldDecision(db, prepared, {
@@ -1685,13 +1718,29 @@ function verifyIntentSignature(frame: IntentFrame, senderPublicKeyBase64: string
   }
 }
 
-function handleResult(db: Database, frame: ResultFrame): void {
-  if (!frame || typeof frame.nonce !== 'string') {
+function handleResult(
+  db: Database,
+  senderBeamId: string,
+  senderWs: WebSocket,
+  frame: ResultFrame,
+): void {
+  if (!frame || typeof frame !== 'object' || Array.isArray(frame) || typeof frame.nonce !== 'string' || !frame.nonce) {
+    sendResultValidationError(senderWs, frame, new RelayError('BAD_REQUEST', 'Invalid result frame or nonce'))
     return
   }
 
   const pending = pendingResults.get(frame.nonce)
   if (pending) {
+    try {
+      validateResultFrameForIntent(pending.db, senderBeamId, frame, {
+        responderBeamId: pending.toBeamId,
+        requesterBeamId: pending.fromBeamId,
+      })
+    } catch (err) {
+      sendResultValidationError(senderWs, frame, err)
+      return
+    }
+
     clearTimeout(pending.timeout)
     pendingResults.delete(frame.nonce)
     const latencyMs = typeof frame.latency === 'number' ? frame.latency : Math.max(0, Date.now() - pending.startedAtMs)
@@ -1729,6 +1778,17 @@ function handleResult(db: Database, frame: ResultFrame): void {
 
   const existing = getIntentLogByNonce(db, frame.nonce)
   if (!existing) {
+    sendResultValidationError(senderWs, frame, new RelayError('BAD_REQUEST', `Unknown result nonce ${frame.nonce}`))
+    return
+  }
+
+  try {
+    validateResultFrameForIntent(db, senderBeamId, frame, {
+      responderBeamId: existing.to_beam_id,
+      requesterBeamId: existing.from_beam_id,
+    })
+  } catch (err) {
+    sendResultValidationError(senderWs, frame, err)
     return
   }
 
@@ -1783,6 +1843,94 @@ function handleResult(db: Database, frame: ResultFrame): void {
     nonce: frame.nonce,
     timestamp: existing.requested_at,
   }, frame, resolvedLatencyMs)
+}
+
+function sendResultValidationError(senderWs: WebSocket, frame: ResultFrame | null | undefined, err: unknown): void {
+  sendJson(senderWs, {
+    type: 'error',
+    nonce: typeof frame?.nonce === 'string' ? frame.nonce : undefined,
+    errorCode: err instanceof RelayError ? err.code : 'BAD_REQUEST',
+    message: err instanceof Error ? err.message : 'Invalid result frame',
+  })
+}
+
+function validateResultFrameForIntent(
+  db: Database,
+  senderBeamId: string,
+  frame: ResultFrame,
+  expected: {
+    responderBeamId: string
+    requesterBeamId: string
+  },
+): void {
+  const candidate = frame as unknown as Record<string, unknown>
+
+  if (senderBeamId !== expected.responderBeamId) {
+    throw new RelayError(
+      'FORBIDDEN',
+      `Result for nonce ${frame.nonce} must come from ${expected.responderBeamId}`,
+    )
+  }
+  if (candidate['v'] !== '1') {
+    throw new RelayError('BAD_REQUEST', 'Invalid result protocol version')
+  }
+  if (typeof candidate['success'] !== 'boolean') {
+    throw new RelayError('BAD_REQUEST', 'Result success must be a boolean')
+  }
+  if (typeof candidate['timestamp'] !== 'string' || !candidate['timestamp']) {
+    throw new RelayError('BAD_REQUEST', 'Result timestamp is required')
+  }
+  const timestampMs = new Date(candidate['timestamp']).getTime()
+  if (Number.isNaN(timestampMs)) {
+    throw new RelayError('BAD_REQUEST', 'Invalid result timestamp format')
+  }
+  if (Math.abs(Date.now() - timestampMs) > REPLAY_WINDOW_MS) {
+    throw new RelayError('BAD_REQUEST', 'Result timestamp outside allowed replay window (5 minutes)')
+  }
+  if (candidate['latency'] !== undefined && (
+    typeof candidate['latency'] !== 'number'
+    || !Number.isFinite(candidate['latency'])
+    || candidate['latency'] < 0
+  )) {
+    throw new RelayError('BAD_REQUEST', 'Result latency must be a non-negative number when provided')
+  }
+  if (candidate['payload'] !== undefined && (
+    !candidate['payload']
+    || typeof candidate['payload'] !== 'object'
+    || Array.isArray(candidate['payload'])
+  )) {
+    throw new RelayError('BAD_REQUEST', 'Result payload must be an object when provided')
+  }
+  if (candidate['error'] !== undefined && typeof candidate['error'] !== 'string') {
+    throw new RelayError('BAD_REQUEST', 'Result error must be a string when provided')
+  }
+  if (candidate['errorCode'] !== undefined && typeof candidate['errorCode'] !== 'string') {
+    throw new RelayError('BAD_REQUEST', 'Result errorCode must be a string when provided')
+  }
+
+  // ResultFrame v1 has no mandatory from/to fields. When forward-compatible
+  // extensions provide them, bind them to the authenticated responder and the
+  // original requester rather than accepting contradictory routing metadata.
+  if (candidate['from'] !== undefined && candidate['from'] !== senderBeamId) {
+    throw new RelayError('FORBIDDEN', 'Result from does not match the authenticated responder')
+  }
+  if (candidate['to'] !== undefined && candidate['to'] !== expected.requesterBeamId) {
+    throw new RelayError('FORBIDDEN', 'Result to does not match the original requester')
+  }
+
+  const signature = candidate['signature']
+  if (typeof signature !== 'string' || !signature) {
+    throw new RelayError('BAD_REQUEST', 'Result signature is required')
+  }
+  const responder = getAgent(db, senderBeamId)
+  if (!responder) {
+    throw new RelayError('FORBIDDEN', `Result responder ${senderBeamId} is not registered`)
+  }
+
+  const { signature: _signature, ...unsigned } = candidate
+  if (!verifyPayload(canonicalizeJson(unsigned), signature, responder.public_key)) {
+    throw new RelayError('BAD_REQUEST', 'Result signature verification failed')
+  }
 }
 
 function createResultWaiter(db: Database, frame: IntentFrame, timeoutMs: number): Promise<ResultFrame> {

@@ -1,0 +1,67 @@
+app = "beam-mcp-pilot"
+primary_region = "fra"
+kill_signal = "SIGTERM"
+kill_timeout = 20
+
+[build]
+  dockerfile = "../../../packages/mcp-server/Dockerfile"
+
+  [build.args]
+    RUNTIME_USER = "root"
+
+[env]
+  NODE_ENV = "production"
+  BEAM_MCP_TRANSPORT = "http"
+  BEAM_MCP_HTTP_HOST = "0.0.0.0"
+  BEAM_MCP_HTTP_PORT = "3333"
+  BEAM_MCP_PUBLIC_URL = "https://mcp.beam.directory/mcp"
+  BEAM_MCP_OAUTH_ISSUER = "https://identity.beam.directory/realms/beam-mcp-pilot"
+  BEAM_MCP_OAUTH_METADATA_URL = "https://identity.beam.directory/realms/beam-mcp-pilot/.well-known/openid-configuration"
+  BEAM_MCP_OAUTH_INTROSPECTION_URL = "https://identity.beam.directory/realms/beam-mcp-pilot/protocol/openid-connect/token/introspect"
+  BEAM_MCP_OAUTH_CLIENT_ID = "https://mcp.beam.directory/mcp"
+  BEAM_MCP_OAUTH_CLIENT_SECRET_FILE = "/run/secrets/oauth_client_secret"
+  BEAM_ID = "grok@coppen.beam.directory"
+  BEAM_PUBLIC_KEY_BASE64_FILE = "/run/secrets/beam_public_key"
+  BEAM_PRIVATE_KEY_BASE64_FILE = "/run/secrets/beam_private_key"
+  BEAM_API_KEY_FILE = "/run/secrets/beam_api_key"
+  BEAM_DIRECTORY_URL = "https://api.beam.directory"
+  BEAM_MCP_ALLOWED_INTENTS = "conversation.message"
+  BEAM_MCP_REQUIRE_VERIFIED_TARGET = "true"
+  BEAM_MCP_MIN_VERIFICATION_TIER = "business"
+  BEAM_MCP_MIN_TRUST_SCORE = "0.5"
+  BEAM_MCP_ENABLE_SEND = "false"
+
+[[files]]
+  guest_path = "/run/secrets/oauth_client_secret"
+  secret_name = "MCP_OAUTH_CLIENT_SECRET_B64"
+
+[[files]]
+  guest_path = "/run/secrets/beam_public_key"
+  secret_name = "MCP_BEAM_PUBLIC_KEY_B64"
+
+[[files]]
+  guest_path = "/run/secrets/beam_private_key"
+  secret_name = "MCP_BEAM_PRIVATE_KEY_B64"
+
+[[files]]
+  guest_path = "/run/secrets/beam_api_key"
+  secret_name = "MCP_BEAM_API_KEY_B64"
+
+[http_service]
+  internal_port = 3333
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+  [[http_service.checks]]
+    grace_period = "20s"
+    interval = "30s"
+    timeout = "5s"
+    method = "GET"
+    path = "/health"
+    headers = { Host = "mcp.beam.directory" }
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "256mb"

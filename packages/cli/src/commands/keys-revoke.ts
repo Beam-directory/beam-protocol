@@ -22,6 +22,7 @@ export async function cmdKeysRevoke(publicKey: string, options: KeysRevokeOption
     const client = new BeamClient({
       identity: config.identity,
       directoryUrl,
+      apiKey: config.apiKey,
     })
     const result = await client.revokeKey(trimmedKey)
     spinner.succeed('Key revoked')

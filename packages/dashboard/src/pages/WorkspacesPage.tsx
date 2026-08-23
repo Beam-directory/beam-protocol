@@ -19,6 +19,9 @@ import {
   type WorkspaceIdentityBinding,
   type WorkspaceIdentityCredentialBundle,
   type WorkspaceIdentityLifecycleStatus,
+  type WorkspaceMember,
+  type WorkspaceMemberInvitation,
+  type WorkspaceMemberRole,
   type WorkspaceOverviewAttentionCode,
   type WorkspaceOverviewAttentionItem,
   type WorkspaceOverviewResponse,
@@ -509,6 +512,9 @@ export default function WorkspacesPage() {
   const [policy, setPolicy] = useState<WorkspacePolicyResponse | null>(null)
   const [timeline, setTimeline] = useState<WorkspaceTimelineEntry[]>([])
   const [digest, setDigest] = useState<WorkspaceDigestResponse | null>(null)
+  const [members, setMembers] = useState<WorkspaceMember[]>([])
+  const [invitations, setInvitations] = useState<WorkspaceMemberInvitation[]>([])
+  const [canManageMembers, setCanManageMembers] = useState(false)
   const [intentCatalog, setIntentCatalog] = useState<IntentCatalogItem[]>([FALLBACK_CONVERSATION_INTENT])
   const [loading, setLoading] = useState(true)
   const [surfaceLoading, setSurfaceLoading] = useState(false)
@@ -552,6 +558,12 @@ export default function WorkspacesPage() {
     bundle: WorkspaceIdentityCredentialBundle
   } | null>(null)
   const [selectedApprovalBindingIds, setSelectedApprovalBindingIds] = useState<number[]>([])
+  const [inviteForm, setInviteForm] = useState({
+    email: '',
+    role: 'viewer' as WorkspaceMemberRole,
+    expiresInHours: 72,
+  })
+  const [issuedInvitation, setIssuedInvitation] = useState<{ email: string; url: string } | null>(null)
 
   const selectedSlug = searchParams.get('workspace') ?? ''
   const selectedThreadId = useMemo(() => {
@@ -679,6 +691,7 @@ export default function WorkspacesPage() {
       policyResponse,
       timelineResponse,
       digestResponse,
+      accessResponse,
     ] = await Promise.all([
       directoryApi.getWorkspaceOverview(slug),
       directoryApi.getWorkspaceApprovalQueue(slug),
@@ -688,6 +701,7 @@ export default function WorkspacesPage() {
       directoryApi.getWorkspacePolicy(slug),
       directoryApi.getWorkspaceTimeline(slug, 60),
       directoryApi.getWorkspaceDigest(slug, { days: 7 }),
+      directoryApi.getWorkspaceAccess(slug),
     ])
 
     setOverview(overviewResponse)
@@ -699,6 +713,20 @@ export default function WorkspacesPage() {
     setTimeline(timelineResponse.entries)
     setDigest(digestResponse)
     setPolicyDefaults(buildPolicyDefaultsState(policyResponse))
+
+    if (accessResponse.access.workspaceRole === 'owner') {
+      const [membersResponse, invitationsResponse] = await Promise.all([
+        directoryApi.listWorkspaceMembers(slug),
+        directoryApi.listWorkspaceInvitations(slug),
+      ])
+      setMembers(membersResponse.members)
+      setInvitations(invitationsResponse.invitations)
+      setCanManageMembers(true)
+    } else {
+      setMembers([])
+      setInvitations([])
+      setCanManageMembers(false)
+    }
   }
 
   async function loadThreadDetail(slug: string, threadId: number) {
@@ -798,6 +826,10 @@ export default function WorkspacesPage() {
       setPolicy(null)
       setTimeline([])
       setDigest(null)
+      setMembers([])
+      setInvitations([])
+      setCanManageMembers(false)
+      setIssuedInvitation(null)
       setSelectedApprovalBindingIds([])
       return
     }
@@ -817,6 +849,7 @@ export default function WorkspacesPage() {
 
   useEffect(() => {
     setSelectedApprovalBindingIds([])
+    setIssuedInvitation(null)
   }, [selectedWorkspace?.slug])
 
   useEffect(() => {
@@ -974,15 +1007,6 @@ export default function WorkspacesPage() {
       })
       await loadWorkspaceSurface(selectedWorkspace.slug)
     }, `${binding.beamId} local credential reissued.`)
-  }
-
-  async function handleCopyCredential(bundle: WorkspaceIdentityCredentialBundle) {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2))
-      setNotice(`Credential bundle copied for ${bundle.beamId}.`)
-    } catch {
-      setError('Clipboard access failed while copying the credential bundle.')
-    }
   }
 
   function handleDownloadCredential(bundle: WorkspaceIdentityCredentialBundle) {
@@ -1310,6 +1334,58 @@ export default function WorkspacesPage() {
       await directoryApi.deliverWorkspaceDigest(selectedWorkspace.slug, { days: 7 })
       await loadWorkspaceSurface(selectedWorkspace.slug)
     }, 'Workspace digest delivered to your operator mailbox.')
+  }
+
+  async function handleInvitationSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedWorkspace || !inviteForm.email.trim()) return
+
+    await runAction('workspace-invitation-create', async () => {
+      const response = await directoryApi.createWorkspaceInvitation(selectedWorkspace.slug, {
+        email: inviteForm.email.trim(),
+        role: inviteForm.role,
+        expiresInHours: inviteForm.expiresInHours,
+      })
+      setIssuedInvitation({ email: response.invitation.email, url: response.url })
+      setInviteForm((current) => ({ ...current, email: '' }))
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+    }, `Invitation created for ${inviteForm.email.trim()}. Copy the link below and share it securely.`)
+  }
+
+  async function handleInvitationRevoke(invitation: WorkspaceMemberInvitation) {
+    if (!selectedWorkspace) return
+    await runAction(`workspace-invitation-revoke-${invitation.id}`, async () => {
+      await directoryApi.revokeWorkspaceInvitation(selectedWorkspace.slug, invitation.id)
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+    }, `Invitation for ${invitation.email} revoked.`)
+  }
+
+  async function handleMemberRoleChange(member: WorkspaceMember, role: WorkspaceMemberRole) {
+    if (!selectedWorkspace || role === member.role) return
+    await runAction(`workspace-member-role-${member.id}`, async () => {
+      await directoryApi.updateWorkspaceMember(selectedWorkspace.slug, member.id, role)
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+      await loadWorkspaces()
+    }, `${member.principalId} is now ${role}.`)
+  }
+
+  async function handleMemberRemove(member: WorkspaceMember) {
+    if (!selectedWorkspace) return
+    await runAction(`workspace-member-remove-${member.id}`, async () => {
+      await directoryApi.removeWorkspaceMember(selectedWorkspace.slug, member.id)
+      await loadWorkspaceSurface(selectedWorkspace.slug)
+      await loadWorkspaces()
+    }, `${member.principalId} removed from the workspace.`)
+  }
+
+  async function handleCopyInvitation() {
+    if (!issuedInvitation) return
+    try {
+      await navigator.clipboard.writeText(issuedInvitation.url)
+      setNotice(`Invitation link for ${issuedInvitation.email} copied. The secret is shown only in this browser state.`)
+    } catch {
+      setError('Clipboard access is not available in this browser context.')
+    }
   }
 
   async function handleCopyDigest() {
@@ -1695,6 +1771,134 @@ export default function WorkspacesPage() {
             </div>
           </section>
 
+          {canManageMembers ? (
+            <section className="panel">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <div className="panel-title">Members and invitations</div>
+                  <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
+                    Email-bound, expiring access for people who collaborate inside this workspace.
+                  </p>
+                </div>
+                <div className="flex gap-2">
+                  <StatusPill label={`${members.length} members`} tone="default" />
+                  <StatusPill label={`${invitations.filter((item) => item.status === 'pending').length} pending`} tone={invitations.some((item) => item.status === 'pending') ? 'warning' : 'success'} />
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-6 xl:grid-cols-[0.82fr,1.18fr]">
+                <div>
+                  <form className="rounded-2xl border border-slate-200 p-4 dark:border-slate-800" onSubmit={(event) => { void handleInvitationSubmit(event) }}>
+                    <div className="text-sm font-medium">Invite a person</div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <input
+                        className="input-field sm:col-span-2"
+                        type="email"
+                        required
+                        placeholder="teammate@company.com"
+                        value={inviteForm.email}
+                        onChange={(event) => setInviteForm((current) => ({ ...current, email: event.target.value }))}
+                      />
+                      <select className="input-field" value={inviteForm.role} onChange={(event) => setInviteForm((current) => ({ ...current, role: event.target.value as WorkspaceMemberRole }))}>
+                        <option value="viewer">Viewer</option>
+                        <option value="operator">Operator</option>
+                        <option value="owner">Owner</option>
+                      </select>
+                      <select className="input-field" value={inviteForm.expiresInHours} onChange={(event) => setInviteForm((current) => ({ ...current, expiresInHours: Number(event.target.value) }))}>
+                        <option value={24}>24 hours</option>
+                        <option value={72}>3 days</option>
+                        <option value={168}>7 days</option>
+                        <option value={336}>14 days</option>
+                      </select>
+                    </div>
+                    <button className="btn-primary mt-4" disabled={actionBusy === 'workspace-invitation-create' || !inviteForm.email.trim()} type="submit">
+                      Create invitation
+                    </button>
+                    <p className="mt-3 text-xs leading-5 text-slate-500 dark:text-slate-400">
+                      Beam stores only a SHA-256 token hash. Share the generated link through a trusted channel; it cannot be recovered later.
+                    </p>
+                  </form>
+
+                  {issuedInvitation ? (
+                    <div className="mt-4 rounded-2xl border border-emerald-200 bg-emerald-50/80 p-4 dark:border-emerald-500/30 dark:bg-emerald-500/10">
+                      <div className="text-sm font-medium text-emerald-900 dark:text-emerald-100">Invitation link ready</div>
+                      <div className="mt-1 text-xs text-emerald-700 dark:text-emerald-200">For {issuedInvitation.email}. This secret is available only until you leave or refresh this workspace.</div>
+                      <input className="input-field mt-3 font-mono text-xs" readOnly value={issuedInvitation.url} aria-label={`Invitation link for ${issuedInvitation.email}`} />
+                      <div className="mt-3 flex gap-2">
+                        <button className="btn-primary" onClick={() => { void handleCopyInvitation() }} type="button">Copy link</button>
+                        <button className="rounded-xl border border-slate-300 px-3 py-2 text-sm dark:border-slate-700" onClick={() => setIssuedInvitation(null)} type="button">Hide secret</button>
+                      </div>
+                    </div>
+                  ) : null}
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Current members</div>
+                    <div className="mt-3 divide-y divide-slate-200 rounded-2xl border border-slate-200 dark:divide-slate-800 dark:border-slate-800">
+                      {members.map((member) => (
+                        <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center" key={member.id}>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{member.principalId}</div>
+                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{member.principalType} · joined {formatRelativeTime(member.createdAt)}</div>
+                          </div>
+                          <select
+                            className="input-field min-w-32 text-sm"
+                            disabled={actionBusy === `workspace-member-role-${member.id}`}
+                            value={member.role}
+                            onChange={(event) => { void handleMemberRoleChange(member, event.target.value as WorkspaceMemberRole) }}
+                          >
+                            <option value="viewer">Viewer</option>
+                            <option value="operator">Operator</option>
+                            {member.principalType === 'human' ? <option value="owner">Owner</option> : null}
+                          </select>
+                          <button
+                            className="rounded-xl border border-red-200 px-3 py-2 text-sm text-red-700 transition hover:bg-red-50 disabled:opacity-50 dark:border-red-500/30 dark:text-red-200 dark:hover:bg-red-500/10"
+                            disabled={actionBusy === `workspace-member-remove-${member.id}`}
+                            onClick={() => { void handleMemberRemove(member) }}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Invitation history</div>
+                    <div className="mt-3 space-y-2">
+                      {invitations.length === 0 ? (
+                        <div className="rounded-2xl border border-dashed border-slate-300 px-4 py-5 text-sm text-slate-500 dark:border-slate-700 dark:text-slate-400">No invitations yet.</div>
+                      ) : invitations.slice(0, 12).map((invitation) => (
+                        <div className="flex flex-col gap-3 rounded-2xl border border-slate-200 p-4 dark:border-slate-800 sm:flex-row sm:items-center" key={invitation.id}>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium">{invitation.email}</div>
+                            <div className="mt-1 text-xs text-slate-500 dark:text-slate-400">{invitation.role} · expires {formatDateTime(invitation.expiresAt)}</div>
+                          </div>
+                          <StatusPill
+                            label={invitation.status}
+                            tone={invitation.status === 'accepted' ? 'success' : invitation.status === 'pending' ? 'warning' : 'default'}
+                          />
+                          {invitation.status === 'pending' ? (
+                            <button
+                              className="rounded-xl border border-slate-300 px-3 py-2 text-sm transition hover:bg-slate-50 disabled:opacity-50 dark:border-slate-700 dark:hover:bg-slate-900"
+                              disabled={actionBusy === `workspace-invitation-revoke-${invitation.id}`}
+                              onClick={() => { void handleInvitationRevoke(invitation) }}
+                              type="button"
+                            >
+                              Revoke
+                            </button>
+                          ) : null}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </section>
+          ) : null}
+
           <section className="grid gap-6 xl:grid-cols-2">
             <div className="panel">
               <div className="flex items-center justify-between gap-3">
@@ -1742,6 +1946,7 @@ export default function WorkspacesPage() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <StatusPill label={binding.bindingType} />
+                          {binding.credentialManaged ? <StatusPill label="managed credential" tone="success" /> : null}
                           <StatusPill label={binding.lifecycleStatus} tone={lifecycleTone(binding.lifecycleStatus)} />
                           <StatusPill label={binding.status} tone={binding.status === 'paused' ? 'warning' : 'default'} />
                           {binding.hostLabel || binding.runtimeSessionState === 'conflict' ? (
@@ -1852,7 +2057,7 @@ export default function WorkspacesPage() {
                             Resolve in fleet
                           </Link>
                         ) : null}
-                        {binding.bindingType !== 'partner' && binding.identity.existsLocally ? (
+                        {binding.bindingType !== 'partner' && binding.identity.existsLocally && binding.credentialManaged ? (
                           <button
                             className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
                             type="button"
@@ -1929,24 +2134,15 @@ export default function WorkspacesPage() {
                               <button
                                 className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                                 type="button"
-                                onClick={() => { void handleCopyCredential(issuedCredential.bundle) }}
-                              >
-                                Copy JSON
-                              </button>
-                              <button
-                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                type="button"
                                 onClick={() => { handleDownloadCredential(issuedCredential.bundle) }}
                               >
                                 Download
                               </button>
                             </div>
                           </div>
-                          <textarea
-                            className="input-field mt-3 min-h-56 font-mono text-xs"
-                            readOnly
-                            value={JSON.stringify(issuedCredential.bundle, null, 2)}
-                          />
+                          <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                            Secret material is not rendered in the dashboard or written to browser storage.
+                          </div>
                         </div>
                       ) : null}
                     </div>

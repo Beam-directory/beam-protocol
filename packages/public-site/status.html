@@ -4,7 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Beam Directory Status</title>
-  <meta name="description" content="Live operational status for beam.directory, the Beam API, and the Beam WebSocket service." />
+  <meta name="description" content="Live aggregate operational status for beam.directory and the public Beam API." />
+  <meta property="og:title" content="Beam Status | Public Service Health" />
+  <meta property="og:description" content="Live aggregate health, protocol, release, and availability checks for Beam's public services." />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/status.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://beam.directory/status.html" />
   <style>
     :root {
       --bg: #081018;
@@ -58,9 +65,11 @@
       .hero, .grid, .checks { grid-template-columns: 1fr; }
     }
   </style>
+  <link rel="stylesheet" href="/beam-pages.css" />
+  <script defer src="/beam-motion.js"></script>
 </head>
-<body>
-  <div class="shell">
+<body class="beam-status">
+  <main class="shell" id="main">
     <div class="topbar">
       <a class="brand" href="/">beam.directory</a>
       <div class="links">
@@ -75,8 +84,8 @@
         <div class="eyebrow">Operations</div>
         <h1>Beam Directory Status</h1>
         <p>
-          Live checks for the public Beam API and WebSocket relay. This page refreshes every 30 seconds
-          and performs fresh checks in your browser.
+          Live aggregate checks for the public Beam API. This page refreshes every 30 seconds
+          without subscribing to private agent or intent feeds.
         </p>
         <div id="overall-status" class="overall warn"><span class="dot warn"></span>Checking services…</div>
         <p class="meta">Last refresh: <span id="last-refresh">—</span></p>
@@ -84,7 +93,7 @@
       <div class="card">
         <div class="metric-label">Status source</div>
         <div class="metric-value mono">/health + /stats</div>
-        <div class="metric-sub">WebSocket check: <span class="mono">wss://api.beam.directory/ws?feed=intents</span></div>
+        <div class="metric-sub">Public aggregate data only; no intent metadata is requested.</div>
       </div>
     </section>
 
@@ -95,9 +104,9 @@
         <div class="metric-sub" id="api-detail">Waiting for health check</div>
       </div>
       <div class="card">
-        <div class="metric-label">WebSocket</div>
-        <div class="metric-value" id="ws-status">—</div>
-        <div class="metric-sub" id="ws-detail">Waiting for socket check</div>
+        <div class="metric-label">Protocol</div>
+        <div class="metric-value" id="protocol-status">—</div>
+        <div class="metric-sub" id="protocol-detail">Waiting for health check</div>
       </div>
       <div class="card">
         <div class="metric-label">Connected agents</div>
@@ -131,18 +140,26 @@
       </div>
       <div class="card">
         <div class="check-top">
-          <h2>WebSocket handshake</h2>
-          <div id="socket-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
+          <h2>Aggregated service stats</h2>
+          <div id="stats-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
         </div>
-        <p class="mono" id="socket-payload">No handshake yet.</p>
+        <p class="mono" id="stats-payload">No aggregate payload yet.</p>
       </div>
     </section>
-  </div>
+    <footer class="beam-subfooter">
+      <span>Beam Protocol · public aggregate status</span>
+      <nav aria-label="Footer navigation">
+        <a href="/guided-evaluation.html">Evaluation</a>
+        <a href="/playground.html">Playground</a>
+        <a href="/blog/">Blog</a>
+        <a href="https://docs.beam.directory">Docs</a>
+      </nav>
+    </footer>
+  </main>
 
   <script>
     const HEALTH_URL = 'https://api.beam.directory/health';
     const STATS_URL = 'https://api.beam.directory/stats';
-    const WS_URL = 'wss://api.beam.directory/ws?feed=intents';
     const REFRESH_MS = 30_000;
 
     const elements = {
@@ -150,8 +167,8 @@
       lastRefresh: document.getElementById('last-refresh'),
       apiStatus: document.getElementById('api-status'),
       apiDetail: document.getElementById('api-detail'),
-      wsStatus: document.getElementById('ws-status'),
-      wsDetail: document.getElementById('ws-detail'),
+      protocolStatus: document.getElementById('protocol-status'),
+      protocolDetail: document.getElementById('protocol-detail'),
       connectedAgents: document.getElementById('connected-agents'),
       uptime: document.getElementById('uptime'),
       releaseVersion: document.getElementById('release-version'),
@@ -160,8 +177,8 @@
       releaseTruthDetail: document.getElementById('release-truth-detail'),
       httpBadge: document.getElementById('http-badge'),
       httpPayload: document.getElementById('http-payload'),
-      socketBadge: document.getElementById('socket-badge'),
-      socketPayload: document.getElementById('socket-payload'),
+      statsBadge: document.getElementById('stats-badge'),
+      statsPayload: document.getElementById('stats-payload'),
     };
 
     function setBadge(element, variant, label) {
@@ -218,9 +235,18 @@
       }
 
       setBadge(elements.httpBadge, 'ok', `Healthy · ${latency} ms`);
+      setBadge(elements.statsBadge, 'ok', 'Available');
       elements.httpPayload.textContent = JSON.stringify({ health: healthPayload, stats: statsPayload }, null, 2);
+      elements.statsPayload.textContent = JSON.stringify({
+        agents: statsPayload.agents ?? null,
+        intentsProcessed: statsPayload.intentsProcessed ?? null,
+        uptime: statsPayload.uptime ?? null,
+        version: statsPayload.version ?? null,
+      }, null, 2);
       elements.apiStatus.textContent = String(healthPayload.status || 'ok').toUpperCase();
       elements.apiDetail.textContent = `${latency} ms · ${healthPayload.protocol || 'beam/1'}`;
+      elements.protocolStatus.textContent = String(healthPayload.protocol || 'beam/1').toUpperCase();
+      elements.protocolDetail.textContent = 'Reported by the aggregate health endpoint';
       elements.connectedAgents.textContent = String(healthPayload.connectedAgents ?? '—');
       elements.uptime.textContent = formatUptime(healthPayload.uptimeSeconds);
 
@@ -241,37 +267,9 @@
       return { ok: true, consistent, healthPayload, statsPayload, latency };
     }
 
-    function checkWebSocket() {
-      return new Promise((resolve, reject) => {
-        const startedAt = performance.now();
-        const socket = new WebSocket(WS_URL);
-        const timeout = window.setTimeout(() => {
-          socket.close();
-          reject(new Error('WebSocket timeout'));
-        }, 8000);
-
-        socket.addEventListener('message', (event) => {
-          clearTimeout(timeout);
-          const latency = Math.round(performance.now() - startedAt);
-          setBadge(elements.socketBadge, 'ok', `Reachable · ${latency} ms`);
-          elements.socketPayload.textContent = event.data;
-          elements.wsStatus.textContent = 'ONLINE';
-          elements.wsDetail.textContent = `${latency} ms handshake`;
-          socket.close(1000, 'status check complete');
-          resolve({ ok: true, latency, payload: event.data });
-        }, { once: true });
-
-        socket.addEventListener('error', () => {
-          clearTimeout(timeout);
-          reject(new Error('WebSocket connection failed'));
-        }, { once: true });
-      });
-    }
-
     async function refresh() {
       elements.lastRefresh.textContent = new Date().toLocaleString();
       let httpOk = false;
-      let wsOk = false;
       let releaseConsistent = false;
 
       try {
@@ -283,28 +281,22 @@
         elements.httpPayload.textContent = error instanceof Error ? error.message : 'HTTP check failed';
         elements.apiStatus.textContent = 'DOWN';
         elements.apiDetail.textContent = 'Health endpoint unavailable';
+        elements.protocolStatus.textContent = 'UNKNOWN';
+        elements.protocolDetail.textContent = 'Health endpoint unavailable';
         elements.connectedAgents.textContent = '—';
         elements.uptime.textContent = '—';
         elements.releaseVersion.textContent = '—';
         elements.releaseDetail.textContent = 'Release metadata unavailable';
         elements.releaseTruth.textContent = 'UNKNOWN';
         elements.releaseTruthDetail.textContent = 'Could not compare health and stats.';
+        setBadge(elements.statsBadge, 'err', 'Unavailable');
+        elements.statsPayload.textContent = 'Aggregate stats endpoint unavailable';
       }
 
-      try {
-        await checkWebSocket();
-        wsOk = true;
-      } catch (error) {
-        setBadge(elements.socketBadge, 'err', 'Unavailable');
-        elements.socketPayload.textContent = error instanceof Error ? error.message : 'WebSocket check failed';
-        elements.wsStatus.textContent = 'DOWN';
-        elements.wsDetail.textContent = 'Handshake failed';
-      }
-
-      if (httpOk && wsOk && releaseConsistent) {
-        setOverall('ok', 'All core services operational');
-      } else if (httpOk || wsOk) {
-        setOverall('warn', 'Partial degradation detected');
+      if (httpOk && releaseConsistent) {
+        setOverall('ok', 'Public services operational');
+      } else if (httpOk) {
+        setOverall('warn', 'Release metadata drift detected');
       } else {
         setOverall('err', 'Service disruption detected');
       }

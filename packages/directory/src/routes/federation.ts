@@ -4,8 +4,8 @@ import type { Database } from 'better-sqlite3'
 import { getAgent, logAuditEvent, upsertFederatedTrust } from '../db.js'
 import {
   applyTrustAssertion,
-  getFederationSharedSecret,
   getLocalDirectoryUrl,
+  isFederationRequestAuthorized,
   isPrivateDirectoryMode,
   listPeers,
   queryPeerForAgent,
@@ -18,16 +18,7 @@ import { relayIntentFromHttp } from '../websocket.js'
 import type { IntentFrame } from '../types.js'
 
 function hasFederationAuth(c: Context): boolean {
-  if (c.req.header('x-beam-mtls-verified') === 'true') {
-    return true
-  }
-
-  const configuredSecret = getFederationSharedSecret()
-  if (!configuredSecret) {
-    return false
-  }
-
-  return c.req.header('x-beam-federation-secret') === configuredSecret
+  return isFederationRequestAuthorized(c.req.raw.headers)
 }
 
 function requireFederationAuth(c: Context): Response | null {
@@ -200,8 +191,12 @@ export function federationRouter(db: Database): Hono {
 
     const raw = body as Record<string, unknown>
     const beamId = String(raw['beamId'] ?? '').trim()
-    const trustDelta = typeof raw['trustDelta'] === 'number' ? raw['trustDelta'] : null
-    const assertedTrust = typeof raw['assertedTrust'] === 'number' ? raw['assertedTrust'] : null
+    const trustDelta = typeof raw['trustDelta'] === 'number' && Number.isFinite(raw['trustDelta'])
+      ? raw['trustDelta']
+      : null
+    const assertedTrust = typeof raw['assertedTrust'] === 'number' && Number.isFinite(raw['assertedTrust'])
+      ? raw['assertedTrust']
+      : null
     const sourceDirectoryUrl = String(raw['sourceDirectoryUrl'] ?? c.req.header('x-beam-source-directory') ?? '').trim()
     const originDirectoryUrl = String(raw['originDirectoryUrl'] ?? sourceDirectoryUrl).trim()
     const hopCount = Number.isFinite(Number(raw['hopCount'])) ? Number(raw['hopCount']) : 1
@@ -210,7 +205,8 @@ export function federationRouter(db: Database): Hono {
       return c.json({ error: 'beamId, sourceDirectoryUrl, and trust value are required', errorCode: 'INVALID_TRUST_UPDATE' }, 400)
     }
 
-    const effectiveTrust = trustDelta ?? applyTrustAssertion(db, {
+    const boundedTrustDelta = trustDelta === null ? null : Math.max(0, Math.min(1, trustDelta))
+    const effectiveTrust = boundedTrustDelta ?? applyTrustAssertion(db, {
       beamId,
       sourceDirectoryUrl,
       originDirectoryUrl,
@@ -218,13 +214,13 @@ export function federationRouter(db: Database): Hono {
       hopCount,
     })
 
-    if (trustDelta !== null) {
+    if (boundedTrustDelta !== null) {
       upsertFederatedTrust(db, {
         beamId,
         sourceDirectoryUrl,
         originDirectoryUrl,
-        assertedTrust: trustDelta,
-        effectiveTrust: trustDelta,
+        assertedTrust: boundedTrustDelta,
+        effectiveTrust: boundedTrustDelta,
         hopCount,
       })
     }

@@ -88,9 +88,11 @@ test('dashboard production GO refuses apply mode without domain confirmation', a
 
 test('dashboard production GO inspects Vercel domain and protection read-only', async () => {
   const calls = []
+  const cliOptions = []
   const result = await inspectVercelState(config(), {
-    execFile: async (command, args) => {
+    execFile: async (command, args, options) => {
       calls.push([command, ...args])
+      cliOptions.push(options)
       if (args[0] === 'domains' && args[1] === 'inspect') {
         return {
           stdout: [
@@ -190,6 +192,23 @@ test('dashboard production GO inspects Vercel domain and protection read-only', 
     'dashboard-alfridus1s-projects.vercel.app',
   ])
   assert.equal(calls.some((call) => call.includes('add')), false)
+  assert.equal(cliOptions.every((options) => options.timeout === 15_000), true)
+  assert.equal(cliOptions.every((options) => options.maxBuffer === 1024 * 1024), true)
+  assert.equal(cliOptions.every((options) => options.env.CI === '1'), true)
+})
+
+test('dashboard Vercel inspection redacts device-login codes from errors', async () => {
+  const result = await inspectVercelState(config(), {
+    execFile: async () => {
+      const error = new Error('Login at https://vercel.com/oauth/device?user_code=ABCD-EFGH')
+      error.stderr = 'Visit https://vercel.com/oauth/device?user_code=ABCD-EFGH'
+      throw error
+    },
+  })
+
+  const serialized = JSON.stringify(result)
+  assert.equal(serialized.includes('ABCD-EFGH'), false)
+  assert.equal(serialized.includes('user_code=[redacted]'), true)
 })
 
 test('dashboard production GO rejects the old CNAME-specific apply flag', () => {

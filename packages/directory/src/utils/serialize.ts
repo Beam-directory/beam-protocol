@@ -1,5 +1,6 @@
 import type { AgentKeyRow, AgentRow } from '../types.js'
 import { toBeamDID } from '../did.js'
+import { getLocalDirectoryUrl } from '../federation.js'
 
 export function serializeAgentKey(row: AgentKeyRow): object {
   return {
@@ -37,6 +38,9 @@ export function serializeAgent(
     verified: row.verified === 1 || row.verification_tier !== 'basic',
     flagged: row.flagged === 1,
     verificationTier: row.verification_tier,
+    verificationStatus: row.verified === 1 || row.verification_tier !== 'basic' ? 'verified' : 'unverified',
+    assuranceScope: 'local',
+    assuranceIssuer: getLocalDirectoryUrl(),
     ...(options.connected === undefined ? {} : { connected: options.connected }),
     ...(options.keys ? { keyState: serializeAgentKeyState(options.keys) } : {}),
   }

@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { createAdminSession } from './admin-auth.js'
+import { createAdminSession, createAdminSessionFromMagicLink } from './admin-auth.js'
 import { createApp } from './server.js'
 import { assignDirectoryRole, createDatabase, listAuditLog } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
@@ -45,6 +45,14 @@ test('admin auth issues sessions, supports session introspection, and audits log
     assert.equal(challenge.dev, true)
     assert.ok(challenge.token)
     assert.ok(challenge.url?.includes('/auth/callback?token='))
+    const storedChallenge = db.prepare(`
+      SELECT token
+      FROM admin_magic_links
+      WHERE email = ? AND used = 0
+      ORDER BY created_at DESC
+      LIMIT 1
+    `).get('ops@example.com') as { token: string }
+    assert.notEqual(storedChallenge.token, challenge.token)
 
     const verifyResponse = await app.request(new Request('http://localhost/admin/auth/verify', {
       method: 'POST',
@@ -77,6 +85,23 @@ test('admin auth issues sessions, supports session introspection, and audits log
       headers: { Authorization: `Bearer ${verified.token}` },
     }))
     assert.equal(afterLogoutResponse.status, 401)
+
+    const cookieChallengeResponse = await app.request(new Request('http://localhost/admin/auth/magic-link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ email: 'ops@example.com' }),
+    }))
+    const cookieChallenge = await cookieChallengeResponse.json() as { token: string }
+    const cookieVerifyResponse = await app.request(new Request('http://localhost/admin/auth/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ token: cookieChallenge.token, sessionTransport: 'cookie' }),
+    }))
+    assert.equal(cookieVerifyResponse.status, 200)
+    assert.ok((cookieVerifyResponse.headers.get('set-cookie') ?? '').includes('HttpOnly'))
+    const cookieVerified = await cookieVerifyResponse.json() as { token?: string; email: string }
+    assert.equal(cookieVerified.email, 'ops@example.com')
+    assert.equal(cookieVerified.token, undefined)
 
     const auditActions = listAuditLog(db, { limit: 10 }).map((entry) => entry.action)
     assert.ok(auditActions.includes('admin.auth.challenge.issued'))
@@ -166,6 +191,33 @@ test('directory role listing is viewer-readable while assignment and revoke stay
       roles: Array<{ email: string; role: string }>
     }
     assert.ok(!afterDeleteBody.roles.some((entry) => entry.email === 'new-operator@example.com'))
+  } finally {
+    db.close()
+  }
+})
+
+test('legacy plaintext magic-link rows remain consumable during the hashed-token migration', () => {
+  const db = createDatabase(':memory:')
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    assignDirectoryRole(db, {
+      userId: 'legacy@example.com',
+      role: 'viewer',
+      directoryUrl: getLocalDirectoryUrl(),
+    })
+    const token = 'legacy-plaintext-token'
+    const now = new Date()
+    db.prepare(`
+      INSERT INTO admin_magic_links (
+        token, email, role, auth_scope, return_to, created_at, expires_at, used
+      ) VALUES (?, ?, 'viewer', 'platform', NULL, ?, ?, 0)
+    `).run(token, 'legacy@example.com', now.toISOString(), new Date(now.getTime() + 60_000).toISOString())
+
+    const session = createAdminSessionFromMagicLink(db, token)
+    assert.ok(session)
+    assert.equal(session.session.email, 'legacy@example.com')
+    assert.equal(session.session.scope, 'platform')
+    assert.equal((db.prepare('SELECT used FROM admin_magic_links WHERE token = ?').get(token) as { used: number }).used, 1)
   } finally {
     db.close()
   }

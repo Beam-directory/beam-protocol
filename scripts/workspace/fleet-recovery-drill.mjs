@@ -12,6 +12,7 @@ import {
 import {
   closeFleetClient,
   sendFleetIntent,
+  sendSignedFleetResult,
   startOpenClawFleetHarness,
 } from './fleet-shared.mjs'
 
@@ -65,7 +66,7 @@ async function corruptSqliteSnapshot(basePath, label) {
   }
 }
 
-async function expectInbound(ws, expectedFrom, expectedMessage) {
+async function expectInbound(ws, responder, expectedFrom, expectedMessage) {
   const payload = await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error(`Timed out waiting for inbound payload from ${expectedFrom}`)), 15_000)
     ws.once('message', (chunk) => {
@@ -88,20 +89,11 @@ async function expectInbound(ws, expectedFrom, expectedMessage) {
     throw new Error(`Expected payload message "${expectedMessage}", received ${JSON.stringify(frame.payload)}`)
   }
 
-  ws.send(JSON.stringify({
-    type: 'result',
-    frame: {
-      v: '1',
-      success: true,
-      nonce: frame.nonce,
-      timestamp: new Date().toISOString(),
-      payload: {
-        ok: true,
-        acknowledgedBy: frame.to,
-        echoedMessage: frame.payload?.message ?? null,
-      },
-    },
-  }))
+  sendSignedFleetResult(ws, responder, frame, {
+    ok: true,
+    acknowledgedBy: frame.to,
+    echoedMessage: frame.payload?.message ?? null,
+  })
 
   return frame
 }
@@ -110,7 +102,7 @@ async function sendAndExpect(fleet, sender, receiver, message, receiverClient) {
   const responsePromise = sendFleetIntent(fleet.harness.directoryUrl, sender, receiver.beamId, {
     message,
   })
-  const inbound = await expectInbound(receiverClient, sender.beamId, message)
+  const inbound = await expectInbound(receiverClient, receiver, sender.beamId, message)
   const response = await responsePromise
   if (!response.ok) {
     throw new Error(`Expected a successful intent send from ${sender.beamId} to ${receiver.beamId}: ${JSON.stringify(response.payload)}`)

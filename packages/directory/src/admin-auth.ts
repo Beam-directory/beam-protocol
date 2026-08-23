@@ -1,9 +1,9 @@
-import { createHmac, randomBytes, randomUUID } from 'node:crypto'
+import { createHash, createHmac, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import type { Context } from 'hono'
-import { getDirectoryRole } from './db.js'
+import { getDirectoryRole, hasWorkspaceSessionAccess } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
-import type { AdminMagicLinkRow, AdminSessionRow, DirectoryRoleRow } from './types.js'
+import type { AdminAuthScope, AdminMagicLinkRow, AdminSessionRow, DirectoryRoleRow } from './types.js'
 
 export type AdminRole = DirectoryRoleRow['role']
 
@@ -12,6 +12,7 @@ type AdminSessionClaims = {
   sid: string
   email: string
   role: AdminRole
+  scope: AdminAuthScope
   exp: number
 }
 
@@ -19,6 +20,7 @@ export type AdminSession = {
   id: string
   email: string
   role: AdminRole
+  scope: AdminAuthScope
   expiresAt: string
   authType: 'cookie' | 'bearer'
 }
@@ -47,6 +49,10 @@ function getJwtSecret(): string {
 
 function normalizeEmail(email: string): string {
   return email.trim().toLowerCase()
+}
+
+function hashMagicLinkToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex')
 }
 
 function parseEmailList(value: string | undefined): Set<string> {
@@ -83,7 +89,9 @@ function verifySessionJwt(token: string): AdminSessionClaims | null {
       .update(`${header}.${payload}`)
       .digest('base64url')
 
-    if (signature !== expectedSignature) {
+    const signatureBuffer = Buffer.from(signature)
+    const expectedSignatureBuffer = Buffer.from(expectedSignature)
+    if (signatureBuffer.length !== expectedSignatureBuffer.length || !timingSafeEqual(signatureBuffer, expectedSignatureBuffer)) {
       return null
     }
 
@@ -100,7 +108,12 @@ function verifySessionJwt(token: string): AdminSessionClaims | null {
       return null
     }
 
-    return claims as AdminSessionClaims
+    const scope = claims.scope ?? 'platform'
+    if (scope !== 'platform' && scope !== 'workspace') {
+      return null
+    }
+
+    return { ...claims, scope } as AdminSessionClaims
   } catch {
     return null
   }
@@ -139,6 +152,27 @@ function shouldUseCrossSiteCookie(c: Context): boolean {
 
 function getDashboardUrl(): string {
   return (process.env['BEAM_DASHBOARD_URL'] ?? process.env['APP_URL'] ?? 'https://dashboard.beam.directory').replace(/\/$/, '')
+}
+
+function normalizeReturnTo(value: string | null | undefined): string | null {
+  const candidate = value?.trim()
+  if (!candidate || !candidate.startsWith('/') || candidate.startsWith('//')) {
+    return null
+  }
+
+  try {
+    const parsed = new URL(candidate, 'https://dashboard.beam.directory')
+    if (parsed.origin !== 'https://dashboard.beam.directory' || parsed.pathname !== '/workspace-invite') {
+      return null
+    }
+    const token = parsed.searchParams.get('token')?.trim()
+    if (!token || !/^[A-Za-z0-9_-]{43}$/.test(token)) {
+      return null
+    }
+    return `/workspace-invite?token=${encodeURIComponent(token)}`
+  } catch {
+    return null
+  }
 }
 
 function getConfiguredRoleForEmail(email: string): AdminRole | null {
@@ -188,27 +222,32 @@ export function roleSatisfies(actual: AdminRole, required: AdminRole): boolean {
   return ROLE_ORDER[actual] >= ROLE_ORDER[required]
 }
 
-export function issueAdminMagicLink(db: Database, email: string): {
+export function issueAdminMagicLink(db: Database, email: string, returnTo?: string | null): {
   email: string
   role: AdminRole
+  scope: AdminAuthScope
   token: string
   url: string
   expiresAt: string
 } | null {
   const normalizedEmail = normalizeEmail(email)
-  const role = resolveAdminRole(db, normalizedEmail)
+  const platformRole = resolveAdminRole(db, normalizedEmail)
+  const scope: AdminAuthScope = platformRole ? 'platform' : 'workspace'
+  const role: AdminRole | null = platformRole ?? (hasWorkspaceSessionAccess(db, normalizedEmail) ? 'viewer' : null)
   if (!role) {
     return null
   }
 
   const token = randomBytes(32).toString('hex')
+  const tokenHash = hashMagicLinkToken(token)
   const expiresAt = new Date(Date.now() + ADMIN_MAGIC_LINK_TTL_MS).toISOString()
   const createdAt = new Date().toISOString()
 
+  const safeReturnTo = normalizeReturnTo(returnTo)
   db.prepare(`
-    INSERT INTO admin_magic_links (token, email, role, created_at, expires_at, used)
-    VALUES (?, ?, ?, ?, ?, 0)
-  `).run(token, normalizedEmail, role, createdAt, expiresAt)
+    INSERT INTO admin_magic_links (token, email, role, auth_scope, return_to, created_at, expires_at, used)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(tokenHash, normalizedEmail, role, scope, safeReturnTo, createdAt, expiresAt)
 
   db.prepare(`
     DELETE FROM admin_magic_links
@@ -220,49 +259,55 @@ export function issueAdminMagicLink(db: Database, email: string): {
   return {
     email: normalizedEmail,
     role,
+    scope,
     token,
     url,
     expiresAt,
   }
 }
 
-function consumeMagicLink(db: Database, token: string): { email: string; role: AdminRole } | null {
+function consumeMagicLink(db: Database, token: string): { email: string; role: AdminRole; scope: AdminAuthScope; returnTo: string | null } | null {
+  const tokenHash = hashMagicLinkToken(token)
   const row = db.prepare(`
     SELECT *
     FROM admin_magic_links
-    WHERE token = ? AND used = 0 AND expires_at > ?
-  `).get(token, new Date().toISOString()) as AdminMagicLinkRow | undefined
+    WHERE token IN (?, ?) AND used = 0 AND expires_at > ?
+  `).get(tokenHash, token, new Date().toISOString()) as AdminMagicLinkRow | undefined
 
   if (!row) {
     return null
   }
 
-  db.prepare('UPDATE admin_magic_links SET used = 1 WHERE token = ?').run(token)
+  db.prepare('UPDATE admin_magic_links SET used = 1 WHERE token = ?').run(row.token)
   return {
     email: row.email,
     role: row.role,
+    scope: row.auth_scope,
+    returnTo: row.return_to,
   }
 }
 
 export function createAdminSession(
   db: Database,
-  input: { email: string; role: AdminRole },
+  input: { email: string; role: AdminRole; scope?: AdminAuthScope },
 ): { token: string; session: AdminSession } {
   const id = randomUUID()
   const now = new Date()
   const expiresAt = new Date(now.getTime() + ADMIN_SESSION_TTL_MS).toISOString()
   const timestamp = now.toISOString()
 
+  const scope = input.scope ?? 'platform'
   db.prepare(`
-    INSERT INTO admin_sessions (id, email, role, created_at, last_seen_at, expires_at, revoked_at)
-    VALUES (?, ?, ?, ?, ?, ?, NULL)
-  `).run(id, normalizeEmail(input.email), input.role, timestamp, timestamp, expiresAt)
+    INSERT INTO admin_sessions (id, email, role, auth_scope, created_at, last_seen_at, expires_at, revoked_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, NULL)
+  `).run(id, normalizeEmail(input.email), input.role, scope, timestamp, timestamp, expiresAt)
 
   const token = createSessionJwt({
     typ: 'beam-admin',
     sid: id,
     email: normalizeEmail(input.email),
     role: input.role,
+    scope,
     exp: Date.parse(expiresAt),
   })
 
@@ -272,6 +317,7 @@ export function createAdminSession(
       id,
       email: normalizeEmail(input.email),
       role: input.role,
+      scope,
       expiresAt,
       authType: 'bearer',
     },
@@ -281,21 +327,23 @@ export function createAdminSession(
 export function createAdminSessionFromMagicLink(
   db: Database,
   token: string,
-): { token: string; session: AdminSession } | null {
+): { token: string; session: AdminSession; returnTo: string | null } | null {
   const link = consumeMagicLink(db, token)
   if (!link) {
     return null
   }
 
-  const effectiveRole = resolveAdminRole(db, link.email)
-  if (!effectiveRole) {
-    return null
-  }
+  const effectiveRole = link.scope === 'platform'
+    ? resolveAdminRole(db, link.email)
+    : (hasWorkspaceSessionAccess(db, link.email) ? 'viewer' : null)
+  if (!effectiveRole) return null
 
-  return createAdminSession(db, {
+  const session = createAdminSession(db, {
     email: link.email,
     role: effectiveRole,
+    scope: link.scope,
   })
+  return { ...session, returnTo: link.returnTo }
 }
 
 export function revokeAdminSession(db: Database, sessionId: string): void {
@@ -345,8 +393,16 @@ export function getAdminSessionFromRequest(db: Database, request: Request): Admi
     return null
   }
 
-  const effectiveRole = resolveAdminRole(db, claims.email)
-  if (!effectiveRole || effectiveRole !== claims.role || sessionRow.email !== claims.email || sessionRow.role !== claims.role) {
+  const effectiveRole = claims.scope === 'platform'
+    ? resolveAdminRole(db, claims.email)
+    : (hasWorkspaceSessionAccess(db, claims.email) ? 'viewer' : null)
+  if (
+    !effectiveRole
+    || effectiveRole !== claims.role
+    || sessionRow.email !== claims.email
+    || sessionRow.role !== claims.role
+    || sessionRow.auth_scope !== claims.scope
+  ) {
     revokeAdminSession(db, claims.sid)
     return null
   }
@@ -357,6 +413,7 @@ export function getAdminSessionFromRequest(db: Database, request: Request): Admi
     id: sessionRow.id,
     email: sessionRow.email,
     role: sessionRow.role,
+    scope: sessionRow.auth_scope,
     expiresAt: sessionRow.expires_at,
     authType: token.authType,
   }
@@ -386,6 +443,28 @@ export function requireAdminRole(
     return new Response(JSON.stringify({ error: 'Forbidden', errorCode: 'FORBIDDEN' }), {
       status: 403,
       headers: { 'content-type': 'application/json' },
+    })
+  }
+
+  if (session.scope !== 'platform') {
+    return new Response(JSON.stringify({ error: 'Platform role required', errorCode: 'PLATFORM_ROLE_REQUIRED' }), {
+      status: 403,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
+    })
+  }
+
+  return { ok: true, session }
+}
+
+export function requireAdminSession(
+  db: Database,
+  request: Request,
+): { ok: true; session: AdminSession } | Response {
+  const session = getAdminSessionFromRequest(db, request)
+  if (!session) {
+    return new Response(JSON.stringify({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }), {
+      status: 401,
+      headers: { 'content-type': 'application/json', 'cache-control': 'no-store' },
     })
   }
 

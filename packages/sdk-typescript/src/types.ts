@@ -1,6 +1,15 @@
 export type BeamIdString = `${string}@beam.directory` | `${string}@${string}.beam.directory`
 
 export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
+export type AssuranceScope = 'local' | 'federated-untrusted'
+
+export interface RemoteAssuranceAssertion {
+  issuer: string
+  verified: boolean
+  tier: VerificationTier | null
+  status: string | null
+  trustScore: number | null
+}
 
 export interface BeamIdentityConfig {
   agentName: string
@@ -49,6 +58,12 @@ export interface AgentRecord extends AgentRegistration {
   apiKey?: string
   trustScore: number  // 0.0-1.0
   verified: boolean
+  verificationTier?: VerificationTier
+  verificationStatus?: 'pending' | 'verified' | 'failed' | 'unverified'
+  assuranceScope?: AssuranceScope
+  assuranceIssuer?: string
+  remoteAssurance?: RemoteAssuranceAssertion
+  domain?: string
   createdAt: string
   lastSeen: string
   keyState?: AgentKeyState
@@ -58,9 +73,6 @@ export interface AgentProfile extends AgentRecord {
   description?: string
   logoUrl?: string
   website?: string
-  verificationTier?: VerificationTier
-  verificationStatus?: 'pending' | 'verified' | 'failed' | 'unverified'
-  domain?: string
   intentsHandled?: number
 }
 
@@ -93,6 +105,13 @@ export interface DirectoryStats {
     gitShaShort?: string | null
     deployedAt: string
   }
+}
+
+export interface WebSocketTicket {
+  beamId: BeamIdString
+  ticket: string
+  expiresAt: string
+  expiresInSeconds: number
 }
 
 export interface Delegation {
