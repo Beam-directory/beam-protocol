@@ -57,6 +57,7 @@ export async function cmdTalk(
     const client = new BeamClient({
       identity: config.identity,
       directoryUrl,
+      apiKey: config.apiKey,
     })
 
     const reply = await client.talk(to as BeamIdString, message, {

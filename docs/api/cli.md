@@ -22,6 +22,7 @@ beam init --agent alice
 
 ```bash
 beam init --agent assistant --org acme
+export BEAM_ORG_API_KEY='beam_org_...'
 ```
 
 ## Registration
@@ -29,6 +30,8 @@ beam init --agent assistant --org acme
 ```bash
 beam register --display-name "Acme Procurement Desk" --capabilities "conversation.message,quote.request"
 ```
+
+For an organization identity, `beam register` reads namespace proof from `BEAM_ORG_API_KEY`. On success it replaces that bootstrap credential with the new `bk_` agent API key in `.beam/identity.json` and enforces file mode `0600`.
 
 ## Browse
 

@@ -75,6 +75,10 @@ export interface DirectoryAgent {
   lastSeen: string
 }
 
+export interface DirectoryAgentRegistration extends DirectoryAgent {
+  apiKey: string
+}
+
 export interface AgentIntentStats {
   received: number
   responded: number
@@ -218,6 +222,7 @@ export interface WorkspaceIdentityBinding {
   policyProfile: string | null
   defaultThreadScope: WorkspaceThreadScope
   canInitiateExternal: boolean
+  credentialManaged: boolean
   status: WorkspaceBindingStatus
   notes: string | null
   createdAt: string
@@ -1798,6 +1803,8 @@ export interface WorkspaceIdentityCredentialBundle {
   generatedAt: string
   publicKey: string
   privateKey: string
+  publicKeyBase64: string
+  privateKeyBase64: string
   apiKey: string
   urls: {
     didResolution: string
@@ -1807,6 +1814,21 @@ export interface WorkspaceIdentityCredentialBundle {
 }
 
 export interface WorkspaceIdentityReissueResponse {
+  binding: WorkspaceIdentityBinding
+  credential: WorkspaceIdentityCredentialBundle
+}
+
+export interface WorkspaceIdentityProvisionInput {
+  agentName: string
+  displayName?: string
+  capabilities?: string[]
+  description?: string
+  bindingType?: 'agent' | 'service'
+  runtimeType?: string
+  orgApiKey?: string
+}
+
+export interface WorkspaceIdentityProvisionResponse {
   binding: WorkspaceIdentityBinding
   credential: WorkspaceIdentityCredentialBundle
 }
@@ -2277,6 +2299,9 @@ export interface OrgAgentResponse {
   capabilities: string[]
   publicKey: string
   privateKey?: string
+  publicKeyBase64: string
+  privateKeyBase64?: string
+  apiKey?: string
   trustScore: number
   verified: boolean
   createdAt: string
@@ -3324,6 +3349,10 @@ export const directoryApi = {
   getWorkspaceOverview: (slug: string) => request<WorkspaceOverviewResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/overview`, undefined, { admin: true }),
   getWorkspaceApprovalQueue: (slug: string) => request<WorkspaceApprovalQueueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/approval-queue`, undefined, { admin: true }),
   listWorkspaceIdentities: (slug: string) => request<WorkspaceIdentitiesResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities`, undefined, { admin: true }),
+  provisionWorkspaceIdentity: (slug: string, input: WorkspaceIdentityProvisionInput) => request<WorkspaceIdentityProvisionResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/provision-local`, {
+    method: 'POST',
+    body: JSON.stringify(input),
+  }, { admin: true }),
   updateWorkspaceIdentity: (slug: string, id: number, input: WorkspaceIdentityPatchInput) => request<{ binding: WorkspaceIdentityBinding }>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}`, {
     method: 'PATCH',
     body: JSON.stringify(input),
@@ -3366,7 +3395,7 @@ export const directoryApi = {
     body: JSON.stringify(input ?? {}),
   }, { admin: true }),
   heartbeat: (beamId: string) => request<DirectoryAgent>(`/agents/${encodeURIComponent(beamId)}/heartbeat`, { method: 'POST' }),
-  registerAgent: (input: RegisterAgentInput) => request<DirectoryAgent>('/agents/register', {
+  registerAgent: (input: RegisterAgentInput) => request<DirectoryAgentRegistration>('/agents/register', {
     method: 'POST',
     body: JSON.stringify(input),
   }),

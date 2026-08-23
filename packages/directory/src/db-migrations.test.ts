@@ -392,6 +392,7 @@ test('createDatabase adds beam workspace control-plane tables to legacy database
     const bindingColumns = db.prepare('PRAGMA table_info(workspace_identity_bindings)').all() as Array<{ name: string }>
     assert.ok(bindingColumns.some((column) => column.name === 'default_thread_scope'))
     assert.ok(bindingColumns.some((column) => column.name === 'can_initiate_external'))
+    assert.ok(bindingColumns.some((column) => column.name === 'credential_managed'))
     assert.ok(bindingColumns.some((column) => column.name === 'runtime_type'))
 
     const threadColumns = db.prepare('PRAGMA table_info(workspace_threads)').all() as Array<{ name: string }>

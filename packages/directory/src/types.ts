@@ -252,6 +252,7 @@ export interface WorkspaceIdentityBindingRow {
   policy_profile: string | null
   default_thread_scope: WorkspaceThreadScope
   can_initiate_external: number
+  credential_managed: number
   status: WorkspaceIdentityBindingStatus
   notes: string | null
   created_at: string

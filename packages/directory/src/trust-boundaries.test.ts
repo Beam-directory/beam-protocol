@@ -3,7 +3,7 @@ import { generateKeyPairSync } from 'node:crypto'
 import { afterEach, beforeEach, describe, it } from 'node:test'
 import { Hono } from 'hono'
 import type Stripe from 'stripe'
-import { assignDirectoryRole, createDatabase, createDomainVerification, getAgent, registerAgent, updateDomainVerificationStatus } from './db.js'
+import { assignDirectoryRole, createDatabase, createDomainVerification, createOrg, getAgent, registerAgent, updateDomainVerificationStatus } from './db.js'
 import { createAdminSession } from './admin-auth.js'
 import { createAgentApiKey, hashApiKey } from './api-key.js'
 import { getLocalDirectoryUrl } from './federation.js'
@@ -108,8 +108,8 @@ describe('billing and identity assurance trust boundaries', () => {
     assert.equal(privateStatus.status, 401)
   })
 
-  it('rejects self-asserted assurance and preserves independently granted tiers on re-registration', async () => {
-    const beamId = 'self-claim@acme.beam.directory'
+  it('rejects self-asserted assurance and prevents unauthenticated Beam-ID takeover', async () => {
+    const beamId = 'self-claim@beam.directory'
     const { publicKey } = generateKeyPairSync('ed25519')
     const publicKeyBase64 = publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
     const app = new Hono()
@@ -119,7 +119,6 @@ describe('billing and identity assurance trust boundaries', () => {
       displayName: 'Self Claim',
       capabilities: ['conversation.message'],
       publicKey: publicKeyBase64,
-      org: 'acme',
       email: 'operator@acme.example',
     }
 
@@ -142,14 +141,60 @@ describe('billing and identity assurance trust boundaries', () => {
     assert.equal(getAgent(db, beamId)?.email_verified, 0)
 
     db.prepare("UPDATE agents SET verification_tier = 'business', verified = 1 WHERE beam_id = ?").run(beamId)
+    const beforeTakeover = getAgent(db, beamId)
+    const { publicKey: attackerPublicKey } = generateKeyPairSync('ed25519')
     const reRegistered = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...body,
+        publicKey: attackerPublicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      }),
+    })
+    assert.equal(reRegistered.status, 409)
+    assert.equal((await reRegistered.json() as { errorCode: string }).errorCode, 'BEAM_ID_ALREADY_REGISTERED')
+    assert.equal(getAgent(db, beamId)?.public_key, beforeTakeover?.public_key)
+    assert.equal(getAgent(db, beamId)?.api_key_hash, beforeTakeover?.api_key_hash)
+    assert.equal(getAgent(db, beamId)?.verification_tier, 'business')
+    assert.equal(getAgent(db, beamId)?.verified, 1)
+  })
+
+  it('requires organization namespace ownership for public organization registration', async () => {
+    const orgApiKey = 'beam_org_acme_owner_key'
+    createOrg(db, {
+      name: 'acme',
+      displayName: 'Acme GmbH',
+      apiKeyHash: hashApiKey(orgApiKey),
+      verificationToken: 'acme-verification-token',
+    })
+    const { publicKey } = generateKeyPairSync('ed25519')
+    const body = {
+      beamId: 'grok@acme.beam.directory',
+      org: 'acme',
+      displayName: 'Acme Grok',
+      capabilities: ['conversation.message'],
+      publicKey: publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+    }
+    const app = new Hono()
+    app.route('/agents', agentsRouter(db))
+
+    const unauthorized = await app.request('http://localhost/agents/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify(body),
     })
-    assert.equal(reRegistered.status, 201)
-    assert.equal(getAgent(db, beamId)?.verification_tier, 'business')
-    assert.equal(getAgent(db, beamId)?.verified, 1)
+    assert.equal(unauthorized.status, 403)
+    assert.equal((await unauthorized.json() as { errorCode: string }).errorCode, 'ORG_OWNERSHIP_REQUIRED')
+    assert.equal(getAgent(db, body.beamId), null)
+
+    const authorized = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
+      body: JSON.stringify(body),
+    })
+    assert.equal(authorized.status, 201)
+    assert.match(authorized.headers.get('cache-control') ?? '', /no-store/i)
+    assert.match((await authorized.json() as { apiKey: string }).apiKey, /^bk_/)
   })
 
   it('keeps business verification pending until an administrator reviews registry and domain evidence', async () => {

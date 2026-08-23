@@ -289,6 +289,7 @@ function initSchema(db: DB): void {
       policy_profile TEXT,
       default_thread_scope TEXT NOT NULL DEFAULT 'internal' CHECK(default_thread_scope IN ('internal', 'handoff')),
       can_initiate_external INTEGER NOT NULL DEFAULT 0,
+      credential_managed INTEGER NOT NULL DEFAULT 0 CHECK(credential_managed IN (0, 1)),
       status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'paused')),
       notes TEXT,
       created_at TEXT NOT NULL,
@@ -1021,6 +1022,7 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'intent_log', 'result_json', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_intent_type', 'TEXT')
   ensureColumn(db, 'workspace_threads', 'draft_payload_json', 'TEXT')
+  ensureColumn(db, 'workspace_identity_bindings', 'credential_managed', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'openclaw_hosts', 'credential_nonce', 'TEXT')
   ensureColumn(db, 'openclaw_hosts', 'credential_state', "TEXT NOT NULL DEFAULT 'missing'")
   ensureColumn(db, 'openclaw_hosts', 'credential_issued_at', 'TEXT')
@@ -2125,6 +2127,7 @@ export function createWorkspaceIdentityBinding(
     policyProfile?: string | null
     defaultThreadScope?: WorkspaceIdentityBindingRow['default_thread_scope']
     canInitiateExternal?: boolean
+    credentialManaged?: boolean
     status?: WorkspaceIdentityBindingRow['status']
     notes?: string | null
   },
@@ -2140,11 +2143,12 @@ export function createWorkspaceIdentityBinding(
       policy_profile,
       default_thread_scope,
       can_initiate_external,
+      credential_managed,
       status,
       notes,
       created_at,
       updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     input.workspaceId,
     input.beamId,
@@ -2154,6 +2158,7 @@ export function createWorkspaceIdentityBinding(
     input.policyProfile ?? null,
     input.defaultThreadScope ?? 'internal',
     input.canInitiateExternal ? 1 : 0,
+    input.credentialManaged ? 1 : 0,
     input.status ?? 'active',
     input.notes ?? null,
     now,

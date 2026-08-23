@@ -14,7 +14,7 @@ export async function cmdVerifyCheck(options: VerifyCheckOptions): Promise<void>
   const spinner = ora('Checking verification status...').start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const verification = await client.checkDomainVerification()
     spinner.stop()
 

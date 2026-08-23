@@ -26,7 +26,7 @@ export async function cmdDelegate(targetBeamId: string, options: DelegateOptions
   const spinner = ora(`Creating delegation for ${chalk.bold(targetBeamId)}...`).start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const delegation = await client.delegate(targetBeamId, options.scope, expiresIn)
     spinner.stop()
 

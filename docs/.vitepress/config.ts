@@ -27,6 +27,7 @@ export default defineConfig({
         { text: 'Production Partner Onboarding Pack', link: '/guide/design-partner-onboarding' },
         { text: 'Production Go-Live Checklist', link: '/guide/production-go-live-checklist' },
         { text: 'Beam Workspaces', link: '/guide/beam-workspaces' },
+        { text: 'Identity Onboarding', link: '/guide/identity-onboarding' },
         { text: 'Grok MCP Connector', link: '/guide/grok-mcp-connector' },
         { text: 'Getting Started', link: '/guide/getting-started' },
         { text: 'Hosted Quickstart', link: '/guide/hosted-quickstart' },

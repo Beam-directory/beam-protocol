@@ -6,7 +6,8 @@ vi.mock('../src/email.js', () => ({
   sendAgentVerificationEmail: vi.fn(async () => true),
 }))
 
-import { createDatabase } from '../src/db.js'
+import { createDatabase, createOrg } from '../src/db.js'
+import { hashApiKey } from '../src/api-key.js'
 import { sendAgentVerificationEmail } from '../src/email.js'
 import { createApp } from '../src/server.js'
 
@@ -43,9 +44,16 @@ function signProfileUpdate(input: {
 describe('directory agent enhancements', () => {
   let db: Database
   let app: ReturnType<typeof createApp>
+  const orgApiKey = 'beam_org_testorg_owner_key'
 
   beforeEach(() => {
     db = createDatabase(':memory:')
+    createOrg(db, {
+      name: 'testorg',
+      displayName: 'Test Org',
+      apiKeyHash: hashApiKey(orgApiKey),
+      verificationToken: 'test-verification-token',
+    })
     app = createApp(db)
     vi.mocked(sendAgentVerificationEmail).mockResolvedValue(true)
   })
@@ -60,7 +68,7 @@ describe('directory agent enhancements', () => {
     const identity = createIdentity()
     const response = await app.request('http://localhost/agents/register', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
       body: JSON.stringify({
         beamId: 'helper@testorg.beam.directory',
         org: 'testorg',
@@ -88,7 +96,7 @@ describe('directory agent enhancements', () => {
     const identity = createIdentity()
     await app.request('http://localhost/agents/register', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
       body: JSON.stringify({
         beamId: 'verified@testorg.beam.directory',
         org: 'testorg',
@@ -123,7 +131,7 @@ describe('directory agent enhancements', () => {
 
     const unauthorized = await app.request('http://localhost/agents/register', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
       body: JSON.stringify({
         beamId: 'echo@beam.directory',
         displayName: 'Echo Agent',
@@ -177,13 +185,45 @@ describe('directory agent enhancements', () => {
     expect(searchBody.agents[0]?.beam_id).toBe('alice@beam.directory')
   })
 
-  it('defaults generated Beam IDs to personal when org and email are absent', async () => {
+  it('requires organization ownership before issuing an organization Beam ID', async () => {
+    const identity = createIdentity()
+    const missingProof = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        beamId: 'intruder@testorg.beam.directory',
+        org: 'testorg',
+        displayName: 'Intruder',
+        capabilities: ['assistant'],
+        publicKey: identity.publicKeyBase64,
+      }),
+    })
+    expect(missingProof.status).toBe(403)
+    expect((await missingProof.json() as { errorCode: string }).errorCode).toBe('ORG_OWNERSHIP_REQUIRED')
+
+    const unknownOrg = await app.request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
+      body: JSON.stringify({
+        beamId: 'agent@unknown.beam.directory',
+        org: 'unknown',
+        displayName: 'Unknown',
+        capabilities: ['assistant'],
+        publicKey: identity.publicKeyBase64,
+      }),
+    })
+    expect(unknownOrg.status).toBe(403)
+    expect((await unknownOrg.json() as { errorCode: string }).errorCode).toBe('ORG_REGISTRATION_REQUIRED')
+  })
+
+  it('defaults generated Beam IDs to personal even when a contact email is present', async () => {
     const identity = createIdentity()
     const response = await app.request('http://localhost/agents/register', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         displayName: 'Alice Example',
+        email: 'alice@acme.example',
         capabilities: ['assistant'],
         publicKey: identity.publicKeyBase64,
       }),
@@ -237,7 +277,7 @@ describe('directory agent enhancements', () => {
     const identity = createIdentity()
     await app.request('http://localhost/agents/register', {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
+      headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
       body: JSON.stringify({
         beamId: 'profile@testorg.beam.directory',
         org: 'testorg',
@@ -292,7 +332,7 @@ describe('directory agent enhancements', () => {
     ] as const) {
       const response = await app.request('http://localhost/agents/register', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
         body: JSON.stringify({
           beamId,
           org: 'testorg',
@@ -338,7 +378,7 @@ describe('directory agent enhancements', () => {
     ] as const) {
       const response = await app.request('http://localhost/agents/register', {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
+        headers: { 'content-type': 'application/json', 'x-api-key': orgApiKey },
         body: JSON.stringify({
           beamId,
           org: 'testorg',

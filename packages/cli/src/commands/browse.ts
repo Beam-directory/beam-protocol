@@ -26,7 +26,7 @@ export async function cmdBrowse(options: BrowseOptions): Promise<void> {
   const spinner = ora(`Browsing directory page ${page}...`).start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const result = await client.browse(page, filters)
     spinner.stop()
 

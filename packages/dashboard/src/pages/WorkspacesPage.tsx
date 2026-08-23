@@ -1009,15 +1009,6 @@ export default function WorkspacesPage() {
     }, `${binding.beamId} local credential reissued.`)
   }
 
-  async function handleCopyCredential(bundle: WorkspaceIdentityCredentialBundle) {
-    try {
-      await navigator.clipboard.writeText(JSON.stringify(bundle, null, 2))
-      setNotice(`Credential bundle copied for ${bundle.beamId}.`)
-    } catch {
-      setError('Clipboard access failed while copying the credential bundle.')
-    }
-  }
-
   function handleDownloadCredential(bundle: WorkspaceIdentityCredentialBundle) {
     const blob = new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
@@ -1955,6 +1946,7 @@ export default function WorkspacesPage() {
                         </div>
                         <div className="flex flex-wrap gap-2">
                           <StatusPill label={binding.bindingType} />
+                          {binding.credentialManaged ? <StatusPill label="managed credential" tone="success" /> : null}
                           <StatusPill label={binding.lifecycleStatus} tone={lifecycleTone(binding.lifecycleStatus)} />
                           <StatusPill label={binding.status} tone={binding.status === 'paused' ? 'warning' : 'default'} />
                           {binding.hostLabel || binding.runtimeSessionState === 'conflict' ? (
@@ -2065,7 +2057,7 @@ export default function WorkspacesPage() {
                             Resolve in fleet
                           </Link>
                         ) : null}
-                        {binding.bindingType !== 'partner' && binding.identity.existsLocally ? (
+                        {binding.bindingType !== 'partner' && binding.identity.existsLocally && binding.credentialManaged ? (
                           <button
                             className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-slate-100 disabled:opacity-60 dark:border-slate-800 dark:text-slate-200 dark:hover:bg-slate-800"
                             type="button"
@@ -2142,24 +2134,15 @@ export default function WorkspacesPage() {
                               <button
                                 className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
                                 type="button"
-                                onClick={() => { void handleCopyCredential(issuedCredential.bundle) }}
-                              >
-                                Copy JSON
-                              </button>
-                              <button
-                                className="rounded-xl border border-slate-200 px-3 py-2 text-sm text-slate-700 transition hover:bg-white dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800"
-                                type="button"
                                 onClick={() => { handleDownloadCredential(issuedCredential.bundle) }}
                               >
                                 Download
                               </button>
                             </div>
                           </div>
-                          <textarea
-                            className="input-field mt-3 min-h-56 font-mono text-xs"
-                            readOnly
-                            value={JSON.stringify(issuedCredential.bundle, null, 2)}
-                          />
+                          <div className="mt-3 text-xs text-slate-500 dark:text-slate-400">
+                            Secret material is not rendered in the dashboard or written to browser storage.
+                          </div>
                         </div>
                       ) : null}
                     </div>

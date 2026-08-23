@@ -14,6 +14,7 @@ import {
   registerAgent,
 } from '../db.js'
 import { seedAclsFromCatalog } from '../acl.js'
+import { createAgentApiKey, hashApiKey as hashAgentApiKey } from '../api-key.js'
 
 const ORG_NAME_RE = /^[a-z0-9_-]+$/
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
@@ -162,6 +163,7 @@ export function orgsRouter(db: Database): Hono {
         apiKeyHash: hashApiKey(apiKey),
         verificationToken,
       })
+      c.header('Cache-Control', 'no-store')
       return c.json({
         ...serializeOrg(org),
         apiKey,
@@ -251,18 +253,21 @@ export function orgsRouter(db: Database): Hono {
     const beamId = `${agentName}@${buildBeamDomain(name)}`
     const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
     const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    const apiKey = createAgentApiKey(beamId)
 
     const request: RegisterRequest = {
       beamId,
       displayName,
       capabilities,
       publicKey: publicKeyBase64,
+      apiKeyHash: hashAgentApiKey(apiKey),
       org: name,
     }
 
     try {
       const agent = registerAgent(db, request)
       seedAclsFromCatalog(db)
+      c.header('Cache-Control', 'no-store')
       return c.json({
         beamId,
         did: toBeamDID(beamId),
@@ -271,6 +276,9 @@ export function orgsRouter(db: Database): Hono {
         capabilities,
         publicKey: publicKeyBase64,
         privateKey: privateKeyBase64,
+        publicKeyBase64,
+        privateKeyBase64,
+        apiKey,
         trustScore: agent.trust_score,
         verified: agent.verified === 1,
         createdAt: agent.created_at,

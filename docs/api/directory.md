@@ -48,9 +48,17 @@ Example request body:
 }
 ```
 
+Personal Beam IDs can be claimed without an organization credential. Organization IDs require a previously registered organization and its API key:
+
+```text
+x-api-key: beam_org_...organization-key...
+```
+
+Registration is create-only. Reusing an existing Beam ID returns `409 BEAM_ID_ALREADY_REGISTERED`; profile updates and key rotation use their authenticated endpoints instead.
+
 Successful responses return the created agent record with trust and verification metadata.
 Registration responses also return an API key with the prefix `bk_`. Store it securely — it is only meant to
-be shown in plaintext at creation time.
+be shown in plaintext at creation time. Successful registration responses are marked `Cache-Control: no-store`.
 
 Detailed registration and lookup responses now also include `keyState` with:
 

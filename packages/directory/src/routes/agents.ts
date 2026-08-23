@@ -1,4 +1,4 @@
-import { createPublicKey, randomBytes, verify } from 'node:crypto'
+import { createPublicKey, randomBytes, timingSafeEqual, verify } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { getAdminSessionFromRequest, roleSatisfies } from '../admin-auth.js'
@@ -13,6 +13,7 @@ import {
   getAgent,
   getAgentDirectoryStats,
   getAgentIntentStats,
+  getOrg,
   listAgentKeys,
   registerAgent,
   countSearchAgents,
@@ -75,16 +76,6 @@ function slugify(value: string): string {
     .slice(0, 32)
 }
 
-function deriveOrg(email: string): string | null {
-  if (!email) {
-    return null
-  }
-
-  const domain = email.split('@')[1] ?? ''
-  const label = domain.split('.')[0] ?? ''
-  return slugify(label) || null
-}
-
 function parseBeamId(beamId: string): { org: string; personal: boolean } | null {
   const match = /^([a-z0-9_-]+)@(?:([a-z0-9_-]+)\.)?beam\.directory$/.exec(beamId)
   if (!match) {
@@ -95,6 +86,13 @@ function parseBeamId(beamId: string): { org: string; personal: boolean } | null 
     org: match[2] ?? 'personal',
     personal: !match[2],
   }
+}
+
+function orgApiKeyMatches(expectedHash: string, suppliedApiKey: string): boolean {
+  if (!suppliedApiKey) return false
+  const expected = Buffer.from(expectedHash)
+  const supplied = Buffer.from(hashApiKey(suppliedApiKey))
+  return expected.length === supplied.length && timingSafeEqual(expected, supplied)
 }
 
 function buildBeamId(baseName: string, org: string, personal: boolean, db: Database): string {
@@ -285,8 +283,11 @@ export function agentsRouter(db: Database): Hono {
     }
 
     if (!org) {
-      org = deriveOrg(email) ?? 'personal'
-      personal = org === 'personal'
+      // Contact email is not proof of namespace ownership. Implicit
+      // registrations are personal; organization identities must explicitly
+      // name the organization and prove control with its API key below.
+      org = 'personal'
+      personal = true
     } else if (org === 'personal') {
       personal = true
     }
@@ -311,6 +312,33 @@ export function agentsRouter(db: Database): Hono {
         error: `org field (${org}) does not match org extracted from beamId (${orgFromId ?? 'unknown'})`,
         errorCode: 'ORG_MISMATCH',
       }, 400)
+    }
+
+    if (!personal) {
+      const registeredOrg = getOrg(db, org)
+      if (!registeredOrg) {
+        return c.json({
+          error: 'Organization namespace must be registered before creating organization Beam IDs',
+          errorCode: 'ORG_REGISTRATION_REQUIRED',
+        }, 403)
+      }
+
+      if (!orgApiKeyMatches(registeredOrg.api_key_hash, getSuppliedApiKey(c.req.raw))) {
+        return c.json({
+          error: 'A valid organization API key is required to create an organization Beam ID',
+          errorCode: 'ORG_OWNERSHIP_REQUIRED',
+        }, 403)
+      }
+    }
+
+    // Registration is a claim operation, not an update or key-rotation surface.
+    // An unauthenticated caller must never be able to replace the signing key or
+    // API-key hash of an existing Beam identity by posting the same Beam ID.
+    if (getAgent(db, beamId)) {
+      return c.json({
+        error: 'Beam ID is already registered; use the authenticated profile or key-management endpoints',
+        errorCode: 'BEAM_ID_ALREADY_REGISTERED',
+      }, 409)
     }
 
     // Visibility: 'public' or 'unlisted' (default: unlisted for privacy)
@@ -380,6 +408,7 @@ export function agentsRouter(db: Database): Hono {
       }
 
       seedAclsFromCatalog(db)
+      c.header('Cache-Control', 'no-store')
       return c.json({
         ...serializeAgent(agent, { keys: listAgentKeys(db, request.beamId) }),
         apiKey,

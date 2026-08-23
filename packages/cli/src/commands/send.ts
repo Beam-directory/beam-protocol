@@ -47,7 +47,8 @@ export async function cmdSend(
   try {
     const client = new BeamClient({
       identity: config.identity,
-      directoryUrl
+      directoryUrl,
+      apiKey: config.apiKey,
     })
 
     const result = await client.send(to as BeamIdString, intent, params, timeoutMs)

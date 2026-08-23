@@ -7,6 +7,7 @@ import {
   createDatabase,
   createWorkspaceMember,
   finalizeIntentLog,
+  getAgent,
   getWorkspaceMember,
   listWorkspaces,
   logIntentStart,
@@ -356,7 +357,46 @@ test('workspace identities expose explicit did control, per-binding partner over
     assert.deepEqual(policyBody.preview.allowedPartners, ['finance@northwind.beam.directory'])
     assert.equal(policyBody.binding.workspacePolicy.bindingRule?.externalInitiation, 'allow')
 
-    const reissueResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${bindBody.binding.id}/reissue-local-credential`, {
+    const unmanagedReissueResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${bindBody.binding.id}/reissue-local-credential`, {
+      method: 'POST',
+      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+    }))
+    assert.equal(unmanagedReissueResponse.status, 403)
+    assert.equal((await unmanagedReissueResponse.json() as { errorCode: string }).errorCode, 'WORKSPACE_CREDENTIAL_NOT_MANAGED')
+
+    const provisionResponse = await app.request(new Request('http://localhost/admin/workspaces/acme-agent-control/identities/provision-local', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        agentName: 'grok-bot',
+        displayName: 'Grok Bot',
+        capabilities: ['conversation.message', 'workspace.handoff.prepare'],
+      }),
+    }))
+    assert.equal(provisionResponse.status, 201)
+    const provisionBody = await provisionResponse.json() as {
+      binding: { id: number; beamId: string; credentialManaged: boolean; canInitiateExternal: boolean }
+      credential: {
+        beamId: string
+        apiKey: string
+        publicKey: string
+        privateKey: string
+        publicKeyBase64: string
+        privateKeyBase64: string
+      }
+    }
+    assert.equal(provisionBody.binding.beamId, 'grok-bot@beam.directory')
+    assert.equal(provisionBody.binding.credentialManaged, true)
+    assert.equal(provisionBody.binding.canInitiateExternal, false)
+    assert.match(provisionBody.credential.apiKey, /^bk_/)
+    assert.equal(provisionBody.credential.publicKeyBase64, provisionBody.credential.publicKey)
+    assert.equal(provisionBody.credential.privateKeyBase64, provisionBody.credential.privateKey)
+    assert.equal(getAgent(db, 'grok-bot@beam.directory')?.api_key_hash?.length, 64)
+
+    const reissueResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${provisionBody.binding.id}/reissue-local-credential`, {
       method: 'POST',
       headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
     }))
@@ -390,13 +430,13 @@ test('workspace identities expose explicit did control, per-binding partner over
         }
       }
     }
-    assert.equal(reissueBody.binding.beamId, 'ops-bot@beam.directory')
-    assert.equal(reissueBody.binding.identity.did.id, 'did:beam:ops-bot')
+    assert.equal(reissueBody.binding.beamId, 'grok-bot@beam.directory')
+    assert.equal(reissueBody.binding.identity.did.id, 'did:beam:grok-bot')
     assert.match(reissueBody.binding.identity.did.resolutionUrl, /\/did\//)
     assert.match(reissueBody.credential.apiKey, /^bk_/)
     assert.equal(reissueBody.credential.format, 'beam-local-identity/v1')
-    assert.equal(reissueBody.credential.beamId, 'ops-bot@beam.directory')
-    assert.equal(reissueBody.credential.did, 'did:beam:ops-bot')
+    assert.equal(reissueBody.credential.beamId, 'grok-bot@beam.directory')
+    assert.equal(reissueBody.credential.did, 'did:beam:grok-bot')
     assert.match(reissueBody.credential.privateKey, /^[A-Za-z0-9+/=]+$/)
     assert.match(reissueBody.credential.publicKey, /^[A-Za-z0-9+/=]+$/)
     assert.match(reissueBody.credential.urls.didResolution, /\/did\//)
@@ -404,6 +444,95 @@ test('workspace identities expose explicit did control, per-binding partner over
     assert.equal(reissueBody.binding.identity.keyState?.total, 2)
     assert.equal(reissueBody.binding.identity.keyState?.revoked.length, 1)
     assert.equal(reissueBody.binding.identity.keyState?.active?.publicKey, reissueBody.credential.publicKey)
+  } finally {
+    db.close()
+  }
+})
+
+test('organization workspace onboarding requires namespace proof and reserves the Beam ID once', async () => {
+  const db = createDatabase(':memory:')
+
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'test-secret'
+    const app = createApp(db)
+
+    const orgResponse = await app.request(new Request('http://localhost/orgs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'acme', displayName: 'Acme GmbH', domain: 'acme.example' }),
+    }))
+    assert.equal(orgResponse.status, 201)
+    const orgBody = await orgResponse.json() as { apiKey: string }
+    assert.match(orgResponse.headers.get('cache-control') ?? '', /no-store/i)
+
+    const orgAgentResponse = await app.request(new Request('http://localhost/orgs/acme/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': orgBody.apiKey },
+      body: JSON.stringify({ agentName: 'support', displayName: 'Acme Support', capabilities: ['conversation.message'] }),
+    }))
+    assert.equal(orgAgentResponse.status, 201)
+    const orgAgentBody = await orgAgentResponse.json() as {
+      beamId: string
+      apiKey: string
+      publicKey: string
+      privateKey: string
+      publicKeyBase64: string
+      privateKeyBase64: string
+    }
+    assert.equal(orgAgentBody.beamId, 'support@acme.beam.directory')
+    assert.match(orgAgentBody.apiKey, /^bk_/)
+    assert.equal(orgAgentBody.publicKeyBase64, orgAgentBody.publicKey)
+    assert.equal(orgAgentBody.privateKeyBase64, orgAgentBody.privateKey)
+    assert.equal(getAgent(db, orgAgentBody.beamId)?.api_key_hash?.length, 64)
+    assert.match(orgAgentResponse.headers.get('cache-control') ?? '', /no-store/i)
+
+    const workspaceResponse = await app.request(new Request('http://localhost/admin/workspaces', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'owner@acme.example', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ name: 'Acme Grok', slug: 'acme-grok', orgName: 'acme' }),
+    }))
+    assert.equal(workspaceResponse.status, 201)
+
+    const provision = (orgApiKey?: string) => app.request(new Request('http://localhost/admin/workspaces/acme-grok/identities/provision-local', {
+      method: 'POST',
+      headers: {
+        ...createAdminHeaders(db, 'owner@acme.example', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        agentName: 'grok',
+        displayName: 'Acme Grok',
+        capabilities: ['conversation.message'],
+        ...(orgApiKey ? { orgApiKey } : {}),
+      }),
+    }))
+
+    const missingProof = await provision()
+    assert.equal(missingProof.status, 403)
+    assert.equal((await missingProof.json() as { errorCode: string }).errorCode, 'ORG_OWNERSHIP_REQUIRED')
+    assert.equal(getAgent(db, 'grok@acme.beam.directory'), null)
+
+    const wrongProof = await provision('beam_org_wrong')
+    assert.equal(wrongProof.status, 403)
+    assert.equal(getAgent(db, 'grok@acme.beam.directory'), null)
+
+    const created = await provision(orgBody.apiKey)
+    assert.equal(created.status, 201)
+    const createdBody = await created.json() as {
+      binding: { beamId: string; credentialManaged: boolean }
+      credential: { beamId: string; apiKey: string }
+    }
+    assert.equal(createdBody.binding.beamId, 'grok@acme.beam.directory')
+    assert.equal(createdBody.binding.credentialManaged, true)
+    assert.equal(createdBody.credential.beamId, 'grok@acme.beam.directory')
+    assert.match(createdBody.credential.apiKey, /^bk_/)
+
+    const duplicate = await provision(orgBody.apiKey)
+    assert.equal(duplicate.status, 409)
+    assert.equal((await duplicate.json() as { errorCode: string }).errorCode, 'BEAM_ID_ALREADY_REGISTERED')
   } finally {
     db.close()
   }

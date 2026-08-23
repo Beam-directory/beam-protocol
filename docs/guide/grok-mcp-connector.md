@@ -7,6 +7,8 @@ Beam can connect Grok to a signed, policy-gated agent handoff in two deployment 
 
 The remote implementation is available in the repository. It is not proof that a production connector is already deployed or that a particular Grok organization and OAuth provider have passed an external pilot.
 
+Start with [Beam identity onboarding](/guide/identity-onboarding) for the exact human session, workspace, Beam ID, one-time credential, and connector sequence.
+
 ## Trust boundary
 
 Grok and MCP provide tool discovery and user authorization. Beam provides the receiving agent identity, target trust policy, signed intent and Result Frame, ACL enforcement, replay protection, and operator trace.

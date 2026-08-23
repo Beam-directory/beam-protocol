@@ -27,6 +27,7 @@ export async function cmdKeysRotate(options: KeysRotateOptions): Promise<void> {
     const client = new BeamClient({
       identity: config.identity,
       directoryUrl,
+      apiKey: config.apiKey,
     })
     const result = await client.rotateKeys(replacementIdentity.export())
 

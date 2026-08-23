@@ -14,7 +14,7 @@ export async function cmdVerifyDomain(domain: string, options: VerifyDomainOptio
   const spinner = ora(`Starting DNS verification for ${chalk.bold(domain)}...`).start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const verification = await client.verifyDomain(domain)
     spinner.stop()
 

@@ -14,7 +14,7 @@ export async function cmdStats(options: StatsOptions): Promise<void> {
   const spinner = ora('Fetching directory statistics...').start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const stats = await client.getStats()
     spinner.stop()
 

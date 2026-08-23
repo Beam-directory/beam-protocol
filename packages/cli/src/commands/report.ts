@@ -24,7 +24,7 @@ export async function cmdReport(targetBeamId: string, options: ReportOptions): P
   const spinner = ora(`Submitting report for ${chalk.bold(targetBeamId)}...`).start()
 
   try {
-    const client = new BeamClient({ identity: config.identity, directoryUrl })
+    const client = new BeamClient({ identity: config.identity, directoryUrl, apiKey: config.apiKey })
     const report = await client.report(targetBeamId, options.reason)
     spinner.stop()
 
