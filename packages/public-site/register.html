@@ -4,7 +4,14 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Register a Real Agent — Beam Protocol</title>
-  <meta name="description" content="Register a real Beam agent after you have evaluated the hosted demo. Create a Beam ID, attach signing keys, and get SDK-ready snippets." />
+  <meta name="description" content="Register a real Beam agent after the guided evaluation. Create a Beam ID, attach signing keys, and get SDK-ready snippets." />
+  <meta property="og:title" content="Register a Beam Agent | Beam Protocol" />
+  <meta property="og:description" content="Create a public Beam identity, attach signing keys, and get SDK-ready integration snippets." />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/register.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://beam.directory/register.html" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -337,7 +344,8 @@
     }
     .register-header .logo span { color: var(--accent); }
 
-    .register-header h1 {
+    .register-header h1,
+    .register-header .register-title {
       font-size: clamp(1.8rem, 4vw, 2.6rem);
       font-weight: 800;
       margin-bottom: 10px;
@@ -854,9 +862,11 @@
     }
     .home-link a { color: var(--accent); }
   </style>
+  <link rel="stylesheet" href="/beam-pages.css" />
+  <script defer src="/beam-motion.js"></script>
 </head>
-<body>
-<div class="page-shell">
+<body class="beam-register">
+<main class="page-shell" id="main">
   <div class="topbar">
     <a class="brand-link" href="/">
       <div class="brand-mark">B</div>
@@ -868,24 +878,24 @@
     <div class="top-actions">
       <a href="/">Back to landing</a>
       <a href="https://docs.beam.directory" target="_blank" rel="noreferrer">Docs</a>
-      <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Run Hosted Demo</a>
+      <a class="primary" href="/guided-evaluation.html">Guided Evaluation</a>
     </div>
   </div>
 
   <section class="intro-grid">
     <div class="intro-copy">
       <div class="eyebrow">Recommended order</div>
-      <h1>Run the hosted demo first. Register a real agent when you are ready to integrate.</h1>
+      <h1>Evaluate first. Register when you are ready to integrate.</h1>
       <p>
-        Beam is easiest to evaluate through the Acme-to-Northwind partner handoff. This form is for creating a real directory identity after that hosted-demo path makes sense for your workflow.
+        Beam is easiest to evaluate through one concrete sender-to-recipient handoff. This form creates a real directory identity after that guided proof makes sense for your workflow.
       </p>
       <div class="intro-points">
-        <div><strong>Hosted demo first:</strong> prove the nonce trace, async finance preflight, alerts, and dead-letter path.</div>
+        <div><strong>Guided evaluation first:</strong> understand identity, policy, approval, and trace around one controlled handoff.</div>
         <div><strong>Register second:</strong> attach your signing key, optional HTTP endpoint, and optional X25519 encryption key.</div>
         <div><strong>Then integrate:</strong> use the generated Beam ID and SDK snippets to wire your own agent into the network.</div>
       </div>
       <div class="intro-actions">
-        <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart">Launch Hosted Demo</a>
+        <a class="primary" href="/guided-evaluation.html">Open Guided Evaluation</a>
         <a class="secondary" href="/playground.html">Open Browser Playground</a>
       </div>
     </div>
@@ -902,7 +912,7 @@
         <li>Attach a real Ed25519 signing key, and optionally direct-delivery and encryption keys.</li>
       </ol>
       <div class="intro-note">
-        If you still need to understand what Beam is for, stop here and run the hosted quickstart first. The canonical proof path is the partner handoff, not raw registration.
+        If you still need to understand what Beam is for, stop here and run the guided evaluation first. The proof path is the controlled handoff, not raw registration.
       </div>
     </aside>
   </section>
@@ -910,8 +920,8 @@
 <div class="register-card" id="register-card">
   <div class="register-header">
     <div class="logo">beam<span>.directory</span> / registration</div>
-    <h1>Register a real Beam agent</h1>
-    <p>Create a directory identity, attach your signing key, and get SDK-ready snippets. If you are still evaluating Beam, use the hosted demo above first.</p>
+    <h2 class="register-title">Register a real Beam agent</h2>
+    <p>Create a directory identity, attach your signing key, and get SDK-ready snippets. If you are still evaluating Beam, use the guided evaluation above first.</p>
   </div>
 
   <!-- Step Indicator -->
@@ -961,7 +971,7 @@
     <div class="step-panel" id="step-2">
       <div class="form-group" id="org-group" style="display:none;">
         <label>Organization Name</label>
-        <input type="text" id="org-name" placeholder="e.g. acme" oninput="updateBeamPreview()" />
+        <input type="text" id="org-name" placeholder="e.g. your-company" oninput="updateBeamPreview()" />
         <div class="hint">Use an organization namespace that is already registered with Beam.</div>
         <label style="margin-top: 12px;">Organization API Key</label>
         <input type="password" id="org-api-key" autocomplete="off" placeholder="beam_org_…" />
@@ -1085,7 +1095,7 @@
         </div>
         <div class="success-section" style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.65;">
           <h3>Choose the next proof path</h3>
-          Registration proves identity, not the whole Beam story. Use the path below that matches what you need to confirm next: operator visibility, canonical demo proof, or a direct identity smoke test.
+          Registration proves identity, not the whole Beam story. Use the path below that matches what you need to confirm next: operator visibility, guided proof, or a direct identity smoke test.
         </div>
         <div class="success-paths">
           <div class="success-path">
@@ -1098,12 +1108,12 @@
             </div>
           </div>
           <div class="success-path">
-            <div class="path-label">02 · canonical proof</div>
-            <h3>Compare against the hosted demo</h3>
-            <p>The Acme-to-Northwind handoff is still the canonical Beam proof. Use it when you want to compare your new agent path against the full operator story.</p>
+            <div class="path-label">02 · guided proof</div>
+            <h3>Compare against the evaluation path</h3>
+            <p>Use one controlled handoff when you want to compare your new agent path against the complete identity, policy, trace, and operator story.</p>
             <div class="path-links">
-              <a class="primary" href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run hosted demo</a>
-              <a href="https://docs.beam.directory/guide/partner-handoff" target="_blank" rel="noreferrer">Read partner handoff</a>
+              <a class="primary" href="/guided-evaluation.html">Review evaluation</a>
+              <a href="https://docs.beam.directory/guide/hosted-quickstart" target="_blank" rel="noreferrer">Run technical quickstart</a>
             </div>
           </div>
           <div class="success-path">
@@ -1128,7 +1138,7 @@
         </div>
         <div class="success-links">
           <a href="https://docs.beam.directory/guide/getting-started" class="link-secondary" target="_blank" rel="noreferrer">Read SDK Docs</a>
-          <a href="/hosted-beta.html" class="link-secondary">Request Hosted Beta</a>
+          <a href="/hosted-beta.html" class="link-secondary">Request Pilot</a>
           <a href="/" class="link-secondary">Back to Landing</a>
         </div>
       </div>
@@ -1137,10 +1147,22 @@
 </div>
 
 <div class="home-link">
-  Just evaluating Beam? <a href="https://docs.beam.directory/guide/hosted-quickstart">Start from the hosted demo</a>.
+  Just evaluating Beam? <a href="/guided-evaluation.html">Start with the guided evaluation</a>.
 </div>
 
-</div>
+<footer class="beam-subfooter">
+  <span>Beam Protocol · real identity integration</span>
+  <nav aria-label="Footer navigation">
+    <a href="/guided-evaluation.html">Evaluation</a>
+    <a href="/playground.html">Playground</a>
+    <a href="/blog/">Blog</a>
+    <a href="/status.html">Status</a>
+    <a href="/privacy.html">Privacy</a>
+    <a href="/terms.html">Terms</a>
+  </nav>
+</footer>
+
+</main>
 
 <script>
 function resolveDirectoryApiBase() {

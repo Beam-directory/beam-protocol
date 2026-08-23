@@ -3,237 +3,97 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam Protocol OG Image</title>
+  <meta name="robots" content="noindex" />
+  <title>Beam Protocol Social Preview</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500&family=Manrope:wght@500;600;700;800&display=swap" rel="stylesheet" />
   <style>
-    :root {
-      --ink: #fff7f1;
-      --ink-soft: rgba(255, 247, 241, 0.74);
-      --line: rgba(255, 255, 255, 0.08);
-      --accent: #f15a24;
-      --accent-soft: #ff8c58;
-      --panel: rgba(255, 255, 255, 0.06);
-      --panel-strong: rgba(255, 255, 255, 0.1);
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
+    * { box-sizing: border-box; }
+    html, body { width: 1200px; height: 630px; margin: 0; overflow: hidden; }
     body {
-      width: 1200px;
-      height: 630px;
-      overflow: hidden;
-      font-family: "Space Grotesk", "Inter", system-ui, sans-serif;
-      color: var(--ink);
+      position: relative;
+      color: #0b1020;
       background:
-        radial-gradient(circle at 10% 12%, rgba(255, 182, 132, 0.28), transparent 24%),
-        radial-gradient(circle at 86% 10%, rgba(241, 90, 36, 0.18), transparent 18%),
-        linear-gradient(140deg, #130e0a 0%, #20140f 38%, #3b1d0f 100%);
+        radial-gradient(circle at 82% 8%, rgba(128, 103, 255, 0.16), transparent 27%),
+        radial-gradient(circle at 66% 58%, rgba(31, 94, 255, 0.13), transparent 32%),
+        linear-gradient(180deg, #ffffff 0%, #f5f8ff 100%);
+      font-family: "Manrope", sans-serif;
     }
-
     body::before {
       content: "";
       position: absolute;
       inset: 0;
       background-image:
-        linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
-      background-size: 36px 36px;
-      mask-image: radial-gradient(circle at center, black 18%, transparent 88%);
-      opacity: 0.45;
-      pointer-events: none;
+        linear-gradient(rgba(72, 99, 160, 0.055) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(72, 99, 160, 0.055) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: linear-gradient(90deg, transparent, #000 42%, #000 100%);
     }
-
     .frame {
       position: relative;
-      width: 100%;
+      z-index: 1;
       height: 100%;
-      padding: 44px 46px 40px;
       display: grid;
-      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
-      gap: 28px;
+      grid-template-columns: 0.9fr 1.1fr;
+      gap: 54px;
+      padding: 52px 58px;
     }
-
-    .copy {
-      display: grid;
-      align-content: space-between;
-      min-width: 0;
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 10px;
-      padding: 10px 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      background: rgba(255, 255, 255, 0.08);
-      font-size: 13px;
-      letter-spacing: 0.12em;
-      text-transform: uppercase;
-      color: rgba(255, 247, 241, 0.82);
-    }
-
-    .eyebrow::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 999px;
-      background: var(--accent-soft);
-      box-shadow: 0 0 0 7px rgba(255, 140, 88, 0.14);
-    }
-
-    .headline {
-      display: grid;
-      gap: 16px;
-      margin-top: 22px;
-    }
-
-    .headline h1 {
-      font-size: 66px;
-      line-height: 0.93;
-      letter-spacing: -0.06em;
-      max-width: 9ch;
-    }
-
-    .headline p {
-      max-width: 39ch;
-      color: var(--ink-soft);
-      font-size: 21px;
-      line-height: 1.45;
-    }
-
-    .pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      margin-top: 22px;
-    }
-
-    .pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 10px 12px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.06);
-      font-size: 13px;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: rgba(255, 247, 241, 0.84);
-    }
-
-    .brand {
-      display: flex;
-      align-items: center;
-      gap: 14px;
-    }
-
-    .mark {
-      width: 48px;
-      height: 48px;
-      border-radius: 14px;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(140deg, var(--accent-soft), var(--accent));
-      color: white;
-      font-size: 24px;
-      font-weight: 700;
-      box-shadow: 0 20px 40px rgba(241, 90, 36, 0.28);
-    }
-
-    .brand-copy {
-      display: grid;
-      gap: 3px;
-    }
-
-    .brand-copy strong {
-      font-size: 20px;
-      letter-spacing: -0.03em;
-    }
-
-    .brand-copy span {
-      color: rgba(255, 247, 241, 0.72);
-      font-size: 14px;
-    }
-
-    .proof {
-      position: relative;
-      min-width: 0;
-    }
-
+    .copy { display: flex; flex-direction: column; }
+    .brand { display: flex; align-items: center; gap: 13px; font-size: 22px; font-weight: 800; letter-spacing: -0.04em; }
+    .mark { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 14px; background: #1f5eff; color: white; box-shadow: 0 14px 32px rgba(31, 94, 255, 0.25); }
+    .eyebrow { margin-top: auto; color: #1f5eff; font-family: "IBM Plex Mono", monospace; font-size: 15px; letter-spacing: 0.08em; text-transform: uppercase; }
+    h1 { margin: 18px 0 22px; max-width: 590px; font-size: 65px; line-height: 0.93; letter-spacing: -0.065em; }
+    h1 span { color: #1f5eff; }
+    .lede { margin: 0 0 auto; max-width: 500px; color: #465169; font-size: 21px; line-height: 1.45; }
+    .proof { position: relative; display: flex; align-items: center; justify-content: center; }
     .panel {
-      position: absolute;
-      overflow: hidden;
-      border-radius: 26px;
-      border: 1px solid var(--line);
-      background: var(--panel);
-      backdrop-filter: blur(12px);
-      box-shadow: 0 28px 80px rgba(4, 6, 12, 0.34);
-      padding: 14px;
-    }
-
-    .panel img {
+      position: relative;
       width: 100%;
-      height: 100%;
-      object-fit: cover;
-      object-position: top center;
-      border-radius: 18px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: #0d1322;
+      height: 430px;
+      overflow: hidden;
+      border: 1px solid #d7e0ef;
+      border-radius: 32px;
+      background: rgba(255, 255, 255, 0.86);
+      box-shadow: 0 34px 90px rgba(32, 63, 133, 0.16);
     }
-
-    .panel.overview {
-      inset: 16px 0 92px 36px;
-      transform: rotate(-2deg);
-    }
-
-    .panel.trace {
-      width: 325px;
-      height: 360px;
-      right: 8px;
-      bottom: 8px;
-      transform: rotate(3deg);
-      background: var(--panel-strong);
-    }
+    .status { position: absolute; left: 26px; top: 24px; display: flex; align-items: center; gap: 10px; color: #465169; font: 500 13px "IBM Plex Mono", monospace; text-transform: uppercase; letter-spacing: 0.06em; }
+    .dot { width: 9px; height: 9px; border-radius: 50%; background: #11815f; box-shadow: 0 0 0 6px rgba(17, 129, 95, 0.1); }
+    .agent { position: absolute; display: flex; align-items: center; gap: 12px; min-width: 210px; padding: 14px; border: 1px solid #dfe5f0; border-radius: 17px; background: white; box-shadow: 0 14px 38px rgba(32, 63, 133, 0.11); }
+    .agent.from { left: 26px; top: 100px; }
+    .agent.to { right: 26px; top: 214px; }
+    .agent-icon { width: 42px; height: 42px; display: grid; place-items: center; border-radius: 13px; background: #0b1020; color: white; font-weight: 800; }
+    .agent.to .agent-icon { background: #1f5eff; }
+    .agent small { display: block; color: #7b8597; font: 500 10px "IBM Plex Mono", monospace; letter-spacing: 0.08em; }
+    .agent strong { display: block; margin-top: 4px; font-size: 15px; }
+    svg { position: absolute; inset: 70px 0 auto; width: 100%; height: 255px; }
+    .route { fill: none; stroke: #1f5eff; stroke-width: 4; stroke-linecap: round; stroke-dasharray: 10 12; }
+    .core { position: absolute; left: 50%; top: 46%; width: 106px; height: 106px; transform: translate(-50%, -50%); display: grid; place-items: center; border: 1px solid rgba(31, 94, 255, 0.25); border-radius: 50%; background: #1f5eff; color: white; font-size: 38px; font-weight: 800; box-shadow: 0 0 0 17px rgba(31, 94, 255, 0.08), 0 24px 52px rgba(31, 94, 255, 0.28); }
+    .result { position: absolute; inset: auto 26px 24px; display: grid; grid-template-columns: repeat(3, 1fr); overflow: hidden; border: 1px solid #dfe5f0; border-radius: 16px; background: #f8faff; }
+    .result div { padding: 12px 14px; border-left: 1px solid #dfe5f0; }
+    .result div:first-child { border-left: 0; }
+    .result small { display: block; color: #7b8597; font: 500 9px "IBM Plex Mono", monospace; letter-spacing: 0.08em; }
+    .result strong { display: block; margin-top: 5px; font-size: 12px; }
   </style>
 </head>
 <body>
-  <div class="frame">
-    <div class="copy">
-      <div>
-        <div class="eyebrow">Verified partner handoffs</div>
-        <div class="headline">
-          <h1>Beam Protocol</h1>
-          <p>One company agent hands work to another with signed messages, traceable nonces, and operator-visible recovery.</p>
-        </div>
-        <div class="pills">
-          <div class="pill">Hosted demo</div>
-          <div class="pill">Nonce traces</div>
-          <div class="pill">0 alerts baseline</div>
-        </div>
+  <main class="frame">
+    <section class="copy">
+      <div class="brand"><span class="mark">B</span> Beam</div>
+      <div class="eyebrow">Identity · Policy · Approval · Trace</div>
+      <h1>The trust layer for <span>AI agents.</span></h1>
+      <p class="lede">Let agents work across companies without losing human control or the paper trail.</p>
+    </section>
+    <section class="proof" aria-label="Verified Beam handoff">
+      <div class="panel">
+        <div class="status"><span class="dot"></span> Verified handoff preview</div>
+        <div class="agent from"><span class="agent-icon">G</span><span><small>FROM</small><strong>grok@coppen</strong></span></div>
+        <svg viewBox="0 0 620 260" aria-hidden="true"><path class="route" d="M70 78 C 190 78, 182 196, 325 196 S 448 128, 552 128" /></svg>
+        <div class="core">B</div>
+        <div class="agent to"><span class="agent-icon">C</span><span><small>TO · VERIFIED</small><strong>coppen-assistant</strong></span></div>
+        <div class="result"><div><small>IDENTITY</small><strong>Verified</strong></div><div><small>APPROVAL</small><strong>Required</strong></div><div><small>TRACE</small><strong>Attached</strong></div></div>
       </div>
-
-      <div class="brand">
-        <div class="mark">B</div>
-        <div class="brand-copy">
-          <strong>beam.directory</strong>
-          <span>Acme-to-Northwind proof path with real dashboard evidence</span>
-        </div>
-      </div>
-    </div>
-
-    <div class="proof">
-      <div class="panel overview">
-        <img src="/assets/dashboard-overview.png" alt="" />
-      </div>
-      <div class="panel trace">
-        <img src="/assets/dashboard-trace.png" alt="" />
-      </div>
-    </div>
-  </div>
+    </section>
+  </main>
 </body>
 </html>

@@ -31,7 +31,7 @@ export default function LoginPage() {
   return (
     <div data-ui-page="login" className="relative min-h-screen overflow-hidden bg-transparent text-slate-950 dark:text-slate-50">
       <div className="pointer-events-none fixed inset-0 overflow-hidden">
-        <div className="absolute -left-24 top-0 h-80 w-80 rounded-full bg-orange-500/14 blur-3xl" style={{ animation: 'beam-float 12s ease-in-out infinite' }} />
+        <div className="absolute -left-24 top-0 h-80 w-80 rounded-full bg-blue-500/14 blur-3xl" style={{ animation: 'beam-float 12s ease-in-out infinite' }} />
         <div className="absolute right-[-5rem] top-12 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" style={{ animation: 'beam-float 16s ease-in-out infinite' }} />
         <div className="beam-grid-lines absolute inset-0 opacity-45 dark:opacity-20" />
       </div>
@@ -41,8 +41,8 @@ export default function LoginPage() {
           <section className="panel hidden min-h-[640px] flex-col justify-between px-8 py-8 lg:flex">
             <div>
               <div className="inline-flex items-center gap-3 rounded-full border border-white/60 bg-white/[0.72] px-4 py-2 text-[11px] font-semibold uppercase tracking-[0.3em] text-slate-500 dark:border-white/10 dark:bg-slate-950/60 dark:text-slate-400">
-                <Radio size={14} className="text-orange-500" />
-                Beam Control Plane
+                <Radio size={14} className="text-blue-500" />
+                Beam Operator Console
               </div>
               <div className="mt-8 max-w-xl">
                 <div className="text-5xl font-semibold tracking-[-0.06em] text-slate-950 dark:text-white">
@@ -57,7 +57,7 @@ export default function LoginPage() {
             <div className="grid gap-3">
               <div className="rounded-[24px] border border-white/60 bg-white/70 p-4 dark:border-white/10 dark:bg-slate-950/55">
                 <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-orange-500/12 text-orange-600 dark:text-orange-300">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-blue-500/12 text-blue-600 dark:text-blue-300">
                     <KeyRound size={18} />
                   </div>
                   <div>
@@ -93,12 +93,12 @@ export default function LoginPage() {
 
           <section className="panel mx-auto w-full max-w-xl px-6 py-7 sm:px-8 sm:py-8">
             <div className="flex items-center gap-3">
-              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-[0_22px_60px_rgba(249,115,22,0.35)]">
+              <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-[0_22px_60px_rgba(31,94,255,0.32)]">
                 <Radio size={18} />
               </div>
               <div>
-                <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-orange-600 dark:text-orange-300">
-                  Beam Directory
+                <div className="text-[11px] font-semibold uppercase tracking-[0.32em] text-blue-600 dark:text-blue-300">
+                  Beam Protocol
                 </div>
                 <div className="text-base font-semibold tracking-tight text-slate-950 dark:text-white">
                   Operator sign-in
@@ -167,7 +167,7 @@ export default function LoginPage() {
                   Didn&apos;t receive it? Check spam or{' '}
                   <button
                     onClick={() => { setSent(false); setDevUrl('') }}
-                    className="font-medium text-orange-600 transition hover:text-orange-700 dark:text-orange-300"
+                    className="font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-300"
                     type="button"
                   >
                     request a new link
@@ -175,12 +175,12 @@ export default function LoginPage() {
                 </div>
 
                 {devUrl ? (
-                  <div className="mt-4 rounded-[24px] border border-orange-200 bg-orange-50/90 px-4 py-4 text-sm leading-6 text-orange-900 dark:border-orange-500/20 dark:bg-orange-500/10 dark:text-orange-100">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-orange-600 dark:text-orange-300">
+                  <div className="mt-4 rounded-[24px] border border-blue-200 bg-blue-50/90 px-4 py-4 text-sm leading-6 text-blue-900 dark:border-blue-500/20 dark:bg-blue-500/10 dark:text-blue-100">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-blue-600 dark:text-blue-300">
                       Local dev shortcut
                     </div>
                     <div className="mt-2 break-all font-mono text-xs">{devUrl}</div>
-                    <a className="mt-3 inline-flex items-center gap-2 font-medium text-orange-700 transition hover:text-orange-800 dark:text-orange-200" href={devUrl}>
+                    <a className="mt-3 inline-flex items-center gap-2 font-medium text-blue-700 transition hover:text-blue-800 dark:text-blue-200" href={devUrl}>
                       Open local session
                       <ArrowRight size={15} />
                     </a>
@@ -198,11 +198,17 @@ export default function LoginPage() {
               <a
                 href="https://docs.beam.directory/guide/operator-observability"
                 rel="noreferrer"
-                className="mt-3 inline-flex items-center gap-2 font-medium text-orange-600 transition hover:text-orange-700 dark:text-orange-300"
+                className="mt-3 inline-flex items-center gap-2 font-medium text-blue-600 transition hover:text-blue-700 dark:text-blue-300"
                 target="_blank"
               >
                 Open operator setup guide
                 <ArrowRight size={15} />
+              </a>
+              <a
+                href="https://beam.directory"
+                className="mt-3 ml-5 inline-flex items-center gap-2 font-medium text-slate-600 transition hover:text-blue-700 dark:text-slate-300 dark:hover:text-blue-200"
+              >
+                Back to beam.directory
               </a>
             </div>
           </section>

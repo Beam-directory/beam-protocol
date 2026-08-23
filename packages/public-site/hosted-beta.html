@@ -3,783 +3,106 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Request a Guided Beam Pilot — Beam Protocol</title>
+  <title>Beam Hosted Pilot | Request Access</title>
   <meta
     name="description"
-    content="Request a guided Beam pilot for one real cross-company AI workflow."
+    content="Request a guided Beam pilot for one real AI-agent handoff with owner-visible trace and support evidence."
   />
-  <meta property="og:title" content="Request a Guided Beam Pilot — Beam Protocol" />
+  <meta property="og:title" content="Beam Hosted Pilot | Request Access" />
   <meta
     property="og:description"
-    content="Bring Beam into one real cross-company AI workflow with a guided hosted evaluation and operator proof."
+    content="Start with one real workflow. Beam provides the hosted control plane, trace proof, and operator support path."
   />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory/hosted-beta.html" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
-  <meta name="twitter:title" content="Request a Guided Beam Pilot — Beam Protocol" />
-  <meta
-    name="twitter:description"
-    content="Start a guided Beam evaluation around one real partner workflow, not a vague platform pitch."
-  />
-  <meta name="twitter:image" content="https://beam.directory/og-image.png" />
   <link rel="canonical" href="https://beam.directory/hosted-beta.html" />
+  <meta name="theme-color" content="#f8faff" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;700&display=swap"
-    rel="stylesheet"
-  />
-  <style>
-    :root {
-      --paper: #f5efe8;
-      --surface: rgba(255, 250, 244, 0.92);
-      --surface-strong: #fff9f3;
-      --ink: #1b130e;
-      --ink-soft: #54473c;
-      --ink-muted: #85786d;
-      --line: rgba(43, 28, 18, 0.12);
-      --line-strong: rgba(43, 28, 18, 0.18);
-      --accent: #f15a24;
-      --accent-soft: #ff8c58;
-      --accent-fog: rgba(241, 90, 36, 0.14);
-      --green: #1f8f5f;
-      --green-fog: rgba(31, 143, 95, 0.12);
-      --red: #c83a2f;
-      --red-fog: rgba(200, 58, 47, 0.12);
-      --shadow-soft: 0 26px 70px rgba(58, 31, 12, 0.1);
-      --shadow-strong: 0 48px 140px rgba(58, 31, 12, 0.16);
-      --radius-xl: 34px;
-      --radius-lg: 24px;
-      --radius-md: 16px;
-      --radius-sm: 12px;
-      --font-display: "Space Grotesk", sans-serif;
-      --font-body: "Space Grotesk", sans-serif;
-      --font-mono: "IBM Plex Mono", monospace;
-      --max: 1180px;
-    }
-
-    * {
-      box-sizing: border-box;
-      margin: 0;
-      padding: 0;
-    }
-
-    html {
-      scroll-behavior: smooth;
-      background: var(--paper);
-    }
-
-    body {
-      min-height: 100vh;
-      font-family: var(--font-body);
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 10% 10%, rgba(255, 205, 167, 0.4), transparent 22%),
-        radial-gradient(circle at 88% 8%, rgba(241, 90, 36, 0.14), transparent 20%),
-        linear-gradient(180deg, #f7f1ea 0%, #f2ebe3 48%, #f5efe8 100%);
-      line-height: 1.6;
-      -webkit-font-smoothing: antialiased;
-    }
-
-    body::before {
-      content: "";
-      position: fixed;
-      inset: 0;
-      background-image:
-        linear-gradient(rgba(27, 19, 14, 0.03) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(27, 19, 14, 0.03) 1px, transparent 1px);
-      background-size: 42px 42px;
-      mask-image: radial-gradient(circle at center, black 16%, transparent 86%);
-      pointer-events: none;
-      opacity: 0.55;
-      z-index: -1;
-    }
-
-    a {
-      color: inherit;
-      text-decoration: none;
-    }
-
-    img {
-      display: block;
-      max-width: 100%;
-    }
-
-    .container {
-      width: min(var(--max), calc(100% - 40px));
-      margin: 0 auto;
-    }
-
-    .topbar-shell {
-      padding: 22px 0 0;
-    }
-
-    .topbar {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 18px;
-      padding: 14px 16px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.26);
-      background: rgba(36, 24, 17, 0.8);
-      color: #fff8f1;
-      box-shadow: 0 20px 44px rgba(34, 18, 8, 0.12);
-      backdrop-filter: blur(16px);
-    }
-
-    .brand {
-      display: inline-flex;
-      align-items: center;
-      gap: 12px;
-      min-width: 0;
-    }
-
-    .brand-mark {
-      width: 42px;
-      height: 42px;
-      border-radius: 12px;
-      display: grid;
-      place-items: center;
-      background: linear-gradient(140deg, var(--accent-soft), var(--accent));
-      color: white;
-      font-weight: 700;
-      box-shadow: 0 14px 30px rgba(241, 90, 36, 0.25);
-    }
-
-    .brand-copy {
-      display: grid;
-      gap: 2px;
-      line-height: 1;
-    }
-
-    .brand-copy strong {
-      font-size: 1rem;
-      letter-spacing: -0.03em;
-    }
-
-    .brand-copy span {
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      letter-spacing: 0.1em;
-      text-transform: uppercase;
-      color: rgba(255, 248, 241, 0.7);
-    }
-
-    .top-links {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-    }
-
-    .top-links a {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 42px;
-      padding: 0 14px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      color: rgba(255, 248, 241, 0.88);
-      font-size: 0.88rem;
-      transition: transform 0.2s ease, border-color 0.2s ease, background 0.2s ease;
-    }
-
-    .top-links a:hover {
-      transform: translateY(-1px);
-      border-color: rgba(255, 255, 255, 0.24);
-    }
-
-    .top-links a.primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
-      border-color: transparent;
-      color: white;
-      font-weight: 700;
-    }
-
-    main {
-      padding: 28px 0 90px;
-    }
-
-    .hero-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 0.92fr) minmax(340px, 1.08fr);
-      gap: 24px;
-      align-items: stretch;
-    }
-
-    .panel,
-    .form-panel {
-      border-radius: var(--radius-xl);
-      border: 1px solid var(--line);
-      box-shadow: var(--shadow-soft);
-    }
-
-    .panel {
-      padding: 36px;
-      background:
-        radial-gradient(circle at top left, rgba(255, 205, 167, 0.36), transparent 26%),
-        linear-gradient(162deg, #241711 0%, #3d2215 44%, #6f3518 100%);
-      color: #fff8f1;
-    }
-
-    .form-panel {
-      padding: 30px;
-      background:
-        linear-gradient(180deg, rgba(255, 250, 244, 0.96), rgba(255, 252, 248, 0.9)),
-        radial-gradient(circle at top right, rgba(241, 90, 36, 0.1), transparent 24%);
-    }
-
-    .eyebrow {
-      display: inline-flex;
-      align-items: center;
-      gap: 8px;
-      padding: 8px 12px;
-      border-radius: 999px;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid rgba(255, 255, 255, 0.14);
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: rgba(255, 248, 241, 0.86);
-      margin-bottom: 16px;
-    }
-
-    .eyebrow::before {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      background: var(--accent-soft);
-      box-shadow: 0 0 0 7px rgba(255, 141, 89, 0.12);
-    }
-
-    h1,
-    h2,
-    h3,
-    strong {
-      font-family: var(--font-display);
-    }
-
-    .panel h1 {
-      font-size: clamp(2.5rem, 5vw, 4.3rem);
-      line-height: 0.92;
-      letter-spacing: -0.06em;
-      max-width: 9ch;
-      margin-bottom: 16px;
-    }
-
-    .panel p {
-      max-width: 48ch;
-      color: rgba(255, 248, 241, 0.8);
-      font-size: 1rem;
-    }
-
-    .panel ul {
-      list-style: none;
-      display: grid;
-      gap: 12px;
-      margin-top: 24px;
-      color: rgba(255, 248, 241, 0.78);
-    }
-
-    .panel li {
-      display: flex;
-      gap: 12px;
-      align-items: flex-start;
-    }
-
-    .panel li::before {
-      content: "+";
-      color: var(--accent-soft);
-      font-weight: 700;
-      margin-top: 1px;
-    }
-
-    .hero-metrics {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 12px;
-      margin-top: 24px;
-    }
-
-    .metric {
-      padding: 14px 16px;
-      border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.12);
-      background: rgba(255, 255, 255, 0.08);
-    }
-
-    .metric strong {
-      display: block;
-      font-size: 1.5rem;
-      letter-spacing: -0.04em;
-      margin-bottom: 4px;
-    }
-
-    .metric span {
-      display: block;
-      font-size: 0.86rem;
-      color: rgba(255, 248, 241, 0.72);
-    }
-
-    .section-kicker {
-      font-family: var(--font-mono);
-      font-size: 0.74rem;
-      text-transform: uppercase;
-      letter-spacing: 0.12em;
-      color: var(--accent);
-      margin-bottom: 10px;
-    }
-
-    .form-panel h2 {
-      font-size: clamp(1.7rem, 4vw, 2.5rem);
-      line-height: 0.96;
-      letter-spacing: -0.05em;
-      margin-bottom: 10px;
-    }
-
-    .form-panel > p {
-      color: var(--ink-soft);
-      margin-bottom: 22px;
-      max-width: 48ch;
-    }
-
-    .form-grid {
-      display: grid;
-      gap: 14px;
-    }
-
-    .field {
-      display: grid;
-      gap: 8px;
-    }
-
-    .field label {
-      font-size: 0.88rem;
-      font-weight: 600;
-      color: var(--ink);
-    }
-
-    .field input,
-    .field select,
-    .field textarea {
-      width: 100%;
-      padding: 14px 15px;
-      border-radius: 14px;
-      border: 1px solid var(--line-strong);
-      background: rgba(255, 255, 255, 0.72);
-      color: var(--ink);
-      font: inherit;
-      transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
-    }
-
-    .field textarea {
-      min-height: 122px;
-      resize: vertical;
-    }
-
-    .field input:focus,
-    .field select:focus,
-    .field textarea:focus {
-      outline: none;
-      border-color: rgba(241, 90, 36, 0.4);
-      box-shadow: 0 0 0 4px rgba(241, 90, 36, 0.12);
-      transform: translateY(-1px);
-    }
-
-    .field small {
-      color: var(--ink-muted);
-      font-size: 0.8rem;
-      line-height: 1.5;
-    }
-
-    .field-row {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 14px;
-    }
-
-    .submit-row {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-      padding-top: 8px;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 50px;
-      padding: 0 18px;
-      border-radius: 999px;
-      border: none;
-      cursor: pointer;
-      font: inherit;
-      font-weight: 700;
-      transition: transform 0.2s ease, box-shadow 0.2s ease, opacity 0.2s ease;
-    }
-
-    .btn:hover {
-      transform: translateY(-1px);
-    }
-
-    .btn:disabled {
-      cursor: wait;
-      opacity: 0.7;
-      transform: none;
-    }
-
-    .btn.primary {
-      background: linear-gradient(135deg, var(--accent), var(--accent-soft));
-      color: white;
-      box-shadow: 0 16px 34px rgba(241, 90, 36, 0.22);
-    }
-
-    .btn.ghost {
-      border: 1px solid var(--line-strong);
-      background: transparent;
-      color: var(--ink);
-    }
-
-    .status {
-      display: none;
-      padding: 16px 18px;
-      border-radius: 18px;
-      border: 1px solid var(--line);
-      background: rgba(255, 255, 255, 0.8);
-      margin-top: 18px;
-      line-height: 1.6;
-    }
-
-    .status.visible {
-      display: block;
-    }
-
-    .status.success {
-      border-color: rgba(31, 143, 95, 0.2);
-      background: var(--green-fog);
-      color: #11402c;
-    }
-
-    .status.error {
-      border-color: rgba(200, 58, 47, 0.2);
-      background: var(--red-fog);
-      color: #691f17;
-    }
-
-    .proof-section,
-    .expect-section {
-      padding-top: 88px;
-    }
-
-    .section-head {
-      display: grid;
-      gap: 12px;
-      margin-bottom: 32px;
-    }
-
-    .section-head h2 {
-      font-size: clamp(2rem, 4vw, 3.2rem);
-      line-height: 0.96;
-      letter-spacing: -0.05em;
-      max-width: 12ch;
-    }
-
-    .section-head p {
-      max-width: 46rem;
-      color: var(--ink-soft);
-    }
-
-    .proof-grid {
-      display: grid;
-      grid-template-columns: minmax(0, 1.04fr) minmax(0, 0.96fr);
-      gap: 22px;
-      align-items: start;
-    }
-
-    .proof-card {
-      padding: 16px;
-      border-radius: 30px;
-      border: 1px solid var(--line);
-      background: rgba(20, 16, 13, 0.96);
-      color: #fff7f1;
-      box-shadow: var(--shadow-strong);
-      overflow: hidden;
-    }
-
-    .proof-card img {
-      width: 100%;
-      border-radius: 20px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: #0d1322;
-      object-fit: cover;
-      object-position: top center;
-    }
-
-    .proof-card.overview img {
-      aspect-ratio: 1.44 / 1;
-    }
-
-    .proof-card.trace img {
-      aspect-ratio: 0.98 / 1;
-    }
-
-    .proof-copy {
-      display: grid;
-      gap: 8px;
-      padding-top: 14px;
-    }
-
-    .proof-copy strong {
-      font-size: 1.02rem;
-      letter-spacing: -0.03em;
-    }
-
-    .proof-copy p {
-      color: rgba(255, 247, 241, 0.74);
-      font-size: 0.9rem;
-    }
-
-    .proof-pills {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 8px;
-      padding-top: 4px;
-    }
-
-    .proof-pill {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 7px 10px;
-      border-radius: 999px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      background: rgba(255, 255, 255, 0.06);
-      font-family: var(--font-mono);
-      font-size: 0.72rem;
-      letter-spacing: 0.08em;
-      text-transform: uppercase;
-      color: rgba(255, 247, 241, 0.82);
-    }
-
-    .expect-grid {
-      display: grid;
-      grid-template-columns: repeat(3, minmax(0, 1fr));
-      gap: 20px;
-    }
-
-    .expect-card {
-      display: grid;
-      gap: 14px;
-      padding: 24px 0 0;
-      border-top: 1px solid var(--line-strong);
-    }
-
-    .expect-card h3 {
-      font-size: 1.18rem;
-      letter-spacing: -0.03em;
-    }
-
-    .expect-card p {
-      color: var(--ink-soft);
-    }
-
-    .expect-card ul {
-      list-style: none;
-      display: grid;
-      gap: 10px;
-      color: var(--ink);
-    }
-
-    .expect-card li {
-      display: flex;
-      gap: 10px;
-      align-items: flex-start;
-    }
-
-    .expect-card li::before {
-      content: ">";
-      color: var(--accent);
-      margin-top: 1px;
-    }
-
-    .faq-section {
-      padding-top: 88px;
-    }
-
-    .faq-grid {
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-      gap: 22px 26px;
-    }
-
-    .faq-card {
-      display: grid;
-      gap: 12px;
-      padding: 22px 0 0;
-      border-top: 1px solid var(--line-strong);
-    }
-
-    .faq-card h3 {
-      font-size: 1.1rem;
-      letter-spacing: -0.03em;
-    }
-
-    .faq-card p {
-      color: var(--ink-soft);
-    }
-
-    @media (max-width: 1120px) {
-      .hero-grid,
-      .proof-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .proof-card.trace img {
-        aspect-ratio: 1.18 / 1;
-      }
-    }
-
-    @media (max-width: 860px) {
-      .topbar,
-      .submit-row {
-        flex-direction: column;
-        align-items: stretch;
-      }
-
-      .top-links,
-      .hero-metrics,
-      .field-row,
-      .expect-grid,
-      .faq-grid {
-        grid-template-columns: 1fr;
-      }
-
-      .hero-metrics,
-      .field-row {
-        display: grid;
-      }
-
-      .top-links {
-        display: grid;
-      }
-
-      .top-links a,
-      .btn {
-        width: 100%;
-      }
-    }
-
-    @media (max-width: 640px) {
-      .container {
-        width: min(var(--max), calc(100% - 28px));
-      }
-
-      .panel,
-      .form-panel {
-        padding: 26px;
-      }
-
-      .proof-section,
-      .expect-section,
-      .faq-section {
-        padding-top: 72px;
-      }
-    }
-  </style>
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+  <link rel="preload" href="/assets/dashboard-overview.png" as="image" />
+  <link rel="stylesheet" href="/magic-path.css" />
+  <script defer src="/beam-analytics.js"></script>
+  <script defer src="/magic-path.js"></script>
 </head>
 <body>
-  <div class="topbar-shell">
-    <div class="container">
-      <nav class="topbar">
-        <a class="brand" href="/">
-          <div class="brand-mark">B</div>
-          <div class="brand-copy">
-            <strong>beam.directory</strong>
-            <span>Guided pilot intake</span>
-          </div>
-        </a>
-
-        <div class="top-links">
-          <a data-beam-cta="hosted_beta_guided_eval_nav" href="/guided-evaluation.html">Guided evaluation</a>
-          <a href="https://docs.beam.directory/guide/production-partner-workflow">Workflow contract</a>
-          <a href="https://docs.beam.directory/guide/design-partner-onboarding">Onboarding pack</a>
-          <a class="primary" href="#faq">Common questions</a>
-        </div>
+  <div class="site-shell">
+    <header class="topbar">
+      <a class="brand" href="/" aria-label="Beam home">
+        <span class="brand-mark">B</span>
+        <span class="brand-copy">
+          <strong>Beam</strong>
+          <span>hosted pilot</span>
+        </span>
+      </a>
+      <nav class="nav-links" aria-label="Primary navigation">
+        <a href="/">Home</a>
+        <a href="/guided-evaluation.html">Evaluation</a>
+        <a href="/playground.html">Playground</a>
+        <a class="primary" href="#request">Request pilot</a>
       </nav>
-    </div>
-  </div>
+    </header>
 
-  <main>
-    <div class="container">
-      <section class="hero-grid">
-        <div class="panel">
-          <div class="eyebrow">Guided evaluation</div>
-          <h1>Request a guided Beam pilot for one real workflow.</h1>
-          <p>
-            If your AI needs another company's AI to do something real, Beam can scope a small
-            pilot around that handoff. We start narrow, prove it, write down the recap, and only
-            expand if the first pilot earns a bigger footprint. The `1.0.0` production contract is the <a href="https://docs.beam.directory/guide/production-partner-workflow">Quote Approval Partner Handoff</a>.
-          </p>
-          <ul>
-            <li>One workflow first, not a platform rollout.</li>
-            <li>Shared proof pack for both companies and one operator owner.</li>
-            <li>Managed directory, dashboard, and follow-up until one next decision is clear.</li>
-          </ul>
-          <div class="hero-metrics">
-            <div class="metric">
-              <strong>1 workflow</strong>
-              <span>The cleanest pilots start with one handoff, one owner, and one clear success condition.</span>
-            </div>
-            <div class="metric">
-              <strong>2 sides</strong>
-              <span>Both companies can point at the same request, reply, and current status.</span>
-            </div>
-            <div class="metric">
-              <strong>Visible status</strong>
-              <span>Requests, replies, retries, and stuck work stay inspectable instead of hidden.</span>
-            </div>
-            <div class="metric">
-              <strong>Guided rollout</strong>
-              <span>Beam helps scope the first evaluation, shares the onboarding pack, and leaves the pilot with a recap, proof links, and one next concrete step.</span>
+    <main>
+      <section class="page-hero">
+        <div class="hero-media" aria-hidden="true">
+          <img src="/assets/dashboard-overview.png" alt="" />
+        </div>
+        <div class="hero-inner">
+          <div class="reveal visible">
+            <div class="kicker">Hosted pilot</div>
+            <h1 class="page-title">Put one agent workflow on Beam.</h1>
+            <p class="page-lede">
+              The hosted pilot is for teams that already have one real cross-agent or cross-company workflow and need to prove it can be operated.
+            </p>
+            <div class="hero-actions">
+              <a class="btn light" href="#request">Request access</a>
+              <a class="btn ghost" href="/guided-evaluation.html">Review the path</a>
             </div>
           </div>
         </div>
+      </section>
 
-        <div class="form-panel">
-          <div class="section-kicker">Hosted beta request</div>
-          <h2>Tell us the first handoff you want to make reliable.</h2>
-          <p>
-            Keep it simple. We want the first workflow, who owns it, and what a good outcome looks
-            like. Beam will use that to decide the next concrete step.
-          </p>
+      <section class="section" id="request">
+        <div class="container pilot-layout">
+          <div class="pilot-copy reveal">
+            <div class="eyebrow">What we need</div>
+            <h2>Bring the workflow, not a platform wish list.</h2>
+            <p>
+              Beam works best when the first pilot has a named owner, a concrete handoff, and a clear reason to inspect the trace.
+            </p>
+            <div class="check-list">
+              <div><span>+</span><p>One sender agent or host that needs to ask for work.</p></div>
+              <div><span>+</span><p>One receiver agent, team, or partner workflow that can answer.</p></div>
+              <div><span>+</span><p>One operational question an owner must be able to reconstruct.</p></div>
+              <div><span>+</span><p>One support or audit moment where proof matters.</p></div>
+            </div>
+          </div>
 
-          <form id="waitlist-form" class="form-grid">
-            <div class="field-row">
+          <section class="form-panel reveal" aria-labelledby="request-title">
+            <h2 id="request-title">Request a hosted pilot</h2>
+            <p>Send the workflow shape. We will respond with the next concrete proof step.</p>
+
+            <form id="waitlist-form" class="form-grid">
               <div class="field">
-                <label for="email">Team email</label>
+                <label for="email">Work email</label>
                 <input id="email" name="email" type="email" autocomplete="email" placeholder="ops@company.com" required />
               </div>
+
               <div class="field">
                 <label for="company">Company</label>
-                <input id="company" name="company" type="text" autocomplete="organization" placeholder="Northwind Systems" required />
+                <input id="company" name="company" type="text" autocomplete="organization" placeholder="Your company" required />
               </div>
-            </div>
 
-            <div class="field-row">
               <div class="field">
-                <label for="agent-count">How many AI systems or agents are in the first workflow?</label>
-                <input id="agent-count" name="agentCount" type="number" min="1" step="1" placeholder="6" />
-                <small>Used only to size the first evaluation.</small>
+                <label for="agent-count">Agents or hosts in scope</label>
+                <input id="agent-count" name="agentCount" type="number" min="1" step="1" placeholder="5" />
               </div>
+
               <div class="field">
-                <label for="workflow">What kind of workflow is it?</label>
+                <label for="workflow">Workflow type</label>
                 <select id="workflow" name="workflow">
                   <option value="hosted-beta-partner-handoff">Partner handoff</option>
                   <option value="hosted-beta-operator-eval">Operator evaluation</option>
@@ -787,282 +110,63 @@
                   <option value="hosted-beta-compliance">Compliance-sensitive workflow</option>
                 </select>
               </div>
-            </div>
 
-            <div class="field">
-              <label for="notes">What is the first handoff you want to make reliable?</label>
-              <textarea id="notes" name="notes" placeholder="Example: procurement asks a partner for stock and delivery, then finance needs an approval step before purchase."></textarea>
-              <small>This summary goes straight into operator review, so keep it short and specific.</small>
-            </div>
-
-            <div class="submit-row">
-              <button class="btn primary" id="submit-button" type="submit">Request hosted beta</button>
-              <a class="btn ghost" data-beam-cta="hosted_beta_guided_eval_form" href="/guided-evaluation.html">See the guided evaluation first</a>
-            </div>
-          </form>
-
-          <div id="form-status" class="status" aria-live="polite"></div>
-        </div>
-      </section>
-
-      <section class="proof-section">
-        <div class="section-head">
-          <div class="section-kicker">The proof Beam already shows</div>
-          <h2>You should expect Beam to show its work.</h2>
-          <p>
-            These are real screenshots from the current hosted-demo baseline. That is the bar: the
-            pilot should preserve the same traceability and operator visibility, just scoped to your
-            workflow.
-          </p>
-        </div>
-
-        <div class="proof-grid">
-          <figure class="proof-card overview">
-            <img src="/assets/dashboard-overview.png" alt="Beam dashboard overview showing a healthy baseline, no active alerts, and no stuck work." />
-            <figcaption class="proof-copy">
-              <strong>Overview baseline</strong>
-              <p>The current hosted-demo baseline shows a healthy system with clear operator state. A guided pilot should stay that understandable.</p>
-              <div class="proof-pills">
-                <div class="proof-pill">0 alerts</div>
-                <div class="proof-pill">0 stuck handoffs</div>
-                <div class="proof-pill">4 live agents</div>
+              <div class="field">
+                <label for="notes">Workflow shape</label>
+                <textarea id="notes" name="notes" placeholder="Example: support agent asks a partner agent for an answer, then an owner needs the trace before approving the reply."></textarea>
               </div>
-            </figcaption>
-          </figure>
 
-          <figure class="proof-card trace">
-            <img src="/assets/dashboard-trace.png" alt="Beam dashboard trace view for one quote request showing each stage from arrival to completion." />
-            <figcaption class="proof-copy">
-              <strong>Request-level trace</strong>
-              <p>The canonical quote request is inspectable step by step. Hosted beta only matters if that same operator surface survives first contact with your workflow.</p>
-            </figcaption>
-          </figure>
+              <button class="btn dark" id="submit-button" type="submit">Request pilot</button>
+            </form>
+
+            <div id="form-status" class="status" aria-live="polite"></div>
+          </section>
         </div>
       </section>
 
-      <section class="expect-section">
-        <div class="section-head">
-          <div class="section-kicker">What hosted beta is</div>
-          <h2>Use hosted beta for one narrow rollout, then widen only after it works.</h2>
-        </div>
-
-          <div class="expect-grid">
-          <div class="expect-card">
-            <div class="section-kicker">01 · what you get</div>
-            <h3>Managed Beam surfaces plus a proof pack</h3>
-            <p>Directory, dashboard, intake, and operator guidance stay aligned to the same proof path used on the public site, and the first pilot ends with something your team can reuse.</p>
-            <ul>
-              <li>Managed directory and dashboard instead of only self-hosting.</li>
-              <li>Operator runbook, demo path, and rollout guidance around one workflow.</li>
-              <li>Workflow recap, proof links, and an explicit next-step recommendation.</li>
-              <li>Support for traces, alerts, stuck-work queues, rate limits, and recovery.</li>
-            </ul>
+      <section class="section dark">
+        <div class="container">
+          <div class="section-head reveal">
+            <div>
+              <div class="eyebrow">Pilot output</div>
+              <h2>What the owner should receive.</h2>
+            </div>
+            <p>
+              A pilot is useful only if it leaves a decision trail. Beam keeps the artifacts close to the work.
+            </p>
           </div>
 
-          <div class="expect-card">
-            <div class="section-kicker">02 · what you bring</div>
-            <h3>One real handoff</h3>
-            <p>Beam is sharpest when the scope stays narrow: one sender, one recipient, one workflow, one operator owner.</p>
-            <ul>
-              <li>The sender and recipient agents you actually want to connect.</li>
-              <li>A concrete success condition beyond “messages can be exchanged.”</li>
-              <li>The operator who needs visibility when the flow fails or stalls.</li>
-            </ul>
-          </div>
-
-          <div class="expect-card">
-            <div class="section-kicker">03 · how we work together</div>
-            <h3>Start narrow and stay honest</h3>
-            <p>Hosted beta is a guided design-partner engagement. The first job is to decide whether one narrow workflow is worth a real pilot.</p>
-            <ul>
-              <li>Run the hosted demo first if the use case is still fuzzy.</li>
-              <li>Use the intake to scope one workflow, not a broad platform conversation.</li>
-              <li>Treat pricing and rollout as workflow-scoped, not as an open-ended beta promise.</li>
-              <li>End the first pilot with a go, no-go, or narrower next step instead of a vague follow-up thread.</li>
-            </ul>
-          </div>
-          </div>
-
-          <div class="proof-grid" style="margin-top: 18px;">
-            <div class="expect-card">
-              <div class="section-kicker">Before the call</div>
-              <h3>Every serious evaluation starts with the same pack.</h3>
-              <p>The onboarding pack sets scope, prerequisites, proof expectations, and common operator follow-up states before anyone is on a call.</p>
+          <div class="screens">
+            <div class="screen-frame reveal">
+              <img src="/assets/dashboard-trace.png" alt="Beam trace and support proof" loading="lazy" />
+            </div>
+            <div class="screen-copy reveal">
+              <span class="mono">deliverables</span>
+              <h2>Trace. Audit. Support.</h2>
               <ul>
-                <li>One workflow, one owner, one success condition</li>
-                <li>What proof Beam should show during the walkthrough</li>
-                <li>What the buyer should take away after the first pilot</li>
-                <li>What happens after the call if the fit is real</li>
+                <li>A completed intent trace with sender, receiver, type, status, and timing.</li>
+                <li>A support bundle or fleet handoff that answers a real debug question.</li>
+                <li>A recommendation: stop, repair, or expand the workflow.</li>
               </ul>
-              <div class="submit-row" style="margin-top: 18px;">
-                <a class="btn ghost" href="https://docs.beam.directory/guide/production-partner-workflow">Open workflow contract</a>
-                <a class="btn ghost" href="https://docs.beam.directory/guide/design-partner-onboarding">Open onboarding pack</a>
-              </div>
             </div>
           </div>
-      </section>
-
-      <section class="faq-section" id="faq">
-        <div class="section-head">
-          <div class="section-kicker">Common questions</div>
-          <h2>Short answers before you fill out the form.</h2>
-          <p>
-            The fastest way to a good Beam conversation is one workflow, one owner, and one clear
-            reason the handoff matters.
-          </p>
-        </div>
-
-        <div class="faq-grid">
-          <div class="faq-card">
-            <h3>Do we need to self-host Beam to start?</h3>
-            <p>
-              No. Hosted beta is the guided path. Self-hosting is still available later if you need
-              deeper control after the workflow is proven.
-            </p>
-          </div>
-          <div class="faq-card">
-            <h3>Do we need many agents for the first pilot?</h3>
-            <p>
-              No. One sender and one recipient is enough. Beam is easier to evaluate when the first
-              pilot stays narrow.
-            </p>
-          </div>
-          <div class="faq-card">
-            <h3>How long does the first evaluation usually take?</h3>
-            <p>
-              The first step is a short fit conversation. If there is a fit, Beam scopes one
-              workflow before anything broader.
-            </p>
-          </div>
-          <div class="faq-card">
-            <h3>What should come out of the first pilot?</h3>
-            <p>
-              A short workflow recap, proof links from the operator surface, and one clear next
-              decision. If Beam cannot produce that, the pilot stayed too fuzzy.
-            </p>
-          </div>
-          <div class="faq-card">
-            <h3>How does pricing work right now?</h3>
-            <p>
-              Hosted beta is currently a guided design-partner engagement. Scope and pricing depend
-              on workflow complexity, so the intake form is the first qualification step.
-            </p>
-          </div>
         </div>
       </section>
-    </div>
-  </main>
+    </main>
 
-  <script src="/beam-analytics.js"></script>
-  <script>
-    function resolveDirectoryApiBase() {
-      if (window.location.hostname === 'localhost') {
-        return 'http://localhost:43100'
-      }
-
-      if (window.location.hostname === '127.0.0.1') {
-        return 'http://127.0.0.1:43100'
-      }
-
-      return 'https://api.beam.directory'
-    }
-
-    const API_BASE = resolveDirectoryApiBase()
-    const form = document.getElementById('waitlist-form')
-    const submitButton = document.getElementById('submit-button')
-    const formStatus = document.getElementById('form-status')
-    const WORKFLOW_LABELS = {
-      'hosted-beta-partner-handoff': 'Partner handoff',
-      'hosted-beta-operator-eval': 'Operator evaluation',
-      'hosted-beta-managed-rollout': 'Managed rollout',
-      'hosted-beta-compliance': 'Compliance-sensitive workflow',
-    }
-
-    function setStatus(type, html) {
-      formStatus.className = `status visible ${type}`
-      formStatus.innerHTML = html
-    }
-
-    form.addEventListener('submit', async (event) => {
-      event.preventDefault()
-
-      const formData = new FormData(form)
-      const email = String(formData.get('email') || '').trim().toLowerCase()
-      const company = String(formData.get('company') || '').trim()
-      const workflow = String(formData.get('workflow') || 'hosted-beta-partner-handoff')
-      const workflowLabel = WORKFLOW_LABELS[workflow] || 'Hosted beta workflow'
-      const agentCountRaw = String(formData.get('agentCount') || '').trim()
-      const agentCount = agentCountRaw ? Number.parseInt(agentCountRaw, 10) : null
-      const notes = String(formData.get('notes') || '').trim()
-
-      submitButton.disabled = true
-      submitButton.textContent = 'Submitting...'
-      setStatus('success', 'Submitting hosted beta request...')
-
-      try {
-        const response = await fetch(`${API_BASE}/waitlist`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            email,
-            company: company || null,
-            source: 'hosted-beta-page',
-            agentCount: Number.isFinite(agentCount) ? agentCount : null,
-            workflowType: workflow,
-            workflowSummary: notes || null,
-            analyticsSessionId: window.beamAnalytics?.sessionId || null,
-            pageKey: window.beamAnalytics?.pageKey || 'hosted_beta',
-          }),
-        })
-
-        const payload = await response.json()
-
-        if (!response.ok || !payload.ok) {
-          throw new Error(payload.error || 'Hosted beta request failed')
-        }
-
-        const request = payload.request || null
-        const createdAt = request?.createdAt ? new Date(request.createdAt).toLocaleString('en-US', {
-          dateStyle: 'medium',
-          timeStyle: 'short',
-        }) : null
-        const nextStep = payload.nextStep || 'Beam will review the workflow, send the onboarding pack, and follow up with the next concrete step.'
-
-        if (payload.status === 'already_registered') {
-          setStatus(
-            'success',
-            `<strong>You are already on the hosted beta list.</strong><br />` +
-            `Beam refreshed the latest workflow context for <code>${email}</code> and kept the original intake.` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Expected outcome: workflow recap, proof links, and one next-step decision.</span>` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
-            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Original intake: ${createdAt}</span>` : ''),
-          )
-        } else {
-          setStatus(
-            'success',
-            `<strong>Hosted beta request recorded.</strong><br />` +
-            `Beam queued <strong>${workflowLabel}</strong> for <strong>${company}</strong>.` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Next: ${nextStep}</span>` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Expected outcome: workflow recap, proof links, and one next-step decision.</span>` +
-            `<br /><span style="color: inherit; opacity: 0.8;">Reference pack: <a href="https://docs.beam.directory/guide/design-partner-onboarding" target="_blank" rel="noreferrer">design-partner onboarding</a></span>` +
-            (createdAt ? `<br /><span style="color: inherit; opacity: 0.8;">Recorded: ${createdAt}</span>` : ''),
-          )
-          form.reset()
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : 'Hosted beta request failed'
-        setStatus(
-          'error',
-          `<strong>Submission failed.</strong><br />${message}. If you are previewing locally, make sure the directory is reachable at <code>${API_BASE}</code>.`,
-        )
-      } finally {
-        submitButton.disabled = false
-        submitButton.textContent = 'Request hosted beta'
-      }
-    })
-  </script>
+    <footer class="footer">
+      <div class="container footer-inner">
+        <span>Beam Protocol</span>
+        <div class="footer-links">
+          <a href="/privacy.html">Privacy</a>
+          <a href="/terms.html">Terms</a>
+          <a href="/blog/">Blog</a>
+          <a href="/status.html">Status</a>
+          <a href="https://github.com/Beam-directory/beam-protocol">GitHub</a>
+          <a href="https://docs.beam.directory">Docs</a>
+        </div>
+      </div>
+    </footer>
+  </div>
 </body>
 </html>

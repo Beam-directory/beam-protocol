@@ -1,6 +1,10 @@
 (function () {
   const DNT = navigator.doNotTrack === '1' || window.doNotTrack === '1' || navigator.msDoNotTrack === '1'
-  if (DNT) {
+  const LOCAL_PREVIEW_HOSTS = new Set(['localhost', '127.0.0.1', '::1'])
+  const localPreview = LOCAL_PREVIEW_HOSTS.has(window.location.hostname)
+  const localAnalyticsEnabled = new URLSearchParams(window.location.search).get('analytics') === '1'
+
+  if (DNT || (localPreview && !localAnalyticsEnabled)) {
     window.beamAnalytics = {
       disabled: true,
       pageKey: null,

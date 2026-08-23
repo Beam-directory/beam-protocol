@@ -5,6 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Beam Directory Status</title>
   <meta name="description" content="Live aggregate operational status for beam.directory and the public Beam API." />
+  <meta property="og:title" content="Beam Status | Public Service Health" />
+  <meta property="og:description" content="Live aggregate health, protocol, release, and availability checks for Beam's public services." />
+  <meta property="og:image" content="https://beam.directory/og-image.png" />
+  <meta property="og:url" content="https://beam.directory/status.html" />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary_large_image" />
+  <link rel="canonical" href="https://beam.directory/status.html" />
   <style>
     :root {
       --bg: #081018;
@@ -58,9 +65,11 @@
       .hero, .grid, .checks { grid-template-columns: 1fr; }
     }
   </style>
+  <link rel="stylesheet" href="/beam-pages.css" />
+  <script defer src="/beam-motion.js"></script>
 </head>
-<body>
-  <div class="shell">
+<body class="beam-status">
+  <main class="shell" id="main">
     <div class="topbar">
       <a class="brand" href="/">beam.directory</a>
       <div class="links">
@@ -137,7 +146,16 @@
         <p class="mono" id="stats-payload">No aggregate payload yet.</p>
       </div>
     </section>
-  </div>
+    <footer class="beam-subfooter">
+      <span>Beam Protocol · public aggregate status</span>
+      <nav aria-label="Footer navigation">
+        <a href="/guided-evaluation.html">Evaluation</a>
+        <a href="/playground.html">Playground</a>
+        <a href="/blog/">Blog</a>
+        <a href="https://docs.beam.directory">Docs</a>
+      </nav>
+    </footer>
+  </main>
 
   <script>
     const HEALTH_URL = 'https://api.beam.directory/health';

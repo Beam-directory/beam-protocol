@@ -2,23 +2,32 @@ import { defineConfig } from 'vitepress'
 
 export default defineConfig({
   title: 'Beam Protocol',
-  description: 'Verified B2B handoffs for AI agents',
+  description: 'The trust layer for AI agents',
   ignoreDeadLinks: true,
   cleanUrls: true,
   lastUpdated: true,
   head: [
-    ['script', { src: 'https://beam.directory/beam-analytics.js', defer: '' }],
+    ['script', {}, `if (!['localhost', '127.0.0.1', '::1'].includes(location.hostname)) {
+      const analytics = document.createElement('script')
+      analytics.src = 'https://beam.directory/beam-analytics.js'
+      analytics.defer = true
+      document.head.appendChild(analytics)
+    }`],
+    ['link', { rel: 'preconnect', href: 'https://fonts.googleapis.com' }],
+    ['link', { rel: 'preconnect', href: 'https://fonts.gstatic.com', crossorigin: '' }],
+    ['link', { rel: 'stylesheet', href: 'https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap' }],
   ],
   sitemap: {
     hostname: 'https://docs.beam.directory',
   },
   themeConfig: {
-    siteTitle: 'Beam Protocol Docs',
+    siteTitle: 'Beam Docs',
     nav: [
-      { text: 'Guide', link: '/guide/partner-handoff' },
+      { text: 'Evaluate', link: 'https://beam.directory/guided-evaluation.html' },
+      { text: 'Guide', link: '/guide/getting-started' },
       { text: 'API', link: '/api/typescript' },
       { text: 'Security', link: '/security/overview' },
-      { text: 'RFC', link: 'https://github.com/Beam-directory/beam-protocol/blob/main/spec/RFC-0003.md' }
+      { text: 'Status', link: 'https://beam.directory/status.html' }
     ],
     sidebar: [
       { text: 'Guide', items: [

@@ -38,17 +38,17 @@ function RequireAdminSession({ children }: { children: JSX.Element }) {
     return (
       <div className="relative min-h-screen overflow-hidden bg-transparent text-slate-950 dark:text-slate-50">
         <div className="pointer-events-none fixed inset-0 overflow-hidden">
-          <div className="absolute -left-20 top-0 h-72 w-72 rounded-full bg-orange-500/12 blur-3xl" style={{ animation: 'beam-float 12s ease-in-out infinite' }} />
+          <div className="absolute -left-20 top-0 h-72 w-72 rounded-full bg-blue-500/12 blur-3xl" style={{ animation: 'beam-float 12s ease-in-out infinite' }} />
           <div className="absolute right-[-4rem] top-16 h-96 w-96 rounded-full bg-cyan-400/10 blur-3xl" style={{ animation: 'beam-float 16s ease-in-out infinite' }} />
           <div className="beam-grid-lines absolute inset-0 opacity-45 dark:opacity-20" />
         </div>
         <div className="relative flex min-h-screen items-center justify-center px-6 py-10">
           <div className="panel w-full max-w-md px-6 py-8 text-center sm:px-8">
-            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-orange-500 text-white shadow-[0_24px_60px_rgba(249,115,22,0.35)]">
+            <div className="mx-auto flex h-14 w-14 items-center justify-center rounded-2xl bg-blue-600 text-white shadow-[0_24px_60px_rgba(31,94,255,0.32)]">
               <Radio size={22} />
             </div>
-            <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.34em] text-orange-600 dark:text-orange-300">
-              Beam Control Plane
+            <div className="mt-5 text-[11px] font-semibold uppercase tracking-[0.34em] text-blue-600 dark:text-blue-300">
+              Beam Operator Console
             </div>
             <div className="mt-3 text-2xl font-semibold tracking-[-0.04em] text-slate-950 dark:text-white">
               Restoring your operator session
