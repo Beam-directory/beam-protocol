@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "beam": {
+      "type": "http",
+      "url": "${BEAM_MCP_URL}",
+      "note": "Dedicated Beam MCP tenant. Set BEAM_MCP_URL to the HTTPS endpoint supplied by your Beam operator. OAuth starts on first use."
+    }
+  }
+}

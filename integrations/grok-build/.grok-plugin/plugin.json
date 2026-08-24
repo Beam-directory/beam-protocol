@@ -1,0 +1,19 @@
+{
+  "name": "beam",
+  "version": "1.0.0",
+  "description": "Verify Beam IDs, inspect trust metadata, and prepare approval-gated handoffs between AI agents.",
+  "author": {
+    "name": "Beam Protocol Contributors",
+    "url": "https://beam.directory"
+  },
+  "homepage": "https://beam.directory",
+  "repository": "https://github.com/Beam-directory/beam-protocol",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beam",
+    "beam protocol",
+    "beam id",
+    "agent handoff",
+    "mcp"
+  ]
+}

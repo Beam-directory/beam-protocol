@@ -74,6 +74,21 @@ The Beam Directory separately records the signed handoff lifecycle. Keep the OAu
 
 ## Configure and connect
 
+### Grok Build plugin
+
+The Beam-maintained Grok Build plugin lives under
+[`integrations/grok-build`](https://github.com/Beam-directory/beam-protocol/tree/main/integrations/grok-build).
+It bundles the Beam workflow skill, a guided onboarding command, and a remote
+MCP definition. Set `BEAM_MCP_URL` to the operator-supplied dedicated tenant
+URL before starting Grok. The plugin does not default to the COPPEN pilot or
+another organization's connector.
+
+The plugin does not contain executable hooks, install scripts, credentials, or
+a shared signing identity. OAuth remains between Grok and the configured
+dedicated tenant.
+
+### Direct connector setup
+
 Use the full environment reference and security gates in the [`@beam-protocol/mcp-server` README](https://github.com/Beam-directory/beam-protocol/tree/main/packages/mcp-server).
 The repository also includes a hardened dedicated-tenant Compose baseline under
 `ops/mcp-tenant`. It binds only to loopback, mounts all secrets as files, runs

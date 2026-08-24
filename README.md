@@ -79,6 +79,7 @@ For the full three-agent flow, see [`examples/partner-handoff`](./examples/partn
 
 Beam is the trust and delivery layer, not a replacement for an assistant protocol. The repository now includes:
 
+- [Beam for Grok Build](./integrations/grok-build/README.md), the installable plugin for Beam ID lookup and approval-gated MCP handoffs.
 - [`@beam-protocol/mcp-server`](./packages/mcp-server/README.md) for local or dedicated-tenant, OAuth-protected, approval-gated handoffs from Grok and other MCP clients.
 - [`@beam-protocol/a2a-adapter`](./packages/a2a-adapter/README.md) for bounded mappings between current A2A v1 messages/tasks and signed Beam handoffs.
 - [Trust and assurance guidance](./docs/guide/trust-assurance.md) that separates human, organization, agent, runtime, and delegated authority.
