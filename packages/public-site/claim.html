@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.beam.directory http://localhost:3100; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <title>Claim your Beam</title>
+  <meta name="description" content="Claim your private, email-verified Beam identity." />
+  <meta name="theme-color" content="#07100d" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2218%22 fill=%22%2307110e%22/><path d=%22M17 46V18h10c7 0 11 3 11 8 0 3-2 6-5 7 5 1 7 4 7 8 0 6-4 9-12 9H17zm7-17h3c3 0 4-1 4-3s-1-3-4-3h-3v6zm0 15h4c3 0 5-1 5-4s-2-4-5-4h-4v8z%22 fill=%22%23b8ff6a%22/></svg>" />
+  <link rel="stylesheet" href="/claim.css" />
+  <script defer src="/claim.js"></script>
+</head>
+<body class="claim-page">
+  <a class="skip-link" href="#claim-main">Skip to claim form</a>
+  <header class="beam-header claim-header">
+    <a class="beam-brand" href="/" aria-label="Beam home">
+      <span class="beam-brand-mark" aria-hidden="true">B</span>
+      <span>BEAM</span>
+    </a>
+    <a class="claim-header-link" href="/">What is Beam? <span aria-hidden="true">↗</span></a>
+  </header>
+
+  <main id="claim-main" class="claim-shell">
+    <section class="claim-context" aria-labelledby="claim-title">
+      <p class="eyebrow"><span></span> Personal identity</p>
+      <h1 id="claim-title">CLAIM<br />YOUR <em>BEAM.</em></h1>
+      <p class="claim-context-copy">Your verified identity for people, companies, and the agents you trust.</p>
+
+      <div class="claim-beacon" aria-hidden="true">
+        <span class="beacon-ring ring-a"></span>
+        <span class="beacon-ring ring-b"></span>
+        <span class="beacon-ring ring-c"></span>
+        <span class="beacon-core">B</span>
+        <span class="beacon-label">YOUR PLACE<br />IN THE NETWORK</span>
+      </div>
+
+      <ul class="claim-promises">
+        <li><span>01</span><p><strong>Email verified</strong>Your address proves initial control.</p></li>
+        <li><span>02</span><p><strong>Private by default</strong>You stay unlisted until you choose otherwise.</p></li>
+        <li><span>03</span><p><strong>Your key, your identity</strong>It is created on this device, never on our server.</p></li>
+      </ul>
+    </section>
+
+    <section class="claim-panel" aria-label="Claim your personal Beam">
+      <div class="claim-progress" aria-label="Claim progress">
+        <span class="progress-step is-active" data-progress="1"><i>1</i> Choose</span>
+        <span class="progress-line"></span>
+        <span class="progress-step" data-progress="2"><i>2</i> Verify</span>
+        <span class="progress-line"></span>
+        <span class="progress-step" data-progress="3"><i>3</i> Yours</span>
+      </div>
+
+      <div class="claim-state" data-state="start">
+        <div class="panel-heading">
+          <p class="panel-kicker">01 · CHOOSE YOUR IDENTITY</p>
+          <h2>What should the network call you?</h2>
+          <p>No wallet. No connector. No technical setup.</p>
+        </div>
+
+        <form id="claim-form" novalidate>
+          <label class="claim-field">
+            <span>Your name</span>
+            <input name="displayName" type="text" autocomplete="name" minlength="2" maxlength="80" placeholder="Tobias Kub" required />
+          </label>
+          <label class="claim-field beam-name-field">
+            <span>Your Beam name</span>
+            <span class="beam-input-wrap">
+              <input name="handle" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[a-z0-9](?:[a-z0-9_]|-){1,30}[a-z0-9]" placeholder="tobias" required />
+              <strong>@beam.directory</strong>
+            </span>
+            <small>Lowercase letters, numbers, hyphens, or underscores.</small>
+          </label>
+          <label class="claim-field">
+            <span>Email</span>
+            <input name="email" type="email" autocomplete="email" placeholder="you@company.com" required />
+            <small>We send one confirmation link. Your Beam starts unlisted.</small>
+          </label>
+
+          <div class="form-error" id="form-error" role="alert" hidden></div>
+          <button class="claim-submit" type="submit">
+            <span>Continue</span><i aria-hidden="true">↗</i>
+          </button>
+        </form>
+
+        <div class="claim-separator"><span>CLAIMING FOR A COMPANY?</span></div>
+        <a class="organization-path" href="/register.html">
+          <span><strong>Connect a company agent</strong><small>For teams with an existing verified namespace</small></span>
+          <i aria-hidden="true">→</i>
+        </a>
+      </div>
+
+      <div class="claim-state" data-state="email" hidden>
+        <div class="state-symbol mail-symbol" aria-hidden="true"><span></span></div>
+        <p class="panel-kicker">02 · CHECK YOUR EMAIL</p>
+        <h2>Your Beam is waiting.</h2>
+        <p>We sent a private confirmation link for <strong id="requested-beam-id"></strong>. It expires in 30 minutes.</p>
+        <div class="email-check-list">
+          <span><i>✓</i> Name reserved temporarily</span>
+          <span><i>✓</i> No identity created yet</span>
+          <span><i>✓</i> Link works once</span>
+        </div>
+        <button class="text-button" type="button" data-action="restart">Use a different name <span>→</span></button>
+      </div>
+
+      <div class="claim-state" data-state="confirm" hidden>
+        <div class="state-symbol verify-symbol" aria-hidden="true"><span>✓</span></div>
+        <p class="panel-kicker">02 · EMAIL CONFIRMED</p>
+        <h2>This Beam is ready for you.</h2>
+        <div class="identity-preview">
+          <small>YOUR BEAM ID</small>
+          <strong id="confirmed-beam-id"></strong>
+          <span><i>✓</i> <span id="confirmed-email"></span></span>
+        </div>
+        <p class="confirm-note">When you continue, this device creates your identity key. Beam receives only the public half.</p>
+        <div class="form-error" id="confirm-error" role="alert" hidden></div>
+        <button class="claim-submit" id="complete-claim" type="button">
+          <span>Create my Beam</span><i aria-hidden="true">↗</i>
+        </button>
+      </div>
+
+      <div class="claim-state" data-state="complete" hidden>
+        <div class="completion-orbit" aria-hidden="true"><span>B</span></div>
+        <p class="panel-kicker">03 · YOURS</p>
+        <h2>Welcome to Beam.</h2>
+        <div class="claimed-identity">
+          <small>YOUR VERIFIED IDENTITY</small>
+          <strong id="claimed-beam-id"></strong>
+          <span id="claimed-did"></span>
+          <div><i>✓</i> EMAIL VERIFIED <i>✓</i> PRIVATE</div>
+        </div>
+        <p>Your recovery kit contains the only copy of your private identity credential. Keep it private.</p>
+        <button class="recovery-button" id="download-recovery" type="button"><span>Save recovery kit</span><i aria-hidden="true">↓</i></button>
+        <a class="text-button result-home" href="/">Explore the Beam network <span>→</span></a>
+      </div>
+
+      <div class="claim-state" data-state="invalid" hidden>
+        <div class="state-symbol invalid-symbol" aria-hidden="true"><span>×</span></div>
+        <p class="panel-kicker">LINK UNAVAILABLE</p>
+        <h2>This claim link has expired.</h2>
+        <p>Claim links work once and expire after 30 minutes. Start again to request a fresh one.</p>
+        <a class="claim-submit anchor-submit" href="/claim.html"><span>Start again</span><i aria-hidden="true">↗</i></a>
+      </div>
+
+      <div class="claim-loading" id="claim-loading" hidden aria-live="polite">
+        <span class="loading-beam" aria-hidden="true"></span>
+        <p>Checking your Beam…</p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="claim-footer">
+    <span>Beam identities are not government IDs.</span>
+    <nav><a href="/privacy.html">Privacy</a><a href="/terms.html">Terms</a><a href="/status.html">Status</a></nav>
+  </footer>
+  <div class="sr-only" id="claim-announcer" aria-live="polite"></div>
+</body>
+</html>

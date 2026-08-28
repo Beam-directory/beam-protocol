@@ -114,6 +114,38 @@ async function sendEmailMessage(
   return false
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;')
+}
+
+export async function sendIdentityClaimEmail(input: {
+  email: string
+  displayName: string
+  beamId: string
+  url: string
+}): Promise<boolean> {
+  const safeName = escapeHtml(input.displayName)
+  const safeBeamId = escapeHtml(input.beamId)
+  const safeUrl = escapeHtml(input.url)
+  const message = {
+    from: getSmtpConfig().from ?? undefined,
+    to: input.email,
+    subject: `Claim ${input.beamId}`,
+    text: `Hi ${input.displayName}, confirm this email address to claim ${input.beamId}: ${input.url}\n\nThis link expires in 30 minutes. If you did not request it, you can ignore this email.`,
+    html: `<p>Hi ${safeName},</p><p>Confirm this email address to claim <strong>${safeBeamId}</strong>.</p><p><a href="${safeUrl}">Claim your Beam</a></p><p>This link expires in 30 minutes. If you did not request it, you can ignore this email.</p>`,
+  }
+
+  return sendEmailMessage(
+    message,
+    'Identity claim delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+  )
+}
+
 export async function sendAgentVerificationEmail(input: {
   email: string
   beamId: string

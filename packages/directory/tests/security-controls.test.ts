@@ -142,6 +142,34 @@ describe('public endpoint abuse controls', () => {
     expect(second.status).toBe(201)
   })
 
+  it('uses the Fly-provided client address before spoofable forwarded values', async () => {
+    updatePublicEndpointShieldPolicy(db, { registrationPerMinute: 1 })
+    const app = createApp(db)
+    const identity = generateIdentity()
+
+    const first = await app.request(new Request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'fly-client-ip': '203.0.113.90',
+        'x-forwarded-for': '198.51.100.1',
+      },
+      body: JSON.stringify(buildRegisterBody('fly-client-1@beam.directory', identity.publicKey)),
+    }))
+    const second = await app.request(new Request('http://localhost/agents/register', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'fly-client-ip': '203.0.113.90',
+        'x-forwarded-for': '198.51.100.2',
+      },
+      body: JSON.stringify(buildRegisterBody('fly-client-2@beam.directory', identity.publicKey)),
+    }))
+
+    expect(first.status).toBe(201)
+    expect(second.status).toBe(429)
+  })
+
   it('degrades malformed registration bursts gracefully', async () => {
     updatePublicEndpointShieldPolicy(db, { registrationPerMinute: 2 })
     const app = createApp(db)

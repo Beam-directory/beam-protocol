@@ -11,6 +11,7 @@ build/
 # Test coverage
 coverage/
 .nyc_output/
+output/playwright/
 
 # Environment variables
 .env

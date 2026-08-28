@@ -17,7 +17,10 @@ type BucketSpec = {
 
 function getClientIp(req: Request): string {
   return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    // Fly Proxy provides a non-client-controlled address for the production
+    // deployment. X-Forwarded-For remains a fallback for local/test proxies.
+    req.headers.get('fly-client-ip')?.trim()
+    ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? req.headers.get('x-real-ip')
     ?? 'unknown'
   )
@@ -92,6 +95,24 @@ async function resolveBuckets(
         actorLabel: `ip:${ip}`,
         intentType: 'http.agent.register',
         payload: { path },
+      }],
+    }
+  }
+
+  if (
+    (method === 'POST' && path === '/identity-claims')
+    || (method === 'POST' && path === '/identity-claims/inspect')
+    || (method === 'POST' && path === '/identity-claims/complete')
+  ) {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'identity-claim',
+        limit: policy.registrationPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.identity.claim',
+        payload: { path, method },
       }],
     }
   }

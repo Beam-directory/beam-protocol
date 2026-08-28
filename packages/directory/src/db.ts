@@ -17,6 +17,7 @@ import type {
   IntentFrame,
   IntentLogRow,
   IntentTraceEventRow,
+  IdentityClaimRow,
   OperatorNotificationRow,
   OpenClawFleetAlertDeliveryRow,
   OpenClawFleetAlertDeliveryStatus,
@@ -181,6 +182,23 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_verification_tokens_beam_id ON verification_tokens(beam_id);
     CREATE INDEX IF NOT EXISTS idx_verification_tokens_expires_at ON verification_tokens(expires_at);
+
+    CREATE TABLE IF NOT EXISTS identity_claims (
+      token_hash TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_handle
+      ON identity_claims(handle, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_email
+      ON identity_claims(email, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_expires_at
+      ON identity_claims(expires_at);
 
     CREATE TABLE IF NOT EXISTS intent_acls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -2943,6 +2961,125 @@ export function verifyAgentEmailToken(db: DB, token: string): AgentRow | null {
 
   db.prepare('DELETE FROM verification_tokens WHERE token = ?').run(token)
   return getAgent(db, tokenRow.beam_id)
+}
+
+export function createIdentityClaim(
+  db: DB,
+  input: {
+    tokenHash: string
+    email: string
+    handle: string
+    displayName: string
+    expiresAt: number
+  },
+): IdentityClaimRow | null {
+  const createdAt = nowMs()
+  const email = input.email.trim().toLowerCase()
+  const handle = input.handle.trim().toLowerCase()
+  const beamId = `${handle}@beam.directory`
+
+  const create = db.transaction(() => {
+    db.prepare('DELETE FROM identity_claims WHERE expires_at < ? OR consumed_at IS NOT NULL').run(createdAt)
+
+    if (getAgent(db, beamId)) {
+      return null
+    }
+
+    const pendingHandle = db.prepare(`
+      SELECT token_hash, email
+      FROM identity_claims
+      WHERE handle = ? AND consumed_at IS NULL AND expires_at >= ?
+      LIMIT 1
+    `).get(handle, createdAt) as { token_hash: string; email: string } | undefined
+
+    if (pendingHandle) {
+      if (pendingHandle.email !== email) {
+        return null
+      }
+      // The same mailbox may request a fresh link for the same handle without
+      // waiting for the previous link to expire.
+      db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(pendingHandle.token_hash)
+    }
+
+    db.prepare(`
+      INSERT INTO identity_claims (
+        token_hash, email, handle, display_name, created_at, expires_at, consumed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+    `).run(input.tokenHash, email, handle, input.displayName, createdAt, input.expiresAt)
+
+    return db.prepare('SELECT * FROM identity_claims WHERE token_hash = ?')
+      .get(input.tokenHash) as IdentityClaimRow
+  })
+
+  return create()
+}
+
+export function getIdentityClaim(db: DB, tokenHash: string): IdentityClaimRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM identity_claims
+    WHERE token_hash = ? AND consumed_at IS NULL
+  `).get(tokenHash) as IdentityClaimRow | undefined
+
+  if (!row) {
+    return null
+  }
+
+  if (row.expires_at < nowMs()) {
+    db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(tokenHash)
+    return null
+  }
+
+  return row
+}
+
+export function deleteIdentityClaim(db: DB, tokenHash: string): void {
+  db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(tokenHash)
+}
+
+export function completeIdentityClaim(
+  db: DB,
+  input: {
+    tokenHash: string
+    publicKey: string
+    apiKeyHash: string
+    capabilities: string[]
+  },
+): AgentRow | null {
+  const complete = db.transaction(() => {
+    const claim = getIdentityClaim(db, input.tokenHash)
+    if (!claim) {
+      return null
+    }
+
+    const beamId = `${claim.handle}@beam.directory`
+    if (getAgent(db, beamId)) {
+      db.prepare('UPDATE identity_claims SET consumed_at = ? WHERE token_hash = ?')
+        .run(nowMs(), input.tokenHash)
+      return null
+    }
+
+    const agent = registerAgent(db, {
+      beamId,
+      org: 'personal',
+      personal: true,
+      displayName: claim.display_name,
+      capabilities: input.capabilities,
+      publicKey: input.publicKey,
+      apiKeyHash: input.apiKeyHash,
+      email: claim.email,
+      emailVerified: true,
+      verificationTier: 'basic',
+      visibility: 'unlisted',
+      description: 'Personal Beam identity',
+    })
+
+    db.prepare('UPDATE identity_claims SET consumed_at = ? WHERE token_hash = ?')
+      .run(nowMs(), input.tokenHash)
+    return agent
+  })
+
+  return complete()
 }
 
 export function findAgentByHandle(db: DB, handle: string): AgentRow | null {

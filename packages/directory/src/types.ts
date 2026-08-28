@@ -623,6 +623,16 @@ export interface RegisterRequest {
   dhPublicKey?: string | null
 }
 
+export interface IdentityClaimRow {
+  token_hash: string
+  email: string
+  handle: string
+  display_name: string
+  created_at: number
+  expires_at: number
+  consumed_at: number | null
+}
+
 export interface OrgRow {
   name: string
   display_name: string
