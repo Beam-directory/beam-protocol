@@ -1,4 +1,12 @@
-(function () {
+import {
+  enrollDeviceVault,
+  forgetDeviceVault,
+  getDeviceVaultMetadata,
+  isDeviceVaultCapable,
+  unlockDeviceVault,
+} from './device-vault.js'
+
+;(function () {
   const API_BASE = ['localhost', '127.0.0.1'].includes(window.location.hostname)
     ? 'http://localhost:3100'
     : 'https://api.beam.directory'
@@ -10,6 +18,13 @@
     unlockError: document.getElementById('unlock-error'),
     kitInput: document.getElementById('kit-input'),
     kitDrop: document.getElementById('kit-drop'),
+    deviceUnlock: document.getElementById('device-unlock'),
+    deviceUnlockBeamId: document.getElementById('device-unlock-beam-id'),
+    vaultDivider: document.getElementById('vault-divider'),
+    deviceSetup: document.getElementById('device-setup'),
+    enableDeviceVault: document.getElementById('enable-device-vault'),
+    deviceVaultStatus: document.getElementById('device-vault-status'),
+    deviceVaultAction: document.getElementById('device-vault-action'),
     toast: document.getElementById('toast'),
     identityMenu: document.getElementById('identity-menu'),
     searchForm: document.getElementById('beam-search'),
@@ -27,6 +42,8 @@
     privateKey: null,
     me: null,
     connections: [],
+    vaultMetadata: null,
+    vaultCapable: false,
     toastTimer: null,
   }
 
@@ -74,6 +91,94 @@
     state.toastTimer = window.setTimeout(() => {
       elements.toast.hidden = true
     }, 4200)
+  }
+
+  async function refreshDeviceVaultUi() {
+    state.vaultCapable = isDeviceVaultCapable()
+    state.vaultMetadata = null
+
+    if (state.vaultCapable) {
+      try {
+        state.vaultMetadata = await getDeviceVaultMetadata()
+      } catch (error) {
+        if (!state.kit) showUnlockError(error.message || 'The saved Beam device vault is unavailable.')
+      }
+    }
+
+    const hasVault = Boolean(state.vaultMetadata)
+    if (elements.deviceUnlock) elements.deviceUnlock.hidden = !hasVault
+    if (elements.vaultDivider) elements.vaultDivider.hidden = !hasVault
+    if (elements.deviceUnlockBeamId) {
+      elements.deviceUnlockBeamId.textContent = hasVault ? state.vaultMetadata.beamId : ''
+    }
+    if (elements.deviceSetup) {
+      elements.deviceSetup.hidden = !state.kit || !state.vaultCapable || hasVault
+    }
+
+    if (elements.deviceVaultAction && elements.deviceVaultStatus) {
+      elements.deviceVaultAction.classList.toggle('is-forget', hasVault)
+      if (!state.vaultCapable) {
+        elements.deviceVaultStatus.textContent = 'This browser does not support an encrypted passkey vault. Keep using your recovery kit.'
+        elements.deviceVaultAction.textContent = 'Unavailable'
+        elements.deviceVaultAction.disabled = true
+      } else if (hasVault) {
+        const currentIdentity = state.me && state.me.identity && state.me.identity.beamId
+        const matchesCurrentIdentity = !currentIdentity || currentIdentity === state.vaultMetadata.beamId
+        elements.deviceVaultStatus.textContent = matchesCurrentIdentity
+          ? `Ready for ${state.vaultMetadata.beamId}. Your encrypted vault opens only after device confirmation.`
+          : `This device currently opens ${state.vaultMetadata.beamId}. Forget it before saving another Beam.`
+        elements.deviceVaultAction.textContent = 'Forget this device'
+        elements.deviceVaultAction.disabled = false
+      } else {
+        elements.deviceVaultStatus.textContent = 'Use a passkey to keep an encrypted Beam vault on this device.'
+        elements.deviceVaultAction.textContent = 'Enable passkey'
+        elements.deviceVaultAction.disabled = !state.kit
+      }
+    }
+  }
+
+  async function enableVault(button) {
+    if (!state.kit) throw new Error('Open your Beam before enabling this device.')
+    if (state.vaultMetadata) throw new Error('Forget the existing device vault before saving another Beam.')
+    button.disabled = true
+    try {
+      showLoading(true, 'Protecting this device…')
+      await enrollDeviceVault(state.kit)
+      await refreshDeviceVaultUi()
+      toast('This device can now open your Beam with a passkey.')
+    } finally {
+      showLoading(false)
+      button.disabled = false
+    }
+  }
+
+  async function forgetVault(button) {
+    const confirmed = window.confirm('Forget the encrypted Beam vault on this device? You will need your recovery kit next time.')
+    if (!confirmed) return
+    button.disabled = true
+    try {
+      await forgetDeviceVault()
+      await refreshDeviceVaultUi()
+      toast('This device no longer keeps an encrypted Beam vault.')
+    } finally {
+      button.disabled = false
+    }
+  }
+
+  async function unlockWithDevice() {
+    if (!elements.deviceUnlock) return
+    elements.deviceUnlock.disabled = true
+    showUnlockError('')
+    showLoading(true, 'Confirming this device…')
+    try {
+      const kit = await unlockDeviceVault()
+      await openKit(kit, { deviceUnlock: true })
+    } catch (error) {
+      showUnlockError(error.message || 'This device could not open your Beam.')
+    } finally {
+      showLoading(false)
+      elements.deviceUnlock.disabled = false
+    }
   }
 
   function base64ToBytes(value) {
@@ -423,7 +528,7 @@
     }
   }
 
-  async function openKit(kit) {
+  async function openKit(kit, options) {
     showUnlockError('')
     showLoading(true, 'Verifying your identity…')
     try {
@@ -438,7 +543,14 @@
       if (elements.unlock) elements.unlock.hidden = true
       if (elements.app) elements.app.hidden = false
       window.history.replaceState(null, '', '/network.html')
-      toast(`Welcome back, ${state.me.identity.displayName}.`)
+      await refreshDeviceVaultUi()
+      if (options && options.freshClaim && state.vaultCapable && !state.vaultMetadata) {
+        toast('Beam is open. Enable a passkey once to make the next visit instant.')
+      } else if (options && options.deviceUnlock) {
+        toast(`Opened securely for ${state.me.identity.displayName}.`)
+      } else {
+        toast(`Welcome back, ${state.me.identity.displayName}.`)
+      }
     } catch (error) {
       state.kit = null
       state.privateKey = null
@@ -468,7 +580,7 @@
     }
   }
 
-  function closeSession() {
+  async function closeSession() {
     state.kit = null
     state.privateKey = null
     state.me = null
@@ -479,6 +591,7 @@
     if (elements.searchResults) elements.searchResults.hidden = true
     showView('contacts')
     showUnlockError('')
+    await refreshDeviceVaultUi()
   }
 
   if (elements.kitInput) {
@@ -499,7 +612,31 @@
     }
     elements.kitDrop.addEventListener('drop', (event) => openFile(event.dataTransfer && event.dataTransfer.files[0]))
   }
-  if (elements.identityMenu) elements.identityMenu.addEventListener('click', closeSession)
+  if (elements.identityMenu) {
+    elements.identityMenu.addEventListener('click', () => {
+      closeSession().catch(() => showUnlockError('Beam could not refresh this device state.'))
+    })
+  }
+  if (elements.deviceUnlock) elements.deviceUnlock.addEventListener('click', unlockWithDevice)
+  if (elements.enableDeviceVault) {
+    elements.enableDeviceVault.addEventListener('click', async () => {
+      try {
+        await enableVault(elements.enableDeviceVault)
+      } catch (error) {
+        toast(error.message || 'Beam could not enable this device.', true)
+      }
+    })
+  }
+  if (elements.deviceVaultAction) {
+    elements.deviceVaultAction.addEventListener('click', async () => {
+      try {
+        if (state.vaultMetadata) await forgetVault(elements.deviceVaultAction)
+        else await enableVault(elements.deviceVaultAction)
+      } catch (error) {
+        toast(error.message || 'Beam could not update this device.', true)
+      }
+    })
+  }
   if (elements.searchForm) {
     elements.searchForm.addEventListener('submit', async (event) => {
       event.preventDefault()
@@ -532,7 +669,11 @@
   window.addEventListener('message', (event) => {
     if (event.origin !== window.location.origin || event.source !== window.opener) return
     if (!event.data || event.data.type !== 'beam.identity.handoff') return
-    openKit(event.data.recoveryKit)
+    openKit(event.data.recoveryKit, { freshClaim: true })
+  })
+
+  refreshDeviceVaultUi().catch((error) => {
+    showUnlockError(error.message || 'Beam could not inspect this device.')
   })
 
   if (window.opener && window.location.hash === '#handoff') {

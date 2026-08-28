@@ -54,7 +54,7 @@
         },
         {
           "key": "Permissions-Policy",
-          "value": "camera=(), geolocation=(), microphone=(), payment=(), usb=()"
+          "value": "camera=(), geolocation=(), microphone=(), payment=(), usb=(), publickey-credentials-create=(self), publickey-credentials-get=(self)"
         }
       ]
     }

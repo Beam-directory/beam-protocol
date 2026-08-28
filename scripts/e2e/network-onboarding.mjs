@@ -3,7 +3,7 @@ import { mkdir } from 'node:fs/promises'
 import { resolve } from 'node:path'
 import { chromium } from 'playwright'
 
-const siteUrl = process.env.BEAM_CLAIM_SITE_URL ?? 'http://127.0.0.1:4175'
+const siteUrl = process.env.BEAM_CLAIM_SITE_URL ?? 'http://localhost:4175'
 const outputDir = resolve('output/playwright')
 await mkdir(outputDir, { recursive: true })
 
@@ -75,6 +75,54 @@ try {
     handle: `noah${suffix}`,
     email: `noah-${suffix}@example.com`,
   })
+
+  const webAuthn = await context.newCDPSession(first.network)
+  await webAuthn.send('WebAuthn.enable')
+  await webAuthn.send('WebAuthn.addVirtualAuthenticator', {
+    options: {
+      protocol: 'ctap2',
+      ctap2Version: 'ctap2_1',
+      transport: 'internal',
+      hasResidentKey: true,
+      hasUserVerification: true,
+      hasPrf: true,
+      hasHmacSecret: true,
+      isUserVerified: true,
+      automaticPresenceSimulation: true,
+    },
+  })
+
+  await first.network.locator('#enable-device-vault').click()
+  await first.network.waitForFunction(() => document.getElementById('device-vault-action')?.textContent === 'Forget this device')
+  const storedVault = await first.network.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('beam-device-vault', 1)
+    request.onerror = () => reject(request.error)
+    request.onsuccess = () => {
+      const database = request.result
+      const transaction = database.transaction('vaults', 'readonly')
+      const get = transaction.objectStore('vaults').get('primary')
+      get.onerror = () => reject(get.error)
+      get.onsuccess = () => {
+        resolve(get.result)
+        database.close()
+      }
+    }
+  }))
+  assert.equal(storedVault.beamId, first.beamId)
+  assert.equal(typeof storedVault.ciphertext, 'string')
+  assert.equal(JSON.stringify(storedVault).includes('privateKey'), false)
+  assert.equal(JSON.stringify(storedVault).includes('bk_'), false)
+
+  await first.network.locator('#identity-menu').click()
+  await first.network.locator('#device-unlock').waitFor()
+  await first.network.screenshot({ path: resolve(outputDir, 'beam-network-passkey-unlock.png'), fullPage: true })
+  const reopenPromise = first.network.waitForResponse((response) => response.url().endsWith('/network/me'))
+  await first.network.locator('#device-unlock').click()
+  assert.equal((await reopenPromise).status(), 200)
+  await first.network.getByRole('heading', { name: /your network/i }).waitFor()
+  await first.network.locator('[data-view="profile"]').click()
+  await first.network.screenshot({ path: resolve(outputDir, 'beam-network-passkey-profile.png'), fullPage: true })
+  await first.network.locator('[data-view="contacts"]').click()
 
   await first.network.locator('#search-query').fill(second.beamId)
   const discoverPromise = first.network.waitForResponse((response) => response.url().includes('/network/discover'))
