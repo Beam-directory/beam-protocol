@@ -7,6 +7,7 @@ export interface AgentRecord {
   beam_id: string
   org: string | null
   personal: number
+  identity_kind: BeamIdentityKind
   display_name: string
   capabilities: string[]
   public_key: string
@@ -19,6 +20,8 @@ export interface AgentRecord {
 }
 
 export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
+export type BeamIdentityKind = 'person' | 'organization' | 'agent' | 'service'
+export type BeamConnectionStatus = 'pending' | 'accepted' | 'declined' | 'blocked' | 'cancelled'
 
 export interface IntentFrame {
   v: '1'
@@ -610,6 +613,7 @@ export interface RegisterRequest {
   apiKeyHash?: string | null
   org?: string | null
   personal?: boolean
+  identityKind?: BeamIdentityKind
   email?: string | null
   emailVerified?: boolean
   description?: string | null
@@ -631,6 +635,21 @@ export interface IdentityClaimRow {
   created_at: number
   expires_at: number
   consumed_at: number | null
+}
+
+export interface BeamConnectionRow {
+  connection_id: string
+  pair_key: string
+  requester_beam_id: string
+  recipient_beam_id: string
+  status: BeamConnectionStatus
+  request_message: string | null
+  requester_signature: string
+  response_signature: string | null
+  blocked_by_beam_id: string | null
+  created_at: string
+  updated_at: string
+  responded_at: string | null
 }
 
 export interface OrgRow {
@@ -662,6 +681,7 @@ export interface AgentRow {
   beam_id: string
   org: string | null
   personal: number
+  identity_kind: BeamIdentityKind
   display_name: string
   capabilities: string
   public_key: string

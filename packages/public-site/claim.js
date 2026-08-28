@@ -7,6 +7,7 @@
   const confirmError = document.getElementById('confirm-error')
   const completeButton = document.getElementById('complete-claim')
   const recoveryButton = document.getElementById('download-recovery')
+  const openNetworkButton = document.getElementById('open-network')
   const loading = document.getElementById('claim-loading')
   const announcer = document.getElementById('claim-announcer')
   const stateElements = Array.from(document.querySelectorAll('[data-state]'))
@@ -150,6 +151,44 @@
     announce('Recovery kit download started.')
   }
 
+  function openNetwork() {
+    if (!recoveryKit || !openNetworkButton) return
+    const networkWindow = window.open('/network.html#handoff', '_blank')
+    if (!networkWindow) {
+      announce('Allow this site to open your Beam network, then try again.')
+      return
+    }
+
+    openNetworkButton.disabled = true
+    openNetworkButton.querySelector('span').textContent = 'Opening…'
+    const timeout = window.setTimeout(() => {
+      window.removeEventListener('message', handoff)
+      openNetworkButton.disabled = false
+      openNetworkButton.querySelector('span').textContent = 'Open my Beam'
+    }, 10000)
+
+    function handoff(event) {
+      if (
+        event.origin !== window.location.origin
+        || event.source !== networkWindow
+        || !event.data
+        || event.data.type !== 'beam.network.ready'
+      ) return
+
+      networkWindow.postMessage({
+        type: 'beam.identity.handoff',
+        recoveryKit,
+      }, window.location.origin)
+      window.clearTimeout(timeout)
+      window.removeEventListener('message', handoff)
+      openNetworkButton.disabled = false
+      openNetworkButton.querySelector('span').textContent = 'Open my Beam'
+      announce('Your Beam network opened in a new tab.')
+    }
+
+    window.addEventListener('message', handoff)
+  }
+
   async function inspectClaim(token) {
     showLoading('Checking your Beam…')
     try {
@@ -247,13 +286,17 @@
   }
 
   if (recoveryButton) recoveryButton.addEventListener('click', downloadKit)
+  if (openNetworkButton) openNetworkButton.addEventListener('click', openNetwork)
 
-  const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
-  const fragmentToken = fragment.get('token') || ''
-  if (fragmentToken) {
+  function processClaimFragment() {
+    const fragment = new URLSearchParams(window.location.hash.replace(/^#/, ''))
+    const fragmentToken = fragment.get('token') || ''
+    if (!fragmentToken) return false
     window.history.replaceState(null, '', `${window.location.pathname}#claim`)
+    inspectClaim(fragmentToken)
+    return true
   }
 
-  if (fragmentToken) inspectClaim(fragmentToken)
-  else showState('start')
+  window.addEventListener('hashchange', processClaimFragment)
+  if (!processClaimFragment()) showState('start')
 })()

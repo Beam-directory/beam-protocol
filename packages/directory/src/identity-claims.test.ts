@@ -74,13 +74,14 @@ test('personal identity claim verifies email before creating a private Beam iden
     assert.equal(complete.headers.get('cache-control'), 'no-store')
     const completed = await complete.json() as {
       status: string
-      identity: { beam_id: string; did: string; personal: boolean; email_verified: boolean; visibility: string }
+      identity: { beam_id: string; did: string; personal: boolean; identity_kind: string; email_verified: boolean; visibility: string }
       credential: { apiKey: string; directoryUrl: string }
     }
     assert.equal(completed.status, 'claimed')
     assert.equal(completed.identity.beam_id, 'tobias-kub@beam.directory')
     assert.equal(completed.identity.did, 'did:beam:tobias-kub')
     assert.equal(completed.identity.personal, true)
+    assert.equal(completed.identity.identity_kind, 'person')
     assert.equal(completed.identity.email_verified, true)
     assert.equal(completed.identity.visibility, 'unlisted')
     assert.match(completed.credential.apiKey, /^bk_/)

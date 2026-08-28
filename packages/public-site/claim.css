@@ -594,7 +594,8 @@ button { color: inherit; }
 .claimed-identity > span { display: block; margin-top: 10px; color: #718079; font: 9px/1.4 var(--mono); overflow-wrap: anywhere; }
 .claimed-identity > div { display: flex; gap: 8px; margin-top: 22px; color: #84928a; font: 8px/1 var(--mono); letter-spacing: .1em; }
 .claimed-identity > div i { color: var(--signal); font-style: normal; }
-.recovery-button { width: 100%; justify-content: space-between; margin-top: 25px; color: var(--night); background: var(--signal); border: 0; }
+.open-network-button { margin-top: 25px; }
+.recovery-button { width: 100%; justify-content: space-between; margin-top: 10px; color: var(--night); background: var(--signal); border: 0; }
 .result-home { margin-top: 24px; }
 .anchor-submit { text-decoration: none; }
 
