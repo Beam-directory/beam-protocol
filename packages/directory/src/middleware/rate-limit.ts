@@ -1,8 +1,10 @@
 import type { MiddlewareHandler } from 'hono'
 import type { Database } from 'better-sqlite3'
+import { agentApiKeyMatches, beamIdFromApiKey, getSuppliedApiKey } from '../api-key.js'
 import { getPublicEndpointShieldPolicy, logAuditEvent } from '../db.js'
 import { hashPayload, logShieldEvent } from '../shield/audit.js'
 import { matchesBeamPattern, type PublicEndpointShieldPolicy } from '../shield/policies.js'
+import type { AgentRow } from '../types.js'
 
 const WINDOW_MS = 60_000
 
@@ -17,7 +19,10 @@ type BucketSpec = {
 
 function getClientIp(req: Request): string {
   return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    // Fly Proxy provides a non-client-controlled address for the production
+    // deployment. X-Forwarded-For remains a fallback for local/test proxies.
+    req.headers.get('fly-client-ip')?.trim()
+    ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? req.headers.get('x-real-ip')
     ?? 'unknown'
   )
@@ -54,6 +59,15 @@ async function parseRequestBody(request: Request): Promise<Record<string, unknow
   return null
 }
 
+function authenticatedAgentBeamId(db: Database, request: Request): string | null {
+  const apiKey = getSuppliedApiKey(request)
+  const claimedBeamId = beamIdFromApiKey(apiKey)
+  const agent = claimedBeamId
+    ? db.prepare('SELECT * FROM agents WHERE beam_id = ?').get(claimedBeamId) as AgentRow | undefined
+    : undefined
+  return agentApiKeyMatches(agent, apiKey) ? claimedBeamId : null
+}
+
 function isTrusted(policy: PublicEndpointShieldPolicy, ip: string, beamId?: string | null): boolean {
   return policy.trustedIps.includes(ip) || Boolean(beamId && matchesBeamPattern(beamId, policy.trustedBeamIds))
 }
@@ -76,6 +90,7 @@ function createLookupBucket(path: string, ip: string, policy: PublicEndpointShie
 }
 
 async function resolveBuckets(
+  db: Database,
   request: Request,
   path: string,
   method: string,
@@ -92,6 +107,24 @@ async function resolveBuckets(
         actorLabel: `ip:${ip}`,
         intentType: 'http.agent.register',
         payload: { path },
+      }],
+    }
+  }
+
+  if (
+    (method === 'POST' && path === '/identity-claims')
+    || (method === 'POST' && path === '/identity-claims/inspect')
+    || (method === 'POST' && path === '/identity-claims/complete')
+  ) {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'identity-claim',
+        limit: policy.registrationPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.identity.claim',
+        payload: { path, method },
       }],
     }
   }
@@ -124,6 +157,91 @@ async function resolveBuckets(
         intentType: 'http.agent.search',
         payload: { path },
       }],
+    }
+  }
+
+  if (method === 'GET' && path === '/network/discover') {
+    const authenticatedBeamId = authenticatedAgentBeamId(db, request)
+    const buckets: BucketSpec[] = [{
+      bucket: 'network-discovery-ip',
+      limit: policy.searchPerMinute,
+      actorKey: `ip:${ip}`,
+      actorLabel: `ip:${ip}`,
+      intentType: 'http.network.discover',
+      payload: { path },
+    }]
+    if (authenticatedBeamId) {
+      buckets.push({
+        bucket: 'network-discovery-identity',
+        limit: policy.searchPerMinute,
+        actorKey: `beam:${authenticatedBeamId}`,
+        actorLabel: authenticatedBeamId,
+        intentType: 'http.network.discover',
+        payload: { path },
+      })
+    }
+    return {
+      trusted: isTrusted(policy, ip, authenticatedBeamId),
+      buckets,
+    }
+  }
+
+  if (method === 'GET' && (path === '/network/me' || path === '/network/connections')) {
+    const authenticatedBeamId = authenticatedAgentBeamId(db, request)
+    const buckets: BucketSpec[] = [{
+      bucket: 'network-read-ip',
+      limit: policy.browsePerMinute,
+      actorKey: `ip:${ip}`,
+      actorLabel: `ip:${ip}`,
+      intentType: 'http.network.read',
+      payload: { path },
+    }]
+    if (authenticatedBeamId) {
+      buckets.push({
+        bucket: 'network-read-identity',
+        limit: policy.browsePerMinute,
+        actorKey: `beam:${authenticatedBeamId}`,
+        actorLabel: authenticatedBeamId,
+        intentType: 'http.network.read',
+        payload: { path },
+      })
+    }
+    return {
+      trusted: isTrusted(policy, ip, authenticatedBeamId),
+      buckets,
+    }
+  }
+
+  const isNetworkMutation = (
+    method === 'POST' && path === '/network/connections'
+  ) || (
+    (method === 'POST' || method === 'DELETE')
+    && /^\/network\/connections\/[^/]+(?:\/respond)?$/.test(path)
+  )
+  if (isNetworkMutation) {
+    const authenticatedBeamId = authenticatedAgentBeamId(db, request)
+    const body = await parseRequestBody(request)
+    const buckets: BucketSpec[] = [{
+      bucket: 'network-mutation-ip',
+      limit: policy.keyMutationPerMinute,
+      actorKey: `ip:${ip}`,
+      actorLabel: `ip:${ip}`,
+      intentType: 'http.network.mutate',
+      payload: body ?? { path, method },
+    }]
+    if (authenticatedBeamId) {
+      buckets.push({
+        bucket: 'network-mutation-identity',
+        limit: policy.keyMutationPerMinute,
+        actorKey: `beam:${authenticatedBeamId}`,
+        actorLabel: authenticatedBeamId,
+        intentType: 'http.network.mutate',
+        payload: body ?? { path, method },
+      })
+    }
+    return {
+      trusted: isTrusted(policy, ip, authenticatedBeamId),
+      buckets,
     }
   }
 
@@ -281,7 +399,7 @@ export function createRateLimitMiddleware(db: Database): MiddlewareHandler {
     const path = c.req.path
     const ip = getClientIp(c.req.raw)
     const { policy } = getPublicEndpointShieldPolicy(db)
-    const { trusted, buckets } = await resolveBuckets(c.req.raw, path, method, ip, policy)
+    const { trusted, buckets } = await resolveBuckets(db, c.req.raw, path, method, ip, policy)
 
     if (trusted || buckets.length === 0) {
       await next()

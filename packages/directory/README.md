@@ -46,15 +46,27 @@ Default local endpoints:
 - `BEAM_DASHBOARD_URL` - dashboard origin used in admin magic links
 - `BEAM_DIRECTORY_BASE_URL` - DID base URL override
 - `PUBLIC_BASE_URL` - public origin used in verification links
+- `PUBLIC_SITE_URL` - public website origin used in personal identity claim links, default `https://beam.directory`
 - `BEAM_RATE_LIMIT_PER_MIN` - global per-agent rate limit override
 - `ECHO_AGENT_SECRET` - protects registration of `echo@beam.directory`
 - `BEAM_ALLOW_LEGACY_WS_API_KEY_QUERY` - temporary migration switch; keep unset so long-lived keys are rejected in WebSocket URLs
+- `BEAM_ALLOW_LOCAL_CLAIM_URLS` - local-development opt-in that returns the claim URL when email delivery is unavailable; never enable in production
 
 ### Verification and email
 
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (or `SMTP_PASSWORD`), `SMTP_FROM`
 - `RESEND_API_KEY`
 - `COMPANIES_HOUSE_API_KEY`
+
+### Personal identity claims
+
+The public onboarding uses a pre-verification flow instead of registering an identity before email ownership is proven:
+
+1. `POST /identity-claims` reserves an available personal Beam name for 30 minutes and emails a one-time link.
+2. `POST /identity-claims/inspect` validates the token from the link without putting it in a request URL.
+3. `POST /identity-claims/complete` accepts a browser-generated Ed25519 public key and returns the API credential once.
+
+Claim tokens are stored only as SHA-256 hashes, links keep the token in the URL fragment, completed identities start unlisted, and the private key never reaches the directory.
 
 ### Federation and signing
 

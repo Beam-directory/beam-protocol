@@ -1,4 +1,4 @@
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
 import type {
@@ -7,6 +7,8 @@ import type {
   AgentRow,
   AuditLogRow,
   BusinessVerificationRow,
+  BeamConnectionRow,
+  BeamConnectionStatus,
   DelegationRow,
   DomainVerificationRow,
   DirectoryRoleRow,
@@ -17,6 +19,7 @@ import type {
   IntentFrame,
   IntentLogRow,
   IntentTraceEventRow,
+  IdentityClaimRow,
   OperatorNotificationRow,
   OpenClawFleetAlertDeliveryRow,
   OpenClawFleetAlertDeliveryStatus,
@@ -132,6 +135,7 @@ function initSchema(db: DB): void {
       beam_id TEXT PRIMARY KEY,
       org TEXT,
       personal INTEGER NOT NULL DEFAULT 0,
+      identity_kind TEXT NOT NULL DEFAULT 'agent' CHECK(identity_kind IN ('person', 'organization', 'agent', 'service')),
       display_name TEXT NOT NULL,
       capabilities TEXT NOT NULL DEFAULT '[]',
       public_key TEXT NOT NULL,
@@ -181,6 +185,45 @@ function initSchema(db: DB): void {
 
     CREATE INDEX IF NOT EXISTS idx_verification_tokens_beam_id ON verification_tokens(beam_id);
     CREATE INDEX IF NOT EXISTS idx_verification_tokens_expires_at ON verification_tokens(expires_at);
+
+    CREATE TABLE IF NOT EXISTS identity_claims (
+      token_hash TEXT PRIMARY KEY,
+      email TEXT NOT NULL,
+      handle TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      consumed_at INTEGER
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_handle
+      ON identity_claims(handle, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_email
+      ON identity_claims(email, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_identity_claims_expires_at
+      ON identity_claims(expires_at);
+
+    CREATE TABLE IF NOT EXISTS beam_connections (
+      connection_id TEXT PRIMARY KEY,
+      pair_key TEXT NOT NULL UNIQUE,
+      requester_beam_id TEXT NOT NULL,
+      recipient_beam_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'accepted', 'declined', 'blocked', 'cancelled')),
+      request_message TEXT,
+      requester_signature TEXT NOT NULL,
+      response_signature TEXT,
+      blocked_by_beam_id TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      responded_at TEXT,
+      FOREIGN KEY (requester_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE,
+      FOREIGN KEY (recipient_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_connections_requester
+      ON beam_connections(requester_beam_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_beam_connections_recipient
+      ON beam_connections(recipient_beam_id, status, updated_at DESC);
 
     CREATE TABLE IF NOT EXISTS intent_acls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -961,6 +1004,7 @@ function initSchema(db: DB): void {
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
   ensureColumn(db, 'agents', 'personal', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'agents', 'identity_kind', "TEXT NOT NULL DEFAULT 'agent'")
   ensureColumn(db, 'waitlist', 'workflow_type', 'TEXT')
   ensureColumn(db, 'waitlist', 'workflow_summary', 'TEXT')
   ensureColumn(db, 'waitlist', 'proof_intent_nonce', 'TEXT')
@@ -2656,6 +2700,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
   const personal = data.personal === true ? 1 : 0
 
   const existing = getAgent(db, data.beamId)
+  const identityKind = data.identityKind ?? existing?.identity_kind ?? 'agent'
   if (!existing || existing.public_key !== data.publicKey) {
     assertKeyCanBecomeActive(db, data.beamId, data.publicKey)
   }
@@ -2677,6 +2722,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
       UPDATE agents
       SET org = ?,
           personal = ?,
+          identity_kind = ?,
           display_name = ?,
           capabilities = ?,
           public_key = ?,
@@ -2696,6 +2742,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
     `).run(
       data.org ?? null,
       personal,
+      identityKind,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
@@ -2719,6 +2766,7 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         beam_id,
         org,
         personal,
+        identity_kind,
         display_name,
         capabilities,
         public_key,
@@ -2738,11 +2786,12 @@ export function registerAgent(db: DB, data: RegisterRequest): AgentRow {
         created_at,
         last_seen
       )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?, ?, ?)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0.3, ?, ?, 0, ?, ?, ?, ?, ?, ?)
     `).run(
       data.beamId,
       data.org ?? null,
       personal,
+      identityKind,
       data.displayName,
       capabilitiesJson,
       data.publicKey,
@@ -2943,6 +2992,324 @@ export function verifyAgentEmailToken(db: DB, token: string): AgentRow | null {
 
   db.prepare('DELETE FROM verification_tokens WHERE token = ?').run(token)
   return getAgent(db, tokenRow.beam_id)
+}
+
+export function createIdentityClaim(
+  db: DB,
+  input: {
+    tokenHash: string
+    email: string
+    handle: string
+    displayName: string
+    expiresAt: number
+  },
+): IdentityClaimRow | null {
+  const createdAt = nowMs()
+  const email = input.email.trim().toLowerCase()
+  const handle = input.handle.trim().toLowerCase()
+  const beamId = `${handle}@beam.directory`
+
+  const create = db.transaction(() => {
+    db.prepare('DELETE FROM identity_claims WHERE expires_at < ? OR consumed_at IS NOT NULL').run(createdAt)
+
+    if (getAgent(db, beamId)) {
+      return null
+    }
+
+    const pendingHandle = db.prepare(`
+      SELECT token_hash, email
+      FROM identity_claims
+      WHERE handle = ? AND consumed_at IS NULL AND expires_at >= ?
+      LIMIT 1
+    `).get(handle, createdAt) as { token_hash: string; email: string } | undefined
+
+    if (pendingHandle) {
+      if (pendingHandle.email !== email) {
+        return null
+      }
+      // The same mailbox may request a fresh link for the same handle without
+      // waiting for the previous link to expire.
+      db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(pendingHandle.token_hash)
+    }
+
+    db.prepare(`
+      INSERT INTO identity_claims (
+        token_hash, email, handle, display_name, created_at, expires_at, consumed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, NULL)
+    `).run(input.tokenHash, email, handle, input.displayName, createdAt, input.expiresAt)
+
+    return db.prepare('SELECT * FROM identity_claims WHERE token_hash = ?')
+      .get(input.tokenHash) as IdentityClaimRow
+  })
+
+  return create()
+}
+
+export function getIdentityClaim(db: DB, tokenHash: string): IdentityClaimRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM identity_claims
+    WHERE token_hash = ? AND consumed_at IS NULL
+  `).get(tokenHash) as IdentityClaimRow | undefined
+
+  if (!row) {
+    return null
+  }
+
+  if (row.expires_at < nowMs()) {
+    db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(tokenHash)
+    return null
+  }
+
+  return row
+}
+
+export function deleteIdentityClaim(db: DB, tokenHash: string): void {
+  db.prepare('DELETE FROM identity_claims WHERE token_hash = ?').run(tokenHash)
+}
+
+export function completeIdentityClaim(
+  db: DB,
+  input: {
+    tokenHash: string
+    publicKey: string
+    apiKeyHash: string
+    capabilities: string[]
+  },
+): AgentRow | null {
+  const complete = db.transaction(() => {
+    const claim = getIdentityClaim(db, input.tokenHash)
+    if (!claim) {
+      return null
+    }
+
+    const beamId = `${claim.handle}@beam.directory`
+    if (getAgent(db, beamId)) {
+      db.prepare('UPDATE identity_claims SET consumed_at = ? WHERE token_hash = ?')
+        .run(nowMs(), input.tokenHash)
+      return null
+    }
+
+    const agent = registerAgent(db, {
+      beamId,
+      org: 'personal',
+      personal: true,
+      displayName: claim.display_name,
+      capabilities: input.capabilities,
+      publicKey: input.publicKey,
+      apiKeyHash: input.apiKeyHash,
+      email: claim.email,
+      emailVerified: true,
+      verificationTier: 'basic',
+      visibility: 'unlisted',
+      description: 'Personal Beam identity',
+      identityKind: 'person',
+    })
+
+    db.prepare('UPDATE identity_claims SET consumed_at = ? WHERE token_hash = ?')
+      .run(nowMs(), input.tokenHash)
+    return agent
+  })
+
+  return complete()
+}
+
+function beamConnectionPairKey(leftBeamId: string, rightBeamId: string): string {
+  return [leftBeamId, rightBeamId].sort().join('\n')
+}
+
+export function getBeamConnectionById(db: DB, connectionId: string): BeamConnectionRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM beam_connections
+    WHERE connection_id = ?
+  `).get(connectionId) as BeamConnectionRow | undefined
+
+  return row ?? null
+}
+
+export function getBeamConnectionBetween(
+  db: DB,
+  leftBeamId: string,
+  rightBeamId: string,
+): BeamConnectionRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM beam_connections
+    WHERE pair_key = ?
+  `).get(beamConnectionPairKey(leftBeamId, rightBeamId)) as BeamConnectionRow | undefined
+
+  return row ?? null
+}
+
+export function listBeamConnections(
+  db: DB,
+  beamId: string,
+  statuses?: BeamConnectionStatus[],
+): BeamConnectionRow[] {
+  const normalizedStatuses = [...new Set(statuses ?? [])]
+    .filter((status): status is BeamConnectionStatus => (
+      status === 'pending'
+      || status === 'accepted'
+      || status === 'declined'
+      || status === 'blocked'
+      || status === 'cancelled'
+    ))
+  const statusClause = normalizedStatuses.length > 0
+    ? `AND status IN (${normalizedStatuses.map(() => '?').join(', ')})`
+    : ''
+
+  return db.prepare(`
+    SELECT *
+    FROM beam_connections
+    WHERE (requester_beam_id = ? OR recipient_beam_id = ?)
+      ${statusClause}
+    ORDER BY
+      CASE WHEN status = 'pending' AND recipient_beam_id = ? THEN 0
+           WHEN status = 'accepted' THEN 1
+           ELSE 2 END,
+      updated_at DESC,
+      connection_id ASC
+  `).all(beamId, beamId, ...normalizedStatuses, beamId) as BeamConnectionRow[]
+}
+
+export function createBeamConnectionRequest(
+  db: DB,
+  input: {
+    requesterBeamId: string
+    recipientBeamId: string
+    message: string | null
+    signature: string
+  },
+): { connection: BeamConnectionRow; created: boolean } {
+  const create = db.transaction(() => {
+    const existing = getBeamConnectionBetween(db, input.requesterBeamId, input.recipientBeamId)
+    if (existing && !['declined', 'cancelled'].includes(existing.status)) {
+      return { connection: existing, created: false }
+    }
+
+    if (existing) {
+      db.prepare('DELETE FROM beam_connections WHERE connection_id = ?').run(existing.connection_id)
+    }
+
+    const connectionId = randomUUID()
+    const now = nowIso()
+    db.prepare(`
+      INSERT INTO beam_connections (
+        connection_id,
+        pair_key,
+        requester_beam_id,
+        recipient_beam_id,
+        status,
+        request_message,
+        requester_signature,
+        response_signature,
+        blocked_by_beam_id,
+        created_at,
+        updated_at,
+        responded_at
+      )
+      VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?, NULL)
+    `).run(
+      connectionId,
+      beamConnectionPairKey(input.requesterBeamId, input.recipientBeamId),
+      input.requesterBeamId,
+      input.recipientBeamId,
+      input.message,
+      input.signature,
+      now,
+      now,
+    )
+
+    return {
+      connection: getBeamConnectionById(db, connectionId) as BeamConnectionRow,
+      created: true,
+    }
+  })
+
+  return create()
+}
+
+export function respondToBeamConnection(
+  db: DB,
+  input: {
+    connectionId: string
+    actorBeamId: string
+    decision: 'accepted' | 'declined' | 'blocked'
+    signature: string
+  },
+): BeamConnectionRow | null {
+  const respond = db.transaction(() => {
+    const connection = getBeamConnectionById(db, input.connectionId)
+    if (
+      !connection
+      || connection.status !== 'pending'
+      || connection.recipient_beam_id !== input.actorBeamId
+    ) {
+      return null
+    }
+
+    const now = nowIso()
+    const result = db.prepare(`
+      UPDATE beam_connections
+      SET status = ?,
+          response_signature = ?,
+          blocked_by_beam_id = ?,
+          updated_at = ?,
+          responded_at = ?
+      WHERE connection_id = ?
+        AND status = 'pending'
+        AND recipient_beam_id = ?
+    `).run(
+      input.decision,
+      input.signature,
+      input.decision === 'blocked' ? input.actorBeamId : null,
+      now,
+      now,
+      input.connectionId,
+      input.actorBeamId,
+    )
+
+    return result.changes === 1 ? getBeamConnectionById(db, input.connectionId) : null
+  })
+
+  return respond()
+}
+
+export function removeBeamConnection(
+  db: DB,
+  input: { connectionId: string; actorBeamId: string; signature: string },
+): BeamConnectionRow | null {
+  const remove = db.transaction(() => {
+    const connection = getBeamConnectionById(db, input.connectionId)
+    if (!connection || connection.status === 'blocked') {
+      return null
+    }
+
+    const isParticipant = connection.requester_beam_id === input.actorBeamId
+      || connection.recipient_beam_id === input.actorBeamId
+    const canRemove = connection.status === 'accepted'
+      ? isParticipant
+      : connection.status === 'pending' && connection.requester_beam_id === input.actorBeamId
+    if (!canRemove) {
+      return null
+    }
+
+    const now = nowIso()
+    const result = db.prepare(`
+      UPDATE beam_connections
+      SET status = 'cancelled',
+          response_signature = ?,
+          updated_at = ?,
+          responded_at = ?
+      WHERE connection_id = ?
+        AND status = ?
+    `).run(input.signature, now, now, input.connectionId, connection.status)
+
+    return result.changes === 1 ? getBeamConnectionById(db, input.connectionId) : null
+  })
+
+  return remove()
 }
 
 export function findAgentByHandle(db: DB, handle: string): AgentRow | null {

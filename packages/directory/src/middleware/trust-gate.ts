@@ -23,7 +23,8 @@ const WINDOW_MS = 3600_000
 
 function getClientIp(req: Request): string {
   return (
-    req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
+    req.headers.get('fly-client-ip')?.trim()
+    ?? req.headers.get('x-forwarded-for')?.split(',')[0]?.trim()
     ?? req.headers.get('x-real-ip')
     ?? 'unknown'
   )

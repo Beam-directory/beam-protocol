@@ -1,0 +1,190 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="referrer" content="no-referrer" />
+  <meta name="robots" content="noindex" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.beam.directory http://localhost:3100; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <title>My Beam</title>
+  <meta name="description" content="Your private, verified Beam network." />
+  <meta name="theme-color" content="#07100d" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2218%22 fill=%22%2307110e%22/><path d=%22M17 46V18h10c7 0 11 3 11 8 0 3-2 6-5 7 5 1 7 4 7 8 0 6-4 9-12 9H17zm7-17h3c3 0 4-1 4-3s-1-3-4-3h-3v6zm0 15h4c3 0 5-1 5-4s-2-4-5-4h-4v8z%22 fill=%22%23b8ff6a%22/></svg>" />
+  <link rel="stylesheet" href="/network.css" />
+  <script type="module" src="/network-app.js"></script>
+</head>
+<body>
+  <a class="skip-link" href="#network-main">Skip to your network</a>
+
+  <section class="unlock-shell" id="unlock-shell" aria-labelledby="unlock-title">
+    <div class="unlock-atmosphere" aria-hidden="true">
+      <span class="unlock-orbit orbit-one"></span>
+      <span class="unlock-orbit orbit-two"></span>
+      <span class="unlock-node node-one"></span>
+      <span class="unlock-node node-two"></span>
+      <span class="unlock-node node-three"></span>
+    </div>
+    <a class="beam-brand unlock-brand" href="/" aria-label="Beam home">
+      <span class="beam-brand-mark" aria-hidden="true">B</span><span>BEAM</span>
+    </a>
+    <div class="unlock-card">
+      <p class="eyebrow"><span></span> Your private network</p>
+      <h1 id="unlock-title">OPEN<br />YOUR <em>BEAM.</em></h1>
+      <p>People, companies, and agents you have explicitly trusted — one verified address book.</p>
+
+      <button class="device-unlock" id="device-unlock" type="button" hidden>
+        <span class="device-unlock-icon" aria-hidden="true">◎</span>
+        <span><strong>Open with this device</strong><small id="device-unlock-beam-id"></small></span>
+        <i aria-hidden="true">→</i>
+      </button>
+      <div class="vault-divider" id="vault-divider" hidden><span>OR USE YOUR RECOVERY KIT</span></div>
+
+      <label class="kit-drop" id="kit-drop">
+        <input id="kit-input" type="file" accept="application/json,.json" />
+        <span class="kit-icon" aria-hidden="true">↗</span>
+        <strong>Open recovery kit</strong>
+        <small>Select the private file saved when you claimed your Beam.</small>
+      </label>
+      <div class="unlock-error" id="unlock-error" role="alert" hidden></div>
+      <div class="unlock-divider"><span>NEW HERE?</span></div>
+      <a class="claim-link" href="/claim.html">Claim your Beam <span>→</span></a>
+      <p class="local-note"><i></i> Your private key stays in this browser tab and is forgotten when it closes.</p>
+    </div>
+  </section>
+
+  <div class="network-app" id="network-app" hidden>
+    <header class="app-header">
+      <a class="beam-brand" href="/" aria-label="Beam home">
+        <span class="beam-brand-mark" aria-hidden="true">B</span><span>BEAM</span>
+      </a>
+      <div class="network-health"><i></i><span>NETWORK READY</span></div>
+      <button class="identity-menu" id="identity-menu" type="button" aria-label="Close this Beam session">
+        <span class="identity-avatar" id="header-avatar">B</span>
+        <span><strong id="header-name"></strong><small id="header-beam-id"></small></span>
+        <i aria-hidden="true">×</i>
+      </button>
+    </header>
+
+    <div class="app-layout">
+      <aside class="app-sidebar" aria-label="Beam navigation">
+        <nav class="primary-nav">
+          <button class="nav-item is-active" type="button" data-view="contacts">
+            <span class="nav-icon" aria-hidden="true">◎</span><span>Connections</span>
+            <i id="contacts-count">0</i>
+          </button>
+          <button class="nav-item" type="button" data-view="requests">
+            <span class="nav-icon" aria-hidden="true">↘</span><span>Requests</span>
+            <i id="requests-count">0</i>
+          </button>
+          <button class="nav-item" type="button" data-view="profile">
+            <span class="nav-icon" aria-hidden="true">◇</span><span>My identity</span>
+          </button>
+        </nav>
+
+        <div class="trust-card">
+          <span class="trust-mark" aria-hidden="true">✓</span>
+          <p><strong>Verified relationships</strong><small>Every connection is confirmed by both identities.</small></p>
+        </div>
+        <p class="sidebar-foot">PRIVATE BY DEFAULT · v1</p>
+      </aside>
+
+      <main id="network-main" class="app-main">
+        <section class="app-view" data-view-panel="contacts">
+          <div class="view-heading">
+            <div>
+              <p class="eyebrow"><span></span> Your address book</p>
+              <h1>YOUR<br /><em>NETWORK.</em></h1>
+            </div>
+            <div class="network-stats" aria-label="Network summary">
+              <span><strong id="stat-contacts">0</strong><small>CONNECTIONS</small></span>
+              <span><strong id="stat-pending">0</strong><small>OPEN REQUESTS</small></span>
+            </div>
+          </div>
+
+          <form class="beam-search" id="beam-search" role="search">
+            <span aria-hidden="true">⌕</span>
+            <label class="sr-only" for="search-query">Find a Beam identity</label>
+            <input id="search-query" name="q" type="search" autocomplete="off" placeholder="Name or exact Beam ID" minlength="3" maxlength="128" required />
+            <button type="submit">Find <span>→</span></button>
+          </form>
+          <p class="search-privacy">Unlisted identities appear only when you enter their exact <strong>name@beam.directory</strong>.</p>
+
+          <section class="device-setup" id="device-setup" hidden>
+            <span class="device-setup-mark" aria-hidden="true">◎</span>
+            <p><strong>Open Beam instantly on this device.</strong><small>Protect an encrypted copy with Face ID, Touch ID, or your device PIN.</small></p>
+            <button id="enable-device-vault" type="button">Enable passkey <span>→</span></button>
+          </section>
+
+          <section class="search-results" id="search-results" aria-labelledby="search-results-title" hidden>
+            <div class="section-bar">
+              <h2 id="search-results-title">SEARCH RESULTS</h2>
+              <button id="close-search" type="button">Close</button>
+            </div>
+            <div class="identity-list" id="search-list"></div>
+          </section>
+
+          <section class="connections-section" aria-labelledby="connections-title">
+            <div class="section-bar">
+              <h2 id="connections-title">CONNECTIONS</h2>
+              <button class="refresh-button" type="button" data-refresh>Refresh</button>
+            </div>
+            <div class="identity-list" id="connections-list"></div>
+          </section>
+        </section>
+
+        <section class="app-view" data-view-panel="requests" hidden>
+          <div class="compact-heading">
+            <p class="eyebrow"><span></span> Mutual consent</p>
+            <h1>REQUESTS.</h1>
+            <p>Nothing enters your network until you confirm it.</p>
+          </div>
+          <div class="request-columns">
+            <section>
+              <div class="section-bar"><h2>WAITING FOR YOU</h2><span id="inbound-count">0</span></div>
+              <div class="identity-list" id="inbound-list"></div>
+            </section>
+            <section>
+              <div class="section-bar"><h2>SENT BY YOU</h2><span id="outbound-count">0</span></div>
+              <div class="identity-list" id="outbound-list"></div>
+            </section>
+          </div>
+        </section>
+
+        <section class="app-view" data-view-panel="profile" hidden>
+          <div class="compact-heading">
+            <p class="eyebrow"><span></span> Agentic identity</p>
+            <h1>MY BEAM.</h1>
+            <p>The identity people, companies, and agents can verify before they trust you.</p>
+          </div>
+          <article class="profile-card">
+            <div class="profile-signal" aria-hidden="true"><span id="profile-avatar">B</span></div>
+            <div class="profile-copy">
+              <small>VERIFIED BEAM IDENTITY</small>
+              <h2 id="profile-name"></h2>
+              <strong id="profile-beam-id"></strong>
+              <code id="profile-did"></code>
+              <div class="profile-badges"><span>✓ VERIFIED</span><span>PRIVATE</span><span id="profile-kind"></span></div>
+            </div>
+          </article>
+          <div class="identity-explainer">
+            <span>01<strong>Address</strong><small>One stable Beam ID.</small></span>
+            <span>02<strong>Proof</strong><small>Signed by your private key.</small></span>
+            <span>03<strong>Consent</strong><small>Connections are mutual.</small></span>
+          </div>
+          <section class="device-security" aria-labelledby="device-security-title">
+            <div>
+              <small>THIS DEVICE</small>
+              <h2 id="device-security-title">Passkey unlock</h2>
+              <p id="device-vault-status">Use a passkey to keep an encrypted Beam vault on this device.</p>
+            </div>
+            <button id="device-vault-action" type="button">Enable passkey</button>
+          </section>
+        </section>
+      </main>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+  <div class="app-loading" id="app-loading" hidden aria-live="polite"><span></span><p>Opening your Beam…</p></div>
+</body>
+</html>

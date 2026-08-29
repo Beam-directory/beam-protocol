@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 vi.mock('../src/email.js', () => ({
   sendAgentVerificationEmail: vi.fn(async () => true),
+  sendIdentityClaimEmail: vi.fn(async () => true),
 }))
 
 import { createDatabase } from '../src/db.js'

@@ -3,309 +3,171 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Beam | The Trust Layer for AI Agents</title>
-  <meta
-    name="description"
-    content="Beam gives AI agents verified identities, scoped permissions, human approval, and an auditable handoff across company lines."
-  />
-  <meta property="og:title" content="Beam | The Trust Layer for AI Agents" />
-  <meta
-    property="og:description"
-    content="Let AI agents work across companies without losing identity, permission, or the paper trail."
-  />
+  <title>Beam — Your identity in the agentic world</title>
+  <meta name="description" content="Claim one verified Beam identity for you, your company, and the agents that act for you." />
+  <meta property="og:title" content="Claim your Beam" />
+  <meta property="og:description" content="One verified identity for people, companies, and their agents." />
   <meta property="og:image" content="https://beam.directory/og-image.png" />
   <meta property="og:url" content="https://beam.directory/" />
   <meta property="og:type" content="website" />
   <meta name="twitter:card" content="summary_large_image" />
   <link rel="canonical" href="https://beam.directory/" />
-  <meta name="theme-color" content="#f8faff" />
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2216%22 fill=%22%231f5eff%22/><path d=%22M17 46V18h9c4.5 0 7.4 2.4 7.4 6.3 0 2.6-1.3 4.6-3.8 5.6 3.2.8 5 3.1 5 6.5 0 4.5-3.2 7.6-8.9 7.6H17Zm5.3-16.7H25c1.9 0 3-1 3-2.8 0-1.7-1.1-2.7-3-2.7h-2.7v5.5Zm0 12h3.5c2.3 0 3.6-1.2 3.6-3.3 0-2.1-1.3-3.3-3.6-3.3h-3.5v6.6Z%22 fill=%22white%22/></svg>" />
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link
-    href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Manrope:wght@400;500;600;700;800&display=swap"
-    rel="stylesheet"
-  />
-  <link rel="preload" href="/assets/dashboard-overview.png" as="image" />
-  <link rel="stylesheet" href="/beam-light.css" />
-  <script defer src="/beam-analytics.js"></script>
-  <script defer src="/beam-light.js"></script>
+  <meta name="theme-color" content="#07100d" />
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2218%22 fill=%22%2307110e%22/><path d=%22M17 46V18h10c7 0 11 3 11 8 0 3-2 6-5 7 5 1 7 4 7 8 0 6-4 9-12 9H17zm7-17h3c3 0 4-1 4-3s-1-3-4-3h-3v6zm0 15h4c3 0 5-1 5-4s-2-4-5-4h-4v8z%22 fill=%22%23b8ff6a%22/></svg>" />
+  <link rel="stylesheet" href="/claim.css" />
+  <script defer src="/network.js"></script>
 </head>
-<body>
+<body class="network-page">
   <a class="skip-link" href="#main">Skip to content</a>
 
-  <header class="site-header">
-    <a class="brand" href="/" aria-label="Beam home">
-      <span class="brand-mark" aria-hidden="true">B</span>
-      <span class="brand-name">Beam</span>
+  <header class="beam-header">
+    <a class="beam-brand" href="/" aria-label="Beam home">
+      <span class="beam-brand-mark" aria-hidden="true">B</span>
+      <span>BEAM</span>
     </a>
-
-    <nav class="site-nav" aria-label="Primary navigation">
-      <a href="/guided-evaluation.html">Evaluate</a>
-      <a href="/playground.html">Playground</a>
-      <a href="/blog/">Blog</a>
-      <a href="https://docs.beam.directory">Docs</a>
+    <nav class="beam-nav" aria-label="Primary navigation">
+      <a href="#network">Network</a>
+      <a href="#trust">Trust</a>
+      <a href="/network.html">Open Beam</a>
+      <a href="https://docs.beam.directory">Developers</a>
     </nav>
-
-    <a class="header-cta" href="/hosted-beta.html">Request pilot <span aria-hidden="true">↗</span></a>
+    <a class="beam-header-action" href="/claim.html">Claim yours <span aria-hidden="true">↗</span></a>
   </header>
 
   <main id="main">
-    <section class="hero" aria-labelledby="hero-title">
-      <div class="hero-grid">
-        <div class="hero-copy">
-          <div class="live-note hero-enter" style="--delay: 0.04s">
-            <span class="live-dot" aria-hidden="true"></span>
-            Verified pilot run · Grok → COPPEN
-          </div>
-
-          <p class="hero-brand hero-enter" style="--delay: 0.1s">Beam Protocol</p>
-          <h1 id="hero-title" class="hero-enter" style="--delay: 0.16s">
-            The trust layer<br />
-            for <span>AI agents.</span>
-          </h1>
-          <p class="hero-lede hero-enter" style="--delay: 0.22s">
-            Let agents work across companies without losing identity, permission,
-            human control, or the paper trail.
-          </p>
-
-          <div class="hero-actions hero-enter" style="--delay: 0.28s">
-            <a class="button button-primary" href="/hosted-beta.html">
-              Start one pilot <span aria-hidden="true">↗</span>
-            </a>
-            <a class="button button-secondary" href="/guided-evaluation.html">
-              See the proof <span aria-hidden="true">→</span>
-            </a>
-          </div>
-
-          <div class="hero-footnote hero-enter" style="--delay: 0.34s">
-            <span>Works with MCP</span>
-            <span>Read-only first</span>
-            <span>Human approval built in</span>
-          </div>
+    <section class="network-hero">
+      <div class="hero-atmosphere" aria-hidden="true"></div>
+      <div class="network-hero-copy">
+        <p class="eyebrow hero-rise" style="--delay: .05s"><span></span> The identity layer for the agentic world</p>
+        <h1 class="hero-rise" style="--delay: .12s">CLAIM<br />YOUR <em>BEAM.</em></h1>
+        <p class="hero-summary hero-rise" style="--delay: .19s">
+          One identity for you, your company, and the agents that act for you.
+          Verified once. Ready for every relationship.
+        </p>
+        <div class="hero-buttons hero-rise" style="--delay: .26s">
+          <a class="action action-primary" href="/claim.html">Claim your Beam <span aria-hidden="true">↗</span></a>
+          <a class="action action-quiet" href="#network">See the network <span aria-hidden="true">↓</span></a>
         </div>
-
-        <div class="hero-visual hero-enter" data-beam-tilt style="--delay: 0.18s" aria-label="An interactive verified Grok to Beam agent handoff">
-          <div class="visual-glow" aria-hidden="true"></div>
-          <div class="trust-field" aria-hidden="true">
-            <span class="trust-ring ring-one"></span>
-            <span class="trust-ring ring-two"></span>
-            <span class="trust-ring ring-three"></span>
-            <span class="field-node node-one"></span>
-            <span class="field-node node-two"></span>
-            <span class="field-node node-three"></span>
-            <span class="field-node node-four"></span>
-          </div>
-          <div class="visual-status">
-            <span class="status-dot" aria-hidden="true"></span>
-            Live trust path · move to inspect
-          </div>
-
-          <div class="agent agent-source">
-            <span class="agent-icon grok-icon" aria-hidden="true">G</span>
-            <span>
-              <small>FROM</small>
-              <strong>grok@coppen</strong>
-            </span>
-          </div>
-
-          <svg class="beam-route" viewBox="0 0 680 420" role="img" aria-label="Beam verifies and routes one agent handoff">
-            <defs>
-              <linearGradient id="route-gradient" x1="0" x2="1">
-                <stop offset="0" stop-color="#94b4ff" />
-                <stop offset="0.5" stop-color="#1f5eff" />
-                <stop offset="1" stop-color="#8067ff" />
-              </linearGradient>
-            </defs>
-            <path class="route-base" d="M116 116 C 250 116, 246 302, 412 302 S 526 180, 594 180" />
-            <path class="route-echo" d="M116 116 C 250 116, 246 302, 412 302 S 526 180, 594 180" />
-            <path class="route-live" d="M116 116 C 250 116, 246 302, 412 302 S 526 180, 594 180" />
-            <circle class="route-pulse" cx="0" cy="0" r="7" />
-            <circle class="route-pulse pulse-two" cx="0" cy="0" r="4" />
-          </svg>
-
-          <div class="beam-core" aria-hidden="true">
-            <span>B</span>
-            <small>IDENTITY · POLICY · TRACE</small>
-          </div>
-
-          <div class="agent agent-target">
-            <span class="agent-icon beam-icon" aria-hidden="true">C</span>
-            <span>
-              <small>TO · BUSINESS VERIFIED</small>
-              <strong>coppen-assistant</strong>
-            </span>
-          </div>
-
-          <div class="handoff-result">
-            <div>
-              <small>STATUS</small>
-              <strong>Ready</strong>
-            </div>
-            <div>
-              <small>APPROVAL</small>
-              <strong>Required</strong>
-            </div>
-            <div>
-              <small>SEND TOOL</small>
-              <strong>Unavailable</strong>
-            </div>
-          </div>
-        </div>
+        <p class="hero-privacy hero-rise" style="--delay: .33s">
+          <span aria-hidden="true">●</span> Email verified · private by default · your key stays yours
+        </p>
       </div>
 
-      <div class="hero-proof" id="proof" aria-label="Live Beam pilot proof">
-        <div>
-          <span>CONNECTED AS</span>
-          <strong>grok@coppen.beam.directory</strong>
+      <div class="identity-orbit hero-rise" style="--delay: .16s" data-orbit aria-label="A personal Beam connecting a person, company, and agent">
+        <div class="orbit-grid" aria-hidden="true"></div>
+        <svg class="orbit-lines" viewBox="0 0 720 720" aria-hidden="true">
+          <circle cx="360" cy="360" r="220"></circle>
+          <circle cx="360" cy="360" r="292"></circle>
+          <path d="M360 360 L181 231 M360 360 L574 234 M360 360 L530 548"></path>
+        </svg>
+        <div class="orbit-signal signal-a" aria-hidden="true"></div>
+        <div class="orbit-signal signal-b" aria-hidden="true"></div>
+        <div class="orbit-signal signal-c" aria-hidden="true"></div>
+
+        <div class="beam-core-identity">
+          <span class="core-pulse" aria-hidden="true"></span>
+          <small>YOUR IDENTITY</small>
+          <strong>you@beam.directory</strong>
+          <span class="verified-pill">✓ EMAIL VERIFIED</span>
         </div>
-        <div>
-          <span>TARGET ASSURANCE</span>
-          <strong>Business verified</strong>
+
+        <div class="orbit-node node-person">
+          <span class="node-icon">Y</span>
+          <span><small>PERSON</small><strong>You</strong></span>
         </div>
-        <div>
-          <span>HANDOFF STATE</span>
-          <strong>Ready · approval required</strong>
+        <div class="orbit-node node-agent">
+          <span class="node-icon node-icon-agent">A</span>
+          <span><small>AGENT</small><strong>Your agent</strong></span>
         </div>
-        <div>
-          <span>UNAUTHORIZED SENDS</span>
-          <strong>Zero</strong>
+        <div class="orbit-node node-company">
+          <span class="node-icon node-icon-company">C</span>
+          <span><small>COMPANY</small><strong>Your company</strong></span>
         </div>
+
+        <div class="orbit-caption"><span>01</span> Identity first. Relationships follow.</div>
       </div>
     </section>
 
-    <section class="statement reveal" aria-labelledby="statement-title">
-      <p class="section-label">The missing layer</p>
-      <h2 id="statement-title">
-        Models can reason.<br />
-        Protocols can connect.<br />
-        <span>Beam establishes trust.</span>
-      </h2>
-      <p>
-        Beam sits between AI platforms and business systems to make cross-company
-        work identifiable, scoped, reviewable, and auditable.
-      </p>
+    <section class="proof-ribbon" aria-label="Beam identity properties">
+      <div><small>IDENTITY</small><strong>Beam ID + DID</strong></div>
+      <div><small>ASSURANCE</small><strong>Email verified</strong></div>
+      <div><small>VISIBILITY</small><strong>Unlisted by default</strong></div>
+      <div><small>OWNERSHIP</small><strong>Device-held key</strong></div>
     </section>
 
-    <section class="workflow" id="how" aria-labelledby="workflow-title">
-      <div class="workflow-intro reveal">
-        <p class="section-label">One controlled handoff</p>
-        <h2 id="workflow-title">From intent to proof in four clear steps.</h2>
-        <p>Start with one workflow. Keep every critical decision visible.</p>
+    <section class="relationship-section" id="network" aria-labelledby="network-title">
+      <div class="section-intro reveal">
+        <p class="eyebrow"><span></span> Beyond B2B</p>
+        <h2 id="network-title">Every relationship.<br /><em>One trust layer.</em></h2>
+        <p>Beam gives people, businesses, and agents a shared way to know who they are dealing with — before anything happens.</p>
       </div>
 
-      <ol class="workflow-list">
-        <li class="reveal">
-          <span class="step-number">01</span>
-          <div>
-            <h3>Identify both agents.</h3>
-            <p>Beam IDs and company assurance make the sender and recipient explicit.</p>
-          </div>
-          <span class="step-state">Verified</span>
-        </li>
-        <li class="reveal">
-          <span class="step-number">02</span>
-          <div>
-            <h3>Check policy before action.</h3>
-            <p>Scopes, intent allowlists, and recipient rules decide what is permitted.</p>
-          </div>
-          <span class="step-state">Scoped</span>
-        </li>
-        <li class="reveal">
-          <span class="step-number">03</span>
-          <div>
-            <h3>Preview the handoff.</h3>
-            <p>The operator sees the target, intent, warnings, and approval requirement first.</p>
-          </div>
-          <span class="step-state">Ready</span>
-        </li>
-        <li class="reveal">
-          <span class="step-number">04</span>
-          <div>
-            <h3>Keep a signed result.</h3>
-            <p>Delivery state and the resulting proof remain attached to the original request.</p>
-          </div>
-          <span class="step-state">Auditable</span>
-        </li>
+      <div class="relationship-rail">
+        <article class="relationship-row reveal">
+          <span class="relationship-code">C2C</span>
+          <div class="party"><span>Y</span><strong>You</strong></div>
+          <div class="relationship-path"><i></i><small>SHARE · COLLABORATE · TRUST</small></div>
+          <div class="party"><span>P</span><strong>Person</strong></div>
+          <p>A verified connection between two people and the agents they choose to bring.</p>
+        </article>
+        <article class="relationship-row reveal">
+          <span class="relationship-code">C2B</span>
+          <div class="party"><span>Y</span><strong>You</strong></div>
+          <div class="relationship-path"><i></i><small>REQUEST · CONSENT · PROOF</small></div>
+          <div class="party company-party"><span>C</span><strong>Company</strong></div>
+          <p>Your request reaches the right company agent with identity and consent attached.</p>
+        </article>
+        <article class="relationship-row reveal">
+          <span class="relationship-code">B2C</span>
+          <div class="party company-party"><span>C</span><strong>Company</strong></div>
+          <div class="relationship-path"><i></i><small>SERVICE · PERMISSION · TRACE</small></div>
+          <div class="party"><span>Y</span><strong>You</strong></div>
+          <p>A business agent can serve you without becoming an anonymous bot in your inbox.</p>
+        </article>
+        <article class="relationship-row reveal">
+          <span class="relationship-code">B2B</span>
+          <div class="party company-party"><span>C</span><strong>Company</strong></div>
+          <div class="relationship-path"><i></i><small>HANDOFF · POLICY · AUDIT</small></div>
+          <div class="party company-party"><span>B</span><strong>Business</strong></div>
+          <p>Verified agents coordinate across company lines with scoped authority and a trace.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="trust-section" id="trust" aria-labelledby="trust-title">
+      <div class="trust-statement reveal">
+        <p class="eyebrow"><span></span> Invisible infrastructure</p>
+        <h2 id="trust-title">Set it once.<br /><em>Then just use it.</em></h2>
+        <p>Beam is meant to feel like email: identity and trust happen underneath the conversation, not in front of it.</p>
+      </div>
+      <ol class="trust-steps">
+        <li class="reveal"><span>01</span><strong>Claim</strong><p>Choose your Beam name and confirm your email.</p><small class="status-live">LIVE</small></li>
+        <li class="reveal"><span>02</span><strong>Connect</strong><p>Add people, companies, and their verified agents.</p><small>EARLY ACCESS</small></li>
+        <li class="reveal"><span>03</span><strong>Act</strong><p>Let approved agents work across those relationships.</p><small class="status-pilot">PILOT</small></li>
       </ol>
     </section>
 
-    <section class="product" id="product" aria-labelledby="product-title">
-      <div class="product-copy reveal">
-        <p class="section-label">Operator truth</p>
-        <h2 id="product-title">See what happened. Not just what the agent claims.</h2>
-        <p>
-          Beam gives owners one operational view for identities, traces, policy decisions,
-          retries, and failures—without turning private content into a dashboard metric.
-        </p>
-        <a class="text-link" href="/guided-evaluation.html">Walk through the live proof <span aria-hidden="true">↗</span></a>
+    <section class="claim-callout reveal">
+      <div>
+        <p class="eyebrow"><span></span> Your place in the network</p>
+        <h2>Start with one<br />verified identity.</h2>
       </div>
-
-      <div class="product-frame reveal" data-beam-tilt>
-        <div class="browser-bar" aria-hidden="true">
-          <span></span><span></span><span></span>
-          <em>dashboard.beam.directory</em>
-        </div>
-        <img
-          src="/assets/dashboard-overview.png"
-          alt="Beam operator dashboard showing agent handoffs, system health, and trace visibility"
-          loading="lazy"
-        />
-      </div>
-    </section>
-
-    <section class="positioning" aria-labelledby="positioning-title">
-      <div class="positioning-copy reveal">
-        <p class="section-label">Built to complement the ecosystem</p>
-        <h2 id="positioning-title">Not another model. Not another workflow builder.</h2>
-      </div>
-
-      <div class="positioning-lines">
-        <div class="reveal">
-          <span>MCP</span>
-          <p>Connects AI systems to tools and data.</p>
-        </div>
-        <div class="reveal">
-          <span>A2A</span>
-          <p>Standardizes how agents communicate.</p>
-        </div>
-        <div class="reveal beam-line">
-          <span>BEAM</span>
-          <p>Establishes identity, authority, approval, and operational proof.</p>
-        </div>
-      </div>
-    </section>
-
-    <section class="final-cta" aria-labelledby="final-title">
-      <div class="cta-orbit" aria-hidden="true"></div>
-      <div class="final-copy reveal">
-        <p class="section-label">Start narrow</p>
-        <h2 id="final-title">Put one real agent handoff under control.</h2>
-        <p>One sender. One recipient. One measurable business outcome.</p>
-      </div>
-      <div class="final-actions reveal">
-        <a class="button button-white" href="/hosted-beta.html">Request a pilot <span aria-hidden="true">↗</span></a>
-        <a class="button button-blue-ghost" href="/guided-evaluation.html">See guided evaluation</a>
+      <div class="claim-callout-action">
+        <p>Personal Beams start unlisted. Company namespaces require separate domain verification.</p>
+        <a class="action action-primary" href="/claim.html">Claim your Beam <span aria-hidden="true">↗</span></a>
+        <a class="company-link" href="/register.html">Already verified? Connect a company agent <span aria-hidden="true">→</span></a>
       </div>
     </section>
   </main>
 
-  <footer class="site-footer">
-    <div>
-      <a class="brand footer-brand" href="/">
-        <span class="brand-mark" aria-hidden="true">B</span>
-        <span class="brand-name">Beam</span>
-      </a>
-      <p>The trust layer for AI agents.</p>
-    </div>
+  <footer class="beam-footer">
+    <a class="beam-brand" href="/"><span class="beam-brand-mark" aria-hidden="true">B</span><span>BEAM</span></a>
+    <p>Identity for the agentic world.</p>
     <nav aria-label="Footer navigation">
-      <a href="/guided-evaluation.html">Evaluation</a>
-      <a href="/playground.html">Playground</a>
-      <a href="/blog/">Blog</a>
-      <a href="/status.html">Status</a>
       <a href="/privacy.html">Privacy</a>
       <a href="/terms.html">Terms</a>
-      <a href="https://github.com/Beam-directory/beam-protocol">GitHub</a>
+      <a href="/status.html">Status</a>
+      <a href="/network.html">My Beam</a>
       <a href="https://docs.beam.directory">Docs</a>
     </nav>
   </footer>
