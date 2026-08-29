@@ -39,7 +39,10 @@ COPY --chmod=0555 packages/mcp-server/beam-entrypoint.sh /app/beam-entrypoint.sh
 
 # The runtime executes prebuilt JavaScript only. Removing package managers and
 # their global dependency trees reduces both attack surface and image CVEs.
-RUN apk add --no-cache su-exec=0.3-r0 \
+RUN apk add --no-cache \
+      libcrypto3=3.5.8-r0 \
+      libssl3=3.5.8-r0 \
+      su-exec=0.3-r0 \
   && rm -rf \
       /usr/local/lib/node_modules/npm \
       /usr/local/lib/node_modules/corepack \
