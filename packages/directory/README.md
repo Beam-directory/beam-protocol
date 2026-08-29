@@ -55,6 +55,7 @@ Default local endpoints:
 ### Verification and email
 
 - `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS` (or `SMTP_PASSWORD`), `SMTP_FROM`
+- `M365_TENANT_ID`, `M365_CLIENT_ID`, `M365_CLIENT_SECRET`, `M365_SENDER`, optional `M365_REPLY_TO`
 - `RESEND_API_KEY`
 - `COMPANIES_HOUSE_API_KEY`
 
@@ -112,7 +113,7 @@ Production:
 
 - configure `BEAM_ADMIN_EMAILS` and optional operator/viewer email lists
 - set `BEAM_DASHBOARD_URL` to the real dashboard origin
-- configure `SMTP_*` or `RESEND_API_KEY` for magic-link delivery
+- configure `SMTP_*`, Microsoft Graph (`M365_*`), or `RESEND_API_KEY` for magic-link delivery
 - the dashboard and admin APIs use `/admin/auth/*` plus a short-lived signed session
 
 For the full operator workflow, including alerts, traces, audit history, exports, and prune confirmation, see:

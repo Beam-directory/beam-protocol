@@ -8,6 +8,14 @@ type MailTransport = {
   }): Promise<unknown>
 }
 
+type EmailMessage = {
+  from?: string
+  to: string
+  subject: string
+  text: string
+  html: string
+}
+
 export type SmtpConfig = {
   host: string | null
   port: number
@@ -16,6 +24,21 @@ export type SmtpConfig = {
   pass: string | null
   from: string | null
 }
+
+export type MicrosoftGraphConfig = {
+  tenantId: string | null
+  clientId: string | null
+  clientSecret: string | null
+  sender: string | null
+  replyTo: string | null
+}
+
+type CachedGraphToken = {
+  accessToken: string
+  expiresAt: number
+}
+
+let cachedGraphToken: CachedGraphToken | null = null
 
 export function getSmtpConfig(): SmtpConfig {
   const host = process.env['SMTP_HOST']?.trim() || null
@@ -34,8 +57,26 @@ export function getSmtpConfig(): SmtpConfig {
   }
 }
 
+export function getMicrosoftGraphConfig(): MicrosoftGraphConfig {
+  return {
+    tenantId: process.env['M365_TENANT_ID']?.trim() || null,
+    clientId: process.env['M365_CLIENT_ID']?.trim() || null,
+    clientSecret: process.env['M365_CLIENT_SECRET']?.trim() || null,
+    sender: process.env['M365_SENDER']?.trim() || null,
+    replyTo: process.env['M365_REPLY_TO']?.trim() || null,
+  }
+}
+
+function isMicrosoftGraphConfigured(config = getMicrosoftGraphConfig()): boolean {
+  return Boolean(config.tenantId && config.clientId && config.clientSecret && config.sender)
+}
+
 export function isEmailDeliveryConfigured(): boolean {
-  return Boolean(getSmtpConfig().host || process.env['RESEND_API_KEY'])
+  return Boolean(
+    getSmtpConfig().host
+    || isMicrosoftGraphConfigured()
+    || process.env['RESEND_API_KEY'],
+  )
 }
 
 async function createTransport(): Promise<MailTransport> {
@@ -89,19 +130,106 @@ async function sendWithResend(message: {
   }
 }
 
+async function acquireMicrosoftGraphToken(config: MicrosoftGraphConfig, forceRefresh = false): Promise<string> {
+  if (!isMicrosoftGraphConfigured(config)) {
+    throw new Error('Microsoft Graph email delivery is not fully configured')
+  }
+
+  if (!forceRefresh && cachedGraphToken && cachedGraphToken.expiresAt > Date.now() + 60_000) {
+    return cachedGraphToken.accessToken
+  }
+
+  const response = await fetch(
+    `https://login.microsoftonline.com/${encodeURIComponent(config.tenantId!)}/oauth2/v2.0/token`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        client_id: config.clientId!,
+        client_secret: config.clientSecret!,
+        scope: 'https://graph.microsoft.com/.default',
+        grant_type: 'client_credentials',
+      }),
+      signal: AbortSignal.timeout(15_000),
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Microsoft Graph token request failed with status ${response.status}`)
+  }
+
+  const payload = await response.json() as { access_token?: string; expires_in?: number }
+  if (!payload.access_token) {
+    throw new Error('Microsoft Graph token response did not contain an access token')
+  }
+
+  cachedGraphToken = {
+    accessToken: payload.access_token,
+    expiresAt: Date.now() + Math.max(60, payload.expires_in ?? 3600) * 1000,
+  }
+  return payload.access_token
+}
+
+async function sendWithMicrosoftGraph(message: EmailMessage): Promise<void> {
+  const config = getMicrosoftGraphConfig()
+  if (!isMicrosoftGraphConfigured(config)) {
+    throw new Error('Microsoft Graph email delivery is not fully configured')
+  }
+
+  const send = async (forceRefresh = false): Promise<Response> => {
+    const accessToken = await acquireMicrosoftGraphToken(config, forceRefresh)
+    return fetch(
+      `https://graph.microsoft.com/v1.0/users/${encodeURIComponent(config.sender!)}/sendMail`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: {
+            subject: message.subject,
+            body: {
+              contentType: 'HTML',
+              content: message.html,
+            },
+            toRecipients: [{ emailAddress: { address: message.to } }],
+            ...(config.replyTo
+              ? { replyTo: [{ emailAddress: { address: config.replyTo } }] }
+              : {}),
+          },
+        }),
+        signal: AbortSignal.timeout(20_000),
+      },
+    )
+  }
+
+  let response = await send()
+  if (response.status === 401) {
+    cachedGraphToken = null
+    response = await send(true)
+  }
+
+  if (!response.ok) {
+    const details = (await response.text().catch(() => '')).slice(0, 2_000)
+    throw new Error(
+      `Microsoft Graph email request failed with status ${response.status}${details ? `: ${details}` : ''}`,
+    )
+  }
+}
+
 async function sendEmailMessage(
-  message: {
-    from?: string
-    to: string
-    subject: string
-    text: string
-    html: string
-  },
+  message: EmailMessage,
   disabledWarning: string,
 ): Promise<boolean> {
   if (getSmtpConfig().host) {
     const transporter = await createTransport()
     await transporter.sendMail(message)
+    return true
+  }
+
+  if (isMicrosoftGraphConfigured()) {
+    await sendWithMicrosoftGraph(message)
     return true
   }
 
@@ -142,7 +270,7 @@ export async function sendIdentityClaimEmail(input: {
 
   return sendEmailMessage(
     message,
-    'Identity claim delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+    'Identity claim delivery disabled: set SMTP_HOST, Microsoft Graph, or RESEND_API_KEY to enable delivery',
   )
 }
 
@@ -164,7 +292,7 @@ export async function sendAgentVerificationEmail(input: {
 
   return sendEmailMessage(
     message,
-    'Email verification disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+    'Email verification disabled: set SMTP_HOST, Microsoft Graph, or RESEND_API_KEY to enable delivery',
   )
 }
 
@@ -183,7 +311,7 @@ export async function sendAdminMagicLinkEmail(input: {
 
   return sendEmailMessage(
     message,
-    'Admin email delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+    'Admin email delivery disabled: set SMTP_HOST, Microsoft Graph, or RESEND_API_KEY to enable delivery',
   )
 }
 
@@ -207,6 +335,6 @@ export async function sendOperatorDigestEmail(input: {
       text: input.markdown,
       html,
     },
-    'Operator digest delivery disabled: set SMTP_HOST or RESEND_API_KEY to enable delivery',
+    'Operator digest delivery disabled: set SMTP_HOST, Microsoft Graph, or RESEND_API_KEY to enable delivery',
   )
 }
