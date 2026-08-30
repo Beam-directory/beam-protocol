@@ -1,0 +1,20 @@
+# Merge this example into ~/.codex/config.toml only when your Beam operator
+# has supplied the dedicated tenant URL. OAuth is completed separately with:
+# codex mcp login beam
+
+[mcp_servers.beam]
+url = "https://mcp.your-org.example/mcp"
+auth = "oauth"
+default_tools_approval_mode = "prompt"
+
+[mcp_servers.beam.tools.beam_network_identity]
+approval_mode = "approve"
+
+[mcp_servers.beam.tools.beam_network_connections]
+approval_mode = "approve"
+
+[mcp_servers.beam.tools.beam_network_conversations]
+approval_mode = "approve"
+
+[mcp_servers.beam.tools.beam_network_messages]
+approval_mode = "approve"

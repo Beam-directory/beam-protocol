@@ -11,6 +11,7 @@ import {
 } from './openclaw-secret-store.mjs'
 import { ensureLocalOpenClawAcls, ensureLocalOpenClawRelayTargets, ensureLocalOpenClawShield } from './openclaw-local-trust.mjs'
 import { listOpenClawRuntimeDescriptors } from './openclaw-runtime-state.mjs'
+import { assertNetworkEncryptionIdentity, createNetworkEncryptionIdentity } from './network-e2ee.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', 'http://localhost:43100')
 const dashboardUrl = optionalFlag('--dashboard-url', 'http://localhost:43173')
@@ -58,7 +59,30 @@ function createIdentityPublicKey() {
   return {
     publicKeyBase64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     privateKeyBase64: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+    ...createNetworkEncryptionIdentity(),
   }
+}
+
+function ensureNetworkEncryptionIdentity(identity) {
+  if (identity.dhPublicKeyBase64 && identity.dhPrivateKeyBase64) {
+    assertNetworkEncryptionIdentity(identity.dhPublicKeyBase64, identity.dhPrivateKeyBase64)
+    return identity
+  }
+  return { ...identity, ...createNetworkEncryptionIdentity() }
+}
+
+async function syncDirectoryEncryptionKey(identity) {
+  if (!identity.apiKey || !identity.dhPublicKeyBase64) {
+    return
+  }
+  await requestJson(`${directoryUrl}/agents/${encodeURIComponent(identity.beamId)}/config`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${identity.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dhPublicKey: identity.dhPublicKeyBase64 }),
+  })
 }
 
 function fileMtimeMs(filePath) {
@@ -351,6 +375,7 @@ async function ensureDirectoryAgent(identity, displayName, description) {
       displayName,
       capabilities: ['conversation.message', 'task.delegate'],
       publicKey: identity.publicKeyBase64,
+      dhPublicKey: identity.dhPublicKeyBase64,
       description,
       visibility: 'unlisted',
     }),
@@ -519,6 +544,9 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
           continue
         }
 
+        identity = ensureNetworkEncryptionIdentity(identity)
+        generatedUpdates[descriptor.identityKey] = identity
+
         const description = role
           ? `Imported OpenClaw agent. ${role}`
           : 'Imported OpenClaw agent.'
@@ -562,6 +590,15 @@ async function runImportCycle(existingSession = null, allowRefresh = true) {
             apiKey: reissued.credential.apiKey,
           }
         }
+
+
+        const encryptionReadyIdentity = ensureNetworkEncryptionIdentity(
+          generatedUpdates[descriptor.identityKey]
+            ?? baseIdentities[descriptor.identityKey]
+            ?? identity,
+        )
+        await syncDirectoryEncryptionKey(encryptionReadyIdentity)
+        generatedUpdates[descriptor.identityKey] = encryptionReadyIdentity
 
         imported.push({
           agentName: descriptor.agentName,

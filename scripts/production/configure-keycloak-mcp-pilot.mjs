@@ -41,6 +41,8 @@ const pilotUserPasswordFile = valueAfter('--pilot-user-password-file')
 const pilotUsername = (valueAfter('--pilot-username') ?? 'pilot-operator').trim()
 const mcpResource = valueAfter('--mcp-resource') ?? 'https://mcp.beam.directory/mcp'
 const introspectionClientId = mcpResource
+const enableSendScope = process.argv.includes('--enable-send-scope')
+const grokRedirectUri = 'http://127.0.0.1:35419/callback'
 
 if (!/^[a-z0-9-]{1,63}$/.test(realm)) fail('--realm is invalid')
 if (!/^[a-zA-Z0-9._-]{1,64}$/.test(adminUsername)) fail('--admin-username is invalid')
@@ -58,10 +60,11 @@ const plan = {
   pilotUsername,
   mcpResource,
   readOnlyScope: 'beam:read',
-  sendScopeCreated: false,
+  sendScopeCreated: enableSendScope,
   confidentialClients: [introspectionClientId],
   disabledLegacyClients: ['beam-mcp-resource-server'],
   publicClients: ['beam-grok-pilot'],
+  grokRedirectUri,
   tokenLifespanSeconds: 300,
 }
 
@@ -182,6 +185,19 @@ const readScopeId = await ensureClientScope({
   },
 })
 
+const sendScopeId = enableSendScope
+  ? await ensureClientScope({
+      name: 'beam:send',
+      description: 'Create Beam contacts, conversations, and signed messages after explicit confirmation',
+      protocol: 'openid-connect',
+      attributes: {
+        'display.on.consent.screen': 'true',
+        'include.in.token.scope': 'true',
+        'consent.screen.text': 'Create Beam Network changes and send explicitly confirmed messages',
+      },
+    })
+  : null
+
 const audienceScopeId = await ensureClientScope({
   name: 'beam-mcp-audience',
   description: 'Bind access tokens to the exact Beam MCP resource and its introspection client',
@@ -220,6 +236,10 @@ const audienceScopeId = await ensureClientScope({
   ],
 })
 
+const availableClientScopes = await request(`${realmPath}/client-scopes`, { token: adminToken })
+const offlineAccessScopeId = availableClientScopes.find((scope) => scope.name === 'offline_access')?.id
+if (!offlineAccessScopeId) throw new Error('Keycloak offline_access client scope is missing')
+
 const realmDefaultScopes = await request(`${realmPath}/default-default-client-scopes`, { token: adminToken })
 for (const scope of realmDefaultScopes) {
   if (scope.id === audienceScopeId) continue
@@ -234,16 +254,23 @@ if (!realmDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
 }
 
 const realmOptionalScopes = await request(`${realmPath}/default-optional-client-scopes`, { token: adminToken })
+const allowedOptionalScopeIds = new Set([
+  readScopeId,
+  offlineAccessScopeId,
+  ...(sendScopeId ? [sendScopeId] : []),
+])
 for (const scope of realmOptionalScopes) {
-  if (scope.id === readScopeId) continue
+  if (allowedOptionalScopeIds.has(scope.id)) continue
   await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(scope.id)}`, {
     method: 'DELETE', token: adminToken, expected: [204],
   })
 }
-if (!realmOptionalScopes.some((scope) => scope.id === readScopeId)) {
-  await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(readScopeId)}`, {
-    method: 'PUT', token: adminToken, expected: [204],
-  })
+for (const scopeId of allowedOptionalScopeIds) {
+  if (!realmOptionalScopes.some((scope) => scope.id === scopeId)) {
+    await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(scopeId)}`, {
+      method: 'PUT', token: adminToken, expected: [204],
+    })
+  }
 }
 async function ensureClient(representation) {
   const clients = await request(`${realmPath}/clients?clientId=${encodeURIComponent(representation.clientId)}`, { token: adminToken })
@@ -295,7 +322,7 @@ if (legacyResourceClient?.enabled !== false) {
 
 const grokClientInternalId = await ensureClient({
   clientId: 'beam-grok-pilot',
-  name: 'Beam Grok read-only pilot',
+  name: 'Beam Grok MCP pilot',
   enabled: true,
   protocol: 'openid-connect',
   publicClient: true,
@@ -304,21 +331,24 @@ const grokClientInternalId = await ensureClient({
   directAccessGrantsEnabled: false,
   serviceAccountsEnabled: false,
   fullScopeAllowed: false,
-  redirectUris: ['http://127.0.0.1:*', 'http://localhost:*'],
-  webOrigins: ['+'],
+  redirectUris: [grokRedirectUri],
+  webOrigins: [],
   defaultClientScopes: ['beam-mcp-audience'],
-  optionalClientScopes: ['beam:read'],
+  optionalClientScopes: ['beam:read', 'offline_access', ...(sendScopeId ? ['beam:send'] : [])],
   attributes: {
     'pkce.code.challenge.method': 'S256',
-    'post.logout.redirect.uris': '+',
+    'exclude.issuer.from.auth.response': 'false',
+    'post.logout.redirect.uris': grokRedirectUri,
   },
 })
 
 const clientDefaultScopes = await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes`, { token: adminToken })
-if (clientDefaultScopes.some((scope) => scope.id === readScopeId)) {
-  await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes/${encodeURIComponent(readScopeId)}`, {
-    method: 'DELETE', token: adminToken, expected: [204],
-  })
+for (const scopeId of allowedOptionalScopeIds) {
+  if (clientDefaultScopes.some((scope) => scope.id === scopeId)) {
+    await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes/${encodeURIComponent(scopeId)}`, {
+      method: 'DELETE', token: adminToken, expected: [204],
+    })
+  }
 }
 if (!clientDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
   await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/default-client-scopes/${encodeURIComponent(audienceScopeId)}`, {
@@ -327,10 +357,12 @@ if (!clientDefaultScopes.some((scope) => scope.id === audienceScopeId)) {
 }
 
 const clientOptionalScopes = await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/optional-client-scopes`, { token: adminToken })
-if (!clientOptionalScopes.some((scope) => scope.id === readScopeId)) {
-  await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/optional-client-scopes/${encodeURIComponent(readScopeId)}`, {
-    method: 'PUT', token: adminToken, expected: [204],
-  })
+for (const scopeId of allowedOptionalScopeIds) {
+  if (!clientOptionalScopes.some((scope) => scope.id === scopeId)) {
+    await request(`${realmPath}/clients/${encodeURIComponent(grokClientInternalId)}/optional-client-scopes/${encodeURIComponent(scopeId)}`, {
+      method: 'PUT', token: adminToken, expected: [204],
+    })
+  }
 }
 
 const users = await request(`${realmPath}/users?username=${encodeURIComponent(pilotUsername)}&exact=true`, { token: adminToken })
@@ -372,4 +404,13 @@ if (metadata.introspection_endpoint !== `${publicBaseUrl}/realms/${realm}/protoc
   throw new Error('introspection endpoint is not the expected public URL')
 }
 
-console.log(JSON.stringify({ ok: true, ...plan, apply: true, metadataVerified: true }, null, 2))
+const verifiedGrokClients = await request(`${realmPath}/clients?clientId=beam-grok-pilot`, { token: adminToken })
+const verifiedGrokClient = verifiedGrokClients.find((client) => client.clientId === 'beam-grok-pilot')
+if (!verifiedGrokClient?.publicClient || verifiedGrokClient.attributes?.['pkce.code.challenge.method'] !== 'S256') {
+  throw new Error('Beam Grok client is not a public PKCE S256 client')
+}
+if (JSON.stringify(verifiedGrokClient.redirectUris) !== JSON.stringify([grokRedirectUri])) {
+  throw new Error('Beam Grok redirect URI is not pinned to the configured loopback callback')
+}
+
+console.log(JSON.stringify({ ok: true, ...plan, apply: true, metadataVerified: true, grokClientVerified: true }, null, 2))

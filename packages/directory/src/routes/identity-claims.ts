@@ -1,4 +1,4 @@
-import { createHash, createPublicKey, randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { createAgentApiKey, hashApiKey } from '../api-key.js'
@@ -11,6 +11,7 @@ import {
 } from '../db.js'
 import { sendIdentityClaimEmail } from '../email.js'
 import { serializeAgent } from '../utils/serialize.js'
+import { isEd25519Spki, isX25519Spki } from '../key-validation.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const HANDLE_RE = /^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/
@@ -29,19 +30,6 @@ function maskEmail(email: string): string {
   const [local = '', domain = ''] = email.split('@')
   const visible = local.slice(0, Math.min(2, local.length))
   return `${visible}${'*'.repeat(Math.max(2, local.length - visible.length))}@${domain}`
-}
-
-function isEd25519Spki(publicKey: string): boolean {
-  try {
-    const parsed = createPublicKey({
-      key: Buffer.from(publicKey, 'base64'),
-      format: 'der',
-      type: 'spki',
-    })
-    return parsed.asymmetricKeyType === 'ed25519'
-  } catch {
-    return false
-  }
 }
 
 export function identityClaimsRouter(db: Database): Hono {
@@ -90,7 +78,7 @@ export function identityClaimsRouter(db: Database): Hono {
       return c.json({ error: 'This Beam name is not available', errorCode: 'HANDLE_UNAVAILABLE' }, 409)
     }
 
-    const claimUrl = new URL('/claim.html', publicSiteUrl())
+    const claimUrl = new URL('/claim', publicSiteUrl())
     // Keep the one-time token in the URL fragment so it never reaches the
     // static-site access log or a Referer header.
     claimUrl.hash = new URLSearchParams({ token }).toString()
@@ -176,6 +164,10 @@ export function identityClaimsRouter(db: Database): Hono {
     if (!publicKey || !isEd25519Spki(publicKey)) {
       return c.json({ error: 'A valid Ed25519 identity key is required', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
     }
+    const dhPublicKey = typeof raw['dhPublicKey'] === 'string' ? raw['dhPublicKey'].trim() : ''
+    if (!dhPublicKey || !isX25519Spki(dhPublicKey)) {
+      return c.json({ error: 'A valid X25519 encryption key is required', errorCode: 'INVALID_ENCRYPTION_KEY' }, 400)
+    }
 
     const claim = getIdentityClaim(db, tokenHash(token))
     if (!claim) {
@@ -186,6 +178,7 @@ export function identityClaimsRouter(db: Database): Hono {
     const agent = completeIdentityClaim(db, {
       tokenHash: tokenHash(token),
       publicKey,
+      dhPublicKey,
       apiKeyHash: hashApiKey(apiKey),
       capabilities: ['identity.personal', 'contact.receive'],
     })

@@ -9,6 +9,11 @@ function publicKeyBase64(): string {
   return (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
 }
 
+function dhPublicKeyBase64(): string {
+  const { publicKey } = generateKeyPairSync('x25519')
+  return (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+}
+
 function withLocalClaimLinks(): () => void {
   const previous = {
     BEAM_ALLOW_LOCAL_CLAIM_URLS: process.env['BEAM_ALLOW_LOCAL_CLAIM_URLS'],
@@ -67,7 +72,7 @@ test('personal identity claim verifies email before creating a private Beam iden
     const complete = await app.request('http://localhost/identity-claims/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, publicKey: publicKeyBase64() }),
+      body: JSON.stringify({ token, publicKey: publicKeyBase64(), dhPublicKey: dhPublicKeyBase64() }),
     })
 
     assert.equal(complete.status, 201)
@@ -89,11 +94,12 @@ test('personal identity claim verifies email before creating a private Beam iden
     const stored = getAgent(db, 'tobias-kub@beam.directory')
     assert.equal(stored?.email_verified, 1)
     assert.equal(stored?.visibility, 'unlisted')
+    assert.ok(stored?.dh_public_key)
 
     const replay = await app.request('http://localhost/identity-claims/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, publicKey: publicKeyBase64() }),
+      body: JSON.stringify({ token, publicKey: publicKeyBase64(), dhPublicKey: dhPublicKeyBase64() }),
     })
     assert.equal(replay.status, 404)
   } finally {
@@ -150,14 +156,14 @@ test('identity claim rejects unavailable handles and invalid signing keys', asyn
     const invalid = await app.request('http://localhost/identity-claims/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, publicKey: 'not-a-key' }),
+      body: JSON.stringify({ token, publicKey: 'not-a-key', dhPublicKey: dhPublicKeyBase64() }),
     })
     assert.equal(invalid.status, 400)
 
     const valid = await app.request('http://localhost/identity-claims/complete', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token, publicKey: publicKeyBase64() }),
+      body: JSON.stringify({ token, publicKey: publicKeyBase64(), dhPublicKey: dhPublicKeyBase64() }),
     })
     assert.equal(valid.status, 201)
   } finally {

@@ -48,14 +48,14 @@ try {
   await page.screenshot({ path: resolve(outputDir, 'beam-home-desktop.png'), fullPage: true })
 
   const primaryClaim = page.getByRole('link', { name: /claim your beam/i }).first()
-  assert.equal(await primaryClaim.getAttribute('href'), '/claim.html')
+  assert.equal(await primaryClaim.getAttribute('href'), '/claim')
   await primaryClaim.click()
-  await page.getByRole('heading', { name: /what should the network call you/i }).waitFor()
+  await page.getByRole('heading', { name: /choose your beam id/i }).waitFor()
 
   const handle = `beamcheck${Date.now().toString().slice(-8)}`
-  await page.getByLabel('Your name').fill('Beam Browser Check')
-  await page.getByLabel('Your Beam name').fill(handle)
-  await page.getByLabel('Email').fill('browser-check@example.com')
+  await page.getByLabel('Name').fill('Beam Browser Check')
+  await page.getByLabel('Beam ID').fill(handle)
+  await page.getByLabel('Email address').fill('browser-check@example.com')
 
   const claimResponsePromise = page.waitForResponse((response) => (
     response.url().endsWith('/identity-claims')
@@ -65,7 +65,7 @@ try {
   const claimResponse = await claimResponsePromise
   assert.equal(claimResponse.status(), 202)
   const claimResult = await claimResponse.json()
-  assert.match(claimResult.claimUrl, /\/claim\.html#token=/)
+  assert.match(claimResult.claimUrl, /\/claim#token=/)
   await page.getByRole('heading', { name: /your beam is waiting/i }).waitFor()
 
   const claimPage = await desktopContext.newPage()
@@ -74,12 +74,14 @@ try {
   await claimPage.getByRole('heading', { name: /this beam is ready for you/i }).waitFor()
   assert.equal(await claimPage.locator('#confirmed-beam-id').textContent(), `${handle}@beam.directory`)
 
-  const downloadPromise = claimPage.waitForEvent('download')
   await claimPage.getByRole('button', { name: /create my beam/i }).click()
+  await claimPage.getByRole('heading', { name: /welcome to beam/i }).waitFor()
+  const downloadPromise = claimPage.waitForEvent('download')
+  await claimPage.getByRole('button', { name: /export recovery kit/i }).click()
   const download = await downloadPromise
   assert.match(download.suggestedFilename(), /-recovery\.json$/)
-  await claimPage.getByRole('heading', { name: /welcome to beam/i }).waitFor()
   assert.equal(await claimPage.locator('#claimed-beam-id').textContent(), `${handle}@beam.directory`)
+  await claimPage.waitForTimeout(650)
   await claimPage.screenshot({ path: resolve(outputDir, 'beam-claim-complete.png'), fullPage: true })
   await desktopContext.close()
 
@@ -93,8 +95,8 @@ try {
   await mobile.screenshot({ path: resolve(outputDir, 'beam-home-mobile.png'), fullPage: true })
   assert.equal(await mobile.locator('body').evaluate((element) => element.scrollWidth <= window.innerWidth), true)
 
-  await mobile.goto(`${siteUrl}/claim.html`, { waitUntil: 'networkidle' })
-  await mobile.getByRole('heading', { name: /what should the network call you/i }).waitFor()
+  await mobile.goto(`${siteUrl}/claim`, { waitUntil: 'networkidle' })
+  await mobile.getByRole('heading', { name: /choose your beam id/i }).waitFor()
   await mobile.screenshot({ path: resolve(outputDir, 'beam-claim-mobile.png'), fullPage: true })
   assert.equal(await mobile.locator('body').evaluate((element) => element.scrollWidth <= window.innerWidth), true)
   await mobileContext.close()

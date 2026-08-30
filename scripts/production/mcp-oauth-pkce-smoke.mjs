@@ -94,6 +94,15 @@ const mcpConnectUrl = safeHttpsUrl(valueAfter('--mcp-connect-url') ?? publicMcpU
 const browserHostMap = valueAfter('--browser-host-map')
 const clientId = valueAfter('--client-id') ?? 'beam-grok-pilot'
 const username = valueAfter('--username') ?? 'pilot-operator'
+const expectedTools = (valueAfter('--expected-tools') ?? 'beam_prepare_handoff,beam_status')
+  .split(',')
+  .map((entry) => entry.trim())
+  .filter(Boolean)
+  .sort()
+const requestedScopes = (valueAfter('--scopes') ?? 'openid beam:read')
+  .split(/[\s,]+/)
+  .map((entry) => entry.trim())
+  .filter(Boolean)
 const password = readSecret(valueAfter('--password-file'), 'pilot user password')
 const introspectionSecret = readSecret(valueAfter('--introspection-secret-file'), 'introspection client secret')
 const outputFile = valueAfter('--output')
@@ -140,7 +149,7 @@ try {
     response_type: 'code',
     client_id: clientId,
     redirect_uri: redirectUri,
-    scope: 'openid beam:read',
+    scope: requestedScopes.join(' '),
     code_challenge: challenge,
     code_challenge_method: 'S256',
     state,
@@ -212,7 +221,8 @@ try {
   }
   if (!audiences.includes(publicMcpUrl)) fail('access token is not audience-bound to the exact MCP URL')
   if (!scopes.includes('beam:read')) fail('access token does not include beam:read')
-  if (scopes.includes('beam:send')) fail('access token unexpectedly includes beam:send')
+  if (requestedScopes.includes('beam:send') && !scopes.includes('beam:send')) fail('access token does not include requested beam:send')
+  if (!requestedScopes.includes('beam:send') && scopes.includes('beam:send')) fail('access token unexpectedly includes beam:send')
 
   const connectUrl = new URL(mcpConnectUrl)
   const requestHeaders = connectUrl.hostname === new URL(publicMcpUrl).hostname
@@ -226,7 +236,9 @@ try {
   await client.connect(transport)
   const tools = await client.listTools()
   const toolNames = tools.tools.map((tool) => tool.name).sort()
-  if (toolNames.join(',') !== 'beam_prepare_handoff,beam_status') fail('remote MCP did not expose exactly the two read-only tools')
+  if (toolNames.join(',') !== expectedTools.join(',')) {
+    fail(`remote MCP tool surface did not match the expected read-only tools: ${JSON.stringify({ expected: expectedTools, actual: toolNames })}`)
+  }
   const statusResult = await client.callTool({ name: 'beam_status', arguments: {} })
   if (statusResult.isError === true) fail('beam_status returned an MCP error')
 
@@ -238,10 +250,10 @@ try {
     authorizationCodeFlow: true,
     pkceMethod: 'S256',
     exactAudience: true,
-    scope: ['beam:read'],
+    scope: scopes.filter((scope) => scope.startsWith('beam:')).sort(),
     tokenActive: true,
     tools: toolNames,
-    beamSendAdvertised: false,
+    beamSendAdvertised: toolNames.includes('beam_send'),
     statusCallSucceeded: true,
     messageSent: false,
   }

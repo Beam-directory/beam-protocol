@@ -1,6 +1,6 @@
 # Beam MCP server
 
-Expose signed Beam handoffs to Grok and other MCP clients in either of two modes:
+Expose signed Beam handoffs and Beam Network collaboration to Grok, Codex, and other MCP clients in either of two modes:
 
 - local `stdio`, with the Beam signing identity kept on the user's machine;
 - dedicated-tenant Streamable HTTP, with OAuth, revocation-aware token introspection, resource binding, scopes, and content-free audit events.
@@ -9,7 +9,10 @@ The server offers:
 
 - `beam_status`: read public directory and trust metadata;
 - `beam_prepare_handoff`: validate the target and preview a handoff without sending it;
-- `beam_send`: deliver only when the deployment enables send, OAuth grants `beam:send`, the target passes operator policy, and the exact call has `confirmed=true` after human approval.
+- `beam_network_identity`, `beam_network_discover`, and `beam_network_connections`: inspect the connected identity, find identities, and list contacts or pending requests;
+- `beam_network_conversations` and `beam_network_messages`: read the direct/group inbox and a selected conversation;
+- `beam_send`: deliver only when the deployment enables send, OAuth grants `beam:send`, the target passes operator policy, and the exact call has `confirmed=true` after human approval;
+- `beam_network_request_connection`, `beam_network_respond_connection`, `beam_network_open_direct`, `beam_network_create_group`, and `beam_network_send_message`: signed Network writes available only in the same explicitly enabled send profile and only with exact human confirmation.
 
 Payment status is not identity assurance. The server reports Beam's independent verification and trust data, but does not claim that an unverified target is safe.
 
@@ -53,6 +56,18 @@ grok mcp add beam -- node /absolute/path/to/beam-protocol/packages/mcp-server/di
 
 Configure the four Beam identity secrets in the Grok MCP environment. First call `beam_status`, then `beam_prepare_handoff`, show the preview to the human, and call `beam_send` only after approval.
 
+## Codex
+
+For a dedicated remote tenant, configure the Streamable HTTP connector once and complete OAuth:
+
+```bash
+codex mcp add beam --url 'https://mcp.your-org.example/mcp'
+codex mcp login beam
+codex mcp list
+```
+
+The Codex-compatible Beam plugin package is under `integrations/codex/beam`. It intentionally does not hard-code a tenant URL, so installing the workflow can never select another organization's signing identity.
+
 ## Dedicated-tenant remote connector
 
 Remote mode is an OAuth resource server, not an authorization server. Deploy an external OAuth 2.1 authorization server that:
@@ -86,7 +101,8 @@ export BEAM_PUBLIC_KEY_BASE64_FILE='/run/secrets/beam_public_key'
 export BEAM_PRIVATE_KEY_BASE64_FILE='/run/secrets/beam_private_key'
 export BEAM_API_KEY_FILE='/run/secrets/beam_api_key'
 
-# Remote deployments are read-only unless this explicit policy gate is enabled.
+# Baseline remote deployments expose no Network tools and no writes.
+export BEAM_MCP_ENABLE_NETWORK='false'
 export BEAM_MCP_ENABLE_SEND='false'
 
 node packages/mcp-server/dist/index.js
@@ -134,13 +150,25 @@ Optional comma-separated `BEAM_MCP_ALLOWED_HOSTS` and `BEAM_MCP_ALLOWED_ORIGIN_H
 
 ### Enable remote delivery deliberately
 
-The remote server does not publish `beam_send` by default. To expose it:
+The remote server does not publish Network tools by default. To add the read-only contact list and inbox first:
+
+```bash
+export BEAM_MCP_ENABLE_NETWORK='true'
+```
+
+This does not enable any write. To expose Network write tools and `beam_send` in a separately reviewed profile:
 
 ```bash
 export BEAM_MCP_ENABLE_SEND='true'
 ```
 
 The protected endpoint then requires both `beam:read` and `beam:send`. This is in addition to the target-verification policy and `confirmed=true`; it does not replace human approval.
+
+Network send also requires a dedicated X25519 keypair mounted as
+`BEAM_DH_PUBLIC_KEY_BASE64_FILE` and `BEAM_DH_PRIVATE_KEY_BASE64_FILE`, with the
+public half registered on the connector's Beam identity. The connector
+decrypts inbox content and encrypts outgoing Network messages locally; the
+Directory receives only the signed opaque envelope.
 
 ### Connect Grok
 
@@ -159,6 +187,7 @@ For Grok Business or Enterprise, an administrator provisions a Custom connector 
 - The inbound OAuth token is never forwarded to Beam or another downstream service.
 - Remote send is absent unless explicitly enabled; read and send scopes remain distinct.
 - The signing key and Beam API key stay in the service secret store and never appear in tool output or audit events.
+- The Network X25519 private key stays in the same tenant secret store and is never sent to the Directory or MCP client.
 - Message size is capped at 4 KiB, structured context at 16 KiB, and HTTP MCP requests at 1 MiB.
 - Destination Beam IDs must exist, the intent allowlist is enforced, and target verification/trust policy cannot be changed by a prompt.
 - The send tool is non-read-only, non-idempotent, open-world, and requires exact human confirmation.

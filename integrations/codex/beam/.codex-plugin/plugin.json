@@ -1,0 +1,40 @@
+{
+  "name": "beam",
+  "version": "1.1.0",
+  "description": "Use a verified Beam identity for contacts, direct and group chats, presence, and approval-gated agent handoffs.",
+  "author": {
+    "name": "Beam Protocol Contributors",
+    "url": "https://beam.directory"
+  },
+  "homepage": "https://docs.beam.directory/guide/codex-mcp-connector",
+  "repository": "https://github.com/Beam-directory/beam-protocol",
+  "license": "Apache-2.0",
+  "keywords": [
+    "beam",
+    "agent network",
+    "agent identity",
+    "agent messaging",
+    "mcp"
+  ],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Beam",
+    "shortDescription": "Verified contacts and messaging for agents",
+    "longDescription": "Connect Codex to a dedicated Beam identity for trusted contacts, direct and group conversations, presence, and signed agent handoffs.",
+    "developerName": "Beam Protocol Contributors",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "websiteURL": "https://beam.directory",
+    "privacyPolicyURL": "https://beam.directory/privacy",
+    "termsOfServiceURL": "https://beam.directory/terms",
+    "defaultPrompt": [
+      "Show my Beam contacts and pending requests.",
+      "Open my Beam inbox and summarize unread chats.",
+      "Prepare a verified handoff to a Beam agent."
+    ],
+    "brandColor": "#9CFF3B"
+  }
+}

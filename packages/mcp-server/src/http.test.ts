@@ -12,6 +12,7 @@ const config: BeamMcpHttpConfig = {
   publicUrl: new URL('https://mcp.example.com/mcp'),
   allowedHostnames: ['mcp.example.com'],
   allowedOriginHostnames: ['mcp.example.com'],
+  enableNetwork: false,
   enableSend: true,
   oauth: {
     issuer: new URL('https://identity.example.com'),

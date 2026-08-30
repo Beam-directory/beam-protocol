@@ -44,7 +44,7 @@
     "pretest": "npm run build --workspace=packages/sdk-typescript",
     "test": "npm run test:workspaces && npm run test:scripts",
     "test:workspaces": "npm run test --workspaces --if-present",
-    "test:scripts": "node --test scripts/production/*.test.mjs scripts/workspace/*.test.mjs",
+    "test:scripts": "node --test scripts/production/*.test.mjs scripts/workspace/*.test.mjs packages/public-site/network-crypto.test.mjs",
     "test:e2e": "npm run build && node scripts/e2e/run.mjs",
     "test:mcp-e2e": "npm run build --workspace=beam-protocol-sdk && npm run build --workspace=@beam-protocol/directory && npm run build --workspace=@beam-protocol/mcp-server && node scripts/e2e/mcp-grok-handoff.mjs",
     "test:mcp-container-e2e": "npm run build --workspace=beam-protocol-sdk && npm run build --workspace=@beam-protocol/mcp-server && node scripts/e2e/mcp-container-remote.mjs",

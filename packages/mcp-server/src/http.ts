@@ -14,6 +14,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node'
 import type { BeamIdString, VerificationTier } from 'beam-protocol-sdk'
 import { createBeamClient, loadBeamMcpConfig } from './config.js'
 import { loadBeamMcpHttpConfig, type BeamMcpHttpConfig } from './http-config.js'
+import { createBeamNetworkGateway, type BeamNetworkGateway } from './network-client.js'
 import { IntrospectionTokenVerifier, loadOAuthAuthorizationServerMetadata } from './oauth.js'
 import { createBeamMcpServer, type BeamMcpAuditEvent } from './server.js'
 import type { BeamGateway } from './tools.js'
@@ -121,6 +122,7 @@ export function createBeamMcpHttpHandler(options: {
   oauthMetadata: OAuthMetadata
   verifier: OAuthTokenVerifier
   gateway: BeamGateway
+  networkGateway?: BeamNetworkGateway
   ownBeamId: BeamIdString
   allowedIntents: ReadonlySet<string>
   requireVerifiedTarget: boolean
@@ -145,6 +147,7 @@ export function createBeamMcpHttpHandler(options: {
   })
   const mcp = createMcpHandler((context) => createBeamMcpServer({
     gateway: options.gateway,
+    networkGateway: options.config.enableNetwork ? options.networkGateway : undefined,
     ownBeamId: options.ownBeamId,
     allowedIntents: options.allowedIntents,
     requireVerifiedTarget: options.requireVerifiedTarget,
@@ -217,6 +220,7 @@ export async function startBeamMcpHttpServer(): Promise<{ server: HttpServer; cl
       lookup: (beamId) => client.directory.lookup(beamId),
       send: (to, intent, payload, timeoutMs) => client.send(to, intent, payload, timeoutMs),
     },
+    networkGateway: httpConfig.enableNetwork ? createBeamNetworkGateway(beamConfig) : undefined,
     ownBeamId: beamConfig.beamId,
     allowedIntents: beamConfig.allowedIntents,
     requireVerifiedTarget: beamConfig.requireVerifiedTarget,

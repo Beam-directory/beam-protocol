@@ -6,6 +6,7 @@ export type BeamMcpHttpConfig = {
   publicUrl: URL
   allowedHostnames: string[]
   allowedOriginHostnames: string[]
+  enableNetwork: boolean
   enableSend: boolean
   oauth: {
     issuer: URL
@@ -93,6 +94,7 @@ export function loadBeamMcpHttpConfig(env: NodeJS.ProcessEnv = process.env): Bea
     publicUrl,
     allowedHostnames,
     allowedOriginHostnames,
+    enableNetwork: parseBooleanFlag(env['BEAM_MCP_ENABLE_NETWORK'], 'BEAM_MCP_ENABLE_NETWORK', false),
     enableSend: parseBooleanFlag(env['BEAM_MCP_ENABLE_SEND'], 'BEAM_MCP_ENABLE_SEND', false),
     oauth: {
       issuer,

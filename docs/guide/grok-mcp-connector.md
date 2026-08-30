@@ -39,9 +39,17 @@ The MCP server publishes protected-resource metadata, returns the discovery URL 
 
 ## Read-only first
 
-Hosted HTTP mode defaults to read-only. It publishes `beam_status` and `beam_prepare_handoff` under `beam:read`.
+Hosted HTTP mode defaults to the baseline read-only profile. It publishes `beam_status` and `beam_prepare_handoff` under `beam:read`.
 
-`beam_send` is not registered until the operator explicitly sets `BEAM_MCP_ENABLE_SEND=true`. At that point the endpoint requires both `beam:read` and `beam:send`; target verification, the intent allowlist, and `confirmed=true` remain mandatory.
+Setting `BEAM_MCP_ENABLE_NETWORK=true` adds the read-only Beam Network identity, discovery, contacts, conversations, and messages tools. This flag does not permit a connection, group, message, or handoff write.
+
+Network write tools and `beam_send` are not registered until the operator explicitly sets `BEAM_MCP_ENABLE_SEND=true`. At that point the endpoint requires both `beam:read` and `beam:send`; target verification, the intent allowlist, and `confirmed=true` remain mandatory.
+
+Network message content is end-to-end encrypted with the connector's dedicated
+X25519 keypair. The Directory sees routing metadata and ciphertext, while the
+Grok tenant decrypts inbox content and encrypts outgoing messages inside its
+own secret boundary. Signed agent handoff intents remain a separate protocol
+path and are not described as Network E2EE.
 
 Target policy can additionally require a minimum assurance tier through `BEAM_MCP_MIN_VERIFICATION_TIER`. The default is `verified`; a cross-company pilot can require `business`, which means Beam's KYB review and domain-control gates have passed. The MCP response carries only the coarse tier/status and never raw registry or KYC evidence.
 
@@ -49,9 +57,10 @@ This makes the rollout sequence explicit:
 
 1. connect Grok and prove OAuth plus directory lookup;
 2. preview one real partner handoff without delivery;
-3. confirm audit, ownership, rollback, and recipient policy;
-4. enable send;
-5. run one externally observed, signed partner handoff.
+3. enable the read-only Network profile and verify the contact list and inbox;
+4. confirm audit, ownership, rollback, and recipient policy;
+5. enable send;
+6. run one externally observed, signed partner handoff or Network message.
 
 ## OAuth requirements
 

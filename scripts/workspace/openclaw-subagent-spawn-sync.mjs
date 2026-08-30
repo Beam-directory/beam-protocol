@@ -11,6 +11,7 @@ import {
   storeOpenClawAdminSession,
 } from './openclaw-secret-store.mjs'
 import { ensureLocalOpenClawAcls, ensureLocalOpenClawRelayTargets, ensureLocalOpenClawShield } from './openclaw-local-trust.mjs'
+import { assertNetworkEncryptionIdentity, createNetworkEncryptionIdentity } from './network-e2ee.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', process.env.BEAM_DIRECTORY_URL || 'http://localhost:43100')
 const dashboardUrl = optionalFlag('--dashboard-url', process.env.BEAM_DASHBOARD_URL || 'http://localhost:43173')
@@ -56,7 +57,30 @@ function createIdentityPublicKey() {
   return {
     publicKeyBase64: publicKey.export({ format: 'der', type: 'spki' }).toString('base64'),
     privateKeyBase64: privateKey.export({ format: 'der', type: 'pkcs8' }).toString('base64'),
+    ...createNetworkEncryptionIdentity(),
   }
+}
+
+function ensureNetworkEncryptionIdentity(identity) {
+  if (identity.dhPublicKeyBase64 && identity.dhPrivateKeyBase64) {
+    assertNetworkEncryptionIdentity(identity.dhPublicKeyBase64, identity.dhPrivateKeyBase64)
+    return identity
+  }
+  return { ...identity, ...createNetworkEncryptionIdentity() }
+}
+
+async function syncDirectoryEncryptionKey(identity) {
+  if (!identity.apiKey || !identity.dhPublicKeyBase64) {
+    return
+  }
+  await requestJson(`${directoryUrl}/agents/${encodeURIComponent(identity.beamId)}/config`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${identity.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ dhPublicKey: identity.dhPublicKeyBase64 }),
+  })
 }
 
 function sleep(ms) {
@@ -265,6 +289,7 @@ async function ensureDirectoryAgent(identity, displayName, description) {
       displayName,
       capabilities: ['conversation.message', 'task.delegate'],
       publicKey: identity.publicKeyBase64,
+      dhPublicKey: identity.dhPublicKeyBase64,
       description,
       visibility: 'unlisted',
     }),
@@ -386,6 +411,9 @@ async function performSync(session = null, allowRefresh = true) {
         generatedUpdates[descriptor.identityKey] = identity
       }
 
+      identity = ensureNetworkEncryptionIdentity(identity)
+      generatedUpdates[descriptor.identityKey] = identity
+
       originalPolicy = await getPublicEndpointPolicy(adminHeaders)
       const trustedIps = [...new Set([...(originalPolicy.trustedIps ?? []), '127.0.0.1', '::1', 'unknown'])]
       await patchPublicEndpointPolicy(adminHeaders, {
@@ -434,6 +462,15 @@ async function performSync(session = null, allowRefresh = true) {
           apiKey: reissued.credential.apiKey,
         }
       }
+
+
+      const encryptionReadyIdentity = ensureNetworkEncryptionIdentity(
+        generatedUpdates[descriptor.identityKey]
+          ?? baseIdentities[descriptor.identityKey]
+          ?? identity,
+      )
+      await syncDirectoryEncryptionKey(encryptionReadyIdentity)
+      generatedUpdates[descriptor.identityKey] = encryptionReadyIdentity
 
       const workspaceBeamIds = await listWorkspaceBeamIds(adminHeaders)
       await ensureLocalOpenClawAcls(directoryUrl, adminHeaders, workspaceBeamIds)

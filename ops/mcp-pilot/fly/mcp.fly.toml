@@ -23,12 +23,15 @@ kill_timeout = 20
   BEAM_ID = "grok@coppen.beam.directory"
   BEAM_PUBLIC_KEY_BASE64_FILE = "/run/secrets/beam_public_key"
   BEAM_PRIVATE_KEY_BASE64_FILE = "/run/secrets/beam_private_key"
+  BEAM_DH_PUBLIC_KEY_BASE64_FILE = "/run/secrets/beam_dh_public_key"
+  BEAM_DH_PRIVATE_KEY_BASE64_FILE = "/run/secrets/beam_dh_private_key"
   BEAM_API_KEY_FILE = "/run/secrets/beam_api_key"
   BEAM_DIRECTORY_URL = "https://api.beam.directory"
   BEAM_MCP_ALLOWED_INTENTS = "conversation.message"
   BEAM_MCP_REQUIRE_VERIFIED_TARGET = "true"
   BEAM_MCP_MIN_VERIFICATION_TIER = "business"
   BEAM_MCP_MIN_TRUST_SCORE = "0.5"
+  BEAM_MCP_ENABLE_NETWORK = "false"
   BEAM_MCP_ENABLE_SEND = "false"
 
 [[files]]
@@ -46,6 +49,14 @@ kill_timeout = 20
 [[files]]
   guest_path = "/run/secrets/beam_api_key"
   secret_name = "MCP_BEAM_API_KEY_B64"
+
+[[files]]
+  guest_path = "/run/secrets/beam_dh_public_key"
+  secret_name = "MCP_BEAM_DH_PUBLIC_KEY_B64"
+
+[[files]]
+  guest_path = "/run/secrets/beam_dh_private_key"
+  secret_name = "MCP_BEAM_DH_PRIVATE_KEY_B64"
 
 [http_service]
   internal_port = 3333

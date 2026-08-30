@@ -1,4 +1,11 @@
-(function () {
+import {
+  enrollDeviceVault,
+  getDeviceVaultMetadata,
+  isDeviceVaultCapable,
+} from './device-vault.js'
+import { generateNetworkEncryptionIdentity } from './network-crypto.js'
+
+;(function () {
   const API_BASE = ['localhost', '127.0.0.1'].includes(window.location.hostname)
     ? 'http://localhost:3100'
     : 'https://api.beam.directory'
@@ -15,6 +22,8 @@
 
   let claimToken = ''
   let recoveryKit = null
+  let deviceVaultReady = false
+  let stateTransitionTimer = 0
 
   function announce(message) {
     if (announcer) announcer.textContent = message
@@ -31,6 +40,18 @@
   }
 
   function showState(name) {
+    const previousState = document.body.dataset.claimState || ''
+    document.body.dataset.claimState = name
+    if (previousState && previousState !== name) {
+      document.body.dataset.previousClaimState = previousState
+      document.body.classList.remove('is-state-changing')
+      void document.body.offsetWidth
+      document.body.classList.add('is-state-changing')
+      window.clearTimeout(stateTransitionTimer)
+      stateTransitionTimer = window.setTimeout(() => {
+        document.body.classList.remove('is-state-changing')
+      }, 760)
+    }
     for (const element of stateElements) {
       element.hidden = element.dataset.state !== name
     }
@@ -106,14 +127,16 @@
       throw new Error('This browser does not support secure Beam identity keys yet. Please use a current version of Safari, Chrome, Edge, or Firefox.')
     }
 
-    const [publicKey, privateKey] = await Promise.all([
+    const [publicKey, privateKey, encryption] = await Promise.all([
       window.crypto.subtle.exportKey('spki', keyPair.publicKey),
       window.crypto.subtle.exportKey('pkcs8', keyPair.privateKey),
+      generateNetworkEncryptionIdentity(),
     ])
 
     return {
       publicKey: bufferToBase64(publicKey),
       privateKey: bufferToBase64(privateKey),
+      encryption,
     }
   }
 
@@ -129,6 +152,7 @@
         algorithm: 'Ed25519',
         publicKey: deviceIdentity.publicKey,
         privateKey: deviceIdentity.privateKey,
+        encryption: deviceIdentity.encryption,
       },
       credential: {
         apiKey: result.credential.apiKey,
@@ -153,7 +177,7 @@
 
   function openNetwork() {
     if (!recoveryKit || !openNetworkButton) return
-    const networkWindow = window.open('/network.html#handoff', '_blank')
+    const networkWindow = window.open('/network#handoff', '_blank')
     if (!networkWindow) {
       announce('Allow this site to open your Beam network, then try again.')
       return
@@ -187,6 +211,19 @@
     }
 
     window.addEventListener('message', handoff)
+  }
+
+  async function protectOnThisDevice() {
+    if (!recoveryKit || !isDeviceVaultCapable()) return false
+    try {
+      const existing = await getDeviceVaultMetadata()
+      if (existing?.beamId === recoveryKit.beamId) return true
+      if (existing) return false
+      await enrollDeviceVault(recoveryKit)
+      return true
+    } catch {
+      return false
+    }
   }
 
   async function inspectClaim(token) {
@@ -266,15 +303,26 @@
         const deviceIdentity = await createDeviceIdentity()
         const result = await api('/identity-claims/complete', {
           method: 'POST',
-          body: JSON.stringify({ token: claimToken, publicKey: deviceIdentity.publicKey }),
+          body: JSON.stringify({
+            token: claimToken,
+            publicKey: deviceIdentity.publicKey,
+            dhPublicKey: deviceIdentity.encryption.publicKey,
+          }),
         })
         claimToken = ''
         recoveryKit = buildRecoveryKit(result, deviceIdentity)
 
+        deviceVaultReady = await protectOnThisDevice()
+
         document.getElementById('claimed-beam-id').textContent = result.identity.beam_id
         document.getElementById('claimed-did').textContent = result.identity.did
+        const securityCopy = document.getElementById('completion-security')
+        if (securityCopy) {
+          securityCopy.textContent = deviceVaultReady
+            ? 'Protected by your passkey on this device. Exporting a recovery kit is optional.'
+            : 'This browser could not create a passkey vault. Open Beam now, then export a recovery kit or enable a passkey in Settings.'
+        }
         showState('complete')
-        downloadKit()
         announce(`${result.identity.beam_id} is now yours.`)
       } catch (error) {
         setError(confirmError, error.message || 'Beam could not finish this claim. Please try again.')
@@ -297,6 +345,185 @@
     return true
   }
 
+  function initClaimField() {
+    const canvas = document.getElementById('claim-field-canvas')
+    const shell = document.querySelector('.claim-shell')
+    const panel = document.querySelector('.claim-panel')
+    if (!canvas || !shell) return
+
+    const context = canvas.getContext('2d')
+    if (!context) return
+
+    const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)')
+    const pointer = { x: .7, y: .5, active: false }
+    const nodes = []
+    let width = 0
+    let height = 0
+    let pixelRatio = 1
+    let animationFrame = 0
+    let visible = !document.hidden
+
+    const stateTargets = {
+      start: [.68, .54],
+      email: [.66, .5],
+      confirm: [.72, .5],
+      complete: [.72, .46],
+      invalid: [.68, .5],
+    }
+
+    function seeded(index, offset) {
+      const value = Math.sin((index + 1) * 12.9898 + offset * 78.233) * 43758.5453
+      return value - Math.floor(value)
+    }
+
+    function rebuild() {
+      window.cancelAnimationFrame(animationFrame)
+      const bounds = shell.getBoundingClientRect()
+      width = Math.max(1, bounds.width)
+      height = Math.max(1, bounds.height)
+      pixelRatio = Math.min(window.devicePixelRatio || 1, 1.75)
+      canvas.width = Math.round(width * pixelRatio)
+      canvas.height = Math.round(height * pixelRatio)
+      context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)
+
+      const count = Math.max(16, Math.min(48, Math.round((width * height) / 42000)))
+      nodes.length = 0
+      for (let index = 0; index < count; index += 1) {
+        nodes.push({
+          x: seeded(index, 1),
+          y: seeded(index, 2),
+          drift: 7 + seeded(index, 3) * 16,
+          phase: seeded(index, 4) * Math.PI * 2,
+          speed: .35 + seeded(index, 5) * .55,
+        })
+      }
+
+      draw(performance.now())
+    }
+
+    function position(node, seconds) {
+      return {
+        x: node.x * width + Math.sin(seconds * node.speed + node.phase) * node.drift,
+        y: node.y * height + Math.cos(seconds * node.speed * .82 + node.phase) * node.drift,
+      }
+    }
+
+    function draw(timestamp) {
+      if (!width || !height) return
+      const seconds = timestamp / 1000
+      const state = document.body.dataset.claimState || 'start'
+      const target = stateTargets[state] || stateTargets.start
+      const compact = width < 980
+      const anchorX = compact ? .5 : target[0]
+      const anchorY = compact ? .58 : target[1]
+      const influence = pointer.active ? .24 : 0
+      const focusX = (anchorX * (1 - influence) + pointer.x * influence) * width
+      const focusY = (anchorY * (1 - influence) + pointer.y * influence) * height
+      const points = nodes.map((node) => position(node, reducedMotion.matches ? 0 : seconds))
+
+      context.clearRect(0, 0, width, height)
+
+      const atmosphere = context.createRadialGradient(focusX, focusY, 0, focusX, focusY, Math.max(width, height) * .56)
+      atmosphere.addColorStop(0, 'rgba(184,255,106,.075)')
+      atmosphere.addColorStop(.42, 'rgba(98,245,204,.018)')
+      atmosphere.addColorStop(1, 'rgba(4,8,6,0)')
+      context.fillStyle = atmosphere
+      context.fillRect(0, 0, width, height)
+
+      const linkDistance = Math.min(230, Math.max(130, width * .13))
+      for (let first = 0; first < points.length; first += 1) {
+        for (let second = first + 1; second < points.length; second += 1) {
+          const dx = points[first].x - points[second].x
+          const dy = points[first].y - points[second].y
+          const distance = Math.hypot(dx, dy)
+          if (distance > linkDistance) continue
+          const alpha = (1 - distance / linkDistance) * .075
+          context.strokeStyle = `rgba(184,255,106,${alpha})`
+          context.lineWidth = .7
+          context.beginPath()
+          context.moveTo(points[first].x, points[first].y)
+          context.lineTo(points[second].x, points[second].y)
+          context.stroke()
+        }
+      }
+
+      const closest = points
+        .map((point, index) => ({ point, index, distance: Math.hypot(point.x - focusX, point.y - focusY) }))
+        .sort((first, second) => first.distance - second.distance)
+        .slice(0, compact ? 4 : 7)
+
+      for (const connection of closest) {
+        const beam = context.createLinearGradient(connection.point.x, connection.point.y, focusX, focusY)
+        beam.addColorStop(0, 'rgba(184,255,106,.025)')
+        beam.addColorStop(1, 'rgba(184,255,106,.27)')
+        context.strokeStyle = beam
+        context.lineWidth = 1
+        context.beginPath()
+        context.moveTo(connection.point.x, connection.point.y)
+        context.lineTo(focusX, focusY)
+        context.stroke()
+      }
+
+      points.forEach((point, index) => {
+        const pulse = reducedMotion.matches ? 0 : (Math.sin(seconds * 1.8 + nodes[index].phase) + 1) * .5
+        context.fillStyle = `rgba(184,255,106,${.12 + pulse * .24})`
+        context.beginPath()
+        context.arc(point.x, point.y, 1 + pulse * 1.2, 0, Math.PI * 2)
+        context.fill()
+      })
+
+      const focusPulse = reducedMotion.matches ? 0 : (Math.sin(seconds * 2.2) + 1) * 2.5
+      context.strokeStyle = 'rgba(184,255,106,.22)'
+      context.lineWidth = 1
+      context.beginPath()
+      context.arc(focusX, focusY, 11 + focusPulse, 0, Math.PI * 2)
+      context.stroke()
+      context.fillStyle = 'rgba(184,255,106,.92)'
+      context.beginPath()
+      context.arc(focusX, focusY, 2.2, 0, Math.PI * 2)
+      context.fill()
+
+      if (!reducedMotion.matches && visible) animationFrame = window.requestAnimationFrame(draw)
+    }
+
+    function updatePointer(event) {
+      const bounds = shell.getBoundingClientRect()
+      pointer.x = Math.max(0, Math.min(1, (event.clientX - bounds.left) / bounds.width))
+      pointer.y = Math.max(0, Math.min(1, (event.clientY - bounds.top) / bounds.height))
+      pointer.active = event.pointerType !== 'touch'
+      shell.style.setProperty('--pointer-x', `${pointer.x * 100}%`)
+      shell.style.setProperty('--pointer-y', `${pointer.y * 100}%`)
+      shell.style.setProperty('--tilt-x', `${((.5 - pointer.y) * 3.2).toFixed(2)}deg`)
+      shell.style.setProperty('--tilt-y', `${((pointer.x - .5) * 4.2).toFixed(2)}deg`)
+    }
+
+    shell.addEventListener('pointermove', updatePointer, { passive: true })
+    shell.addEventListener('pointerleave', () => {
+      pointer.active = false
+      shell.style.setProperty('--tilt-x', '0deg')
+      shell.style.setProperty('--tilt-y', '0deg')
+    })
+
+    panel?.querySelectorAll('.claim-submit, .identity-preview, .claimed-identity').forEach((element) => {
+      element.addEventListener('pointermove', (event) => {
+        const bounds = element.getBoundingClientRect()
+        element.style.setProperty('--hot-x', `${event.clientX - bounds.left}px`)
+        element.style.setProperty('--hot-y', `${event.clientY - bounds.top}px`)
+      }, { passive: true })
+    })
+
+    const resizeObserver = new ResizeObserver(rebuild)
+    resizeObserver.observe(shell)
+    reducedMotion.addEventListener('change', rebuild)
+    document.addEventListener('visibilitychange', () => {
+      visible = !document.hidden
+      window.cancelAnimationFrame(animationFrame)
+      if (visible) draw(performance.now())
+    })
+    rebuild()
+  }
+
   window.addEventListener('hashchange', processClaimFragment)
   if (!processClaimFragment()) showState('start')
+  initClaimField()
 })()

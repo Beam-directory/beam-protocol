@@ -52,7 +52,7 @@ docker compose --env-file ops/mcp-tenant/.env \
 Then verify the public `/health` response, RFC 9728 protected-resource
 metadata, an unauthenticated `401` challenge, OAuth login from Grok, and that
 the tool list contains exactly `beam_status` and `beam_prepare_handoff`.
-`beam_send` must not be advertised in this pilot profile.
+The baseline keeps both `BEAM_MCP_ENABLE_NETWORK=false` and `BEAM_MCP_ENABLE_SEND=false`; Network tools and `beam_send` must not be advertised in this pilot profile.
 
 Do not turn on delivery by editing this Compose file in place. Create a
 separately reviewed send-enabled profile only after the read-only external

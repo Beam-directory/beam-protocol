@@ -22,6 +22,7 @@ test('loads a fail-closed HTTPS remote MCP configuration', () => {
   assert.deepEqual(config.allowedHostnames, ['mcp.example.com'])
   assert.equal(config.host, '127.0.0.1')
   assert.equal(config.port, 3333)
+  assert.equal(config.enableNetwork, false)
   assert.equal(config.enableSend, false)
 })
 
@@ -46,6 +47,16 @@ test('remote send capability requires an explicit valid boolean flag', () => {
 
   const typo = baseEnv()
   typo['BEAM_MCP_ENABLE_SEND'] = 'yes'
+  assert.throws(() => loadBeamMcpHttpConfig(typo), /must be true or false/)
+})
+
+test('remote Network tools require a separate explicit valid boolean flag', () => {
+  const enabled = baseEnv()
+  enabled['BEAM_MCP_ENABLE_NETWORK'] = 'true'
+  assert.equal(loadBeamMcpHttpConfig(enabled).enableNetwork, true)
+
+  const typo = baseEnv()
+  typo['BEAM_MCP_ENABLE_NETWORK'] = 'yes'
   assert.throws(() => loadBeamMcpHttpConfig(typo), /must be true or false/)
 })
 

@@ -47,6 +47,9 @@ const adminPasswordFile = valueAfter('--admin-password-file')
 const trustedHosts = valuesAfter('--trusted-host').map((value) => value.trim())
 const trustedDomains = valuesAfter('--trusted-domain').map((value) => value.trim())
 const activateNewClient = process.argv.includes('--activate-new-client')
+const activateLoopbackClient = process.argv.includes('--activate-loopback-client')
+const enableSendScope = process.argv.includes('--enable-send-scope')
+const activateRegisteredClient = activateNewClient || activateLoopbackClient
 
 if (!['open', 'closed'].includes(mode)) fail('--mode must be open or closed')
 if (!/^[a-z0-9-]{1,63}$/.test(realm)) fail('--realm is invalid')
@@ -60,12 +63,16 @@ if (trustedDomains.some((domain) => !['*.bc.googleusercontent.com', 'grok.com'].
 if (mode === 'closed' && (trustedHosts.length > 0 || trustedDomains.length > 0)) {
   fail('--trusted-host and --trusted-domain are only valid in open mode')
 }
-if (mode === 'closed' && activateNewClient) fail('--activate-new-client is only valid in open mode')
+if (activateNewClient && activateLoopbackClient) fail('choose only one client activation mode')
+if (mode === 'closed' && activateRegisteredClient) fail('client activation is only valid in open mode')
 if (activateNewClient && !trustedDomains.includes('*.bc.googleusercontent.com')) {
   fail('--activate-new-client requires the pinned Google Cloud egress domain')
 }
 if (activateNewClient && !trustedDomains.includes('grok.com')) {
   fail('--activate-new-client requires the pinned Grok callback domain')
+}
+if (activateLoopbackClient && (trustedHosts.length !== 1 || trustedDomains.length !== 0)) {
+  fail('--activate-loopback-client requires exactly one trusted IPv4 host and no trusted domains')
 }
 
 const plan = {
@@ -77,9 +84,9 @@ const plan = {
   trustedDomains: mode === 'open' ? trustedDomains : [],
   anonymousRegistration: mode === 'open' ? 'restricted to configured egress matches' : 'blocked',
   clientUriMatching: mode === 'open' && !activateNewClient ? 'temporarily disabled for the restricted staging window' : 'enabled',
-  newlyRegisteredClientsEnabled: mode === 'open' ? activateNewClient : null,
-  allowedCustomScopes: ['beam:read', 'beam-mcp-audience'],
-  sendScopeAllowed: false,
+  newlyRegisteredClientsEnabled: mode === 'open' ? activateRegisteredClient : null,
+  allowedCustomScopes: ['beam:read', 'beam-mcp-audience', ...(enableSendScope ? ['beam:send'] : [])],
+  sendScopeAllowed: enableSendScope,
 }
 
 if (!apply) {
@@ -186,17 +193,26 @@ async function removeTemporaryDisabledPolicy() {
 
 const readScope = clientScopes.find((scope) => scope.name === 'beam:read')
 const audienceScope = clientScopes.find((scope) => scope.name === 'beam-mcp-audience')
-if (!readScope?.id || !audienceScope?.id) fail('required Beam client scopes do not exist')
+const sendScope = clientScopes.find((scope) => scope.name === 'beam:send')
+const offlineAccessScope = clientScopes.find((scope) => scope.name === 'offline_access')
+if (!readScope?.id || !audienceScope?.id || !offlineAccessScope?.id) fail('required Beam client scopes do not exist')
+if (enableSendScope && !sendScope?.id) fail('beam:send client scope does not exist')
 
-if (!realmOptionalScopes.some((scope) => scope.id === readScope.id)) {
-  await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(readScope.id)}`, {
-    method: 'PUT', token: adminToken, expected: [204],
-  })
-}
+const preservedOptionalScopeIds = new Set([
+  readScope.id,
+  offlineAccessScope.id,
+  ...(sendScope?.id ? [sendScope.id] : []),
+])
 for (const scope of realmOptionalScopes) {
-  if (scope.id === readScope.id) continue
+  if (preservedOptionalScopeIds.has(scope.id)) continue
   await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(scope.id)}`, {
     method: 'DELETE', token: adminToken, expected: [204],
+  })
+}
+for (const scopeId of preservedOptionalScopeIds) {
+  if (realmOptionalScopes.some((scope) => scope.id === scopeId)) continue
+  await request(`${realmPath}/default-optional-client-scopes/${encodeURIComponent(scopeId)}`, {
+    method: 'PUT', token: adminToken, expected: [204],
   })
 }
 for (const scope of realmDefaultScopes) {
@@ -215,7 +231,7 @@ const trustedHostsPolicy = policy('trusted-hosts')
 const maxClientsPolicy = policy('max-clients')
 const allowedScopesPolicy = policy('allowed-client-templates')
 
-if (mode === 'open' && !activateNewClient) await ensureTemporaryDisabledPolicy()
+if (mode === 'open' && !activateRegisteredClient) await ensureTemporaryDisabledPolicy()
 else await removeTemporaryDisabledPolicy()
 
 await updatePolicy(trustedHostsPolicy, mode === 'open'
@@ -235,7 +251,7 @@ await updatePolicy(maxClientsPolicy, {
 })
 
 await updatePolicy(allowedScopesPolicy, {
-  'allowed-client-scopes': ['beam:read', 'beam-mcp-audience'],
+  'allowed-client-scopes': ['beam:read', 'beam-mcp-audience', ...(enableSendScope ? ['beam:send'] : [])],
   'allow-default-scopes': ['true'],
 })
 
@@ -268,8 +284,8 @@ const temporaryDisabledPolicies = refreshedComponents.filter(
     && component.subType === 'anonymous'
     && component.name === 'Beam Grok DCR temporary client disable',
 )
-if (mode === 'open' && !activateNewClient && temporaryDisabledPolicies.length !== 1) fail('temporary client-disabled policy is not active')
-if ((mode === 'closed' || activateNewClient) && temporaryDisabledPolicies.length !== 0) fail('temporary client-disabled policy was not removed')
+if (mode === 'open' && !activateRegisteredClient && temporaryDisabledPolicies.length !== 1) fail('temporary client-disabled policy is not active')
+if ((mode === 'closed' || activateRegisteredClient) && temporaryDisabledPolicies.length !== 0) fail('temporary client-disabled policy was not removed')
 
 console.log(JSON.stringify({
   ok: true,

@@ -331,6 +331,31 @@ export async function unlockDeviceVault() {
   return decryptRecoveryKit(record, result)
 }
 
+export async function updateDeviceVault(recoveryKit) {
+  if (!isDeviceVaultCapable()) {
+    throw new DeviceVaultError('Passkeys are not available in this browser.', 'UNSUPPORTED')
+  }
+  const record = await readVaultRecord()
+  if (!record) throw new DeviceVaultError('No Beam device vault is configured in this browser.', 'VAULT_NOT_FOUND')
+  validateVaultRecord(record)
+  if (!recoveryKit || recoveryKit.beamId !== record.beamId) {
+    throw new DeviceVaultError('This identity does not match the saved device vault.', 'VAULT_IDENTITY_MISMATCH')
+  }
+  const result = await requestPrf(
+    base64UrlToBytes(record.credentialId, 4096),
+    base64UrlToBytes(record.salt, 128),
+  )
+  const iv = randomBytes(12)
+  const ciphertext = await encryptRecoveryKit(recoveryKit, result, iv)
+  await writeVaultRecord({
+    ...record,
+    iv: bytesToBase64Url(iv),
+    ciphertext: bytesToBase64Url(ciphertext),
+    updatedAt: new Date().toISOString(),
+  })
+  return { beamId: record.beamId, createdAt: record.createdAt }
+}
+
 export async function forgetDeviceVault() {
   if (!window.indexedDB) return
   await deleteVaultRecord()

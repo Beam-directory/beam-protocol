@@ -105,7 +105,12 @@ function writeKeychainSecret(service, account, value) {
 }
 
 function stripGeneratedIdentitySecrets(identity) {
-  const { privateKeyBase64: _privateKeyBase64, apiKey: _apiKey, ...safe } = identity
+  const {
+    privateKeyBase64: _privateKeyBase64,
+    dhPrivateKeyBase64: _dhPrivateKeyBase64,
+    apiKey: _apiKey,
+    ...safe
+  } = identity
   return safe
 }
 
@@ -125,6 +130,8 @@ function loadGeneratedIdentitySecret(identityKey) {
 function storeGeneratedIdentitySecret(identityKey, identity) {
   const payload = JSON.stringify({
     privateKeyBase64: identity.privateKeyBase64 ?? null,
+    dhPrivateKeyBase64: identity.dhPrivateKeyBase64 ?? null,
+    dhPublicKeyBase64: identity.dhPublicKeyBase64 ?? null,
     apiKey: identity.apiKey ?? null,
     beamId: identity.beamId ?? null,
   })
@@ -146,7 +153,7 @@ export async function loadOpenClawIdentityState({
     }
 
     let resolved = { ...entry }
-    if (!resolved.privateKeyBase64 || !resolved.apiKey) {
+    if (!resolved.privateKeyBase64 || !resolved.apiKey || (resolved.dhPublicKeyBase64 && !resolved.dhPrivateKeyBase64)) {
       const secret = loadGeneratedIdentitySecret(identityKey)
       if (secret) {
         resolved = {
@@ -213,7 +220,7 @@ export async function persistOpenClawIdentityState({
     }
 
     let resolved = { ...entry }
-    if (!resolved.privateKeyBase64 || !resolved.apiKey) {
+    if (!resolved.privateKeyBase64 || !resolved.apiKey || (resolved.dhPublicKeyBase64 && !resolved.dhPrivateKeyBase64)) {
       const secret = loadGeneratedIdentitySecret(identityKey)
       if (secret) {
         resolved = {

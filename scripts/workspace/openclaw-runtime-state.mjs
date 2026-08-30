@@ -334,6 +334,8 @@ export async function loadOpenClawRuntimeState(options = {}) {
         apiKey: identity.apiKey,
         publicKeyBase64: identity.publicKeyBase64 ?? null,
         privateKeyBase64: identity.privateKeyBase64 ?? null,
+        dhPublicKeyBase64: identity.dhPublicKeyBase64 ?? null,
+        dhPrivateKeyBase64: identity.dhPrivateKeyBase64 ?? null,
         directoryUrl: identity.directoryUrl ?? null,
       }
     })
