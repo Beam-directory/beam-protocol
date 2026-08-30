@@ -1,16 +1,18 @@
 # Beam for Grok Build
 
-The Beam plugin lets Grok verify Beam IDs, inspect public trust metadata, and prepare policy-checked agent handoffs through a dedicated Beam MCP tenant.
+The Beam plugin gives Grok one verified Beam identity with a contact list, direct and group conversations, presence, and policy-checked agent handoffs through a dedicated Beam MCP tenant.
 
 This plugin is maintained by the Beam Protocol project. It is a third-party plugin submitted to the xAI marketplace; it is not authored, verified, or endorsed by xAI.
 
 ## What it adds
 
-- the `beam` skill for Beam ID lookup and approval-gated handoff workflows;
+- the `beam` skill for Beam ID lookup, contacts, inbox, messaging, groups, and approval-gated handoffs;
 - the `/beam-onboard` command for connector setup and verification;
 - a remote HTTP MCP definition named `beam`.
 
-The default hosted tenant profile is read-only. It exposes `beam_status` and `beam_prepare_handoff`. A preview is never a delivery. A separately reviewed tenant may expose `beam_send`, but the plugin requires explicit approval of the exact destination and content before any send call.
+The baseline hosted tenant exposes trust status and handoff previews. A Network-enabled read-only tenant additionally exposes identity discovery, contacts, conversations, and messages. A separately reviewed send-enabled tenant adds connection, direct-chat, group, Network-message, and handoff delivery tools. Every external write requires approval of the exact target and content. A preview is never a delivery.
+
+After the one-time endpoint and OAuth setup, Grok reuses the connector. The Beam signing key stays in the tenant; Grok receives only the scoped tools and their results.
 
 ## Requirements
 
@@ -39,7 +41,7 @@ Verify the connection:
 grok mcp doctor beam
 ```
 
-Then ask Grok to show the connected Beam identity or run `/beam-onboard`.
+Then ask Grok to show the connected Beam identity and contact list, or run `/beam-onboard`.
 
 If your organization does not yet have a tenant, start with the [Beam Grok connector guide](https://docs.beam.directory/guide/grok-mcp-connector) and [identity onboarding](https://docs.beam.directory/guide/identity-onboarding). Tenant provisioning remains an operator-controlled infrastructure step; creating a Beam ID alone does not deploy a connector.
 
@@ -47,7 +49,7 @@ If your organization does not yet have a tenant, start with the [Beam Grok conne
 
 The plugin contains no executable hooks, helper binaries, install scripts, telemetry, or static credentials. It does not read project files, `.env` files, SSH keys, or token stores.
 
-Grok connects only to the HTTPS URL the operator explicitly places in `BEAM_MCP_URL`. OAuth tokens are managed by Grok and sent to that MCP resource. The plugin itself does not read or forward them. The remote tenant may call the Beam Directory at `https://api.beam.directory` to look up public identity and trust data and, only in a separately enabled delivery profile, submit a signed Beam handoff.
+Grok connects only to the HTTPS URL the operator explicitly places in `BEAM_MCP_URL`. OAuth tokens are managed by Grok and sent to that MCP resource. The plugin itself does not read or forward them. The remote tenant may call the Beam Directory at `https://api.beam.directory` to read the connected identity's contacts and conversations and, only in a separately enabled delivery profile, submit signed connection, chat, group, message, or handoff mutations.
 
 Never put a token, API key, signing key, or private business content in `BEAM_MCP_URL` or in a Beam tool argument. The URL must not contain credentials, query parameters, or fragments.
 
