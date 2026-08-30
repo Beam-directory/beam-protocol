@@ -542,7 +542,7 @@ import {
       }
       if (elements.unlock) elements.unlock.hidden = true
       if (elements.app) elements.app.hidden = false
-      window.history.replaceState(null, '', '/network.html')
+      window.history.replaceState(null, '', '/network')
       await refreshDeviceVaultUi()
       if (options && options.freshClaim && state.vaultCapable && !state.vaultMetadata) {
         toast('Beam is open. Enable a passkey once to make the next visit instant.')

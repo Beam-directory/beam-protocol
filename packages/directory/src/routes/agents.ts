@@ -24,6 +24,7 @@ import {
   verifyAgentEmailToken,
 } from '../db.js'
 import { agentApiKeyMatches, createAgentApiKey, getSuppliedApiKey, hashApiKey } from '../api-key.js'
+import { isEd25519Spki, isX25519Spki } from '../key-validation.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
@@ -223,15 +224,7 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'public_key must be a non-empty string', errorCode: 'INVALID_PUBLIC_KEY' }, 400)
     }
 
-    // K5 FIX: Validate that publicKey is a valid Ed25519 SPKI-encoded key
-    try {
-      const { createPublicKey } = await import('node:crypto')
-      createPublicKey({
-        key: Buffer.from(publicKey, 'base64'),
-        format: 'der',
-        type: 'spki',
-      })
-    } catch {
+    if (!isEd25519Spki(publicKey)) {
       return c.json({ error: 'Invalid Ed25519 public key — must be base64-encoded SPKI/DER format', errorCode: 'INVALID_PUBLIC_KEY_FORMAT' }, 400)
     }
 
@@ -376,6 +369,9 @@ export function agentsRouter(db: Database): Hono {
     const dhPublicKey = typeof raw.dhPublicKey === 'string' ? raw.dhPublicKey.trim()
       : typeof raw.dh_public_key === 'string' ? raw.dh_public_key.trim()
       : null
+    if (dhPublicKey && !isX25519Spki(dhPublicKey)) {
+      return c.json({ error: 'Invalid X25519 public key — must be base64-encoded SPKI/DER format', errorCode: 'INVALID_ENCRYPTION_KEY' }, 400)
+    }
 
     const apiKey = createAgentApiKey(beamId)
     const request: RegisterRequest = {
@@ -829,6 +825,9 @@ export function agentsRouter(db: Database): Hono {
     // S5: DH public key for E2E
     if ('dhPublicKey' in body || 'dh_public_key' in body) {
       const dhKey = String(body.dhPublicKey ?? body.dh_public_key ?? '').trim()
+      if (dhKey && !isX25519Spki(dhKey)) {
+        return c.json({ error: 'Invalid X25519 public key', errorCode: 'INVALID_ENCRYPTION_KEY' }, 400)
+      }
       updates.push('dh_public_key = ?')
       params.push(dhKey || null)
     }

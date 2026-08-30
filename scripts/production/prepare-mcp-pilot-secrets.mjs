@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { randomBytes } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -89,6 +89,8 @@ const plan = {
     'mcp_oauth_client_secret',
     'beam_public_key',
     'beam_private_key',
+    'beam_dh_public_key',
+    'beam_dh_private_key',
     'beam_api_key',
   ],
   sendEnabled: false,
@@ -115,10 +117,25 @@ writeSecret(secretDirectory, 'mcp_oauth_client_secret', randomBytes(32).toString
 writeSecret(secretDirectory, 'beam_public_key', exported.publicKeyBase64)
 writeSecret(secretDirectory, 'beam_private_key', exported.privateKeyBase64)
 
+const networkEncryption = generateKeyPairSync('x25519')
+const dhPublicKeyBase64 = networkEncryption.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+const dhPrivateKeyBase64 = networkEncryption.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+writeSecret(secretDirectory, 'beam_dh_public_key', dhPublicKeyBase64)
+writeSecret(secretDirectory, 'beam_dh_private_key', dhPrivateKeyBase64)
+
 const client = new BeamClient({ identity: exported, directoryUrl, apiKey: orgApiKey })
 const registration = await client.register('Grok read-only MCP pilot', ['conversation.message'])
 if (!registration.apiKey) fail('Directory registration did not return an API key')
 writeSecret(secretDirectory, 'beam_api_key', registration.apiKey)
+const encryptionRegistration = await fetch(`${directoryUrl}/agents/${encodeURIComponent(beamId)}/config`, {
+  method: 'PATCH',
+  headers: {
+    Authorization: `Bearer ${registration.apiKey}`,
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({ dhPublicKey: dhPublicKeyBase64 }),
+})
+if (!encryptionRegistration.ok) fail(`Directory encryption-key registration failed with ${encryptionRegistration.status}`)
 
 writeFileSync(path.join(secretDirectory, 'manifest.json'), `${JSON.stringify({
   beamId,

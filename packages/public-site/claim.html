@@ -5,13 +5,13 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <meta name="referrer" content="no-referrer" />
   <meta name="robots" content="noindex" />
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.beam.directory http://localhost:3100; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src https://api.beam.directory http://localhost:3100 ws://localhost:* ws://127.0.0.1:*; img-src 'self' data:; style-src 'self'; script-src 'self'; object-src 'none'; base-uri 'none'; form-action 'self'" />
   <title>Claim your Beam</title>
   <meta name="description" content="Claim your private, email-verified Beam identity." />
-  <meta name="theme-color" content="#07100d" />
+  <meta name="theme-color" content="#f5f7f1" />
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 64 64%22><rect width=%2264%22 height=%2264%22 rx=%2218%22 fill=%22%2307110e%22/><path d=%22M17 46V18h10c7 0 11 3 11 8 0 3-2 6-5 7 5 1 7 4 7 8 0 6-4 9-12 9H17zm7-17h3c3 0 4-1 4-3s-1-3-4-3h-3v6zm0 15h4c3 0 5-1 5-4s-2-4-5-4h-4v8z%22 fill=%22%23b8ff6a%22/></svg>" />
-  <link rel="stylesheet" href="/claim.css" />
-  <script defer src="/claim.js"></script>
+  <link rel="stylesheet" href="/claim-flow.css" />
+  <script type="module" src="/claim.js"></script>
 </head>
 <body class="claim-page">
   <a class="skip-link" href="#claim-main">Skip to claim form</a>
@@ -24,10 +24,11 @@
   </header>
 
   <main id="claim-main" class="claim-shell">
+    <canvas class="claim-field-canvas" id="claim-field-canvas" aria-hidden="true"></canvas>
     <section class="claim-context" aria-labelledby="claim-title">
-      <p class="eyebrow"><span></span> Personal identity</p>
+      <p class="eyebrow"><span></span> Personal Beam</p>
       <h1 id="claim-title">CLAIM<br />YOUR <em>BEAM.</em></h1>
-      <p class="claim-context-copy">Your verified identity for people, companies, and the agents you trust.</p>
+      <p class="claim-context-copy">One verified identity for you and every agent you trust.</p>
 
       <div class="claim-beacon" aria-hidden="true">
         <span class="beacon-ring ring-a"></span>
@@ -56,17 +57,17 @@
       <div class="claim-state" data-state="start">
         <div class="panel-heading">
           <p class="panel-kicker">01 · CHOOSE YOUR IDENTITY</p>
-          <h2>What should the network call you?</h2>
-          <p>No wallet. No connector. No technical setup.</p>
+          <h2>Choose your Beam ID.</h2>
+          <p>Your public name in the Beam network. Private by default.</p>
         </div>
 
         <form id="claim-form" novalidate>
           <label class="claim-field">
-            <span>Your name</span>
+            <span>Name</span>
             <input name="displayName" type="text" autocomplete="name" minlength="2" maxlength="80" placeholder="Tobias Kub" required />
           </label>
           <label class="claim-field beam-name-field">
-            <span>Your Beam name</span>
+            <span>Beam ID</span>
             <span class="beam-input-wrap">
               <input name="handle" type="text" autocomplete="username" minlength="3" maxlength="32" pattern="[a-z0-9](?:[a-z0-9_]|-){1,30}[a-z0-9]" placeholder="tobias" required />
               <strong>@beam.directory</strong>
@@ -74,7 +75,7 @@
             <small>Lowercase letters, numbers, hyphens, or underscores.</small>
           </label>
           <label class="claim-field">
-            <span>Email</span>
+            <span>Email address</span>
             <input name="email" type="email" autocomplete="email" placeholder="you@company.com" required />
             <small>We send one confirmation link. Your Beam starts unlisted.</small>
           </label>
@@ -131,9 +132,9 @@
           <span id="claimed-did"></span>
           <div><i>✓</i> EMAIL VERIFIED <i>✓</i> PRIVATE</div>
         </div>
-        <p>Your recovery kit contains the only copy of your private identity credential. Keep it private.</p>
+        <p id="completion-security">Beam will protect this identity with your device. A recovery export stays optional.</p>
         <button class="claim-submit open-network-button" id="open-network" type="button"><span>Open my Beam</span><i aria-hidden="true">↗</i></button>
-        <button class="recovery-button" id="download-recovery" type="button"><span>Save recovery kit</span><i aria-hidden="true">↓</i></button>
+        <button class="recovery-button" id="download-recovery" type="button"><span>Export recovery kit</span><i aria-hidden="true">↓</i></button>
         <a class="text-button result-home" href="/">Back to Beam <span>→</span></a>
       </div>
 
@@ -142,7 +143,7 @@
         <p class="panel-kicker">LINK UNAVAILABLE</p>
         <h2>This claim link has expired.</h2>
         <p>Claim links work once and expire after 30 minutes. Start again to request a fresh one.</p>
-        <a class="claim-submit anchor-submit" href="/claim.html"><span>Start again</span><i aria-hidden="true">↗</i></a>
+        <a class="claim-submit anchor-submit" href="/claim"><span>Start again</span><i aria-hidden="true">↗</i></a>
       </div>
 
       <div class="claim-loading" id="claim-loading" hidden aria-live="polite">

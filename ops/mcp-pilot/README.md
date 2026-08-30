@@ -1,4 +1,4 @@
-# Beam read-only hosted MCP pilot
+# Beam hosted MCP pilot
 
 This directory defines the production-shaped, dedicated Fly.io pilot used for
 Grok connector evidence. It is intentionally split into three apps:
@@ -7,10 +7,13 @@ Grok connector evidence. It is intentionally split into three apps:
 - `beam-identity-pilot`: Keycloak OAuth 2.1/OIDC issuer;
 - `beam-mcp-pilot`: the public Beam MCP resource server.
 
-The MCP app is hard-coded to `BEAM_MCP_ENABLE_SEND=false`, publishes only the
-two read-only tools, requires an exact resource audience, and refuses targets
-below Beam's independently reviewed `business` tier. Removing that last gate is
-not a valid way to complete pilot evidence.
+The checked-in Fly profile defaults to `BEAM_MCP_ENABLE_NETWORK=false` and
+`BEAM_MCP_ENABLE_SEND=false`. A reviewed deployment may override those flags in
+stages: Network read tools require `beam:read`; Network write tools and
+`beam_send` additionally require `beam:send`. Every profile requires an exact
+resource audience and refuses targets below Beam's independently reviewed
+`business` tier. Removing that last gate is not a valid way to complete pilot
+evidence.
 
 The pilot enables Keycloak's versioned `resource-indicators:v1` feature. The
 confidential resource-server client ID and its `resource_url` attribute are both
@@ -28,8 +31,9 @@ pilot image starts through a minimal root entrypoint that changes ownership and
 mode to `0400`, then drops to the normal PostgreSQL, Keycloak, or Node user.
 
 Deployment order is PostgreSQL, Keycloak, then MCP. Do not add the public DNS
-records until the Fly hostnames are healthy. Keep the pull request in draft and
-do not enable `beam_send` during this pilot.
+records until the Fly hostnames are healthy. Enable Network and send only as
+explicit rollout stages and verify the OAuth scope and advertised tool surface
+after every stage.
 
 The repository provides two fail-closed helpers:
 
@@ -44,8 +48,9 @@ node scripts/production/configure-keycloak-mcp-pilot.mjs \
 
 Both commands are dry-run-only unless `--apply` is present. The secret helper
 refuses a path inside the repository or a non-empty target and never prints a
-credential. The Keycloak helper creates only `beam:read`; it does not create a
-send scope.
+credential. The Keycloak helper creates `beam:read` by default. Pass
+`--enable-send-scope` only for an approved write stage; this creates the
+separate optional `beam:send` scope without granting it implicitly.
 
 During initial DNS propagation, `--base-url` may point to the app's Fly hostname
 while `--public-base-url https://identity.beam.directory` keeps every issuer and
@@ -53,12 +58,46 @@ token endpoint assertion pinned to the final public origin.
 
 After both public endpoints are healthy, `mcp-oauth-pkce-smoke.mjs` runs a real
 browser authorization-code login with PKCE S256, introspects the short-lived
-token, verifies the exact MCP audience and `beam:read` scope, then connects with
-the official MCP client and rejects any tool surface other than the two
-read-only tools. Passwords and tokens are never written to its output.
+token, verifies the exact MCP audience and requested Beam scopes, then connects
+with the official MCP client and rejects any tool surface other than the
+operator-supplied `--expected-tools` list. Passwords and tokens are never
+written to its output.
 
-The hosted pilot smoke does not prove a Grok connection by itself. Grok cloud
-connector creation, an external operator run, and a lookup of a real
+The hosted pilot smoke does not prove a Grok connection by itself. For the
+native Grok CLI, use the dedicated public `beam-grok-pilot` client. It is pinned
+to `http://127.0.0.1:35419/callback`, requires PKCE S256, has no client secret,
+and receives the Beam audience by default while `beam:read`, `beam:send`, and
+`offline_access` remain explicitly requested optional scopes.
+
+Configure Grok with the same fixed callback before authorization:
+
+```toml
+[mcp_servers.beam]
+url = "https://mcp.beam.directory/mcp"
+enabled = true
+
+[mcp_servers.beam.oauth]
+clientId = "beam-grok-pilot"
+scopes = ["beam:read", "beam:send", "offline_access"]
+callbackPort = 35419
+```
+
+The installer below performs an authorization-code login with PKCE S256,
+introspects the token, verifies the exact resource audience and all requested
+scopes, and atomically merges the result into Grok's owner-only
+`~/.grok/mcp_credentials.json`. It never prints tokens and never calls a Beam
+write or send tool:
+
+```bash
+node scripts/production/install-grok-beam-oauth.mjs \
+  --password-file /absolute/private/pilot_user_password \
+  --introspection-secret-file /absolute/private/mcp_oauth_client_secret
+
+grok mcp doctor beam --json
+```
+
+Keep anonymous dynamic client registration closed for this native CLI flow.
+Grok cloud connector creation, an external operator run, and a lookup of a real
 business-assurance target remain separate release evidence. Do not create the
 release-gate evidence file from an internal smoke or fixture.
 

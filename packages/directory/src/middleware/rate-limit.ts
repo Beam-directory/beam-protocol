@@ -188,27 +188,33 @@ async function resolveBuckets(
 
   if (method === 'GET' && (path === '/network/me' || path === '/network/connections')) {
     const authenticatedBeamId = authenticatedAgentBeamId(db, request)
-    const buckets: BucketSpec[] = [{
-      bucket: 'network-read-ip',
-      limit: policy.browsePerMinute,
-      actorKey: `ip:${ip}`,
-      actorLabel: `ip:${ip}`,
-      intentType: 'http.network.read',
-      payload: { path },
-    }]
     if (authenticatedBeamId) {
-      buckets.push({
+      return {
+        trusted: isTrusted(policy, ip, authenticatedBeamId),
+        buckets: [{
         bucket: 'network-read-identity',
-        limit: policy.browsePerMinute,
+        // An active messenger refreshes identity and connection state together.
+        // Keep this credential-bound budget separate from the shared NAT/IP
+        // budget so multiple users behind one company gateway do not throttle
+        // each other during normal realtime use.
+        limit: policy.browsePerMinute * 4,
         actorKey: `beam:${authenticatedBeamId}`,
         actorLabel: authenticatedBeamId,
         intentType: 'http.network.read',
         payload: { path },
-      })
+        }],
+      }
     }
     return {
-      trusted: isTrusted(policy, ip, authenticatedBeamId),
-      buckets,
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'network-read-ip',
+        limit: policy.browsePerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.network.read',
+        payload: { path },
+      }],
     }
   }
 

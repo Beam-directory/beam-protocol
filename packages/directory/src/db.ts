@@ -225,6 +225,96 @@ function initSchema(db: DB): void {
     CREATE INDEX IF NOT EXISTS idx_beam_connections_recipient
       ON beam_connections(recipient_beam_id, status, updated_at DESC);
 
+    CREATE TABLE IF NOT EXISTS beam_conversations (
+      conversation_id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL CHECK(kind IN ('direct', 'group')),
+      pair_key TEXT UNIQUE,
+      title TEXT,
+      created_by_beam_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (created_by_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS beam_conversation_members (
+      conversation_id TEXT NOT NULL,
+      beam_id TEXT NOT NULL,
+      role TEXT NOT NULL DEFAULT 'member' CHECK(role IN ('owner', 'member')),
+      joined_at TEXT NOT NULL,
+      last_read_at TEXT,
+      PRIMARY KEY (conversation_id, beam_id),
+      FOREIGN KEY (conversation_id) REFERENCES beam_conversations(conversation_id) ON DELETE CASCADE,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_conversation_members_beam
+      ON beam_conversation_members(beam_id, conversation_id);
+
+    CREATE TABLE IF NOT EXISTS beam_attachments (
+      attachment_id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      owner_beam_id TEXT NOT NULL,
+      file_name TEXT NOT NULL,
+      mime_type TEXT NOT NULL,
+      byte_size INTEGER NOT NULL,
+      sha256 TEXT NOT NULL,
+      content BLOB NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES beam_conversations(conversation_id) ON DELETE CASCADE,
+      FOREIGN KEY (owner_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_attachments_conversation
+      ON beam_attachments(conversation_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS beam_messages (
+      message_id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      sender_beam_id TEXT NOT NULL,
+      body TEXT NOT NULL DEFAULT '',
+      message_type TEXT NOT NULL CHECK(message_type IN ('text', 'file', 'audio')),
+      attachment_id TEXT,
+      encrypted_payload TEXT,
+      automation_depth INTEGER NOT NULL DEFAULT 0 CHECK(automation_depth IN (0, 1)),
+      sender_signature TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (conversation_id) REFERENCES beam_conversations(conversation_id) ON DELETE CASCADE,
+      FOREIGN KEY (sender_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE,
+      FOREIGN KEY (attachment_id) REFERENCES beam_attachments(attachment_id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_messages_conversation
+      ON beam_messages(conversation_id, created_at DESC, message_id DESC);
+
+    CREATE TABLE IF NOT EXISTS beam_devices (
+      device_id TEXT PRIMARY KEY,
+      beam_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      platform TEXT,
+      created_at TEXT NOT NULL,
+      last_seen_at TEXT NOT NULL,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_devices_owner
+      ON beam_devices(beam_id, last_seen_at DESC);
+
+    CREATE TABLE IF NOT EXISTS beam_push_subscriptions (
+      subscription_id TEXT PRIMARY KEY,
+      beam_id TEXT NOT NULL,
+      device_id TEXT NOT NULL,
+      endpoint TEXT NOT NULL UNIQUE,
+      p256dh TEXT NOT NULL,
+      auth_secret TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE,
+      FOREIGN KEY (device_id) REFERENCES beam_devices(device_id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_beam_push_subscriptions_owner
+      ON beam_push_subscriptions(beam_id, updated_at DESC);
+
     CREATE TABLE IF NOT EXISTS intent_acls (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       target_beam_id TEXT NOT NULL,
@@ -1000,6 +1090,8 @@ function initSchema(db: DB): void {
   ensureColumn(db, 'agents', 'dh_public_key', 'TEXT')
   // S3: Billing plan tier
   ensureColumn(db, 'agents', 'plan', "TEXT NOT NULL DEFAULT 'free'")
+  ensureColumn(db, 'beam_messages', 'automation_depth', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'beam_messages', 'encrypted_payload', 'TEXT')
 
   // Create indexes that depend on ensureColumn'd columns
   db.exec(`CREATE INDEX IF NOT EXISTS idx_agents_verification_tier ON agents(verification_tier, trust_score DESC)`)
@@ -3073,6 +3165,7 @@ export function completeIdentityClaim(
   input: {
     tokenHash: string
     publicKey: string
+    dhPublicKey: string
     apiKeyHash: string
     capabilities: string[]
   },
@@ -3097,6 +3190,7 @@ export function completeIdentityClaim(
       displayName: claim.display_name,
       capabilities: input.capabilities,
       publicKey: input.publicKey,
+      dhPublicKey: input.dhPublicKey,
       apiKeyHash: input.apiKeyHash,
       email: claim.email,
       emailVerified: true,

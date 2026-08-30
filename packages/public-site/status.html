@@ -52,7 +52,7 @@
     .dot.warn { background: var(--warn); }
     .dot.err { background: var(--err); }
     .metric-label { color: var(--muted); text-transform: uppercase; letter-spacing: .06em; font-size: .76rem; margin-bottom: 8px; }
-    .metric-value { font-size: 1.8rem; font-weight: 800; }
+    .metric-value { font-size: 1.8rem; font-weight: 800; overflow-wrap: anywhere; }
     .metric-sub { color: var(--muted); margin-top: 6px; font-size: .9rem; }
     .check-top { display: flex; justify-content: space-between; gap: 16px; align-items: center; margin-bottom: 12px; }
     .badge { display: inline-flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 999px; font-weight: 700; font-size: .82rem; }
@@ -62,7 +62,8 @@
     .mono { font-family: var(--mono); color: #e2e8f0; word-break: break-word; }
     .meta { color: var(--muted); font-size: .92rem; margin-top: 16px; }
     @media (max-width: 920px) {
-      .hero, .grid, .checks { grid-template-columns: 1fr; }
+      .hero, .grid, .checks { grid-template-columns: minmax(0, 1fr); }
+      .card { min-width: 0; }
     }
   </style>
   <link rel="stylesheet" href="/beam-pages.css" />
@@ -131,20 +132,20 @@
     </section>
 
     <section class="checks">
-      <div class="card">
-        <div class="check-top">
+      <details class="card raw-check">
+        <summary class="check-top">
           <h2>HTTP health check</h2>
           <div id="http-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
-        </div>
+        </summary>
         <p class="mono" id="http-payload">No payload yet.</p>
-      </div>
-      <div class="card">
-        <div class="check-top">
+      </details>
+      <details class="card raw-check">
+        <summary class="check-top">
           <h2>Aggregated service stats</h2>
           <div id="stats-badge" class="badge warn"><span class="dot warn"></span>Pending</div>
-        </div>
+        </summary>
         <p class="mono" id="stats-payload">No aggregate payload yet.</p>
-      </div>
+      </details>
     </section>
     <footer class="beam-subfooter">
       <span>Beam Protocol · public aggregate status</span>

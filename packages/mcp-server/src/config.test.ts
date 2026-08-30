@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { test } from 'node:test'
 import { BeamIdentity } from 'beam-protocol-sdk'
+import { generateKeyPairSync } from 'node:crypto'
 import { loadBeamMcpConfig } from './config.js'
 
 function env(): NodeJS.ProcessEnv {
@@ -61,6 +62,18 @@ test('rejects mismatched key material', () => {
   const values = env()
   values['BEAM_PUBLIC_KEY_BASE64'] = BeamIdentity.generate({ agentName: 'other' }).publicKeyBase64
   assert.throws(() => loadBeamMcpConfig(values), /do not match/)
+})
+
+test('loads a matching X25519 network encryption key pair and rejects partial material', () => {
+  const values = env()
+  const pair = generateKeyPairSync('x25519')
+  values['BEAM_DH_PUBLIC_KEY_BASE64'] = pair.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+  values['BEAM_DH_PRIVATE_KEY_BASE64'] = pair.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+  const config = loadBeamMcpConfig(values)
+  assert.ok(config.dhPublicKeyBase64)
+  assert.ok(config.dhPrivateKeyBase64)
+  delete values['BEAM_DH_PRIVATE_KEY_BASE64']
+  assert.throws(() => loadBeamMcpConfig(values), /Set both/)
 })
 
 test('validates explicit target trust policy', () => {

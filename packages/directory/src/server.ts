@@ -18,6 +18,7 @@ import { federationRouter } from './routes/federation.js'
 import { identityClaimsRouter } from './routes/identity-claims.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { networkRouter } from './routes/network.js'
+import { networkMessagingRouter } from './routes/network-messaging.js'
 import { orgsRouter } from './routes/orgs.js'
 import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter, type AlertItem } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
@@ -4000,6 +4001,7 @@ export function createApp(db: Database): Hono {
   app.route('/orgs', orgsRouter(db))
   app.route('/identity-claims', identityClaimsRouter(db))
   app.route('/network', networkRouter(db))
+  app.route('/network', networkMessagingRouter(db))
   app.route('/agents', agentsRouter(db))
   app.route('/agents', webSocketTicketRouter(db))
   app.route('/agents', verificationRouter(db))

@@ -7,6 +7,7 @@ import { toNodeHandler } from '@modelcontextprotocol/node'
 import type { AgentProfile, AgentRecord, BeamIdString, ResultFrame } from 'beam-protocol-sdk'
 import { createBeamMcpHttpHandler, hardenBeamMcpHttpServer, type BeamMcpRemoteAuditRecord } from './http.js'
 import type { BeamMcpHttpConfig } from './http-config.js'
+import type { BeamNetworkGateway } from './network-client.js'
 import { IntrospectionTokenVerifier, loadOAuthAuthorizationServerMetadata } from './oauth.js'
 import type { BeamGateway } from './tools.js'
 
@@ -89,6 +90,40 @@ function gatewayFixture(): { gateway: BeamGateway; sends: Array<Record<string, u
   }
 }
 
+function networkGatewayFixture(): { gateway: BeamNetworkGateway; calls: Array<Record<string, unknown>> } {
+  const calls: Array<Record<string, unknown>> = []
+  return {
+    calls,
+    gateway: {
+      async identity() { return { identity: { beamId: ownBeamId }, counts: { contacts: 1, inbound: 0, outbound: 0 } } },
+      async discover(query) { return { results: [], query } },
+      async connections(statuses) { return { connections: [], statuses: statuses ?? [] } },
+      async conversations() { return { conversations: [] } },
+      async messages(conversationId, limit, before) { return { messages: [], conversationId, limit, before: before ?? null } },
+      async requestConnection(recipientBeamId, message) {
+        calls.push({ tool: 'requestConnection', recipientBeamId, message })
+        return { connection: { recipientBeamId, status: 'pending' } }
+      },
+      async respondConnection(connectionId, decision) {
+        calls.push({ tool: 'respondConnection', connectionId, decision })
+        return { connection: { connectionId, status: decision } }
+      },
+      async openDirect(counterpartBeamId) {
+        calls.push({ tool: 'openDirect', counterpartBeamId })
+        return { conversation: { conversationId: 'conversation-123', counterpartBeamId } }
+      },
+      async createGroup(title, memberBeamIds) {
+        calls.push({ tool: 'createGroup', title, memberBeamIds })
+        return { conversation: { conversationId: 'group-123', title } }
+      },
+      async sendMessage(conversationId, body) {
+        calls.push({ tool: 'sendMessage', conversationId, body })
+        return { message: { messageId: 'message-123', conversationId } }
+      },
+    },
+  }
+}
+
 async function startAuthorizationServer(input: {
   scopes: string[]
   getResource: () => string
@@ -143,7 +178,7 @@ async function startAuthorizationServer(input: {
   }
 }
 
-async function startRemoteMcp(input: { enableSend: boolean; scopes: string[] }) {
+async function startRemoteMcp(input: { enableNetwork?: boolean; enableSend: boolean; scopes: string[] }) {
   let publicUrl = ''
   const authorizationServer = await startAuthorizationServer({
     scopes: input.scopes,
@@ -155,6 +190,7 @@ async function startRemoteMcp(input: { enableSend: boolean; scopes: string[] }) 
     introspectionUrl: authorizationServer.introspectionUrl,
   })
   const { gateway, sends } = gatewayFixture()
+  const network = networkGatewayFixture()
   const audits: BeamMcpRemoteAuditRecord[] = []
   let nodeHandler: ReturnType<typeof toNodeHandler> | undefined
   const server = createServer((request, response) => {
@@ -174,6 +210,7 @@ async function startRemoteMcp(input: { enableSend: boolean; scopes: string[] }) 
     publicUrl: mcpUrl,
     allowedHostnames: ['127.0.0.1'],
     allowedOriginHostnames: ['127.0.0.1'],
+    enableNetwork: input.enableNetwork ?? true,
     enableSend: input.enableSend,
     oauth: {
       issuer: authorizationServer.issuer,
@@ -193,6 +230,7 @@ async function startRemoteMcp(input: { enableSend: boolean; scopes: string[] }) 
       resource: mcpUrl,
     }),
     gateway,
+    networkGateway: network.gateway,
     ownBeamId,
     allowedIntents: new Set(['conversation.message']),
     requireVerifiedTarget: true,
@@ -205,6 +243,7 @@ async function startRemoteMcp(input: { enableSend: boolean; scopes: string[] }) 
   return {
     mcpUrl,
     sends,
+    networkCalls: network.calls,
     audits,
     introspections: authorizationServer.introspections,
     close: async () => {
@@ -230,11 +269,23 @@ test('official MCP client proves a read-only OAuth-protected remote connector ov
   try {
     connected = await connectClient(remote.mcpUrl)
     const tools = await connected.client.listTools()
-    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), ['beam_prepare_handoff', 'beam_status'])
+    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      'beam_network_connections',
+      'beam_network_conversations',
+      'beam_network_discover',
+      'beam_network_identity',
+      'beam_network_messages',
+      'beam_prepare_handoff',
+      'beam_status',
+    ])
+    const identity = await connected.client.callTool({ name: 'beam_network_identity', arguments: {} })
+    assert.equal((identity.structuredContent as Record<string, unknown>)['identity'] !== undefined, true)
     const result = await connected.client.callTool({ name: 'beam_status', arguments: { target: targetBeamId } })
     assert.equal(result.isError, undefined)
     const structured = result.structuredContent as Record<string, unknown>
     assert.equal(structured['connectedAs'], ownBeamId)
+    assert.equal((structured['connector'] as Record<string, unknown>)['networkRead'], true)
+    assert.equal((structured['connector'] as Record<string, unknown>)['networkWrite'], false)
     const target = structured['target'] as Record<string, unknown>
     assert.equal((target['assurance'] as Record<string, unknown>)['tier'], 'business')
     assert.ok(remote.introspections.length >= 2)
@@ -281,12 +332,28 @@ test('official MCP client preserves send scope, confirmation, signed result, and
     const structured = delivered.structuredContent as Record<string, unknown>
     assert.equal((structured['result'] as Record<string, unknown>)['signed'], true)
 
+    const networkBlocked = await connected.client.callTool({
+      name: 'beam_network_send_message',
+      arguments: { conversationId: 'conversation-123', body: message, confirmed: false },
+    })
+    assert.equal(networkBlocked.isError, true)
+    assert.equal(remote.networkCalls.length, 0)
+
+    const networkDelivered = await connected.client.callTool({
+      name: 'beam_network_send_message',
+      arguments: { conversationId: 'conversation-123', body: message, confirmed: true },
+    })
+    assert.equal(networkDelivered.isError, undefined)
+    assert.equal(remote.networkCalls.length, 1)
+
     const auditJson = JSON.stringify(remote.audits)
     assert.equal(auditJson.includes(message), false)
     assert.equal(auditJson.includes(accessToken), false)
     assert.equal(auditJson.includes('test-introspection-secret'), false)
     assert.ok(remote.audits.some((record) => record.tool === 'beam_send' && record.outcome === 'rejected'))
     assert.ok(remote.audits.some((record) => record.tool === 'beam_send' && record.outcome === 'success'))
+    assert.ok(remote.audits.some((record) => record.tool === 'beam_network_send_message' && record.outcome === 'rejected'))
+    assert.ok(remote.audits.some((record) => record.tool === 'beam_network_send_message' && record.outcome === 'success'))
     assert.ok(remote.audits.every((record) => record.principal.clientId === 'grok-remote-client'))
   } finally {
     if (connected) {

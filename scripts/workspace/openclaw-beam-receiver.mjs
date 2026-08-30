@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
+import { createPrivateKey, sign } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { optionalFlag } from '../production/shared.mjs'
 import {
@@ -10,6 +11,7 @@ import {
   runtimeSourceFingerprint,
   slugify,
 } from './openclaw-runtime-state.mjs'
+import { decryptNetworkPayload, encryptNetworkPayload } from './network-e2ee.mjs'
 
 const directoryUrl = optionalFlag('--directory-url', process.env.BEAM_DIRECTORY_URL || 'http://localhost:43100')
 const workspaceSlug = optionalFlag('--workspace', process.env.BEAM_WORKSPACE_SLUG || 'openclaw-local')
@@ -136,6 +138,99 @@ async function requestWsTicket(beamId, apiKey) {
   return body.ticket
 }
 
+function canonicalize(value) {
+  if (Array.isArray(value)) {
+    return value.map(canonicalize)
+  }
+  if (value && typeof value === 'object') {
+    return Object.keys(value).sort().reduce((result, key) => {
+      result[key] = canonicalize(value[key])
+      return result
+    }, {})
+  }
+  return value
+}
+
+async function sendNetworkReply(route, event, message) {
+  if (!route.privateKeyBase64) {
+    throw new Error(`No signing key is available for ${route.beamId}`)
+  }
+  if (!route.dhPrivateKeyBase64 || !route.dhPublicKeyBase64) {
+    throw new Error(`No Beam Network encryption identity is available for ${route.beamId}`)
+  }
+
+  const conversationId = event.conversationId
+  const sourceMessageId = event.message.messageId
+  const listingResponse = await fetch(`${directoryUrl}/network/conversations`, {
+    headers: { Authorization: `Bearer ${route.apiKey}` },
+  })
+  const listing = await listingResponse.json().catch(() => ({}))
+  if (!listingResponse.ok) {
+    throw new Error(`Could not load Beam conversation members for ${route.beamId} (${listingResponse.status})`)
+  }
+  const conversation = Array.isArray(listing.conversations)
+    ? listing.conversations.find((entry) => entry?.conversationId === conversationId)
+    : null
+  if (!conversation) {
+    throw new Error(`Beam conversation ${conversationId} was not found`)
+  }
+  const recipients = Array.isArray(conversation.members)
+    ? conversation.members.map((member) => {
+        const beamId = typeof member?.beamId === 'string' ? member.beamId : ''
+        const dhPublicKey = typeof member?.profile?.dhPublicKey === 'string' ? member.profile.dhPublicKey : ''
+        if (!beamId || !dhPublicKey) {
+          throw new Error(`${beamId || 'A conversation member'} has not enabled Beam encryption`)
+        }
+        return { beamId, dhPublicKey }
+      })
+    : []
+  if (recipients.length === 0) {
+    throw new Error(`Beam conversation ${conversationId} has no encryption-ready members`)
+  }
+  const encrypted = encryptNetworkPayload({
+    conversationId,
+    senderBeamId: route.beamId,
+    recipients,
+    payload: { body: message, messageType: 'text', attachment: null },
+  })
+  const timestamp = new Date().toISOString()
+  const nonce = `network_reply_${String(sourceMessageId).replace(/[^A-Za-z0-9_-]/gu, '')}`
+  const payload = {
+    type: 'network.message.send',
+    conversationId,
+    senderBeamId: route.beamId,
+    body: '',
+    messageType: 'text',
+    attachment: null,
+    encrypted,
+    automationDepth: 1,
+    timestamp,
+    nonce,
+  }
+  const privateKey = createPrivateKey({
+    key: Buffer.from(route.privateKeyBase64, 'base64'),
+    format: 'der',
+    type: 'pkcs8',
+  })
+  const signature = sign(null, Buffer.from(JSON.stringify(canonicalize(payload))), privateKey).toString('base64')
+  const response = await fetch(`${directoryUrl}/network/conversations/${encodeURIComponent(conversationId)}/messages`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${route.apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ ...payload, signature }),
+  })
+  const body = await response.json().catch(() => ({}))
+  if (response.status === 409 && body.errorCode === 'NONCE_REPLAY') {
+    return { duplicate: true }
+  }
+  if (!response.ok) {
+    throw new Error(`Network reply failed for ${route.beamId} (${response.status}: ${body.errorCode ?? 'UNKNOWN'})`)
+  }
+  return { duplicate: false, messageId: body.message?.messageId ?? null }
+}
+
 async function postRouteEvent(route, reportedState) {
   if (!hostCredential) {
     return
@@ -182,6 +277,7 @@ function createRouteSignature(route) {
     source: route.source,
     childSessionKey: route.childSessionKey ?? null,
     runtimeType: route.runtimeType,
+    dhPublicKeyBase64: route.dhPublicKeyBase64 ?? null,
   })
 }
 
@@ -470,6 +566,13 @@ class RouteConnection {
       return
     }
 
+    if (payload?.type === 'network.message.created' && payload.message) {
+      await this.handleNetworkMessage(payload).catch((error) => {
+        log(`Network message handling failed for ${this.route.beamId}: ${error instanceof Error ? error.message : String(error)}`)
+      })
+      return
+    }
+
     if (payload?.type !== 'intent' || !payload.frame) {
       return
     }
@@ -501,6 +604,71 @@ class RouteConnection {
         errorCode: 'OPENCLAW_RECEIVER_ERROR',
       })
       log(`failed ${frame.intent} for ${this.route.beamId}: ${message}`)
+    }
+  }
+
+  async handleNetworkMessage(event) {
+    const message = event.message
+    if (
+      typeof event.conversationId !== 'string'
+      || typeof message.messageId !== 'string'
+      || typeof message.senderBeamId !== 'string'
+      || message.senderBeamId === this.route.beamId
+      || Number(message.automationDepth ?? 0) > 0
+    ) {
+      return
+    }
+
+    if (message.encrypted && !this.route.dhPrivateKeyBase64) {
+      throw new Error(`No Beam Network decryption key is available for ${this.route.beamId}`)
+    }
+    const decrypted = message.encrypted
+      ? decryptNetworkPayload({
+          conversationId: event.conversationId,
+          senderBeamId: message.senderBeamId,
+          recipientBeamId: this.route.beamId,
+          privateKeyBase64: this.route.dhPrivateKeyBase64,
+          envelope: message.encrypted,
+        })
+      : { body: message.body, attachment: message.attachment }
+    const attachment = decrypted.attachment && typeof decrypted.attachment === 'object'
+      ? decrypted.attachment
+      : null
+    const attachmentSummary = attachment
+      ? `${message.type === 'audio' ? 'Audio' : 'File'} attachment: ${attachment.name} (${attachment.mimeType}, ${attachment.byteSize} bytes)`
+      : null
+    const frame = {
+      v: '1',
+      from: message.senderBeamId,
+      to: this.route.beamId,
+      intent: 'conversation.message',
+      payload: {
+        message: typeof decrypted.body === 'string' && decrypted.body.trim()
+          ? decrypted.body.trim()
+          : attachmentSummary ?? 'A Beam Network message was received.',
+        threadKey: `network-${event.conversationId}`,
+        beamNetwork: {
+          conversationId: event.conversationId,
+          messageId: message.messageId,
+          attachment: attachment ? {
+            name: attachment.name ?? null,
+            mimeType: attachment.mimeType ?? null,
+            byteSize: attachment.byteSize ?? null,
+            sha256: attachment.sha256 ?? null,
+          } : null,
+          endToEndEncrypted: Boolean(message.encrypted),
+        },
+      },
+      nonce: message.messageId,
+      timestamp: message.createdAt ?? new Date().toISOString(),
+    }
+
+    try {
+      const delivery = await forwardIntentToOpenClaw(this.route, frame)
+      const reply = await sendNetworkReply(this.route, event, delivery.text)
+      log(`${reply.duplicate ? 'deduplicated' : 'replied to'} Network message ${message.messageId} via ${delivery.sessionKey}`)
+    } catch (error) {
+      log(`Network message ${message.messageId} failed for ${this.route.beamId}: ${error instanceof Error ? error.message : String(error)}`)
     }
   }
 

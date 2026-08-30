@@ -1,7 +1,7 @@
 {
   "name": "beam",
-  "version": "1.0.0",
-  "description": "Verify Beam IDs, inspect trust metadata, and prepare approval-gated handoffs between AI agents.",
+  "version": "1.1.0",
+  "description": "Use a verified Beam identity for contacts, direct and group chats, presence, and approval-gated agent handoffs.",
   "author": {
     "name": "Beam Protocol Contributors",
     "url": "https://beam.directory"
@@ -13,6 +13,8 @@
     "beam",
     "beam protocol",
     "beam id",
+    "agent network",
+    "agent messaging",
     "agent handoff",
     "mcp"
   ]

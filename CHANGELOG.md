@@ -2,6 +2,13 @@
 
 ## v1.7.0 (draft)
 
+### Beam Network
+- add mutual contacts, direct conversations, groups, presence, devices, notifications, file and audio messages to the verified identity network
+- encrypt new Network messages and attachments per conversation member with the version-1 X25519/HKDF/AES-GCM envelope, with an enforcement switch for migrated deployments
+- add passkey-protected browser vault onboarding and optional recovery-kit export without sending private keys to the Directory
+- expose scoped Network tools through dedicated Grok and Codex MCP connectors and add OpenClaw receive/reply support
+- refresh the public home, claim, Network, status, and supporting pages with the light Beam design and responsive browser checks
+
 ### Hosted Fleet Adoption
 - package the OpenClaw host installer and bootstrap-token flow into a reusable host-adoption path
 - add guided enrollment links, recent enrollment visibility, and install-pack operator onboarding in the fleet surface

@@ -3,18 +3,18 @@
 }
 
 :root {
-  --ink: #0b1020;
-  --ink-soft: #354056;
-  --muted: #6d7689;
-  --paper: #f8faff;
+  --ink: #08130f;
+  --ink-soft: #35463c;
+  --muted: #69766e;
+  --paper: #f7f8f2;
   --paper-strong: #ffffff;
-  --line: #dfe5f0;
-  --line-strong: #cbd4e4;
-  --night: #091126;
-  --night-soft: #101a33;
+  --line: #dce4da;
+  --line-strong: #c8d3c5;
+  --night: #07110e;
+  --night-soft: #102118;
   --white: #ffffff;
-  --accent: #1f5eff;
-  --accent-dark: #1547ca;
+  --accent: #397d16;
+  --accent-dark: #24550b;
   --green: #11815f;
   --amber: #b76b16;
   --font-display: "Manrope", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
@@ -42,8 +42,8 @@ body::before {
   inset: 0;
   pointer-events: none;
   background-image:
-      linear-gradient(rgba(72, 99, 160, 0.04) 1px, transparent 1px),
-      linear-gradient(90deg, rgba(72, 99, 160, 0.04) 1px, transparent 1px);
+      linear-gradient(rgba(49, 84, 57, 0.04) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(49, 84, 57, 0.04) 1px, transparent 1px);
   background-size: 56px 56px;
   opacity: 0.55;
   z-index: -1;
@@ -108,8 +108,8 @@ textarea {
   display: grid;
   place-items: center;
   border-radius: 11px;
-  background: var(--accent);
-  color: white;
+  background: #b8ff6a;
+  color: #07110e;
   font-weight: 800;
   letter-spacing: 0;
 }

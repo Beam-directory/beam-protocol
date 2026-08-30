@@ -2,6 +2,7 @@
 
 import { StdioServerTransport } from '@modelcontextprotocol/server/stdio'
 import { createBeamClient, loadBeamMcpConfig } from './config.js'
+import { createBeamNetworkGateway } from './network-client.js'
 import { createBeamMcpServer } from './server.js'
 import { startBeamMcpHttpServer } from './http.js'
 
@@ -37,6 +38,7 @@ async function main(): Promise<void> {
       lookup: (beamId) => client.directory.lookup(beamId),
       send: (to, intent, payload, timeoutMs) => client.send(to, intent, payload, timeoutMs),
     },
+    networkGateway: createBeamNetworkGateway(config),
     ownBeamId: config.beamId,
     allowedIntents: config.allowedIntents,
     requireVerifiedTarget: config.requireVerifiedTarget,

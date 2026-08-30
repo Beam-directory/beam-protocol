@@ -1,5 +1,6 @@
 import { BeamClient, BeamIdentity, type BeamIdString, type VerificationTier } from 'beam-protocol-sdk'
 import { requiredSecret } from './secret-file.js'
+import { assertX25519KeyPair } from './network-crypto.js'
 
 const DEFAULT_DIRECTORY_URL = 'https://api.beam.directory'
 
@@ -7,6 +8,8 @@ export interface BeamMcpConfig {
   beamId: BeamIdString
   publicKeyBase64: string
   privateKeyBase64: string
+  dhPublicKeyBase64?: string
+  dhPrivateKeyBase64?: string
   apiKey: string
   directoryUrl: string
   allowedIntents: ReadonlySet<string>
@@ -94,10 +97,17 @@ export function loadBeamMcpConfig(env: NodeJS.ProcessEnv = process.env): BeamMcp
     true,
     'BEAM_MCP_REQUIRE_VERIFIED_TARGET',
   )
+  const hasDhPublic = Boolean(env['BEAM_DH_PUBLIC_KEY_BASE64']?.trim() || env['BEAM_DH_PUBLIC_KEY_BASE64_FILE']?.trim())
+  const hasDhPrivate = Boolean(env['BEAM_DH_PRIVATE_KEY_BASE64']?.trim() || env['BEAM_DH_PRIVATE_KEY_BASE64_FILE']?.trim())
+  if (hasDhPublic !== hasDhPrivate) throw new Error('Set both BEAM_DH_PUBLIC_KEY_BASE64 and BEAM_DH_PRIVATE_KEY_BASE64 secrets')
   const config: BeamMcpConfig = {
     beamId: beamId as BeamIdString,
     publicKeyBase64: requiredSecret(env, 'BEAM_PUBLIC_KEY_BASE64'),
     privateKeyBase64: requiredSecret(env, 'BEAM_PRIVATE_KEY_BASE64'),
+    ...(hasDhPublic ? {
+      dhPublicKeyBase64: requiredSecret(env, 'BEAM_DH_PUBLIC_KEY_BASE64'),
+      dhPrivateKeyBase64: requiredSecret(env, 'BEAM_DH_PRIVATE_KEY_BASE64'),
+    } : {}),
     apiKey: requiredSecret(env, 'BEAM_API_KEY'),
     directoryUrl: parseDirectoryUrl(env['BEAM_DIRECTORY_URL']?.trim() || DEFAULT_DIRECTORY_URL),
     allowedIntents: parseAllowedIntents(env['BEAM_MCP_ALLOWED_INTENTS']),
@@ -118,6 +128,9 @@ export function loadBeamMcpConfig(env: NodeJS.ProcessEnv = process.env): BeamMcp
   const keyProbe = 'beam-mcp-key-pair-check-v1'
   if (!BeamIdentity.verify(keyProbe, identity.sign(keyProbe), config.publicKeyBase64)) {
     throw new Error('BEAM public and private key material do not match')
+  }
+  if (config.dhPublicKeyBase64 && config.dhPrivateKeyBase64) {
+    assertX25519KeyPair(config.dhPublicKeyBase64, config.dhPrivateKeyBase64)
   }
 
   return config

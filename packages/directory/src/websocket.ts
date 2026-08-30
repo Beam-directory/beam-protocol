@@ -55,8 +55,54 @@ type ConnectionSession = {
 
 type OpenClawHostMaintenanceState = 'serving' | 'maintenance' | 'draining'
 
-const connections = new Map<string, ConnectionSession>()
+const connections = new Map<string, Set<ConnectionSession>>()
 const intentFeedSubscribers = new Set<WebSocket>()
+
+function openSessions(beamId: string): ConnectionSession[] {
+  return Array.from(connections.get(beamId) ?? []).filter((session) => session.ws.readyState === WebSocket.OPEN)
+}
+
+function firstOpenSession(beamId: string): ConnectionSession | null {
+  return openSessions(beamId)[0] ?? null
+}
+
+function hasWebSocketSession(beamId: string, ws: WebSocket): boolean {
+  return Array.from(connections.get(beamId) ?? []).some((session) => session.ws === ws)
+}
+
+function removeWebSocketSession(beamId: string, ws: WebSocket): boolean {
+  const sessions = connections.get(beamId)
+  if (!sessions) return false
+  for (const session of sessions) {
+    if (session.ws === ws) sessions.delete(session)
+  }
+  if (sessions.size === 0) connections.delete(beamId)
+  return openSessions(beamId).length === 0
+}
+
+function networkContactBeamIds(db: Database, beamId: string): string[] {
+  const rows = db.prepare(`
+    SELECT CASE
+      WHEN requester_beam_id = ? THEN recipient_beam_id
+      ELSE requester_beam_id
+    END AS beam_id
+    FROM beam_connections
+    WHERE status = 'accepted'
+      AND (requester_beam_id = ? OR recipient_beam_id = ?)
+  `).all(beamId, beamId, beamId) as Array<{ beam_id: string }>
+  return rows.map((row) => row.beam_id)
+}
+
+function broadcastNetworkPresence(db: Database, beamId: string, online: boolean): void {
+  // Shutdown can close SQLite before ws emits its final close/error event.
+  if (!db.open) return
+  broadcastNetworkEvent(networkContactBeamIds(db, beamId), {
+    type: 'network.presence',
+    beamId,
+    online,
+    at: new Date().toISOString(),
+  })
+}
 
 const pendingResults = new Map<string, {
   db: Database
@@ -822,31 +868,31 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       return
     }
 
-    const existingSession = connections.get(beamId)
-    if (existingSession && existingSession.ws.readyState === WebSocket.OPEN) {
-      existingSession.ws.close(1001, 'Replaced by new connection')
-    }
-
-    connections.set(beamId, { ws, authenticatedViaApiKey })
+    const wasOffline = openSessions(beamId).length === 0
+    const sessions = connections.get(beamId) ?? new Set<ConnectionSession>()
+    sessions.add({ ws, authenticatedViaApiKey })
+    connections.set(beamId, sessions)
     updateLastSeen(db, beamId)
 
-    sendJson(ws, { type: 'connected', beamId, auth: authenticatedViaTicket ? 'ws_ticket' : 'api_key' })
+    sendJson(ws, {
+      type: 'connected',
+      beamId,
+      auth: authenticatedViaTicket ? 'ws_ticket' : 'api_key',
+      deviceCount: openSessions(beamId).length,
+    })
+    if (wasOffline) broadcastNetworkPresence(db, beamId, true)
 
     ws.on('message', (data: Buffer) => {
       void handleMessage(db, beamId, ws, data, { authenticatedViaApiKey })
     })
 
     ws.on('close', () => {
-      if (connections.get(beamId)?.ws === ws) {
-        connections.delete(beamId)
-      }
+      if (removeWebSocketSession(beamId, ws)) broadcastNetworkPresence(db, beamId, false)
     })
 
     ws.on('error', (err: Error) => {
       console.error(`WebSocket error for ${beamId}:`, err)
-      if (connections.get(beamId)?.ws === ws) {
-        connections.delete(beamId)
-      }
+      if (removeWebSocketSession(beamId, ws)) broadcastNetworkPresence(db, beamId, false)
     })
   })
 
@@ -873,14 +919,11 @@ export function getConnectedCount(): number {
 }
 
 export function isAgentConnected(beamId: string): boolean {
-  const session = connections.get(beamId)
-  return Boolean(session && session.ws.readyState === WebSocket.OPEN)
+  return openSessions(beamId).length > 0
 }
 
 export function getConnectedBeamIds(): string[] {
-  return Array.from(connections.entries())
-    .filter(([, session]) => session.ws.readyState === WebSocket.OPEN)
-    .map(([beamId]) => beamId)
+  return Array.from(connections.keys()).filter((beamId) => isAgentConnected(beamId))
 }
 
 export async function relayIntentFromHttp(
@@ -1019,7 +1062,7 @@ export async function relayIntentFromHttp(
     throw new RelayError(routeBlock.relayCode, routeBlock.message)
   }
 
-  const recipientSession = connections.get(prepared.to)
+  const recipientSession = firstOpenSession(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
     const echoFallback = maybeDeliverPublicEcho(db, prepared, {
@@ -1093,7 +1136,7 @@ async function handleMessage(
   data: Buffer,
   auth: { authenticatedViaApiKey: boolean }
 ): Promise<void> {
-  if (connections.get(senderBeamId)?.ws !== senderWs) {
+  if (!hasWebSocketSession(senderBeamId, senderWs)) {
     sendJson(senderWs, { type: 'error', errorCode: 'FORBIDDEN', message: 'WebSocket session is no longer active' })
     return
   }
@@ -1322,7 +1365,7 @@ async function handleIntent(
     return
   }
 
-  const recipientSession = connections.get(prepared.to)
+  const recipientSession = firstOpenSession(prepared.to)
   const recipientWs = recipientSession?.ws
   if (!recipientWs || recipientWs.readyState !== WebSocket.OPEN) {
     const echoFallback = maybeDeliverPublicEcho(db, prepared, {
@@ -1995,11 +2038,13 @@ export function resetRelayRuntimeState(
   pendingResults.clear()
 
   if (closeConnections) {
-    for (const session of connections.values()) {
-      try {
-        session.ws.terminate()
-      } catch {
-        // Ignore best-effort connection cleanup during runtime resets.
+    for (const sessions of connections.values()) {
+      for (const session of sessions) {
+        try {
+          session.ws.terminate()
+        } catch {
+          // Ignore best-effort connection cleanup during runtime resets.
+        }
       }
     }
     for (const ws of intentFeedSubscribers.values()) {
@@ -2018,6 +2063,12 @@ export function resetRelayRuntimeState(
 function sendJson(ws: WebSocket, payload: object): void {
   if (ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify(payload))
+  }
+}
+
+export function broadcastNetworkEvent(beamIds: Iterable<string>, payload: object): void {
+  for (const beamId of new Set(beamIds)) {
+    for (const session of openSessions(beamId)) sendJson(session.ws, payload)
   }
 }
 

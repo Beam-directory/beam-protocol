@@ -30,12 +30,19 @@ LABEL org.opencontainers.image.title="Beam MCP server" \
 WORKDIR /app
 
 COPY --from=builder /workspace/node_modules ./node_modules
-COPY --from=builder /workspace/packages/sdk-typescript/package.json ./packages/sdk-typescript/package.json
+COPY --from=builder --chmod=0644 /workspace/packages/sdk-typescript/package.json ./packages/sdk-typescript/package.json
 COPY --from=builder /workspace/packages/sdk-typescript/dist ./packages/sdk-typescript/dist
-COPY --from=builder /workspace/packages/mcp-server/package.json ./packages/mcp-server/package.json
+COPY --from=builder --chmod=0644 /workspace/packages/mcp-server/package.json ./packages/mcp-server/package.json
 COPY --from=builder /workspace/packages/mcp-server/dist ./packages/mcp-server/dist
 COPY LICENSE ./LICENSE
 COPY --chmod=0555 packages/mcp-server/beam-entrypoint.sh /app/beam-entrypoint.sh
+
+# npm workspaces may materialize the local SDK as a copied package whose
+# package entrypoint does not survive the production prune. Point the runtime
+# dependency at the compiled workspace copy explicitly.
+RUN rm -rf node_modules/beam-protocol-sdk \
+  && ln -s ../packages/sdk-typescript node_modules/beam-protocol-sdk \
+  && chmod -R a+rX /app/packages
 
 # The runtime executes prebuilt JavaScript only. Removing package managers and
 # their global dependency trees reduces both attack surface and image CVEs.

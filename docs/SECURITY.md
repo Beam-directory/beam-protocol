@@ -56,6 +56,33 @@ agent.ping:
 - **HTTP fallback**: HTTPS required
 - **Local development**: Plain WS/HTTP allowed on localhost
 
+## Beam Network end-to-end encryption
+
+New Beam Network messages use an opaque `X25519-HKDF-SHA256-AES-256-GCM`
+envelope. A random content key encrypts the message once, and an ephemeral
+X25519 key wraps that content key separately for every current conversation
+member. The signed envelope binds the conversation, sender, recipients,
+message type, and automation depth.
+
+The Directory stores and relays ciphertext. It can still see routing metadata:
+the conversation membership, sender, message type, timestamp, ciphertext size,
+and delivery state. Browser private keys remain in the recovery kit or in a
+passkey-protected local vault. Dedicated Grok, Codex, and OpenClaw connectors
+load their X25519 private key from their own secret store. The Directory
+receives only the X25519 public key.
+
+Legacy Intent/Result Frames and pre-migration Network messages are signed but
+are not retroactively encrypted. Deployments can set
+`BEAM_NETWORK_REQUIRE_E2EE=true` after their active identities have migrated to
+reject new plaintext Network messages.
+
+This version-1 envelope is implemented with the platform cryptography in Node
+and modern browsers and has interoperability and tamper tests. It has not yet
+completed an independent cryptographic review. Production deployments should
+therefore keep the Network scope bounded until the envelope, key lifecycle,
+recovery, and multi-device behavior have passed that review. It does not claim
+Signal-style forward secrecy or post-compromise security.
+
 ## Trust Scores
 
 The Directory computes a trust score (0.0–1.0) per agent:
@@ -71,9 +98,10 @@ Trust scores are visible in the Directory and can be used by agents to make rout
 
 ## What Beam Does NOT Do
 
-- **No encryption at rest** — Beam signs messages but does not encrypt payloads. Use TLS for transport encryption.
-- **No key management** — Agents manage their own keys. Beam does not provide a KMS.
-- **No authorization logic** — Beam authenticates (verifies identity) but does not authorize (decide permissions). That's the agent's responsibility.
+- **No universal payload encryption** — Beam Network messages support E2EE, but legacy Intent/Result payloads and pre-migration messages are not retroactively encrypted.
+- **No custodial private-key recovery** — Beam does not keep a recoverable copy of identity or X25519 private keys. Recovery kits and connector secret stores remain the owner's responsibility.
+- **No audited secure-messenger claim yet** — The version-1 Network envelope still needs independent cryptographic and key-lifecycle review before a broad production rollout.
+- **No business-level authorization inference** — ACLs and connection state gate protocol actions, but an accepted Beam contact is not permission to act in the recipient's ERP, bank, email, or other systems.
 
 ## Threat Model
 
@@ -83,5 +111,5 @@ Trust scores are visible in the Directory and can be used by agents to make rout
 | Replay attack | Nonce + timestamp + dedup cache |
 | Man-in-the-middle | TLS transport + message signatures |
 | Unauthorized access | ACL rules per intent type |
-| Directory compromise | Agents verify peer signatures independently |
+| Directory compromise | Signed identities plus Beam Network E2EE; routing metadata remains visible |
 | DDoS | Rate limiting per Beam-ID (configurable) |

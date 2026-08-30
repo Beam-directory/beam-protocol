@@ -43,6 +43,7 @@ Beam has one public evaluation journey. Choose the first step that matches your 
 - [Getting Started](/guide/getting-started) for local setup and the first SDK flow.
 - [Hosted Quickstart](/guide/hosted-quickstart) for a self-run demonstration environment.
 - [Grok MCP Connector](/guide/grok-mcp-connector) for connecting a Grok-compatible MCP client through Beam.
+- [Codex MCP Connector](/guide/codex-mcp-connector) for a persistent Beam identity, contact list, and inbox in Codex.
 - [Identity Onboarding](/guide/identity-onboarding) for Beam IDs, keys, and organization namespaces.
 - [Intent Lifecycle](/guide/intent-lifecycle) for request states, retries, and delivery semantics.
 - [Operator Observability](/guide/operator-observability) for traces, alerts, audit history, and support evidence.

@@ -1,0 +1,166 @@
+:root {
+  --ink: #08130f;
+  --muted: #5f6e65;
+  --dim: #7f8b84;
+  --line: rgba(8, 19, 15, .1);
+  --line-strong: rgba(8, 19, 15, .18);
+}
+
+body.network-page {
+  color: var(--ink);
+  background: #f7f8f2;
+}
+
+.network-page .beam-header {
+  position: sticky;
+  top: 0;
+  background: rgba(250, 252, 247, .88);
+  box-shadow: 0 1px 0 rgba(8, 19, 15, .04);
+}
+
+.network-page .beam-header-action {
+  color: #315d12;
+}
+
+.network-page .network-hero {
+  background:
+    radial-gradient(circle at 75% 40%, rgba(184, 255, 106, .18), transparent 26%),
+    linear-gradient(135deg, #fbfcf8 0%, #f1f6eb 100%);
+}
+
+.network-page .hero-atmosphere {
+  background:
+    radial-gradient(circle at 76% 44%, rgba(98, 245, 204, .13), transparent 24%),
+    linear-gradient(rgba(8, 19, 15, .035) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(8, 19, 15, .035) 1px, transparent 1px);
+  background-size: auto, 48px 48px, 48px 48px;
+}
+
+.network-page .hero-summary {
+  color: #435248;
+}
+
+.network-page .network-hero h1 em,
+.network-page .section-intro h2 em,
+.network-page .trust-statement h2 em {
+  color: #4f9d1d;
+  text-shadow: none;
+}
+
+.network-page .action-quiet {
+  background: rgba(255, 255, 255, .76);
+}
+
+.network-page .identity-orbit {
+  border-color: rgba(8, 19, 15, .09);
+  background: radial-gradient(circle, rgba(184, 255, 106, .22), rgba(255, 255, 255, .32) 42%, transparent 68%);
+}
+
+.network-page .orbit-grid {
+  background:
+    linear-gradient(rgba(8, 19, 15, .045) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(8, 19, 15, .045) 1px, transparent 1px);
+  background-size: 38px 38px;
+}
+
+.network-page .orbit-lines circle {
+  stroke: rgba(8, 19, 15, .16);
+}
+
+.network-page .orbit-lines path {
+  stroke: rgba(67, 126, 25, .42);
+}
+
+.network-page .beam-core-identity,
+.network-page .orbit-node {
+  color: var(--ink);
+  background: rgba(255, 255, 255, .92);
+  box-shadow: 0 24px 70px rgba(26, 54, 35, .1);
+}
+
+.network-page .beam-core-identity {
+  border-color: rgba(90, 163, 38, .45);
+}
+
+.network-page .beam-core-identity small,
+.network-page .orbit-node small {
+  color: #6f7d74;
+}
+
+.network-page .verified-pill,
+.network-page .relationship-code,
+.network-page .orbit-caption span,
+.network-page .trust-steps li > span,
+.network-page .trust-steps .status-live {
+  color: #3d7417;
+}
+
+.network-page .core-pulse {
+  border-color: rgba(76, 139, 31, .2);
+}
+
+.network-page .node-icon-company,
+.network-page .company-party > span {
+  color: #203128;
+  background: #e9eee8;
+}
+
+.network-page .proof-ribbon {
+  background: rgba(255, 255, 255, .72);
+}
+
+.network-page .relationship-section {
+  background: #ffffff;
+}
+
+.network-page .relationship-path small {
+  color: #748078;
+  background: #ffffff;
+}
+
+.network-page .trust-section {
+  background: #f2f5ef;
+}
+
+.network-page .trust-steps .status-pilot {
+  color: #087f67;
+}
+
+.network-page .claim-callout {
+  color: #08130f;
+  background: linear-gradient(120deg, #b8ff6a, #9be957);
+}
+
+.network-page .claim-callout .eyebrow {
+  color: rgba(8, 19, 15, .66);
+}
+
+.network-page .claim-callout .eyebrow > span {
+  background: #08130f;
+}
+
+.network-page .claim-callout .action-primary {
+  color: #b8ff6a;
+  background: #08130f;
+}
+
+.network-page .beam-footer {
+  color: #68766d;
+  background: #ffffff;
+}
+
+.network-page .beam-footer a:hover {
+  color: #08130f;
+}
+
+@media (max-width: 820px) {
+  .network-page .beam-header {
+    position: sticky;
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  body.network-page {
+    color-scheme: light;
+  }
+}

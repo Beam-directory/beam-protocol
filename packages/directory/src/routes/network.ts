@@ -16,6 +16,7 @@ import {
 } from '../db.js'
 import { toBeamDID } from '../did.js'
 import type { AgentRow, BeamConnectionRow, BeamConnectionStatus } from '../types.js'
+import { broadcastNetworkEvent, isAgentConnected } from '../websocket.js'
 
 const BEAM_ID_RE = /^[a-z0-9][a-z0-9_-]{1,62}@(?:[a-z0-9](?:[a-z0-9.-]{0,124}[a-z0-9])?\.)?beam\.directory$/
 const NONCE_RE = /^[A-Za-z0-9_-]{16,128}$/
@@ -29,11 +30,11 @@ const CONNECTION_STATUSES = new Set<BeamConnectionStatus>([
   'cancelled',
 ])
 
-type AuthenticatedIdentity = {
+export type AuthenticatedIdentity = {
   agent: AgentRow
 }
 
-function authenticate(db: Database, request: Request): AuthenticatedIdentity | null {
+export function authenticateNetworkIdentity(db: Database, request: Request): AuthenticatedIdentity | null {
   const apiKey = getSuppliedApiKey(request)
   const beamId = beamIdFromApiKey(apiKey)
   const agent = beamId ? getAgent(db, beamId) : null
@@ -44,7 +45,7 @@ function authenticate(db: Database, request: Request): AuthenticatedIdentity | n
   return { agent: agent as AgentRow }
 }
 
-function isNetworkAssured(db: Database, agent: AgentRow): boolean {
+export function isNetworkAssured(db: Database, agent: AgentRow): boolean {
   if (agent.flagged === 1) {
     return false
   }
@@ -73,7 +74,7 @@ function assuranceLabel(db: Database, agent: AgentRow): 'email' | 'organization'
   return 'none'
 }
 
-function safeProfile(db: Database, agent: AgentRow): object {
+export function safeNetworkProfile(db: Database, agent: AgentRow): object {
   return {
     beamId: agent.beam_id,
     did: toBeamDID(agent.beam_id),
@@ -85,6 +86,7 @@ function safeProfile(db: Database, agent: AgentRow): object {
     verificationTier: agent.verification_tier,
     assured: isNetworkAssured(db, agent),
     assurance: assuranceLabel(db, agent),
+    dhPublicKey: agent.dh_public_key,
     visibility: agent.visibility,
   }
 }
@@ -115,7 +117,8 @@ function serializeConnection(db: Database, connection: BeamConnectionRow, viewer
     requesterBeamId: connection.requester_beam_id,
     recipientBeamId: connection.recipient_beam_id,
     message: connection.request_message,
-    counterpart: counterpart ? safeProfile(db, counterpart) : null,
+    counterpart: counterpart ? safeNetworkProfile(db, counterpart) : null,
+    online: isAgentConnected(counterpartBeamId),
     blockedByMe: connection.blocked_by_beam_id === viewerBeamId,
     createdAt: connection.created_at,
     updatedAt: connection.updated_at,
@@ -142,7 +145,7 @@ function normalizeSignature(value: unknown): string | null {
   return typeof value === 'string' && SIGNATURE_RE.test(value) ? value : null
 }
 
-async function readObjectBody(request: Request): Promise<Record<string, unknown> | null> {
+export async function readNetworkObjectBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const body = await request.json()
     return body && typeof body === 'object' && !Array.isArray(body)
@@ -153,7 +156,7 @@ async function readObjectBody(request: Request): Promise<Record<string, unknown>
   }
 }
 
-function verifySignedMutation(
+export function verifyNetworkSignedMutation(
   db: Database,
   agent: AgentRow,
   raw: Record<string, unknown>,
@@ -191,14 +194,14 @@ export function networkRouter(db: Database): Hono {
   })
 
   router.get('/me', (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
 
     const connections = listBeamConnections(db, auth.agent.beam_id, ['pending', 'accepted'])
     return c.json({
-      identity: safeProfile(db, auth.agent),
+      identity: safeNetworkProfile(db, auth.agent),
       counts: {
         contacts: connections.filter((connection) => connection.status === 'accepted').length,
         inbound: connections.filter((connection) => (
@@ -212,7 +215,7 @@ export function networkRouter(db: Database): Hono {
   })
 
   router.get('/connections', (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
@@ -235,7 +238,7 @@ export function networkRouter(db: Database): Hono {
   })
 
   router.get('/discover', (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
@@ -275,7 +278,7 @@ export function networkRouter(db: Database): Hono {
       results: rows.map((agent) => {
         const existing = getBeamConnectionBetween(db, auth.agent.beam_id, agent.beam_id)
         return {
-          identity: safeProfile(db, agent),
+          identity: safeNetworkProfile(db, agent),
           connection: existing ? serializeConnection(db, existing, auth.agent.beam_id) : null,
         }
       }),
@@ -284,7 +287,7 @@ export function networkRouter(db: Database): Hono {
   })
 
   router.post('/connections', async (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
@@ -292,7 +295,7 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: 'Verify this Beam identity before connecting', errorCode: 'IDENTITY_NOT_ASSURED' }, 403)
     }
 
-    const raw = await readObjectBody(c.req.raw)
+    const raw = await readNetworkObjectBody(c.req.raw)
     if (!raw) {
       return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
     }
@@ -312,7 +315,7 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: 'That verified Beam identity was not found', errorCode: 'RECIPIENT_NOT_FOUND' }, 404)
     }
 
-    const proof = verifySignedMutation(db, auth.agent, raw, {
+    const proof = verifyNetworkSignedMutation(db, auth.agent, raw, {
       type: 'network.connection.request',
       requesterBeamId: auth.agent.beam_id,
       recipientBeamId,
@@ -345,11 +348,16 @@ export function networkRouter(db: Database): Hono {
       target: recipientBeamId,
       details: { connectionId: result.connection.connection_id },
     })
+    broadcastNetworkEvent([auth.agent.beam_id, recipientBeamId], {
+      type: 'network.connection.updated',
+      connectionId: result.connection.connection_id,
+      status: result.connection.status,
+    })
     return c.json({ connection: serializeConnection(db, result.connection, auth.agent.beam_id) }, 201)
   })
 
   router.post('/connections/:connectionId/respond', async (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
@@ -359,7 +367,7 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: 'Pending connection request not found', errorCode: 'CONNECTION_NOT_FOUND' }, 404)
     }
 
-    const raw = await readObjectBody(c.req.raw)
+    const raw = await readNetworkObjectBody(c.req.raw)
     if (!raw) {
       return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
     }
@@ -368,7 +376,7 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: 'Decision must be accepted, declined, or blocked', errorCode: 'INVALID_DECISION' }, 400)
     }
 
-    const proof = verifySignedMutation(db, auth.agent, raw, {
+    const proof = verifyNetworkSignedMutation(db, auth.agent, raw, {
       type: 'network.connection.respond',
       connectionId,
       actorBeamId: auth.agent.beam_id,
@@ -394,11 +402,16 @@ export function networkRouter(db: Database): Hono {
       target: connection.requester_beam_id,
       details: { connectionId },
     })
+    broadcastNetworkEvent([connection.requester_beam_id, connection.recipient_beam_id], {
+      type: 'network.connection.updated',
+      connectionId,
+      status: connection.status,
+    })
     return c.json({ connection: serializeConnection(db, connection, auth.agent.beam_id) })
   })
 
   router.delete('/connections/:connectionId', async (c) => {
-    const auth = authenticate(db, c.req.raw)
+    const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) {
       return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
     }
@@ -412,11 +425,11 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: 'Removable connection not found', errorCode: 'CONNECTION_NOT_FOUND' }, 404)
     }
 
-    const raw = await readObjectBody(c.req.raw)
+    const raw = await readNetworkObjectBody(c.req.raw)
     if (!raw) {
       return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
     }
-    const proof = verifySignedMutation(db, auth.agent, raw, {
+    const proof = verifyNetworkSignedMutation(db, auth.agent, raw, {
       type: 'network.connection.remove',
       connectionId,
       actorBeamId: auth.agent.beam_id,
@@ -441,6 +454,11 @@ export function networkRouter(db: Database): Hono {
         ? existing.recipient_beam_id
         : existing.requester_beam_id,
       details: { connectionId },
+    })
+    broadcastNetworkEvent([existing.requester_beam_id, existing.recipient_beam_id], {
+      type: 'network.connection.updated',
+      connectionId,
+      status: connection.status,
     })
     return c.json({ connection: serializeConnection(db, connection, auth.agent.beam_id) })
   })

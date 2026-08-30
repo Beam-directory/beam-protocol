@@ -5,6 +5,7 @@ import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
 import { createAcl } from '../../packages/directory/dist/acl.js'
 import { createDatabase, createOrg, markAgentDomainVerified, markOrgVerified } from '../../packages/directory/dist/db.js'
 import { startServer } from '../../packages/directory/dist/server.js'
+import { BeamNetworkClient } from '../../packages/mcp-server/dist/network-client.js'
 import { createBeamToolHandlers } from '../../packages/mcp-server/dist/tools.js'
 
 const db = createDatabase(':memory:')
@@ -60,6 +61,47 @@ try {
   })
   await receiver.connect()
 
+  assert.ok(grok.apiKey)
+  assert.ok(receiver.apiKey)
+  const grokIdentityData = grokIdentity.export()
+  const partnerIdentityData = partnerIdentity.export()
+  const grokNetwork = new BeamNetworkClient({
+    beamId: grok.beamId,
+    publicKeyBase64: grokIdentityData.publicKeyBase64,
+    privateKeyBase64: grokIdentityData.privateKeyBase64,
+    apiKey: grok.apiKey,
+    directoryUrl,
+    allowedIntents: new Set(['conversation.message']),
+    requireVerifiedTarget: true,
+    minimumVerificationTier: 'verified',
+    minimumTrustScore: 0.5,
+  })
+  const partnerNetwork = new BeamNetworkClient({
+    beamId: receiver.beamId,
+    publicKeyBase64: partnerIdentityData.publicKeyBase64,
+    privateKeyBase64: partnerIdentityData.privateKeyBase64,
+    apiKey: receiver.apiKey,
+    directoryUrl,
+    allowedIntents: new Set(['conversation.message']),
+    requireVerifiedTarget: true,
+    minimumVerificationTier: 'verified',
+    minimumTrustScore: 0.5,
+  })
+
+  await grokNetwork.requestConnection(receiver.beamId, 'Connect Grok and partner support')
+  const pending = await partnerNetwork.connections(['pending'])
+  const pendingConnection = pending.connections?.[0]
+  assert.equal(pendingConnection?.requesterBeamId, grok.beamId)
+  await partnerNetwork.respondConnection(pendingConnection.connectionId, 'accepted')
+  const opened = await grokNetwork.openDirect(receiver.beamId)
+  const conversationId = opened.conversation?.conversationId
+  assert.equal(typeof conversationId, 'string')
+  const networkDelivery = await grokNetwork.sendMessage(conversationId, 'Hello through Beam Network MCP')
+  const partnerInbox = await partnerNetwork.conversations()
+  assert.equal(partnerInbox.conversations?.[0]?.conversationId, conversationId)
+  const partnerMessages = await partnerNetwork.messages(conversationId, 10)
+  assert.equal(partnerMessages.messages?.[0]?.body, 'Hello through Beam Network MCP')
+
   const handlers = createBeamToolHandlers({
     gateway: {
       getStats: () => grok.getStats(),
@@ -100,6 +142,8 @@ try {
     to: receiver.beamId,
     targetVerified: preview.target.verified,
     resultSigned: result.signed,
+    networkConversationId: conversationId,
+    networkMessageId: networkDelivery.message?.messageId,
     nonce: result.nonce,
   })}\n`)
 } finally {

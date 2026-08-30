@@ -1,13 +1,13 @@
 # Beam identity onboarding
 
-Beam onboarding separates the human account, workspace, agent identity, and Grok connector. They are related, but they are not the same credential.
+Beam onboarding separates the human account, workspace, agent identity, and Grok or Codex connector. They are related, but they are not the same credential.
 
 ## The four objects
 
 1. **Human session** — a magic-link session identifies the operator and grants a workspace role.
 2. **Workspace** — the tenant boundary for members, policies, identities, partner channels, and audit history.
 3. **Beam ID** — the agent identity, signing key, API key, DID, and verification state.
-4. **MCP connector** — the dedicated service Grok reaches over HTTPS and authorizes through OAuth.
+4. **MCP connector** — the dedicated service Grok or Codex reaches over HTTPS and authorizes through OAuth.
 
 Personal identities use `agent@beam.directory`. Organization identities use `agent@org.beam.directory` and require the organization's API credential as namespace proof.
 
@@ -23,7 +23,7 @@ Before creating the first organization workspace or Beam ID:
 
 The dashboard `/register` route implements this entire sequence and can resume a pending claim when the operator pastes the saved organization API key.
 
-## Managed Grok onboarding
+## Managed assistant onboarding
 
 The dashboard route `/register` implements the managed path:
 
@@ -33,9 +33,9 @@ The dashboard route `/register` implements the managed path:
 4. Beam atomically reserves the Beam ID, creates an Ed25519 keypair and agent API key, and binds the identity to the workspace.
 5. Download the one-time `beam-local-identity/v1` bundle. The response is `Cache-Control: no-store`; secret material is not written to browser storage or rendered as text.
 6. Provision one dedicated read-only MCP tenant from the bundle. Put the private key, agent API key, and OAuth client secret in the tenant secret store.
-7. In Grok, add the tenant's public HTTPS MCP URL and complete OAuth.
+7. In Grok or Codex, add the tenant's public HTTPS MCP URL and complete OAuth.
 
-The initial connector exposes only `beam_status` and `beam_prepare_handoff`. `beam_send` remains absent until a separately reviewed send-enabled profile is approved.
+The initial connector exposes read-only identity, trust, contact, conversation, and handoff-preview tools. Network writes and `beam_send` remain absent until a separately reviewed send-enabled profile is approved.
 
 ## Credential bundle
 
@@ -44,9 +44,9 @@ The one-time bundle includes SDK-compatible key names:
 ```json
 {
   "format": "beam-local-identity/v1",
-  "beamId": "grok@acme.beam.directory",
-  "did": "did:beam:acme:grok",
-  "workspaceSlug": "acme-grok",
+  "beamId": "assistant@acme.beam.directory",
+  "did": "did:beam:acme:assistant",
+  "workspaceSlug": "acme-assistant",
   "directoryUrl": "https://api.beam.directory",
   "publicKeyBase64": "...",
   "privateKeyBase64": "...",
@@ -67,4 +67,4 @@ The API stores the public key and hashes the API key. It does not retain a recov
 
 ## Current deployment boundary
 
-The control plane and dedicated-tenant package implement the safe onboarding contract. Automatic tenant creation and secret-vault provisioning are still an infrastructure operation, so a completed Beam-ID step does not by itself mean the Grok connector is live. Production proof requires the public MCP URL, OAuth flow, read-only tool list, revocation, monitoring, and an external operator run.
+The control plane and dedicated-tenant package implement the safe onboarding contract. Automatic tenant creation and secret-vault provisioning are still an infrastructure operation, so a completed Beam-ID step does not by itself mean the Grok or Codex connector is live. Production proof requires the public MCP URL, OAuth flow, read-only tool list, revocation, monitoring, and an external operator run.
