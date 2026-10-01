@@ -9,6 +9,7 @@ import {
   getVerifiedDomainVerification,
   listVerifiedBusinessVerifications,
 } from '../db.js'
+import { didToBeamId } from '../did.js'
 import type { AgentRow, BusinessVerificationRow } from '../types.js'
 
 function normalizeLoose(value: string): string {
@@ -51,6 +52,48 @@ function readJsonObject(body: unknown): Record<string, unknown> | null {
     return null
   }
   return body as Record<string, unknown>
+}
+
+function credentialIsCurrent(db: Database, vc: VerifiableCredential): boolean {
+  const beamId = didToBeamId(String(vc.credentialSubject?.id ?? ''))
+  if (!beamId) {
+    return false
+  }
+
+  const agent = getAgent(db, beamId)
+  if (!agent) {
+    return false
+  }
+
+  const types = new Set(vc.type ?? [])
+  if (types.has('EmailVerificationCredential')) {
+    const email = String(vc.credentialSubject.email ?? '').trim().toLowerCase()
+    return agent.email_verified === 1
+      && email.length > 0
+      && agent.email?.trim().toLowerCase() === email
+  }
+
+  if (types.has('DomainVerificationCredential')) {
+    const domain = normalizeDomain(String(vc.credentialSubject.domain ?? ''))
+    return domain.length > 0 && getVerifiedDomainVerification(db, beamId, domain) !== null
+  }
+
+  if (types.has('BusinessVerificationCredential')) {
+    const business = vc.credentialSubject.business
+    if (!business) {
+      return false
+    }
+    const country = String(business['country'] ?? '').trim()
+    const registrationNumber = String(business['registrationNumber'] ?? '').trim()
+    const legalName = String(business['legalName'] ?? '').trim()
+    if (!country || !registrationNumber || !legalName) {
+      return false
+    }
+    return listVerifiedBusinessVerifications(db, beamId)
+      .some((row) => businessMatches(row, { country, registrationNumber, legalName }))
+  }
+
+  return false
 }
 
 function businessMatches(
@@ -164,7 +207,26 @@ export function credentialsRouter(db: Database): Hono {
       return c.json({ error: 'vc is required', errorCode: 'INVALID_REQUEST' }, 400)
     }
 
-    return c.json({ valid: verifyCredential(body.vc) })
+    const signatureValid = verifyCredential(body.vc)
+    if (!signatureValid) {
+      return c.json({
+        valid: false,
+        signatureValid: false,
+        current: false,
+        errorCode: 'INVALID_SIGNATURE',
+      })
+    }
+
+    if (!credentialIsCurrent(db, body.vc)) {
+      return c.json({
+        valid: false,
+        signatureValid: true,
+        current: false,
+        errorCode: 'VERIFICATION_NOT_CURRENT',
+      })
+    }
+
+    return c.json({ valid: true, signatureValid: true, current: true })
   })
 
   return router

@@ -93,18 +93,29 @@ export function issueBusinessVC(beamId: string, businessInfo: Record<string, unk
 }
 
 export function verifyCredential(vc: VerifiableCredential): boolean {
-  if (!vc || typeof vc !== 'object' || !vc.proof) {
+  if (!vc || typeof vc !== 'object' || !vc.proof || vc.credentialSubject?.verified !== true) {
     return false
   }
 
   try {
+    const issuerDid = getDirectoryIssuerDid()
+    const issuerKeyMultibase = getDirectoryIssuerPublicKeyMultibase()
     const { proof, ...unsignedCredential } = vc
-    const publicKeyBase64 = rawEd25519ToPublicKeyBase64(multibaseToRawEd25519(proof.publicKeyMultibase))
 
-    if (proof.verificationMethod !== `${vc.issuer}#key-1`) {
+    if (vc.issuer !== issuerDid) {
+      return false
+    }
+    if (proof.type !== 'Ed25519Signature2020' || proof.proofPurpose !== 'assertionMethod') {
+      return false
+    }
+    if (proof.verificationMethod !== `${issuerDid}#key-1`) {
+      return false
+    }
+    if (proof.publicKeyMultibase !== issuerKeyMultibase) {
       return false
     }
 
+    const publicKeyBase64 = rawEd25519ToPublicKeyBase64(multibaseToRawEd25519(issuerKeyMultibase))
     return verifyPayload(unsignedCredential, proof.proofValue, publicKeyBase64)
   } catch {
     return false

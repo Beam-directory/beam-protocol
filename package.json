@@ -113,7 +113,10 @@
   },
   "overrides": {
     "@babel/core": "7.29.7",
-    "fast-uri": "3.1.5",
+    "baseline-browser-mapping": "2.11.27",
+    "browserslist": "4.29.3",
+    "fast-uri": "3.1.8",
+    "postcss-selector-parser": "6.1.4",
     "nanoid": "3.3.18"
   },
   "allowScripts": {

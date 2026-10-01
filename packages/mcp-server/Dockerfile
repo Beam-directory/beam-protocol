@@ -47,8 +47,8 @@ RUN rm -rf node_modules/beam-protocol-sdk \
 # The runtime executes prebuilt JavaScript only. Removing package managers and
 # their global dependency trees reduces both attack surface and image CVEs.
 RUN apk add --no-cache \
-      libcrypto3=3.5.8-r0 \
-      libssl3=3.5.8-r0 \
+      libcrypto3=3.5.9-r0 \
+      libssl3=3.5.9-r0 \
       su-exec=0.3-r0 \
   && rm -rf \
       /usr/local/lib/node_modules/npm \

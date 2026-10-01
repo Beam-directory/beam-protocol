@@ -1,4 +1,7 @@
 import { generateKeyPairSync } from 'node:crypto'
+import { publicKeyBase64ToMultibase, signPayload } from '../src/crypto.js'
+import { issueEmailVC, verifyCredential, type VerifiableCredential } from '../src/credentials.js'
+import { getDirectoryIssuerDid } from '../src/issuer.js'
 import type { Database } from 'better-sqlite3'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -8,7 +11,6 @@ vi.mock('../src/email.js', () => ({
 }))
 
 import { createAdminSession } from '../src/admin-auth.js'
-import { verifyCredential, type VerifiableCredential } from '../src/credentials.js'
 import {
   assignDirectoryRole,
   createBusinessVerification,
@@ -397,4 +399,107 @@ describe('credential issuance and public discovery', () => {
     expect(JSON.stringify(federationBody)).not.toContain(hiddenEmail)
     expect(federationBody.agent).not.toHaveProperty('email')
   })
+
+  it('accepts only directory-signed credentials that still match directory state', async () => {
+    const { apiKey } = await registerAgent(app, { beamId: 'mail@beam.directory', email: 'mail@example.com' })
+    const selfSigned = selfSignedEmailCredential('mail@beam.directory', 'mail@example.com')
+    const forged = await app.request('http://localhost/agents/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vc: selfSigned }),
+    })
+    expect(forged.status).toBe(200)
+    expect(await forged.json()).toMatchObject({
+      valid: false,
+      signatureValid: false,
+      current: false,
+      errorCode: 'INVALID_SIGNATURE',
+    })
+    expect(verifyCredential(selfSigned)).toBe(false)
+
+    const mintedEarly = issueEmailVC('mail@beam.directory', 'mail@example.com')
+    expect(verifyCredential(mintedEarly)).toBe(true)
+    const stale = await app.request('http://localhost/agents/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vc: mintedEarly }),
+    })
+    expect(await stale.json()).toMatchObject({
+      valid: false,
+      signatureValid: true,
+      current: false,
+      errorCode: 'VERIFICATION_NOT_CURRENT',
+    })
+
+    const token = db.prepare('SELECT token FROM verification_tokens WHERE beam_id = ?').get('mail@beam.directory') as { token: string }
+    const confirmed = await app.request(`http://localhost/agents/verify-email?token=${token.token}`)
+    expect(confirmed.status).toBe(200)
+
+    const current = await app.request('http://localhost/agents/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vc: mintedEarly }),
+    })
+    expect(await current.json()).toEqual({ valid: true, signatureValid: true, current: true })
+
+    const issued = await app.request('http://localhost/agents/email', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ beamId: 'mail@beam.directory', email: 'mail@example.com' }),
+    })
+    expect(issued.status).toBe(201)
+    const credential = await issued.json() as VerifiableCredential
+    const genuine = await app.request('http://localhost/agents/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vc: credential }),
+    })
+    expect(await genuine.json()).toEqual({ valid: true, signatureValid: true, current: true })
+
+    db.prepare('UPDATE agents SET email_verified = 0 WHERE beam_id = ?').run('mail@beam.directory')
+    const revoked = await app.request('http://localhost/agents/verify', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ vc: credential }),
+    })
+    expect(await revoked.json()).toMatchObject({
+      valid: false,
+      signatureValid: true,
+      current: false,
+      errorCode: 'VERIFICATION_NOT_CURRENT',
+    })
+  })
 })
+
+function selfSignedEmailCredential(beamId: string, email: string): VerifiableCredential {
+  const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+  const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+  const issuer = getDirectoryIssuerDid()
+  const issuanceDate = new Date().toISOString()
+  const unsigned = {
+    '@context': [
+      'https://www.w3.org/2018/credentials/v1',
+      'https://w3id.org/security/suites/ed25519-2020/v1',
+    ],
+    id: 'urn:uuid:self-signed',
+    type: ['VerifiableCredential', 'EmailVerificationCredential'],
+    issuer,
+    issuanceDate,
+    credentialSubject: {
+      id: `did:beam:${beamId.slice(0, beamId.indexOf('@'))}`,
+      email,
+      verified: true,
+    },
+  }
+  return {
+    ...unsigned,
+    proof: {
+      type: 'Ed25519Signature2020',
+      created: issuanceDate,
+      proofPurpose: 'assertionMethod',
+      verificationMethod: `${issuer}#key-1`,
+      proofValue: signPayload(unsigned, privateKey),
+      publicKeyMultibase: publicKeyBase64ToMultibase(publicKeyBase64),
+    },
+  }
+}

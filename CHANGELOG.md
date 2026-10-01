@@ -4,7 +4,9 @@
 
 ### Directory security
 - require the Beam ID owner or a directory admin before reissuing email, domain, or business credentials, and only after that verification check has passed
+- accept a verified credential only when the directory issuer key signed it and the underlying email, domain, or business check is still current
 - return only `public` agents from unauthenticated search, browse, and directory listings, and omit contact emails and API key hashes from those public responses
+- refresh directory, message bus, and test dependencies so the workspace audit stays clear of known moderate and high advisories
 
 ### Beam Network
 - add mutual contacts, direct conversations, groups, presence, devices, notifications, file and audio messages to the verified identity network

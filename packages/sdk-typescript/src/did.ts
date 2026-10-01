@@ -314,14 +314,24 @@ export class BeamDID {
 }
 
 export class CredentialVerifier {
-  static verify(vc: VerifiableCredential): boolean {
+  static verify(vc: VerifiableCredential, trustedIssuerPublicKeyMultibase?: string): boolean {
     try {
-      const { proof, ...unsignedCredential } = vc
-      if (proof.verificationMethod !== `${vc.issuer}#key-1` || proof.proofPurpose !== 'assertionMethod') {
+      if (!vc?.proof || vc.credentialSubject?.verified !== true) {
         return false
       }
 
-      const publicKeyBase64 = multibaseToPublicKeyBase64(proof.publicKeyMultibase)
+      const { proof, ...unsignedCredential } = vc
+      if (
+        !trustedIssuerPublicKeyMultibase
+        || proof.publicKeyMultibase !== trustedIssuerPublicKeyMultibase
+        || proof.type !== 'Ed25519Signature2020'
+        || proof.proofPurpose !== 'assertionMethod'
+        || proof.verificationMethod !== `${vc.issuer}#key-1`
+      ) {
+        return false
+      }
+
+      const publicKeyBase64 = multibaseToPublicKeyBase64(trustedIssuerPublicKeyMultibase)
       const publicKey = createPublicKey({
         key: Buffer.from(publicKeyBase64, 'base64'),
         format: 'der',
@@ -359,8 +369,8 @@ export class BeamCredentialsClient {
     return this.post('/credentials/business', { beamId, businessInfo })
   }
 
-  verify(vc: VerifiableCredential): boolean {
-    return CredentialVerifier.verify(vc)
+  verify(vc: VerifiableCredential, trustedIssuerPublicKeyMultibase?: string): boolean {
+    return CredentialVerifier.verify(vc, trustedIssuerPublicKeyMultibase)
   }
 
   private async post(path: string, body: Record<string, unknown>): Promise<VerifiableCredential> {

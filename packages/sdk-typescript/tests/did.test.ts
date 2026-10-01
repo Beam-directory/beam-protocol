@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import { BeamIdentity } from '../src/identity.js'
 import { BeamDID, CredentialVerifier } from '../src/did.js'
+import { generateKeyPairSync } from 'node:crypto'
 import { issueBusinessVC, issueDomainVC, issueEmailVC } from '../../directory/src/credentials.js'
+import { publicKeyBase64ToMultibase, signPayload } from '../../directory/src/crypto.js'
+import { getDirectoryIssuerDid, getDirectoryIssuerPublicKeyMultibase } from '../../directory/src/issuer.js'
 
 describe('BeamDID', () => {
   const identity = BeamIdentity.generate({ agentName: 'jarvis', orgName: 'acme' })
@@ -52,13 +55,15 @@ describe('BeamDID', () => {
 
 describe('Verifiable credentials', () => {
   const beamId = 'jarvis@acme.beam.directory'
+  const issuerKey = getDirectoryIssuerPublicKeyMultibase()
 
   it('issues and verifies an email VC offline', () => {
     const vc = issueEmailVC(beamId, 'jarvis@example.com')
 
     expect(vc.type).toContain('EmailVerificationCredential')
     expect(vc.credentialSubject.email).toBe('jarvis@example.com')
-    expect(CredentialVerifier.verify(vc)).toBe(true)
+    expect(CredentialVerifier.verify(vc, issuerKey)).toBe(true)
+    expect(CredentialVerifier.verify(vc)).toBe(false)
   })
 
   it('issues and verifies a domain VC offline', () => {
@@ -66,7 +71,7 @@ describe('Verifiable credentials', () => {
 
     expect(vc.type).toContain('DomainVerificationCredential')
     expect(vc.credentialSubject.domain).toBe('example.com')
-    expect(CredentialVerifier.verify(vc)).toBe(true)
+    expect(CredentialVerifier.verify(vc, issuerKey)).toBe(true)
   })
 
   it('issues and verifies a business VC offline', () => {
@@ -74,7 +79,7 @@ describe('Verifiable credentials', () => {
 
     expect(vc.type).toContain('BusinessVerificationCredential')
     expect(vc.credentialSubject.business?.['legalName']).toBe('Acme Corp')
-    expect(CredentialVerifier.verify(vc)).toBe(true)
+    expect(CredentialVerifier.verify(vc, issuerKey)).toBe(true)
   })
 
   it('fails verification after credential tampering', () => {
@@ -87,6 +92,42 @@ describe('Verifiable credentials', () => {
       },
     }
 
-    expect(CredentialVerifier.verify(tampered)).toBe(false)
+    expect(CredentialVerifier.verify(tampered, issuerKey)).toBe(false)
+  })
+
+  it('rejects a self-signed credential that claims directory verification', () => {
+    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
+    const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
+    const issuer = getDirectoryIssuerDid()
+    const issuanceDate = new Date().toISOString()
+    const unsigned = {
+      '@context': [
+        'https://www.w3.org/2018/credentials/v1',
+        'https://w3id.org/security/suites/ed25519-2020/v1',
+      ],
+      id: 'urn:uuid:self-signed',
+      type: ['VerifiableCredential', 'EmailVerificationCredential'],
+      issuer,
+      issuanceDate,
+      credentialSubject: {
+        id: 'did:beam:acme:jarvis',
+        email: 'mallory@example.com',
+        verified: true,
+      },
+    }
+    const vc = {
+      ...unsigned,
+      proof: {
+        type: 'Ed25519Signature2020' as const,
+        created: issuanceDate,
+        proofPurpose: 'assertionMethod' as const,
+        verificationMethod: `${issuer}#key-1`,
+        proofValue: signPayload(unsigned, privateKey),
+        publicKeyMultibase: publicKeyBase64ToMultibase(publicKeyBase64),
+      },
+    }
+
+    expect(CredentialVerifier.verify(vc, issuerKey)).toBe(false)
+    expect(CredentialVerifier.verify(vc)).toBe(false)
   })
 })
