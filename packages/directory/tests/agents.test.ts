@@ -116,7 +116,7 @@ describe('directory agent enhancements', () => {
     const agentResponse = await app.request(`http://localhost/agents/${encodeURIComponent('verified@testorg.beam.directory')}`)
     expect(agentResponse.status).toBe(200)
     const agent = await agentResponse.json() as Record<string, unknown>
-    expect(agent['email']).toBe('verified@example.com')
+    expect(agent).not.toHaveProperty('email')
     expect(agent['email_verified']).toBe(true)
     expect(agent['verification_tier']).toBe('basic')
     expect(agent['description']).toBeNull()
@@ -183,8 +183,15 @@ describe('directory agent enhancements', () => {
     const searchResponse = await app.request('http://localhost/agents/search?org=personal')
     expect(searchResponse.status).toBe(200)
     const searchBody = await searchResponse.json() as { agents: Array<Record<string, unknown>>; total: number }
-    expect(searchBody.total).toBe(1)
-    expect(searchBody.agents[0]?.beam_id).toBe('alice@beam.directory')
+    expect(searchBody.total).toBe(0)
+    expect(searchBody.agents).toEqual([])
+
+    const directResponse = await app.request('http://localhost/agents/alice%40beam.directory')
+    expect(directResponse.status).toBe(200)
+    const directBody = await directResponse.json() as Record<string, unknown>
+    expect(directBody['beam_id']).toBe('alice@beam.directory')
+    expect(directBody['personal']).toBe(true)
+    expect(directBody['visibility']).toBe('unlisted')
   })
 
   it('requires organization ownership before issuing an organization Beam ID', async () => {
@@ -348,17 +355,17 @@ describe('directory agent enhancements', () => {
 
     db.prepare(`
       UPDATE agents
-      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?
+      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?, visibility = 'public'
       WHERE beam_id = ?
     `).run('enterprise', 1, 1, 0.95, 'alpha@testorg.beam.directory')
     db.prepare(`
       UPDATE agents
-      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?
+      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?, visibility = 'public'
       WHERE beam_id = ?
     `).run('verified', 1, 1, 0.75, 'beta@testorg.beam.directory')
     db.prepare(`
       UPDATE agents
-      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?
+      SET verification_tier = ?, email_verified = ?, verified = ?, trust_score = ?, visibility = 'public'
       WHERE beam_id = ?
     `).run('business', 0, 0, 0.65, 'gamma@testorg.beam.directory')
 

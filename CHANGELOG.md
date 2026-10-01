@@ -2,6 +2,10 @@
 
 ## v1.7.0 (draft)
 
+### Directory security
+- require the Beam ID owner or a directory admin before reissuing email, domain, or business credentials, and only after that verification check has passed
+- return only `public` agents from unauthenticated search, browse, and directory listings, and omit contact emails and API key hashes from those public responses
+
 ### Beam Network
 - add mutual contacts, direct conversations, groups, presence, devices, notifications, file and audio messages to the verified identity network
 - encrypt new Network messages and attachments per conversation member with the version-1 X25519/HKDF/AES-GCM envelope, with an enforcement switch for migrated deployments

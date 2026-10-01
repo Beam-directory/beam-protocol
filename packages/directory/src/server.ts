@@ -39,7 +39,7 @@ import {
   stopRecoveredIntentTimeoutSweep,
 } from './websocket.js'
 import { createAcl, deleteAcl, listAclsForBeam, seedAclsFromCatalog } from './acl.js'
-import { getAdminSessionFromRequest, requireAdminRole } from './admin-auth.js'
+import { getAdminSessionFromRequest, requireAdminRole, roleSatisfies } from './admin-auth.js'
 import {
   assignDirectoryRole,
   deleteDirectoryRole,
@@ -1421,7 +1421,7 @@ function resolveCorsOrigin(origin?: string | null): string | null {
 }
 
 function serializeAgent(row: AgentRow, connectedSet: Set<string>): object {
-  const { email_token: _emailToken, ...agent } = row
+  const { email_token: _emailToken, api_key_hash: _apiKeyHash, email: _email, ...agent } = row
   return {
     ...agent,
     capabilities: JSON.parse(row.capabilities) as string[],
@@ -3981,7 +3981,8 @@ export function createApp(db: Database): Hono {
     }
 
     try {
-      const includeUnlisted = c.req.query('includeUnlisted') === 'true' && Boolean(adminSession)
+      const includeUnlisted = c.req.query('includeUnlisted') === 'true'
+        && Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
       const rows = includeUnlisted
         ? db.prepare('SELECT * FROM agents ORDER BY trust_score DESC, beam_id ASC').all() as AgentRow[]
         : db.prepare("SELECT * FROM agents WHERE visibility = 'public' ORDER BY trust_score DESC, beam_id ASC").all() as AgentRow[]
@@ -4009,7 +4010,7 @@ export function createApp(db: Database): Hono {
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
   app.route('/agents', reportsRouter(db))
-  app.route('/agents', credentialsRouter())
+  app.route('/agents', credentialsRouter(db))
   app.route('/agents', didRouter(db))
 
   // Top-level DID resolution for W3C compliance: /did/did:beam:*
