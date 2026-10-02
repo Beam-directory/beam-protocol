@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Verified agent registry
+- publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
+- mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email
+- serve an embeddable SVG seal only for public, verified company agents
+
 ## v1.7.0 (2026-10-02)
 
 ### Directory security

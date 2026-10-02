@@ -6,6 +6,7 @@ import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { sendAgentVerificationEmail } from '../email.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { renderPublicSealSvg } from '../public-registry.js'
 import { serializeAgent } from '../utils/serialize.js'
 import {
   createVerificationToken,
@@ -711,6 +712,28 @@ export function agentsRouter(db: Database): Hono {
       console.error('Profile update error:', err)
       return c.json({ error: 'Failed to update agent profile', errorCode: 'DB_ERROR' }, 500)
     }
+  })
+
+  router.get('/:beamId/seal.svg', (c) => {
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
+    if (!BEAM_ID_RE.test(beamId)) {
+      return c.text('Not found', 404)
+    }
+
+    const agent = getAgent(db, beamId)
+    const svg = agent ? renderPublicSealSvg(agent) : null
+    if (!svg) {
+      return c.text('Not found', 404)
+    }
+
+    return new Response(svg, {
+      status: 200,
+      headers: {
+        'content-type': 'image/svg+xml; charset=utf-8',
+        'cache-control': 'public, max-age=300',
+        'x-content-type-options': 'nosniff',
+      },
+    })
   })
 
   router.get('/:beamId', (c) => {
