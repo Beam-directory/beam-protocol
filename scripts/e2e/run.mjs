@@ -123,6 +123,17 @@ async function requestJson(url, init) {
   return parsed
 }
 
+async function publishAgent(directoryUrl, adminToken, beamId) {
+  await requestJson(`${directoryUrl}/agents/${encodeURIComponent(beamId)}/visibility`, {
+    method: 'PATCH',
+    headers: {
+      Authorization: `Bearer ${adminToken}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ visibility: 'public' }),
+  })
+}
+
 async function allowIntent(directoryUrl, adminToken, targetBeamId, intentType, allowedFrom) {
   await requestJson(`${directoryUrl}/acl`, {
     method: 'POST',
@@ -286,6 +297,7 @@ async function main() {
 
     await step('registering the TypeScript receiver', async () => {
       await receiver.register('TypeScript Receiver', ['conversation.message'])
+      await publishAgent(directoryUrl, adminToken, receiver.beamId)
       receiver.onTalk(async (message, from, respond) => {
         respond(`TS receiver heard: ${message}`, {
           echoed: message,

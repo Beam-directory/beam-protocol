@@ -3,7 +3,7 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 COPY package.json ./package.json
-RUN npm install
+RUN npm install --legacy-peer-deps
 
 COPY tsconfig.json ./tsconfig.json
 COPY src ./src

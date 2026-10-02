@@ -29,6 +29,15 @@ import { isEd25519Spki, isX25519Spki } from '../key-validation.js'
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
 
+function canReadAgentContact(db: Database, request: Request, agent: AgentRow): boolean {
+  const adminSession = getAdminSessionFromRequest(db, request)
+  if (adminSession && roleSatisfies(adminSession.role, 'admin')) {
+    return true
+  }
+
+  return agentApiKeyMatches(agent, getSuppliedApiKey(request))
+}
+
 function requireReservedEchoRegistrationSecret(
   request: Request,
   beamId: string,
@@ -500,7 +509,7 @@ export function agentsRouter(db: Database): Hono {
         })
       }
 
-      return c.json({ agents: rows.map((row) => serializeAgent(row)), total: rows.length })
+      return c.json({ agents: rows.map((row) => serializeAgent(row, { includeEmail: false })), total: rows.length })
     } catch (err) {
       console.error('Search error:', err)
       return c.json({ error: 'Search failed', errorCode: 'DB_ERROR' }, 500)
@@ -537,7 +546,7 @@ export function agentsRouter(db: Database): Hono {
         ...filters,
         limit: Math.min(500, limit),
         offset: (page - 1) * limit,
-      }).map((row) => serializeAgent(row))
+      }).map((row) => serializeAgent(row, { includeEmail: false }))
 
       return c.json({ agents, total, page, limit })
     } catch (err) {
@@ -648,7 +657,10 @@ export function agentsRouter(db: Database): Hono {
       }
 
       return c.json({
-        ...serializeAgent(agent, { keys: listAgentKeys(db, beamId) }),
+        ...serializeAgent(agent, {
+          keys: listAgentKeys(db, beamId),
+          includeEmail: canReadAgentContact(db, c.req.raw, agent),
+        }),
         intentStats: getAgentIntentStats(db, beamId),
       })
     } catch (err) {

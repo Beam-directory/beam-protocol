@@ -25,12 +25,13 @@ export function serializeAgentKeyState(rows: AgentKeyRow[]): object {
 
 export function serializeAgent(
   row: AgentRow,
-  options: { connected?: boolean; keys?: AgentKeyRow[] } = {},
+  options: { connected?: boolean; keys?: AgentKeyRow[]; includeEmail?: boolean } = {},
 ): object {
-  const { email_token: _emailToken, api_key_hash: _apiKeyHash, ...agent } = row
+  const { email_token: _emailToken, api_key_hash: _apiKeyHash, email, ...agent } = row
 
   return {
     ...agent,
+    ...(options.includeEmail === false ? {} : { email }),
     did: toBeamDID(row.beam_id),
     capabilities: JSON.parse(row.capabilities) as string[],
     email_verified: row.email_verified === 1,

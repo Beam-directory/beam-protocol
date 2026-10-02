@@ -3500,7 +3500,7 @@ function escapeLikePattern(value: string): string {
 
 function buildSearchAgentsWhereClause(query: SearchQuery): { where: string; params: Array<string | number> } {
   const params: Array<string | number> = []
-  const conditions: string[] = []
+  const conditions: string[] = [`visibility = 'public'`]
 
   if (query.personal === true) {
     conditions.push('personal = 1')
@@ -3645,6 +3645,18 @@ export function getLatestDomainVerification(db: DB, beamId: string): DomainVerif
   return row ?? null
 }
 
+export function getVerifiedDomainVerification(db: DB, beamId: string, domain: string): DomainVerificationRow | null {
+  const row = db.prepare(`
+    SELECT *
+    FROM domain_verifications
+    WHERE beam_id = ? AND lower(domain) = ? AND status = 'verified'
+    ORDER BY verified_at DESC, id DESC
+    LIMIT 1
+  `).get(beamId, domain.trim().toLowerCase()) as DomainVerificationRow | undefined
+
+  return row ?? null
+}
+
 export function updateDomainVerificationStatus(db: DB, id: number, status: string): DomainVerificationRow | null {
   const verifiedAt = status === 'verified' ? nowIso() : null
   db.prepare('UPDATE domain_verifications SET status = ?, verified_at = ? WHERE id = ?').run(status, verifiedAt, id)
@@ -3710,6 +3722,15 @@ export function getLatestBusinessVerification(db: DB, beamId: string): BusinessV
   `).get(beamId) as BusinessVerificationRow | undefined
 
   return row ?? null
+}
+
+export function listVerifiedBusinessVerifications(db: DB, beamId: string): BusinessVerificationRow[] {
+  return db.prepare(`
+    SELECT *
+    FROM business_verifications
+    WHERE beam_id = ? AND status = 'verified'
+    ORDER BY datetime(verified_at) DESC, id DESC
+  `).all(beamId) as BusinessVerificationRow[]
 }
 
 export function getBusinessVerificationById(db: DB, id: number): BusinessVerificationRow | null {
