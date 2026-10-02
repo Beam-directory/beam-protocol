@@ -1,14 +1,17 @@
 import { useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
+import { SealBadge } from '@/components/seal-badge'
 import { Badge } from '@/components/ui/badge'
 import { Breadcrumb, BreadcrumbItem, BreadcrumbLink, BreadcrumbList, BreadcrumbPage, BreadcrumbSeparator } from '@/components/ui/breadcrumb'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Empty, EmptyDescription, EmptyHeader, EmptyTitle } from '@/components/ui/empty'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { directoryApiBase, directoryGet } from '@/lib/directory-client'
-import { fingerprintPublicKey, projectPublicAgent, sealSnippet, type PublicAgentDecision } from '@/lib/public-agent'
+import { fingerprintPublicKey, projectPublicAgent, sealSnippet, type PublicAgentDecision, type PublicAgentView } from '@/lib/public-agent'
+import { REGISTER_AS_OF } from '@/lib/register'
 
 const reasons: Record<Exclude<PublicAgentDecision, { ok: true }>['reason'], string> = {
   invalid: 'Diese Kennung ist kein öffentlicher Agenteneintrag.',
@@ -16,6 +19,13 @@ const reasons: Record<Exclude<PublicAgentDecision, { ok: true }>['reason'], stri
   personal: 'Private Identitäten werden nicht angezeigt.',
   'email-present': 'Der Eintrag enthält Kontaktdaten und wird deshalb nicht angezeigt.',
   unverified: 'Dieser Agent ist nicht geprüft.',
+}
+
+function scopeOf(agent: PublicAgentView): string {
+  const parts = ['öffentlicher Firmenagent']
+  if (agent.domainVerified) parts.push('Domain per DNS')
+  if (agent.legalName) parts.push('Firma nach Registerprüfung')
+  return parts.join(', ')
 }
 
 function formatDate(value: string | null): string {
@@ -96,6 +106,10 @@ export function AgentPage() {
       <Breadcrumb>
         <BreadcrumbList>
           <BreadcrumbItem>
+            <BreadcrumbLink asChild><Link to="/">Register</Link></BreadcrumbLink>
+          </BreadcrumbItem>
+          <BreadcrumbSeparator />
+          <BreadcrumbItem>
             <BreadcrumbLink asChild><Link to="/verzeichnis">Verzeichnis</Link></BreadcrumbLink>
           </BreadcrumbItem>
           <BreadcrumbSeparator />
@@ -104,11 +118,14 @@ export function AgentPage() {
           </BreadcrumbItem>
         </BreadcrumbList>
       </Breadcrumb>
-      <div className="flex flex-wrap items-center gap-2">
-        <h1 className="font-heading text-3xl font-medium tracking-tight">{agent.displayName}</h1>
-        <Badge>{agent.verified ? agent.tier : 'nicht geprüft'}</Badge>
+      <div className="flex flex-col gap-2">
+        <p className="text-xs tracking-wide text-muted-foreground">Stand der Abfrage: {checkedAt ? formatDate(checkedAt) : REGISTER_AS_OF}</p>
+        <div className="flex flex-wrap items-center gap-2">
+          <h1 className="font-heading text-3xl font-semibold tracking-tight">{agent.displayName}</h1>
+          {agent.verified ? <SealBadge label={agent.tier} /> : <Badge variant="outline">nicht geprüft</Badge>}
+        </div>
+        <p className="text-muted-foreground">{agent.beamId}</p>
       </div>
-      <p className="text-muted-foreground">{agent.beamId}</p>
       <Tabs defaultValue="seal">
         <TabsList>
           <TabsTrigger value="seal">Siegel</TabsTrigger>
@@ -121,15 +138,61 @@ export function AgentPage() {
               <CardTitle>{agent.legalName ?? agent.org}</CardTitle>
               <CardDescription>Öffentlicher Prüfstatus ohne Kontaktdaten.</CardDescription>
             </CardHeader>
-            <CardContent className="grid gap-3 text-sm md:grid-cols-2">
-              <p>Firma: {agent.legalName ?? agent.org}</p>
-              <p>Register: {agent.registrationNumber ?? 'nicht öffentlich'}</p>
-              <p>Land: {agent.country ?? 'nicht öffentlich'}</p>
-              <p>Domain: {agent.domainVerified ? agent.domain : 'nicht verifiziert'}</p>
-              <p>Geprüft am: {formatDate(agent.verifiedAt)}</p>
-              <p>DID: {agent.did}</p>
-              <p>Schlüssel: {agent.keyStatus === 'active' ? 'aktiv' : agent.keyStatus === 'revoked' ? 'widerrufen' : 'unbekannt'}</p>
-              <p>Fingerabdruck: {fingerprint ?? 'nicht verfügbar'}</p>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Feld</TableHead>
+                    <TableHead>Angabe</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell>Beam-ID</TableCell>
+                    <TableCell className="whitespace-normal">{agent.beamId}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Status</TableCell>
+                    <TableCell>{agent.verified ? agent.tier : 'nicht geprüft'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Prüfdatum</TableCell>
+                    <TableCell>{formatDate(agent.verifiedAt)}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Prüfumfang</TableCell>
+                    <TableCell className="whitespace-normal">{scopeOf(agent)}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Firma</TableCell>
+                    <TableCell className="whitespace-normal">{agent.legalName ?? agent.org}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Registernummer</TableCell>
+                    <TableCell>{agent.registrationNumber ?? 'nicht öffentlich'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Land</TableCell>
+                    <TableCell>{agent.country ?? 'nicht öffentlich'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Domain</TableCell>
+                    <TableCell>{agent.domainVerified ? agent.domain : 'nicht verifiziert'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>DID</TableCell>
+                    <TableCell className="whitespace-normal">{agent.did}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Schlüssel</TableCell>
+                    <TableCell>{agent.keyStatus === 'active' ? 'aktiv' : agent.keyStatus === 'revoked' ? 'widerrufen' : 'unbekannt'}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell>Fingerabdruck</TableCell>
+                    <TableCell className="whitespace-normal">{fingerprint ?? 'nicht verfügbar'}</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
             </CardContent>
           </Card>
         </TabsContent>

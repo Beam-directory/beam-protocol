@@ -8,6 +8,7 @@
 - serve an embeddable SVG seal only for public, verified company agents
 - rate-limit waitlist posts, and reject honeypot, oversized, or duplicate seal applications without changing the hosted-beta queue
 - hide unlisted and private agents, and DNS challenge tokens, from callers outside the managed-agent scope
+- restate the public register around use, placement, and Article 50 support, with guidelines and a restrained register layout
 
 ## v1.7.0 (2026-10-02)
 

@@ -13,6 +13,8 @@ const aliases = new Map([
   ['/identity', '/identity.html'],
   ['/verzeichnis', '/index.html'],
   ['/siegel-beantragen', '/index.html'],
+  ['/pruefrichtlinien', '/index.html'],
+  ['/impressum', '/index.html'],
 ])
 const spaPatterns = [/^\/agents\/[^/]+\/?$/, /^\/verified\/[^/]+\/?$/]
 const contentTypes = new Map([

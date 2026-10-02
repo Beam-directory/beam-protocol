@@ -13,6 +13,14 @@
       "destination": "/index.html"
     },
     {
+      "source": "/pruefrichtlinien",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/impressum",
+      "destination": "/index.html"
+    },
+    {
       "source": "/agents/:beamId",
       "destination": "/index.html"
     },
