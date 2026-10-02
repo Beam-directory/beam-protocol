@@ -73,6 +73,7 @@ export interface DirectoryAgent {
   verified: boolean
   createdAt: string
   lastSeen: string
+  visibility?: string
 }
 
 export interface DirectoryAgentRegistration extends DirectoryAgent {
@@ -3153,6 +3154,50 @@ function getFilenameFromResponse(response: Response, dataset: string, format: Ex
   return match?.[1] ?? `beam-${dataset}.${format}`
 }
 
+function readAgentString(raw: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = raw[key]
+    if (typeof value === 'string') return value
+  }
+  return ''
+}
+
+export function normalizeDirectoryAgent(raw: Record<string, unknown>): DirectoryAgent {
+  const capabilities = raw['capabilities']
+  const emailVerified = raw['emailVerified'] ?? raw['email_verified']
+  const verified = raw['verified']
+  const trustScore = raw['trustScore'] ?? raw['trust_score']
+  const logoUrl = raw['logoUrl'] ?? raw['logo_url']
+  const description = raw['description']
+  const email = raw['email']
+  const visibility = raw['visibility']
+  const tier = readAgentString(raw, 'verificationTier', 'verification_tier')
+  return {
+    beamId: readAgentString(raw, 'beamId', 'beam_id'),
+    org: readAgentString(raw, 'org'),
+    displayName: readAgentString(raw, 'displayName', 'display_name'),
+    capabilities: Array.isArray(capabilities) ? capabilities.filter((item): item is string => typeof item === 'string') : [],
+    publicKey: readAgentString(raw, 'publicKey', 'public_key'),
+    email: typeof email === 'string' ? email : null,
+    emailVerified: emailVerified === true || emailVerified === 1,
+    verificationTier: (tier || 'basic') as VerificationTier,
+    description: typeof description === 'string' ? description : null,
+    logoUrl: typeof logoUrl === 'string' ? logoUrl : null,
+    trustScore: typeof trustScore === 'number' ? trustScore : 0,
+    verified: verified === true || verified === 1,
+    createdAt: readAgentString(raw, 'createdAt', 'created_at'),
+    lastSeen: readAgentString(raw, 'lastSeen', 'last_seen'),
+    ...(typeof visibility === 'string' ? { visibility } : {}),
+  }
+}
+
+export function mergeManagedAgents(publicAgents: DirectoryAgent[], managedAgents: DirectoryAgent[]): DirectoryAgent[] {
+  const merged = new Map<string, DirectoryAgent>()
+  for (const agent of publicAgents) merged.set(agent.beamId, agent)
+  for (const agent of managedAgents) merged.set(agent.beamId, agent)
+  return [...merged.values()]
+}
+
 export const directoryApi = {
   getHealth: () => request<DirectoryHealth>('/health'),
   getRootStats: () => request<RootStatsResponse>('/stats'),
@@ -3172,9 +3217,25 @@ export const directoryApi = {
     if (params?.org) query.set('org', params.org)
     if (typeof params?.minTrustScore === 'number') query.set('minTrustScore', String(params.minTrustScore))
     if (typeof params?.limit === 'number') query.set('limit', String(params.limit))
-    return request<AgentSearchResponse>(`/agents/search${query.toString() ? `?${query.toString()}` : ''}`)
+    return request<AgentSearchResponse>(`/agents/search${query.toString() ? `?${query.toString()}` : ''}`).then((response) => ({
+      total: response.total,
+      agents: response.agents.map((agent) => normalizeDirectoryAgent(agent as unknown as Record<string, unknown>)),
+    }))
   },
-  getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`),
+  listManagedAgents: (params?: { q?: string; limit?: number }) => {
+    const query = new URLSearchParams()
+    if (params?.q) query.set('q', params.q)
+    if (typeof params?.limit === 'number') query.set('limit', String(params.limit))
+    return request<{ agents: DirectoryAgent[]; total: number; scope: string }>(`/agents/managed${query.toString() ? `?${query.toString()}` : ''}`).then((response) => ({
+      total: response.total,
+      scope: response.scope,
+      agents: response.agents.map((agent) => normalizeDirectoryAgent(agent as unknown as Record<string, unknown>)),
+    }))
+  },
+  getAgent: (beamId: string) => request<DirectoryAgentDetail>(`/agents/${encodeURIComponent(beamId)}`).then((agent) => ({
+    ...normalizeDirectoryAgent(agent as unknown as Record<string, unknown>),
+    intentStats: agent.intentStats,
+  })),
   getOpenClawFleetOverview: () => request<OpenClawFleetOverviewResponse>('/admin/openclaw/fleet/overview', undefined, { admin: true }),
   getOpenClawFleetAnalytics: () => request<OpenClawFleetAnalyticsResponse>('/admin/openclaw/fleet/analytics', undefined, { admin: true }),
   getOpenClawFleetReconciliation: () => request<OpenClawFleetReconciliationResponse>('/admin/openclaw/fleet/reconciliation', undefined, { admin: true }),

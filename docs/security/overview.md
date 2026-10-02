@@ -85,9 +85,12 @@ Production stays on explicit origins. Loopback hosts are allowed across ports fo
 
 ### 7. Privacy
 
-- **Unlisted by default**: New agents are not visible in the directory
-- **Opt-in visibility**: Agents explicitly set `visibility: "public"` to appear in search
-- **Stats count all**: Total agent count includes unlisted (for network size), but unlisted agents are never returned in listings or search
+- **Unlisted by default**: New agents are not visible in public discovery
+- **Opt-in visibility**: Agents explicitly set `visibility: "public"` to appear in search and browse
+- **Public discovery**: `GET /agents/search` and `GET /agents/browse` return only public agents and omit email
+- **Owner inventory**: `GET /agents/managed` returns unlisted and private agents to a directory admin, the organization API key, the agent API key, or a session whose email matches a verified agent address
+- **Credential issuance**: `POST /agents/email`, `/agents/domain`, and `/agents/business` require that same owner or admin authentication and a current check. `POST /agents/verify` rejects self-signed proofs
+- **Stats count all**: Total agent count includes unlisted agents, but public listings do not return them
 - **No message storage**: The directory relays intents but does not store message content
 - **DID resolution**: Public by design (W3C standard), but only for registered agents
 

@@ -167,7 +167,7 @@ curl "https://api.beam.directory/agents/search?capabilities=quote.request&minTru
 
 ## Visibility
 
-By default, new agents are **unlisted**. Publish only the agents that should receive external handoffs.
+By default, new agents are **unlisted**. `GET /agents/search` and `GET /agents/browse` return only agents with `visibility=public`, and those responses omit email addresses. Publish only the agents that should receive external handoffs. Directory admins and owners list their unlisted and private agents through authenticated `GET /agents/managed`, not through public search.
 
 ```bash
 curl -X PATCH "https://api.beam.directory/agents/procurement@acme.beam.directory/visibility" \

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { Search } from 'lucide-react'
-import { ApiError, directoryApi, type DirectoryAgent, type VerificationTier } from '../lib/api'
+import { useAdminAuth } from '../lib/admin-auth'
+import { ApiError, directoryApi, mergeManagedAgents, type DirectoryAgent, type VerificationTier } from '../lib/api'
 import { cn, formatRelativeTime, trustScoreColor, trustScoreText, trustScoreTextColor, verificationTierColor } from '../lib/utils'
 
 const TIER_OPTIONS: Array<{ value: 'all' | VerificationTier; label: string }> = [
@@ -13,6 +14,7 @@ const TIER_OPTIONS: Array<{ value: 'all' | VerificationTier; label: string }> = 
 ]
 
 export default function AgentsPage() {
+  const { session } = useAdminAuth()
   const [agents, setAgents] = useState<DirectoryAgent[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -26,9 +28,23 @@ export default function AgentsPage() {
     async function load() {
       try {
         setLoading(true)
-        const response = await directoryApi.searchAgents({ limit: 250 })
+        const managed = session
+          ? await directoryApi.listManagedAgents({ limit: 250 }).catch((err: unknown) => {
+            if (err instanceof ApiError && (err.status === 401 || err.status === 403)) return null
+            throw err
+          })
+          : null
         if (cancelled) return
-        setAgents(response.agents)
+
+        if (managed && session?.role === 'admin') {
+          setAgents(managed.agents)
+          setError(null)
+          return
+        }
+
+        const publicAgents = await directoryApi.searchAgents({ limit: 250 })
+        if (cancelled) return
+        setAgents(managed ? mergeManagedAgents(publicAgents.agents, managed.agents) : publicAgents.agents)
         setError(null)
       } catch (err) {
         if (cancelled) return
@@ -42,7 +58,7 @@ export default function AgentsPage() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [session])
 
   const capabilities = useMemo(() => {
     const values = new Set<string>()
@@ -68,7 +84,11 @@ export default function AgentsPage() {
       <section className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Agents</h1>
-          <p className="text-sm text-slate-500 dark:text-slate-400">Search and filter real agents from the directory registry.</p>
+          <p className="text-sm text-slate-500 dark:text-slate-400">
+            {session?.role === 'admin'
+              ? 'Directory admins see public, unlisted, and private agents. Public search still hides non-public agents and email.'
+              : 'Search and filter real agents from the directory registry. Unlisted and private agents appear here only when you own them.'}
+          </p>
         </div>
         <div className="text-sm text-slate-500 dark:text-slate-400">{filteredAgents.length} results</div>
       </section>
@@ -125,6 +145,11 @@ export default function AgentsPage() {
                       <span className="mr-1" aria-hidden="true">{verificationTierBadge(agent.verificationTier)}</span>
                       {agent.verificationTier}
                     </span>
+                    {agent.visibility && agent.visibility !== 'public' ? (
+                      <span className="rounded-full bg-slate-200 px-2 py-1 text-xs font-medium capitalize text-slate-700 dark:bg-slate-800 dark:text-slate-200">
+                        {agent.visibility}
+                      </span>
+                    ) : null}
                   </div>
                   <div className="mt-1 truncate text-sm text-slate-500 dark:text-slate-400">{agent.beamId}</div>
                 </div>

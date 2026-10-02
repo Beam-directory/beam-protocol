@@ -10,6 +10,7 @@ vi.mock('../src/email.js', () => ({
   sendIdentityClaimEmail: vi.fn(async () => true),
 }))
 
+import { hashApiKey } from '../src/api-key.js'
 import { createAdminSession } from '../src/admin-auth.js'
 import {
   assignDirectoryRole,
@@ -468,6 +469,123 @@ describe('credential issuance and public discovery', () => {
       current: false,
       errorCode: 'VERIFICATION_NOT_CURRENT',
     })
+  })
+
+  it('lets admins and owners list unlisted and private agents without opening public search', async () => {
+    const hiddenEmail = 'hidden@example.com'
+    const ownedEmail = 'owner@example.com'
+    const otherEmail = 'other@example.com'
+    await registerAgent(app, {
+      beamId: 'listed@beam.directory',
+      email: 'listed@example.com',
+      visibility: 'public',
+      displayName: 'Listed',
+    })
+    const unlisted = await registerAgent(app, {
+      beamId: 'warehouse@beam.directory',
+      email: hiddenEmail,
+      displayName: 'Warehouse',
+    })
+    await registerAgent(app, {
+      beamId: 'owner-agent@beam.directory',
+      email: ownedEmail,
+      displayName: 'Owned',
+    })
+    await registerAgent(app, {
+      beamId: 'vault@beam.directory',
+      email: otherEmail,
+      displayName: 'Vault',
+    })
+    await registerAgent(app, {
+      beamId: 'foreign@beam.directory',
+      email: 'foreign@example.com',
+      displayName: 'Foreign',
+    })
+
+    db.prepare(`UPDATE agents SET visibility = 'unlisted', org = 'acme' WHERE beam_id = 'warehouse@beam.directory'`).run()
+    db.prepare(`UPDATE agents SET visibility = 'private', org = 'acme', email_verified = 1 WHERE beam_id = 'vault@beam.directory'`).run()
+    db.prepare(`UPDATE agents SET visibility = 'unlisted', org = 'other' WHERE beam_id = 'foreign@beam.directory'`).run()
+    db.prepare(`UPDATE agents SET visibility = 'unlisted', email_verified = 1 WHERE beam_id = 'owner-agent@beam.directory'`).run()
+
+    const orgKey = 'beam_org_acme_test_key'
+    const now = new Date().toISOString()
+    db.prepare(`
+      INSERT INTO orgs (
+        name, display_name, domain, beam_domain, api_key_hash, verification_token, verified, created_at, verified_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+    `).run('acme', 'Acme', 'acme.example', 'acme.beam.directory', hashApiKey(orgKey), 'token', now, now)
+
+    const anonymous = await app.request('http://localhost/agents/managed')
+    expect(anonymous.status).toBe(401)
+
+    const viewer = issueAdmin(db, 'viewer@example.com', 'viewer')
+    const viewerListing = await app.request('http://localhost/agents/managed', {
+      headers: { authorization: `Bearer ${viewer}` },
+    })
+    expect(viewerListing.status).toBe(403)
+
+    const admin = issueAdmin(db, 'admin@example.com', 'admin')
+    const adminListing = await app.request('http://localhost/agents/managed', {
+      headers: { authorization: `Bearer ${admin}` },
+    })
+    expect(adminListing.status).toBe(200)
+    const adminBody = await adminListing.json() as { agents: Array<Record<string, unknown>>; scope: string }
+    expect(adminBody.scope).toBe('admin')
+    expect(adminBody.agents.map((agent) => agent['beam_id']).sort()).toEqual([
+      'foreign@beam.directory',
+      'listed@beam.directory',
+      'owner-agent@beam.directory',
+      'vault@beam.directory',
+      'warehouse@beam.directory',
+    ])
+    expect(adminBody.agents.find((agent) => agent['beam_id'] === 'vault@beam.directory')?.['visibility']).toBe('private')
+    expect(adminBody.agents.find((agent) => agent['beam_id'] === 'warehouse@beam.directory')?.['email']).toBe(hiddenEmail)
+
+    const orgListing = await app.request('http://localhost/agents/managed', {
+      headers: { 'x-api-key': orgKey },
+    })
+    expect(orgListing.status).toBe(200)
+    const orgBody = await orgListing.json() as { agents: Array<Record<string, unknown>>; scope: string }
+    expect(orgBody.scope).toBe('org')
+    expect(orgBody.agents.map((agent) => agent['beam_id']).sort()).toEqual([
+      'vault@beam.directory',
+      'warehouse@beam.directory',
+    ])
+    expect(JSON.stringify(orgBody)).not.toContain('foreign@example.com')
+    expect(JSON.stringify(orgBody)).not.toContain('foreign@beam.directory')
+
+    const agentListing = await app.request('http://localhost/agents/managed', {
+      headers: { 'x-api-key': unlisted.apiKey },
+    })
+    expect(agentListing.status).toBe(200)
+    const agentBody = await agentListing.json() as { agents: Array<Record<string, unknown>>; scope: string }
+    expect(agentBody.scope).toBe('agent')
+    expect(agentBody.agents.map((agent) => agent['beam_id'])).toEqual(['warehouse@beam.directory'])
+    expect(agentBody.agents[0]?.['email']).toBe(hiddenEmail)
+
+    const ownerSession = issueAdmin(db, ownedEmail, 'viewer')
+    const ownerListing = await app.request('http://localhost/agents/managed', {
+      headers: { authorization: `Bearer ${ownerSession}` },
+    })
+    expect(ownerListing.status).toBe(200)
+    const ownerBody = await ownerListing.json() as { agents: Array<Record<string, unknown>>; scope: string }
+    expect(ownerBody.scope).toBe('owner')
+    expect(ownerBody.agents.map((agent) => agent['beam_id'])).toEqual(['owner-agent@beam.directory'])
+    expect(ownerBody.agents[0]?.['visibility']).toBe('unlisted')
+
+    const search = await app.request('http://localhost/agents/search')
+    const searchBody = await search.json() as { agents: Array<Record<string, unknown>> }
+    expect(searchBody.agents.map((agent) => agent['beam_id'])).toEqual(['listed@beam.directory'])
+    expect(searchBody.agents[0]).not.toHaveProperty('email')
+    expect(JSON.stringify(searchBody)).not.toContain(hiddenEmail)
+    expect(JSON.stringify(searchBody)).not.toContain(otherEmail)
+
+    const browse = await app.request('http://localhost/agents/browse')
+    const browseBody = await browse.json() as { agents: Array<Record<string, unknown>> }
+    expect(browseBody.agents.map((agent) => agent['beam_id'])).toEqual(['listed@beam.directory'])
+    expect(browseBody.agents[0]).not.toHaveProperty('email')
+    expect(JSON.stringify(browseBody)).not.toContain(hiddenEmail)
+    expect(JSON.stringify(browseBody)).not.toContain(otherEmail)
   })
 })
 

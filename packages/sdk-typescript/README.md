@@ -64,6 +64,8 @@ const matches = await directory.search({ capabilities: ['quote.request'], limit:
 ```ts
 const didDocument = await client.did.resolve('did:beam:echo')
 const domainCredential = await client.credentials.issueDomainVC(client.beamId, 'acme.com')
+// Issuance posts to POST /agents/domain (also /agents/email and /agents/business).
+// The directory accepts the agent API key or an admin session, and only after that check is current.
 // Pass the directory issuer key from its DID document. The key inside the credential is not a trust anchor.
 const isValid = client.credentials.verify(domainCredential, directoryIssuerPublicKeyMultibase)
 ```

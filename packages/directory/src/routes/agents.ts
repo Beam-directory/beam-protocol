@@ -14,7 +14,9 @@ import {
   getAgentDirectoryStats,
   getAgentIntentStats,
   getOrg,
+  getOrgByApiKeyHash,
   listAgentKeys,
+  listManagedAgents,
   registerAgent,
   countSearchAgents,
   searchAgents,
@@ -23,7 +25,7 @@ import {
   updateLastSeen,
   verifyAgentEmailToken,
 } from '../db.js'
-import { agentApiKeyMatches, createAgentApiKey, getSuppliedApiKey, hashApiKey } from '../api-key.js'
+import { agentApiKeyMatches, beamIdFromApiKey, createAgentApiKey, getSuppliedApiKey, hashApiKey } from '../api-key.js'
 import { isEd25519Spki, isX25519Spki } from '../key-validation.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -451,6 +453,73 @@ export function agentsRouter(db: Database): Hono {
   router.get('/verify-email', (c) => {
     const result = handleVerifyEmail(c.req.query('token'))
     return c.json(result.body, result.status)
+  })
+
+  router.get('/managed', (c) => {
+    const limitParam = c.req.query('limit')
+    let limit = 250
+    if (limitParam !== undefined) {
+      const parsed = Number.parseInt(limitParam, 10)
+      if (!Number.isInteger(parsed) || parsed < 1) {
+        return c.json({ error: 'limit must be a positive integer', errorCode: 'INVALID_PARAM' }, 400)
+      }
+      limit = Math.min(500, parsed)
+    }
+
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
+    const suppliedKey = getSuppliedApiKey(c.req.raw)
+    let rows: AgentRow[] | null = null
+    let scope: 'admin' | 'org' | 'agent' | 'owner' | null = null
+
+    if (adminSession && roleSatisfies(adminSession.role, 'admin')) {
+      rows = listManagedAgents(db, { limit })
+      scope = 'admin'
+    } else if (suppliedKey.startsWith('beam_org_')) {
+      const org = getOrgByApiKeyHash(db, hashApiKey(suppliedKey))
+      if (org) {
+        rows = listManagedAgents(db, { org: org.name, limit })
+        scope = 'org'
+      }
+    } else if (suppliedKey.startsWith('bk_')) {
+      const beamId = beamIdFromApiKey(suppliedKey)
+      const agent = beamId ? getAgent(db, beamId) : null
+      if (agent && agentApiKeyMatches(agent, suppliedKey)) {
+        rows = listManagedAgents(db, { beamId: agent.beam_id, limit })
+        scope = 'agent'
+      }
+    } else if (adminSession) {
+      rows = listManagedAgents(db, { email: adminSession.email, limit })
+      scope = rows.length > 0 ? 'owner' : null
+      if (!scope) rows = null
+    }
+
+    if (!adminSession && !suppliedKey) {
+      return c.json({ error: 'Authentication required', errorCode: 'UNAUTHORIZED' }, 401)
+    }
+    if (!rows || !scope) {
+      return c.json({ error: 'Not allowed to list managed agents', errorCode: 'FORBIDDEN' }, 403)
+    }
+
+    const q = c.req.query('q')?.trim().toLowerCase()
+    if (q) {
+      rows = rows.filter((row) => {
+        const haystack = [
+          row.beam_id,
+          row.display_name,
+          row.org ?? '',
+          row.description ?? '',
+          row.capabilities,
+          row.visibility,
+        ].join(' ').toLowerCase()
+        return haystack.includes(q)
+      })
+    }
+
+    return c.json({
+      agents: rows.map((row) => serializeAgent(row, { includeEmail: true })),
+      total: rows.length,
+      scope,
+    })
   })
 
   router.get('/search', (c) => {

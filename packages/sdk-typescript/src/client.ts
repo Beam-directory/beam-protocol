@@ -88,7 +88,7 @@ export class BeamClient {
     this._directoryUrl = config.directoryUrl
     this._directory = new BeamDirectory({ baseUrl: config.directoryUrl, apiKey: config.apiKey })
     this._did = new BeamDID({ baseUrl: config.directoryUrl, identity: this._identity ?? undefined })
-    this._credentials = new BeamCredentialsClient(config.directoryUrl)
+    this._credentials = new BeamCredentialsClient(config.directoryUrl, config.apiKey)
   }
 
   get beamId(): BeamIdString {
@@ -129,6 +129,7 @@ export class BeamClient {
     if (record.apiKey) {
       this._apiKey = record.apiKey
       this._directory = new BeamDirectory({ baseUrl: this._directoryUrl, apiKey: record.apiKey })
+      this._credentials.setApiKey(record.apiKey)
     }
     return record
   }

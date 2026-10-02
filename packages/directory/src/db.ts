@@ -1465,6 +1465,11 @@ export function getOrg(db: DB, name: string): OrgRow | null {
   return row ?? null
 }
 
+export function getOrgByApiKeyHash(db: DB, apiKeyHash: string): OrgRow | null {
+  const row = db.prepare('SELECT * FROM orgs WHERE api_key_hash = ?').get(apiKeyHash) as OrgRow | undefined
+  return row ?? null
+}
+
 export function getOrgByDomain(db: DB, domain: string): OrgRow | null {
   const row = db.prepare('SELECT * FROM orgs WHERE domain = ?').get(domain) as OrgRow | undefined
   return row ?? null
@@ -3541,6 +3546,38 @@ export function countSearchAgents(db: DB, query: SearchQuery): number {
   const { where, params } = buildSearchAgentsWhereClause(query)
   const row = db.prepare(`SELECT COUNT(*) AS cnt FROM agents ${where}`).get(...params) as { cnt: number }
   return row.cnt
+}
+
+export function listManagedAgents(
+  db: DB,
+  scope: { org?: string; beamId?: string; email?: string; limit?: number },
+): AgentRow[] {
+  const limit = scope.limit !== undefined ? Math.max(1, Math.min(500, scope.limit)) : 250
+  if (scope.beamId) {
+    const agent = getAgent(db, scope.beamId)
+    return agent ? [agent] : []
+  }
+  if (scope.org) {
+    return db.prepare(`
+      SELECT * FROM agents
+      WHERE org = ?
+      ORDER BY trust_score DESC, beam_id ASC
+      LIMIT ?
+    `).all(scope.org, limit) as AgentRow[]
+  }
+  if (scope.email) {
+    return db.prepare(`
+      SELECT * FROM agents
+      WHERE email_verified = 1 AND lower(email) = ?
+      ORDER BY trust_score DESC, beam_id ASC
+      LIMIT ?
+    `).all(scope.email.trim().toLowerCase(), limit) as AgentRow[]
+  }
+  return db.prepare(`
+    SELECT * FROM agents
+    ORDER BY trust_score DESC, beam_id ASC
+    LIMIT ?
+  `).all(limit) as AgentRow[]
 }
 
 export function searchAgents(
