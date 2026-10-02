@@ -109,7 +109,8 @@ Public discovery and authenticated management are separate.
 - `GET /agents/search` and `GET /agents/browse` return only `visibility=public` agents. They never include `email`, `email_token`, or `api_key_hash`. Unlisted and private agents are omitted even when the caller sends an admin session.
 - `GET /directory/agents` is the public connected-status listing and also stays on `visibility=public` unless an admin session asks for `includeUnlisted=true`.
 - `GET /agents/managed` is the authenticated inventory. It requires a directory admin session, an organization API key, an agent API key, or a session whose email matches a verified agent address. Admins receive every agent. An organization key receives that org's agents. An agent key receives that one agent. A matching verified email receives those owned agents. The response includes unlisted and private agents and may include `email` for that caller. Anonymous callers get `401`. Authenticated callers with no matching scope get `403`.
-- `GET /agents/:beamId` still resolves an unlisted agent by id. `email` is included only for a directory admin or the matching agent API key.
+- `GET /agents/:beamId` returns a public agent to anyone. Unlisted and private agents are `404` unless the caller has the same scope as `GET /agents/managed`: a directory admin, that organization's API key, that agent's API key, or a session whose email matches the agent's verified address. `email` is included only for a directory admin or the matching agent API key.
+- `GET /agents/:beamId/domain-status` omits the DNS challenge token unless that same owner or admin scope is present. Anonymous callers do not receive `dnsRecord.value`.
 
 Typical public search:
 

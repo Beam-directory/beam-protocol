@@ -279,6 +279,20 @@ async function resolveBuckets(
     }
   }
 
+  if (method === 'POST' && path === '/waitlist') {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'waitlist-signup',
+        limit: policy.waitlistPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.waitlist.signup',
+        payload: { path },
+      }],
+    }
+  }
+
   if (method === 'POST' && (path === '/admin/auth/magic-link' || path === '/admin/auth/verify')) {
     return {
       trusted: isTrusted(policy, ip),

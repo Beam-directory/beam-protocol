@@ -6,6 +6,7 @@ import type { BusinessVerificationRow } from '../types.js'
 import { issueBusinessVC } from '../credentials.js'
 import { BEAM_ID_RE } from '../validation.js'
 import { serializeAgent } from '../utils/serialize.js'
+import { canReadNonPublicAgent, isPublicAgent } from '../agent-access.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
 import { requireAdminRole } from '../admin-auth.js'
 import {
@@ -407,7 +408,7 @@ export function businessVerificationRouter(db: Database): Hono {
     }
 
     const agent = getAgent(db, beamId)
-    if (!agent) {
+    if (!agent || (!isPublicAgent(agent) && !canReadNonPublicAgent(db, c.req.raw, agent))) {
       return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
 

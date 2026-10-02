@@ -6,6 +6,7 @@ import type { AgentRow, RegisterRequest, VerificationTier } from '../types.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { sendAgentVerificationEmail } from '../email.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { canReadNonPublicAgent, isPublicAgent } from '../agent-access.js'
 import { renderPublicSealSvg } from '../public-registry.js'
 import { serializeAgent } from '../utils/serialize.js'
 import {
@@ -744,7 +745,7 @@ export function agentsRouter(db: Database): Hono {
 
     try {
       const agent = getAgent(db, beamId)
-      if (!agent) {
+      if (!agent || (!isPublicAgent(agent) && !canReadNonPublicAgent(db, c.req.raw, agent))) {
         return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
       }
 

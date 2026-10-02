@@ -18,6 +18,7 @@ export interface PublicEndpointShieldPolicy {
   intentSendPerSenderPerMinute: number
   adminAuthPerMinute: number
   keyMutationPerMinute: number
+  waitlistPerMinute: number
 }
 
 export const DEFAULT_SHIELD_CONFIG: ShieldConfig = {
@@ -40,6 +41,7 @@ export const DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY: PublicEndpointShieldPolicy =
   intentSendPerSenderPerMinute: Number.parseInt(process.env['BEAM_RATE_LIMIT_PER_MIN'] ?? '20', 10) || 20,
   adminAuthPerMinute: 6,
   keyMutationPerMinute: 10,
+  waitlistPerMinute: 10,
 }
 
 function sanitizeStringList(value: unknown): string[] {
@@ -119,6 +121,7 @@ export function parsePublicEndpointShieldPolicy(raw: string | null | undefined):
       intentSendPerSenderPerMinute: clamp(parsed.intentSendPerSenderPerMinute, 1, 10_000, DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY.intentSendPerSenderPerMinute),
       adminAuthPerMinute: clamp(parsed.adminAuthPerMinute, 1, 10_000, DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY.adminAuthPerMinute),
       keyMutationPerMinute: clamp(parsed.keyMutationPerMinute, 1, 10_000, DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY.keyMutationPerMinute),
+      waitlistPerMinute: clamp(parsed.waitlistPerMinute, 1, 10_000, DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY.waitlistPerMinute),
     }
   } catch {
     return { ...DEFAULT_PUBLIC_ENDPOINT_SHIELD_POLICY }

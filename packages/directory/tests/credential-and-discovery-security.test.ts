@@ -373,6 +373,12 @@ describe('credential issuance and public discovery', () => {
       headers: { authorization: `Bearer ${adminToken}` },
     })
     const adminBody = await adminListing.json() as { agents: Array<Record<string, unknown>> }
+    const adminLookup = await app.request('http://localhost/agents/hidden-person%40beam.directory', {
+      headers: { authorization: `Bearer ${adminToken}` },
+    })
+    expect(adminLookup.status).toBe(200)
+    expect((await adminLookup.json() as Record<string, unknown>)['visibility']).toBe('unlisted')
+
     const adminIds = adminBody.agents.map((agent) => agent['beam_id'])
     expect(adminIds).toContain('hidden-person@beam.directory')
     expect(adminIds).toContain('warehouse@beam.directory')
@@ -380,12 +386,13 @@ describe('credential issuance and public discovery', () => {
     expect(JSON.stringify(adminBody)).not.toContain('api_key_hash')
 
     const publicLookup = await app.request('http://localhost/agents/hidden-person%40beam.directory')
-    expect(publicLookup.status).toBe(200)
-    const publicAgent = await publicLookup.json() as Record<string, unknown>
-    expect(publicAgent['beam_id']).toBe('hidden-person@beam.directory')
-    expect(publicAgent['visibility']).toBe('unlisted')
-    expect(publicAgent).not.toHaveProperty('email')
-    expect(JSON.stringify(publicAgent)).not.toContain(hiddenEmail)
+    expect(publicLookup.status).toBe(404)
+    expect(JSON.stringify(await publicLookup.json())).not.toContain(hiddenEmail)
+
+    const viewerLookup = await app.request('http://localhost/agents/hidden-person%40beam.directory', {
+      headers: { authorization: `Bearer ${viewerToken}` },
+    })
+    expect(viewerLookup.status).toBe(404)
 
     const ownerLookup = await app.request('http://localhost/agents/hidden-person%40beam.directory', {
       headers: { 'x-api-key': hidden.apiKey },

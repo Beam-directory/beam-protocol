@@ -29,6 +29,7 @@ export function SignupForm() {
   const [domain, setDomain] = useState('')
   const [agentCount, setAgentCount] = useState('2')
   const [message, setMessage] = useState('')
+  const [honeypot, setHoneypot] = useState('')
   const [error, setError] = useState<string | null>(null)
   const [pending, setPending] = useState(false)
   const [saved, setSaved] = useState(false)
@@ -54,7 +55,7 @@ export function SignupForm() {
     setError(null)
     try {
       // Stored via the existing directory waitlist. No payment and no email send.
-      await submitSealApplication(buildSealApplicationPayload(input))
+      await submitSealApplication(buildSealApplicationPayload(input, honeypot))
       setSaved(true)
     } catch (submitError) {
       setSaved(false)
@@ -74,6 +75,16 @@ export function SignupForm() {
       </CardHeader>
       <CardContent>
         <form onSubmit={onSubmit}>
+          <input
+            id="hp_company"
+            name="hp_company"
+            value={honeypot}
+            onChange={(event) => setHoneypot(event.target.value)}
+            tabIndex={-1}
+            autoComplete="off"
+            aria-hidden="true"
+            className="hidden"
+          />
           <FieldGroup>
             <Field data-invalid={error?.includes('Firma') || undefined}>
               <FieldLabel htmlFor="company">Firma</FieldLabel>

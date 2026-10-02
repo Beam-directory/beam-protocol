@@ -6,6 +6,8 @@
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
 - mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email
 - serve an embeddable SVG seal only for public, verified company agents
+- rate-limit waitlist posts, and reject honeypot, oversized, or duplicate seal applications without changing the hosted-beta queue
+- hide unlisted and private agents, and DNS challenge tokens, from callers outside the managed-agent scope
 
 ## v1.7.0 (2026-10-02)
 

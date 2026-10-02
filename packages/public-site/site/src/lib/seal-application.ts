@@ -13,9 +13,12 @@ export interface SealApplicationPayload {
   email: string
   company: string
   agentCount: number
+  contactName: string
+  domain: string
   source: 'seal-application'
   workflowType: 'seal-application'
   workflowSummary: string
+  hp_company: string
 }
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
@@ -43,7 +46,7 @@ export function validateSealApplication(input: SealApplicationInput): string | n
   return null
 }
 
-export function buildSealApplicationPayload(input: SealApplicationInput): SealApplicationPayload {
+export function buildSealApplicationPayload(input: SealApplicationInput, honeypot = ''): SealApplicationPayload {
   const summary = [
     `Kontakt: ${input.contactName.trim()}`,
     `Domain: ${input.domain.trim().toLowerCase()}`,
@@ -58,8 +61,11 @@ export function buildSealApplicationPayload(input: SealApplicationInput): SealAp
     email: input.email.trim().toLowerCase(),
     company: input.companyName.trim(),
     agentCount: input.agentCount,
+    contactName: input.contactName.trim(),
+    domain: input.domain.trim().toLowerCase(),
     source: 'seal-application',
     workflowType: 'seal-application',
     workflowSummary: summary,
+    hp_company: honeypot,
   }
 }

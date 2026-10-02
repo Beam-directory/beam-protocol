@@ -108,6 +108,7 @@ describe('directory identity and verification routes', () => {
       capabilities: ['agent.introduce'],
       publicKey: oldIdentity.publicKey,
       org: 'acme',
+      visibility: 'public',
     })
 
     const app = createTestApp(db)

@@ -113,7 +113,9 @@ describe('directory agent enhancements', () => {
     const verifyResponse = await app.request(`http://localhost/agents/verify?token=${tokenRow.token}`)
     expect(verifyResponse.status).toBe(200)
 
-    const agentResponse = await app.request(`http://localhost/agents/${encodeURIComponent('verified@testorg.beam.directory')}`)
+    const agentResponse = await app.request(`http://localhost/agents/${encodeURIComponent('verified@testorg.beam.directory')}`, {
+      headers: { 'x-api-key': orgApiKey },
+    })
     expect(agentResponse.status).toBe(200)
     const agent = await agentResponse.json() as Record<string, unknown>
     expect(agent).not.toHaveProperty('email')
@@ -186,7 +188,12 @@ describe('directory agent enhancements', () => {
     expect(searchBody.total).toBe(0)
     expect(searchBody.agents).toEqual([])
 
-    const directResponse = await app.request('http://localhost/agents/alice%40beam.directory')
+    const anonymousResponse = await app.request('http://localhost/agents/alice%40beam.directory')
+    expect(anonymousResponse.status).toBe(404)
+
+    const directResponse = await app.request('http://localhost/agents/alice%40beam.directory', {
+      headers: { 'x-api-key': String(body['apiKey']) },
+    })
     expect(directResponse.status).toBe(200)
     const directBody = await directResponse.json() as Record<string, unknown>
     expect(directBody['beam_id']).toBe('alice@beam.directory')

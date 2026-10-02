@@ -15,6 +15,7 @@ import {
   markAgentDomainVerified,
   updateDomainVerificationStatus,
 } from '../db.js'
+import { canReadNonPublicAgent, isPublicAgent } from '../agent-access.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
 
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
@@ -70,8 +71,14 @@ function getAgentOrError(db: Database, c: Context, beamId: string): AgentRow | R
   return agent
 }
 
-function buildDomainStatus(agent: AgentRow, verification: DomainVerificationRow | null): object {
-  const dnsRecord = verification ? getDnsRecord(verification.domain, verification.challenge_token) : null
+function buildDomainStatus(
+  agent: AgentRow,
+  verification: DomainVerificationRow | null,
+  includeChallenge: boolean,
+): object {
+  const dnsRecord = includeChallenge && verification
+    ? getDnsRecord(verification.domain, verification.challenge_token)
+    : null
 
   return {
     beamId: agent.beam_id,
@@ -192,8 +199,12 @@ export function verificationRouter(db: Database, resolveTxtFn: ResolveTxtFn = re
     if (agent instanceof Response) {
       return agent
     }
+    if (!isPublicAgent(agent) && !canReadNonPublicAgent(db, c.req.raw, agent)) {
+      return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
 
-    return c.json(buildDomainStatus(agent, getLatestDomainVerification(db, beamId)))
+    const includeChallenge = canReadNonPublicAgent(db, c.req.raw, agent)
+    return c.json(buildDomainStatus(agent, getLatestDomainVerification(db, beamId), includeChallenge))
   })
 
   return router
