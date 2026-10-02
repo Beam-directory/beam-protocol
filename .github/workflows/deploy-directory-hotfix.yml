@@ -1,0 +1,103 @@
+name: Deploy Directory Hotfix
+
+# Manual directory-only deploy. Does not publish npm packages, create a GitHub
+# release, or change the tag workflow's publish / mcp-pilot-evidence gates.
+# workflow_dispatch is limited to people with write access. The job refuses
+# every ref except this repository's main branch.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-directory-hotfix
+  cancel-in-progress: false
+
+jobs:
+  deploy-directory-hotfix:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Restrict to main
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ] || [ "${GITHUB_REPOSITORY}" != "Beam-directory/beam-protocol" ]; then
+            echo "Directory hotfix deploy only runs from Beam-directory/beam-protocol main (got ${GITHUB_REPOSITORY} ${GITHUB_REF})." >&2
+            exit 1
+          fi
+
+      - name: Checkout
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Build directory
+        run: npm run build --workspace=@beam-protocol/directory
+
+      - name: Test directory
+        run: npm test --workspace=@beam-protocol/directory
+
+      - name: Prepare release metadata
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          PACKAGE_VERSION="$(node -p "require('./packages/directory/package.json').version")"
+
+          if [ "$VERSION" != "$PACKAGE_VERSION" ]; then
+            echo "Root version $VERSION does not match directory package version $PACKAGE_VERSION" >&2
+            exit 1
+          fi
+
+          DEPLOYED_AT="$(date -u +"%Y-%m-%dT%H:%M:%S.000Z")"
+
+          node scripts/release/write-directory-release-metadata.mjs \
+            --version "$VERSION" \
+            --git-sha "$GITHUB_SHA" \
+            --deployed-at "$DEPLOYED_AT"
+
+          echo "BEAM_RELEASE_VERSION=$VERSION" >> "$GITHUB_ENV"
+          echo "BEAM_RELEASE_SHA=$GITHUB_SHA" >> "$GITHUB_ENV"
+          echo "BEAM_DEPLOYED_AT=$DEPLOYED_AT" >> "$GITHUB_ENV"
+
+      - name: Install Flyctl
+        run: curl -L https://fly.io/install.sh | FLYCTL_INSTALL=/home/runner/.fly sh
+
+      - name: Clear stale Fly release env overrides
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl secrets unset \
+            BEAM_RELEASE_VERSION \
+            BEAM_RELEASE_SHA \
+            BEAM_DEPLOYED_AT \
+            --app beam-protocol \
+            --stage || true
+
+      - name: Deploy directory API to Fly.io
+        working-directory: packages/directory
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          test -n "$FLY_API_TOKEN" || { echo "Missing FLY_API_TOKEN repo secret" >&2; exit 1; }
+          /home/runner/.fly/bin/flyctl deploy \
+            --config fly.toml \
+            --app beam-protocol \
+            --remote-only \
+            --yes
+
+      - name: Verify live API release truth
+        run: |
+          node scripts/release/verify-api-release-truth.mjs \
+            --base-url "https://api.beam.directory" \
+            --version "$BEAM_RELEASE_VERSION" \
+            --git-sha "$BEAM_RELEASE_SHA" \
+            --deployed-at "$BEAM_DEPLOYED_AT"

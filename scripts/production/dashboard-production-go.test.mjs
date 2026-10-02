@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { dashboardPackageVersion } from './shared.mjs'
 import {
   createDashboardProductionGoConfig,
   inspectVercelState,
@@ -185,7 +186,7 @@ test('dashboard production GO inspects Vercel domain and protection read-only', 
   assert.equal(result.latestProductionDeployment.latest.url, 'dashboard-7ty5nk4f4-alfridus1s-projects.vercel.app')
   assert.equal(result.latestProductionDeployment.latest.dashboardVersionMeta, '1.1.0')
   assert.equal(result.latestProductionDeployment.packageVersion, '1.1.0')
-  assert.equal(result.latestProductionDeployment.expectedPackageVersion, '1.6.0')
+  assert.equal(result.latestProductionDeployment.expectedPackageVersion, dashboardPackageVersion)
   assert.equal(result.latestProductionDeployment.packageVersionMatches, false)
   assert.deepEqual(result.latestProductionDeployment.aliases, [
     'dashboard-phi-five-73.vercel.app',

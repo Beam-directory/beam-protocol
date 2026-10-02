@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { dashboardPackageVersion } from './shared.mjs'
 import {
   createDashboardDeploymentTruthConfig,
   runDashboardDeploymentTruthCheck,
@@ -12,7 +13,7 @@ function config(args = [], env = {}) {
   })
 }
 
-function vercelFixture({ aliases = ['dashboard.beam.directory'], packageVersion = '1.6.0', latestUrl = 'dashboard-current.vercel.app', metadataVersion = '1.6.0' } = {}) {
+function vercelFixture({ aliases = ['dashboard.beam.directory'], packageVersion = dashboardPackageVersion, latestUrl = 'dashboard-current.vercel.app', metadataVersion = dashboardPackageVersion } = {}) {
   const calls = []
   return {
     calls,
@@ -67,8 +68,8 @@ test('dashboard deployment truth check passes for latest production version and 
 
   assert.equal(result.ok, true)
   assert.deepEqual(result.failures, [])
-  assert.equal(result.deployment.packageVersion, '1.6.0')
-  assert.equal(result.deployment.metadataVersion, '1.6.0')
+  assert.equal(result.deployment.packageVersion, dashboardPackageVersion)
+  assert.equal(result.deployment.metadataVersion, dashboardPackageVersion)
   assert.equal(result.deployment.metadataVersionMatches, true)
   assert.equal(result.deployment.requiredAliasPresent, true)
   assert.equal(result.latestProduction.latest.url, 'dashboard-current.vercel.app')
@@ -120,12 +121,12 @@ test('dashboard deployment truth check retries alias propagation', async () => {
     execFile: async (command, args) => {
       if (args[0] === 'list') {
         return {
-          stdout: JSON.stringify({ deployments: [{ url: 'dashboard-current.vercel.app', state: 'READY', target: 'production', meta: { beamDashboardVersion: '1.6.0' } }] }),
+          stdout: JSON.stringify({ deployments: [{ url: 'dashboard-current.vercel.app', state: 'READY', target: 'production', meta: { beamDashboardVersion: dashboardPackageVersion } }] }),
           stderr: '',
         }
       }
       if (args[0] === 'inspect' && args.includes('--logs')) {
-        return { stdout: '> @beam-protocol/dashboard@1.6.0 build', stderr: '' }
+        return { stdout: `> @beam-protocol/dashboard@${dashboardPackageVersion} build`, stderr: '' }
       }
       if (args[0] === 'inspect') {
         inspectAttempts += 1
