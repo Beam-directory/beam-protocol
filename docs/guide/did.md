@@ -110,7 +110,25 @@ No blockchain, no tokens, no gas fees. Just cryptography and federation.
 
 ## Verifiable Credentials
 
-The directory issues W3C Verifiable Credentials for each verification:
+The directory issues W3C Verifiable Credentials only after a real check, and only to the agent owner or a directory admin:
+
+- `POST /agents/email` after `email_verified` matches that address
+- `POST /agents/domain` after the domain check is verified
+- `POST /agents/business` after the business registration is verified
+
+Send the agent API key (`x-api-key`) or an admin session. An anonymous call is rejected and does not mint `verified: true`.
+
+`POST /agents/verify` checks two things. The proof must be an `Ed25519Signature2020` assertion from the directory issuer key (`did:beam:beam:directory#key-1`). The credential subject must still match the current directory row. Self-signed credentials are invalid even when they copy the directory issuer id. A previously genuine credential becomes `VERIFICATION_NOT_CURRENT` when the underlying check is no longer true.
+
+The TypeScript SDK verifier does not trust the key embedded in the proof. Pass the directory issuer public key:
+
+```ts
+const valid = client.credentials.verify(vc, directoryIssuerPublicKeyMultibase)
+```
+
+`CredentialVerifier.verify(vc)` without that key returns false. Local SDK verification does not re-read the directory; use `POST /agents/verify` for the currency check.
+
+The directory issues these credential shapes:
 
 ### Email Verification VC
 

@@ -352,21 +352,27 @@ export class CredentialVerifier {
 
 export class BeamCredentialsClient {
   private readonly baseUrl: string
+  private apiKey?: string
 
-  constructor(baseUrl: string) {
+  constructor(baseUrl: string, apiKey?: string) {
     this.baseUrl = baseUrl
+    this.apiKey = apiKey
+  }
+
+  setApiKey(apiKey: string | undefined): void {
+    this.apiKey = apiKey
   }
 
   async issueEmailVC(beamId: string, email: string): Promise<VerifiableCredential> {
-    return this.post('/credentials/email', { beamId, email })
+    return this.post('/agents/email', { beamId, email })
   }
 
   async issueDomainVC(beamId: string, domain: string): Promise<VerifiableCredential> {
-    return this.post('/credentials/domain', { beamId, domain })
+    return this.post('/agents/domain', { beamId, domain })
   }
 
   async issueBusinessVC(beamId: string, businessInfo: Record<string, unknown>): Promise<VerifiableCredential> {
-    return this.post('/credentials/business', { beamId, businessInfo })
+    return this.post('/agents/business', { beamId, businessInfo })
   }
 
   verify(vc: VerifiableCredential, trustedIssuerPublicKeyMultibase?: string): boolean {
@@ -374,9 +380,13 @@ export class BeamCredentialsClient {
   }
 
   private async post(path: string, body: Record<string, unknown>): Promise<VerifiableCredential> {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+    if (this.apiKey) {
+      headers['x-api-key'] = this.apiKey
+    }
     const response = await fetch(`${this.baseUrl.replace(/\/$/, '')}${path}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(body),
     })
 

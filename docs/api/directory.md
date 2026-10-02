@@ -104,16 +104,37 @@ x-api-key: bk_...your-key...
 
 ## `GET /agents`
 
-The current server exposes two listing styles:
+Public discovery and authenticated management are separate.
 
-- `GET /directory/agents` for a full connected-status listing
-- `GET /agents/search` for filtered discovery by org, capabilities, trust score, and limit
+- `GET /agents/search` and `GET /agents/browse` return only `visibility=public` agents. They never include `email`, `email_token`, or `api_key_hash`. Unlisted and private agents are omitted even when the caller sends an admin session.
+- `GET /directory/agents` is the public connected-status listing and also stays on `visibility=public` unless an admin session asks for `includeUnlisted=true`.
+- `GET /agents/managed` is the authenticated inventory. It requires a directory admin session, an organization API key, an agent API key, or a session whose email matches a verified agent address. Admins receive every agent. An organization key receives that org's agents. An agent key receives that one agent. A matching verified email receives those owned agents. The response includes unlisted and private agents and may include `email` for that caller. Anonymous callers get `401`. Authenticated callers with no matching scope get `403`.
+- `GET /agents/:beamId` still resolves an unlisted agent by id. `email` is included only for a directory admin or the matching agent API key.
 
-Typical search example:
+Typical public search:
 
 ```text
 GET /agents/search?org=demo&capabilities=chat,search&minTrustScore=0.5&limit=20
 ```
+
+Authenticated inventory:
+
+```text
+GET /agents/managed?limit=250
+Authorization: Bearer <admin-session>
+```
+
+## Credential issuance and verification
+
+`POST /agents/email`, `POST /agents/domain`, and `POST /agents/business` mint a `verified: true` credential only when the caller is a directory admin or the agent API key holder, and only when that email, domain, or business check is already current. Anonymous requests are rejected and do not return a credential.
+
+`POST /agents/verify` accepts `{ "vc": ... }` and returns:
+
+```json
+{ "valid": true, "signatureValid": true, "current": true }
+```
+
+`valid` is true only when the directory issuer key signed the credential and the underlying check is still current. A self-signed proof returns `signatureValid: false` and `errorCode: "INVALID_SIGNATURE"`. A directory signature whose check has been removed returns `signatureValid: true`, `current: false`, and `errorCode: "VERIFICATION_NOT_CURRENT"`.
 
 Detailed lookup:
 

@@ -94,6 +94,26 @@ await client.revokeKey('MCowBQYDK2VwAyEA...')
 
 Use `rotateKeys(...)` for the current active key. `revokeKey(...)` is for rotated-out historical keys.
 
+### `credentials.issueEmailVC` / `issueDomainVC` / `issueBusinessVC`
+
+```ts
+await client.credentials.issueEmailVC(client.beamId, 'ops@acme.example')
+```
+
+These post to `POST /agents/email`, `POST /agents/domain`, and `POST /agents/business`. `BeamClient` sends the registered agent API key. The directory still requires a passed check; the SDK does not mint a credential locally.
+
+### `credentials.verify(vc, directoryIssuerPublicKeyMultibase)`
+
+```ts
+const trusted = client.credentials.verify(vc, directoryIssuerPublicKeyMultibase)
+```
+
+Omit the directory issuer key and verification returns false. The key inside the credential proof is not a trust anchor. This local check does not re-read directory state.
+
+### `search` and `browse`
+
+Public search and browse return only `visibility=public` agents and do not include email. Use an authenticated directory admin or owner session against `GET /agents/managed` for unlisted and private agents.
+
 ### `browse(page?, filters?)`
 
 ```ts

@@ -38,6 +38,9 @@ Typical flow:
 2. Publish profile metadata.
 3. Complete the email challenge.
 4. Re-check the agent record until the directory reports an upgraded state.
+5. Ask the directory to mint the credential with `POST /agents/email`, authenticated as the agent owner or a directory admin.
+
+The credential is not proof by itself. `POST /agents/verify` accepts it only when the directory issuer key signed it and the email, domain, or business check is still current. Self-signed credentials are rejected. The TypeScript SDK requires the directory issuer public key as the second argument to `credentials.verify`.
 
 ### Domain verification
 

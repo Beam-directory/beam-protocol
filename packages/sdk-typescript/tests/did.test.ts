@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
+import { BeamClient } from '../src/client.js'
 import { BeamIdentity } from '../src/identity.js'
-import { BeamDID, CredentialVerifier } from '../src/did.js'
+import { BeamCredentialsClient, BeamDID, CredentialVerifier } from '../src/did.js'
 import { generateKeyPairSync } from 'node:crypto'
 import { issueBusinessVC, issueDomainVC, issueEmailVC } from '../../directory/src/credentials.js'
 import { publicKeyBase64ToMultibase, signPayload } from '../../directory/src/crypto.js'
@@ -56,6 +57,61 @@ describe('BeamDID', () => {
 describe('Verifiable credentials', () => {
   const beamId = 'jarvis@acme.beam.directory'
   const issuerKey = getDirectoryIssuerPublicKeyMultibase()
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  it('issues credentials on the directory agent routes', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: 'Created',
+      json: async () => ({ type: ['VerifiableCredential'] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new BeamCredentialsClient('https://api.beam.directory/', 'bk_owner')
+
+    await client.issueEmailVC(beamId, 'jarvis@example.com')
+    await client.issueDomainVC(beamId, 'acme.com')
+    await client.issueBusinessVC(beamId, { legalName: 'Acme Corp' })
+    client.setApiKey(undefined)
+    await client.issueEmailVC(beamId, 'jarvis@example.com')
+
+    expect(fetchMock).toHaveBeenNthCalledWith(1, 'https://api.beam.directory/agents/email', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': 'bk_owner' },
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, 'https://api.beam.directory/agents/domain', expect.objectContaining({
+      method: 'POST',
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, 'https://api.beam.directory/agents/business', expect.objectContaining({
+      method: 'POST',
+    }))
+    const unauthenticated = fetchMock.mock.calls[3]?.[1] as { headers: Record<string, string> }
+    expect(unauthenticated.headers).toEqual({ 'Content-Type': 'application/json' })
+    expect(JSON.stringify(fetchMock.mock.calls)).not.toContain('/credentials/')
+  })
+
+  it('sends the BeamClient api key to the directory credential route', async () => {
+    const apiKey = `bk_${Buffer.from(beamId).toString('base64url')}.secret`
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 201,
+      statusText: 'Created',
+      json: async () => ({ type: ['VerifiableCredential'] }),
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const client = new BeamClient({ apiKey, directoryUrl: 'https://api.beam.directory' })
+
+    await client.credentials.issueDomainVC(client.beamId, 'acme.com')
+
+    expect(fetchMock).toHaveBeenCalledWith('https://api.beam.directory/agents/domain', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': apiKey },
+    }))
+  })
 
   it('issues and verifies an email VC offline', () => {
     const vc = issueEmailVC(beamId, 'jarvis@example.com')
