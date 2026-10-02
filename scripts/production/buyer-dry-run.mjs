@@ -19,8 +19,8 @@ async function main() {
   const onboardingGuide = await readFile(path.join(repoRoot, 'docs/guide/design-partner-onboarding.md'), 'utf8')
   const goLiveChecklist = await readFile(path.join(repoRoot, 'docs/guide/production-go-live-checklist.md'), 'utf8')
 
-  assertIncludes(landing, 'Safe AI Work Between Companies', 'landing headline')
-  assertIncludes(landing, 'Request hosted beta', 'landing primary CTA')
+  assertIncludes(landing, 'Das geprüfte Register für KI-Agenten.', 'landing headline')
+  assertIncludes(landing, 'Siegel beantragen', 'landing primary CTA')
   assertIncludes(guided, 'guided evaluation', 'guided evaluation narrative')
   assertIncludes(hostedBeta, 'Request a Guided Beam Pilot', 'hosted beta title')
   assertIncludes(docsHome, 'Hosted Quickstart', 'docs home quickstart link')

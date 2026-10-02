@@ -65,6 +65,13 @@ import {
 } from './db.js'
 import { getLocalDirectoryUrl, isFederationRequestAuthorized, isPrivateDirectoryMode } from './federation.js'
 import { createRateLimitMiddleware } from './middleware/rate-limit.js'
+import {
+  findRecentSealApplication,
+  isSealApplication,
+  isWaitlistHoneypotTripped,
+  readOptionalText,
+  validateWaitlistSubmission,
+} from './waitlist-guard.js'
 import { getReleaseInfo } from './release.js'
 import { sendOperatorDigestEmail } from './email.js'
 import type { AgentRow, AuditLogRow, IntentFrame, IntentTraceEventRow, OperatorNotificationRow } from './types.js'
@@ -4214,6 +4221,10 @@ export function createApp(db: Database): Hono {
     }
 
     const raw = body as Record<string, unknown>
+    if (isWaitlistHoneypotTripped(raw)) {
+      return c.json({ ok: true, status: 'registered' }, 201)
+    }
+
     const email = String(raw.email ?? '').trim().toLowerCase()
     const source = typeof raw.source === 'string' && raw.source.trim().length > 0
       ? raw.source.trim()
@@ -4244,6 +4255,20 @@ export function createApp(db: Database): Hono {
     const workflowSummary = normalizeOptionalString(raw.workflowSummary) ?? normalizeOptionalString(raw.notes)
     const analyticsSessionId = normalizeSessionId(raw.analyticsSessionId ?? raw.sessionId)
     const analyticsPageKey = normalizeFunnelPageKey(raw.pageKey) ?? 'hosted_beta'
+    const seal = isSealApplication(source, workflowType)
+    const guardError = validateWaitlistSubmission({
+      email,
+      company,
+      agentCount,
+      source,
+      workflowType,
+      workflowSummary,
+      domain: readOptionalText(raw.domain, 253),
+      contactName: readOptionalText(raw.contactName, 120),
+    })
+    if (guardError) {
+      return c.json(guardError, 400)
+    }
 
     const signup: WaitlistSignupInput = {
       email,
@@ -4257,10 +4282,47 @@ export function createApp(db: Database): Hono {
     const timestamp = new Date().toISOString()
 
     try {
-      const existing = db.prepare(`
+      const recentSeal = seal && signup.company
+        ? findRecentSealApplication(db, signup.email, signup.company, Date.now())
+        : undefined
+      if (recentSeal) {
+        const stored = getBetaRequestById(db, recentSeal.id)
+        if (!stored) {
+          return c.json({ error: 'Failed to load existing seal application', errorCode: 'DB_ERROR' }, 500)
+        }
+        const notification = getOperatorNotificationBySourceKey(db, betaRequestNotificationSourceKey(stored.id))
+        return c.json({
+          ok: true,
+          status: 'already_registered',
+          id: stored.id,
+          email: stored.email,
+          source: stored.source,
+          company: stored.company,
+          agentCount: stored.agent_count,
+          workflowType: stored.workflow_type,
+          workflowSummary: stored.workflow_summary,
+          requestStatus: normalizeBetaRequestStatus(stored.status) ?? 'new',
+          owner: stored.owner,
+          operatorNotes: stored.operator_notes,
+          nextAction: stored.next_action ?? getBetaRequestNextStep(stored.status),
+          lastContactAt: stored.last_contact_at,
+          nextMeetingAt: stored.next_meeting_at,
+          reminderAt: stored.reminder_at,
+          createdAt: stored.created_at,
+          updatedAt: stored.updated_at,
+          request: serializeBetaRequest(stored, notification),
+          nextStep: stored.next_action ?? getBetaRequestNextStep(stored.status),
+        }, 200)
+      }
+
+      const existing = seal
+        ? undefined
+        : db.prepare(`
         SELECT id, email, source, company, agent_count, workflow_type, workflow_summary, status, owner, operator_notes, next_action, last_contact_at, next_meeting_at, reminder_at, blocked_prerequisites, stage_entered_at, created_at, updated_at
         FROM waitlist
         WHERE email = ?
+          AND COALESCE(source, '') != 'seal-application'
+          AND COALESCE(workflow_type, '') != 'seal-application'
         ORDER BY created_at DESC, id DESC
         LIMIT 1
       `).get(signup.email) as WaitlistRow | undefined

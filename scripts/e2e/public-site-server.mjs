@@ -10,7 +10,13 @@ const aliases = new Map([
   ['/', '/index.html'],
   ['/claim', '/claim.html'],
   ['/network', '/network.html'],
+  ['/identity', '/identity.html'],
+  ['/verzeichnis', '/index.html'],
+  ['/siegel-beantragen', '/index.html'],
+  ['/pruefrichtlinien', '/index.html'],
+  ['/impressum', '/index.html'],
 ])
+const spaPatterns = [/^\/agents\/[^/]+\/?$/, /^\/verified\/[^/]+\/?$/]
 const contentTypes = new Map([
   ['.css', 'text/css; charset=utf-8'],
   ['.html', 'text/html; charset=utf-8'],
@@ -23,7 +29,8 @@ const contentTypes = new Map([
 
 const server = createServer((request, response) => {
   const requestUrl = new URL(request.url ?? '/', `http://${request.headers.host ?? '127.0.0.1'}`)
-  const aliasedPath = aliases.get(requestUrl.pathname) ?? requestUrl.pathname
+  const aliasedPath = aliases.get(requestUrl.pathname)
+    ?? (spaPatterns.some((pattern) => pattern.test(requestUrl.pathname)) ? '/index.html' : requestUrl.pathname)
   let decodedPath
   try {
     decodedPath = decodeURIComponent(aliasedPath)

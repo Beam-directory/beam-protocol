@@ -112,7 +112,7 @@ Omit the directory issuer key and verification returns false. The key inside the
 
 ### `search` and `browse`
 
-Public search and browse return only `visibility=public` agents and do not include email. Use an authenticated directory admin or owner session against `GET /agents/managed` for unlisted and private agents.
+Public search and browse return only `visibility=public` agents and do not include email. `DirectoryClient.lookup` sends the configured API key and treats `404` as “not visible”: anonymous lookups of unlisted or private agents return `null`. Use an authenticated directory admin or owner session against `GET /agents/managed` for unlisted and private agents. The dashboard agent profile uses the stored admin session on `GET /agents/:beamId`, so an admin still opens unlisted agents and an owner session still opens the agent whose verified email matches.
 
 ### `browse(page?, filters?)`
 

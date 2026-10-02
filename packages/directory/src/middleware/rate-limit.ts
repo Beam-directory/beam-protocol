@@ -74,7 +74,7 @@ function isTrusted(policy: PublicEndpointShieldPolicy, ip: string, beamId?: stri
 
 function createLookupBucket(path: string, ip: string, policy: PublicEndpointShieldPolicy): BucketSpec | null {
   const reserved = new Set(['search', 'browse', 'stats', 'verify', 'verify-email'])
-  const match = /^\/agents\/([^/]+)$/.exec(path)
+  const match = /^\/agents\/([^/]+)$/.exec(path) ?? /^\/agents\/([^/]+)\/seal\.svg$/.exec(path)
   if (!match || reserved.has(match[1] ?? '')) {
     return null
   }
@@ -274,6 +274,20 @@ async function resolveBuckets(
         actorKey: `ip:${ip}`,
         actorLabel: `ip:${ip}`,
         intentType: 'http.did.resolve',
+        payload: { path },
+      }],
+    }
+  }
+
+  if (method === 'POST' && path === '/waitlist') {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'waitlist-signup',
+        limit: policy.waitlistPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.waitlist.signup',
         payload: { path },
       }],
     }

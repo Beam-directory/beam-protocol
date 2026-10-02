@@ -1,6 +1,34 @@
 {
   "rewrites": [
     {
+      "source": "/identity",
+      "destination": "/identity.html"
+    },
+    {
+      "source": "/verzeichnis",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/siegel-beantragen",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/pruefrichtlinien",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/impressum",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/agents/:beamId",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/verified/:beamId",
+      "destination": "/index.html"
+    },
+    {
       "source": "/claim",
       "destination": "/claim.html"
     },
