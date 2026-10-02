@@ -1,10 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { dashboardPackageVersion } from './shared.mjs'
 import {
   createDashboardDomainConfig,
   normalizeDnsValue,
   runDashboardDomainPreflight,
 } from './dashboard-domain-preflight.mjs'
+
+function currentDashboardShell() {
+  return `<!doctype html><title>Beam Control Plane</title><div id="root" data-beam-dashboard-version="${dashboardPackageVersion}"></div>`
+}
 
 function response(body, status = 200) {
   return {
@@ -66,7 +71,7 @@ test('dashboard domain preflight passes with matching public A DNS, GoDaddy DNS,
       if (href.includes('/records/AAAA/dashboard')) {
         return response(JSON.stringify([]))
       }
-      return response('<!doctype html><title>Beam Control Plane</title><div id="root" data-beam-dashboard-version="1.6.0"></div>')
+      return response(currentDashboardShell())
     },
   })
 
@@ -76,7 +81,7 @@ test('dashboard domain preflight passes with matching public A DNS, GoDaddy DNS,
   assert.equal(result.publicDns.expectedRecordPresent, true)
   assert.equal(result.godaddy.expectedRecordPresent, true)
   assert.equal(result.dashboard.shellReady, true)
-  assert.equal(result.dashboard.dashboardVersion, '1.6.0')
+  assert.equal(result.dashboard.dashboardVersion, dashboardPackageVersion)
   assert.equal(result.godaddy.credentialSource, 'env-file')
   assert.equal(JSON.stringify(result).includes('test-key'), false)
   assert.equal(JSON.stringify(result).includes('test-secret'), false)
@@ -136,7 +141,7 @@ test('dashboard domain preflight retries transient DNS propagation failures', as
       resolve4: async () => [],
       resolve6: async () => [],
     },
-    fetch: async () => response('<!doctype html><title>Beam Control Plane</title><div id="root" data-beam-dashboard-version="1.6.0"></div>'),
+    fetch: async () => response(currentDashboardShell()),
     sleep: async () => undefined,
   })
 
@@ -165,8 +170,8 @@ test('dashboard domain preflight falls back to public DNS for stale system resol
       assert.equal(url, 'https://dashboard.beam.directory/')
       assert.equal(ip, '76.76.21.21')
       return {
-        response: response('<!doctype html><title>Beam Control Plane</title><div id="root" data-beam-dashboard-version="1.6.0"></div>'),
-        text: '<!doctype html><title>Beam Control Plane</title><div id="root" data-beam-dashboard-version="1.6.0"></div>',
+        response: response(currentDashboardShell()),
+        text: currentDashboardShell(),
       }
     },
   })
@@ -190,6 +195,6 @@ test('dashboard domain preflight rejects a shell with a stale dashboard version'
   assert.equal(result.ok, false)
   assert.equal(result.dashboard.shellReady, false)
   assert.equal(result.dashboard.dashboardVersion, '1.1.0')
-  assert.equal(result.dashboard.expectedDashboardVersion, '1.6.0')
+  assert.equal(result.dashboard.expectedDashboardVersion, dashboardPackageVersion)
   assert.equal(result.dashboard.versionReady, false)
 })
