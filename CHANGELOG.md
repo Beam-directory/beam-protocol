@@ -1,6 +1,6 @@
 # Changelog
 
-## v1.7.0 (draft)
+## v1.7.0 (2026-10-02)
 
 ### Directory security
 - require the Beam ID owner or a directory admin before reissuing email, domain, or business credentials, and only after that verification check has passed
