@@ -99,11 +99,70 @@ Authorization: Bearer <operator-session>
 
 `GET /orgs/:name/registry` lists filings for the organization API key.
 
+### People, invitations, and KYC
+
+People belong to one organization. The organization API key creates the account holder directly, or invites an employee. Private keys stay on the client. `publicKey` is an Ed25519 SPKI key.
+
+```http
+POST /orgs/coppen/people
+x-api-key: beam_org_...
+
+{
+  "email": "clara@coppen.de",
+  "displayName": "Clara Sommer",
+  "role": "Vertrieb",
+  "publicKey": "<ed25519-spki>",
+  "supervisorPersonId": null,
+  "rights": {
+    "actions": ["read", "schedule.commit", "order"],
+    "order": { "maxAmount": "5000.00", "currency": "EUR" }
+  }
+}
+```
+
+`rights.actions` is a subset of `read`, `schedule.commit`, `file.send`, and `order`. An `order` limit requires the `order` action. A supervisor must be an active person in the same organization, and the chain cannot cycle.
+
+```http
+POST /orgs/coppen/people/invitations
+POST /people/invitations/accept
+```
+
+The invitation response returns `token` once. Accept sends `token`, `displayName`, and `publicKey`. The person inherits the invited role, supervisor, and rights. KYC starts at `unverified`.
+
+```http
+POST /orgs/coppen/people/:id/kyc
+{ "provider": "manual" }
+```
+
+The only adapter is `manual`. It records `pending` and a reference. It does not contact a vendor and it does not mark anyone verified. An operator sets the status:
+
+```http
+POST /admin/people/:id/kyc
+Authorization: Bearer <operator-session>
+
+{ "status": "verified", "note": "Identity checked outside the directory." }
+```
+
+`status` is `verified` or `rejected`. The note is stored in the audit log.
+
+```http
+POST /orgs/coppen/people/import
+{ "source": "personio", "people": [ { "externalId": "p-1", "email": "a@coppen.de", "displayName": "A", "role": "Einkauf", "supervisorExternalId": "p-2", "status": "active" } ] }
+```
+
+`source` is `personio` or `entra`. The directory stores the snapshot. It does not call Personio or Microsoft Graph. `status: "offboarded"` locks that person immediately and sets `suspended_at` on every agent whose `responsiblePersonId` is that person. An offboarded person is not reactivated by a later `active` row. A supervisor cycle is rejected and the import is rolled back.
+
+```http
+POST /orgs/coppen/people/:id/offboard
+```
+
+Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change.
+
 ### Organization agents
 
-`POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key. The directory does not generate or return a private key. Omitting it returns `400 PUBLIC_KEY_REQUIRED`.
+`POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key, and may set `responsiblePersonId`. The directory does not generate or return a private key. Omitting the public key returns `400 PUBLIC_KEY_REQUIRED`.
 
-The following onboarding steps are not in this revision: person KYC, invitations, hierarchy, mandates, and the first contact request. They follow in later revisions of this API.
+Mandates and the first contact request are the remaining onboarding steps.
 
 ## `POST /register`
 

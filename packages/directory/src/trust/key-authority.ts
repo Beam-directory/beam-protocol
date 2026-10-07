@@ -3,6 +3,7 @@ import type { Database } from 'better-sqlite3'
 import { hashApiKey, getSuppliedApiKey } from '../api-key.js'
 import { verifyPayload } from '../crypto.js'
 import { getOrg } from '../db.js'
+import { getPerson } from './person-store.js'
 import type { AgentRow } from '../types.js'
 
 function hashesMatch(left: string, right: string): boolean {
@@ -46,5 +47,21 @@ export function keyChangeAuthorized(
     return true
   }
 
-  return orgKeyAuthorizes(db, agent, request)
+  return orgKeyAuthorizes(db, agent, request) || personKeyAuthorizes(db, agent, payload, signature)
+}
+
+function personKeyAuthorizes(
+  db: Database,
+  agent: AgentRow,
+  payload: Record<string, unknown>,
+  signature?: string,
+): boolean {
+  if (!signature?.trim() || !agent.responsible_person_id) {
+    return false
+  }
+  const person = getPerson(db, agent.responsible_person_id)
+  if (!person || person.status !== 'active' || person.org_name !== agent.org || !person.public_key) {
+    return false
+  }
+  return verifyPayload(payload, signature.trim(), person.public_key)
 }

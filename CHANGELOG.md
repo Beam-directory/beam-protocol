@@ -7,7 +7,7 @@
 - accept DNS TXT or `https://<domain>/.well-known/beam-verification` as the one-time domain proof
 - record Handelsregister or LEI filings per organization, with a manual representation review and an audit trail
 - stop generating agent signing keys on organization and workspace issuance; require a client public key
-- allow signing-key rotation only with the current key's signature or the owning organization's API key
+- allow signing-key rotation only with the current key's signature, the owning organization's API key, or the active responsible person
 - assign the public Beam label only after domain verification; pending claims use a collision-free `--` namespace (`coppen.co.uk` is `coppen--co-uk`, `coppen-co.uk` is `coppen-co--uk`)
 - require a fresh signed nonce, the organization key, or an admin session before `PATCH /agents/:id/config` can change `dhPublicKey` or `httpEndpoint`
 - log and expose on `/health` when duplicate domains prevent the unique domain index
@@ -20,6 +20,13 @@
 - `POST /agents/keypair/x25519` is removed
 - npm 10 or newer is required to install this repository
 - disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
+
+### Trust layer: people and hierarchy
+- add organization people with role, supervisor, and a rights ceiling
+- invite employees and accept the invitation with a client-generated public key
+- record KYC through a manual adapter; only an operator review can mark a person verified or rejected
+- import a Personio or Entra snapshot without calling either API
+- offboard a person immediately and suspend every agent they are responsible for
 
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
