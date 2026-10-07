@@ -3,6 +3,10 @@ import type { Database } from 'better-sqlite3'
 import { Hono } from 'hono'
 import webPush from 'web-push'
 import { getAgent, getBeamConnectionBetween, logAuditEvent } from '../db.js'
+import { checkAgentRateLimit } from '../rate-limit.js'
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '../trust/attachments.js'
+import { senderOrgSuspended } from '../trust/suspension.js'
+import { UNTRUSTED_LABEL, untrustedAttachment, intentTrustView } from '../trust/untrusted.js'
 import { broadcastNetworkEvent, isAgentConnected } from '../websocket.js'
 import type { AgentRow } from '../types.js'
 import {
@@ -15,25 +19,11 @@ import {
 } from './network.js'
 
 const MAX_MESSAGE_LENGTH = 4_000
-const MAX_ATTACHMENT_BYTES = 6 * 1024 * 1024
 const MAX_ENCRYPTED_PLAINTEXT_BYTES = 9 * 1024 * 1024
 const ENCRYPTION_ALGORITHM = 'X25519-HKDF-SHA256-AES-256-GCM'
 const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/
 const DEVICE_ID_RE = /^[A-Za-z0-9_-]{16,128}$/
 const SHA256_RE = /^[a-f0-9]{64}$/
-const ALLOWED_ATTACHMENT_TYPES = new Set([
-  'application/pdf',
-  'audio/mp4',
-  'audio/mpeg',
-  'audio/ogg',
-  'audio/wav',
-  'audio/webm',
-  'image/gif',
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'text/plain',
-])
 
 type ConversationRow = {
   conversation_id: string
@@ -118,11 +108,21 @@ function messageSelect(): string {
   `
 }
 
-function serializeMessage(row: MessageRow): object {
+function serializeMessage(db: Database, row: MessageRow): object {
   let encrypted: Record<string, unknown> | null = null
   if (row.encrypted_payload) {
     try { encrypted = JSON.parse(row.encrypted_payload) as Record<string, unknown> } catch { encrypted = null }
   }
+  const attachment = row.attachment_id ? {
+    attachmentId: row.attachment_id,
+    name: row.file_name,
+    mimeType: row.mime_type,
+    byteSize: row.byte_size,
+    sha256: row.sha256,
+    url: `/network/attachments/${encodeURIComponent(row.attachment_id)}`,
+    executable: false as const,
+  } : null
+  const trust = intentTrustView(db, row.sender_beam_id)
   return {
     messageId: row.message_id,
     conversationId: row.conversation_id,
@@ -131,15 +131,22 @@ function serializeMessage(row: MessageRow): object {
     type: row.message_type,
     automationDepth: row.automation_depth,
     encrypted,
-    attachment: row.attachment_id ? {
-      attachmentId: row.attachment_id,
-      name: row.file_name,
-      mimeType: row.mime_type,
-      byteSize: row.byte_size,
-      sha256: row.sha256,
-      url: `/network/attachments/${encodeURIComponent(row.attachment_id)}`,
-    } : null,
+    attachment,
     createdAt: row.created_at,
+    untrusted: {
+      label: UNTRUSTED_LABEL,
+      text: row.body || null,
+      encrypted,
+      attachment: untrustedAttachment(attachment),
+    },
+    trust,
+    metadata: {
+      messageId: row.message_id,
+      conversationId: row.conversation_id,
+      senderBeamId: row.sender_beam_id,
+      type: row.message_type,
+      createdAt: row.created_at,
+    },
   }
 }
 
@@ -231,7 +238,7 @@ function serializeConversation(db: Database, row: ConversationRow, viewerBeamId:
     counterpart,
     online: row.kind === 'direct' ? Boolean(counterpart?.online) : memberProfiles.some((member) => member.beamId !== viewerBeamId && member.online),
     unread: unread.count,
-    lastMessage: lastMessage ? serializeMessage(lastMessage) : null,
+    lastMessage: lastMessage ? serializeMessage(db, lastMessage) : null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
   }
@@ -515,12 +522,18 @@ export function networkMessagingRouter(db: Database): Hono {
       ORDER BY m.created_at DESC, m.message_id DESC
       LIMIT ?
     `).all(conversationId, before, before, limit) as MessageRow[]
-    return c.json({ messages: rows.reverse().map(serializeMessage), total: rows.length })
+    return c.json({ messages: rows.reverse().map((row) => serializeMessage(db, row)), total: rows.length })
   })
 
   router.post('/conversations/:conversationId/messages', async (c) => {
     const auth = authenticateNetworkIdentity(db, c.req.raw)
     if (!auth) return c.json({ error: 'A valid Beam credential is required', errorCode: 'UNAUTHORIZED' }, 401)
+    if (!checkAgentRateLimit(auth.agent.beam_id)) {
+      return c.json({ error: 'Rate limit exceeded', errorCode: 'RATE_LIMITED' }, 429)
+    }
+    if (senderOrgSuspended(db, auth.agent.beam_id)) {
+      return c.json({ error: 'Organization is suspended', errorCode: 'ORG_SUSPENDED' }, 403)
+    }
     const conversationId = c.req.param('conversationId')
     const conversation = getConversationForMember(db, conversationId, auth.agent.beam_id)
     if (!conversation) return c.json({ error: 'Conversation not found', errorCode: 'CONVERSATION_NOT_FOUND' }, 404)
@@ -608,7 +621,7 @@ export function networkMessagingRouter(db: Database): Hono {
     })()
     const row = db.prepare(`${messageSelect()} WHERE m.message_id = ?`).get(messageId) as MessageRow
     const members = memberBeamIds
-    const serialized = serializeMessage(row)
+    const serialized = serializeMessage(db, row)
     broadcastNetworkEvent(members, { type: 'network.message.created', conversationId, message: serialized })
     void notifyOfflineMembers(db, conversationId, auth.agent.beam_id, row)
     return c.json({ message: serialized }, 201)

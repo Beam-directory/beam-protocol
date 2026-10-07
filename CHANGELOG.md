@@ -21,6 +21,13 @@
 - npm 10 or newer is required to install this repository
 - disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
 
+### Trust layer: untrusted content and mandate limits
+- deliver message and file bytes as labeled untrusted data, separate from sender assertion, scopes, and metadata
+- require catalog intents for orders, payments, schedule commits, and file sends, and hold anything outside the mandate for a person instead of delivering it
+- keep unknown senders as a contact request for the responsible person
+- record injection reports and let an operator suspend the agent, person, or organization
+- reject a suspended organization on intent and network send
+
 ### Trust layer: mandates and recipient acceptance
 - record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified
 - reject a replay of a revoked mandate or delegation; offboarding, a rights cut, a key change, and a change of responsible person revoke mandates and delegations that no longer hold

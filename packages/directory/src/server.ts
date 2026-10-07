@@ -14,6 +14,8 @@ import { businessVerificationRouter } from './routes/business-verify.js'
 import { credentialsRouter } from './routes/credentials.js'
 import { delegationsRouter } from './routes/delegations.js'
 import { mandatesRouter } from './routes/mandates.js'
+import { abuseAdminRouter, abuseNetworkRouter, orgSuspensionRouter } from './routes/abuse.js'
+import { trustInboxRouter } from './routes/trust-inbox.js'
 import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { identityClaimsRouter } from './routes/identity-claims.js'
@@ -4011,11 +4013,15 @@ export function createApp(db: Database): Hono {
 
   app.route('/orgs', orgsRouter(db))
   app.route('/orgs', peopleRouter(db))
+  app.route('/orgs', trustInboxRouter(db))
   app.route('/people', peopleInvitationRouter(db))
   app.route('/admin/people', peopleAdminRouter(db))
   app.route('/admin/orgs', orgRegistryAdminRouter(db))
+  app.route('/admin/orgs', orgSuspensionRouter(db))
+  app.route('/admin/abuse', abuseAdminRouter(db))
   app.route('/identity-claims', identityClaimsRouter(db))
   app.route('/network', networkRouter(db))
+  app.route('/network', abuseNetworkRouter(db))
   app.route('/network', networkMessagingRouter(db))
   app.route('/agents', agentsRouter(db))
   app.route('/agents', webSocketTicketRouter(db))
@@ -4655,6 +4661,12 @@ export function createApp(db: Database): Hono {
         }
         if (err.code === 'ACCEPTANCE_DENIED') {
           return c.json({ error: err.message, errorCode: 'ACCEPTANCE_DENIED' }, 403)
+        }
+        if (err.code === 'ORG_SUSPENDED') {
+          return c.json({ error: err.message, errorCode: 'ORG_SUSPENDED' }, 403)
+        }
+        if (err.code === 'APPROVAL_REQUIRED') {
+          return c.json({ error: err.message, errorCode: 'APPROVAL_REQUIRED', approvalId: err.approvalId, executed: false }, 202)
         }
         if (err.code === 'RATE_LIMITED') {
           return c.json({ error: err.message, errorCode: 'RATE_LIMITED' }, 429)
