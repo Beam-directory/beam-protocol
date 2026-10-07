@@ -25,6 +25,7 @@ import {
 } from 'lucide-react'
 import { cn } from 'cn'
 import { CodeWindow, type Snippet } from '@/components/code-window'
+import { InProgressBadge } from '@/components/in-progress-badge'
 import { TrustFlow } from '@/components/trust-flow'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
@@ -39,30 +40,32 @@ const EARLY_ACCESS_URL = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('
 
 const assistants = ['Grok', 'Claude', 'OpenAI', 'MCP']
 
-const chain: { icon: Icon; title: string; text: string }[] = [
+type Item = { icon: Icon; title: string; text: string; planned?: boolean }
+
+const chain: Item[] = [
   { icon: BuildingIcon, title: 'Firma', text: 'Geprüft nach Name, Domain und Inhaber. Das Siegel im Register zeigt das öffentlich.' },
-  { icon: UserIcon, title: 'Mensch', text: 'Eine Person in der Firma führt den Agenten. Ihre Rolle setzt die Grenzen.' },
-  { icon: ScrollTextIcon, title: 'Vollmacht', text: 'Der Agent handelt im Auftrag dieser Person und nur im Rahmen ihrer Rechte.' },
+  { icon: UserIcon, title: 'Mensch', text: 'Eine Person in der Firma stellt den Agenten aus und steht für ihn ein.' },
+  { icon: ScrollTextIcon, title: 'Vollmacht', text: 'Der Agent soll im Auftrag dieser Person handeln, nur im Rahmen ihrer Rechte und Betragsgrenzen.', planned: true },
 ]
 
-const rules: { icon: Icon; title: string; text: string }[] = [
-  { icon: ShieldCheckIcon, title: 'Nie mehr als der Mensch', text: 'Rechte werden weitergegeben, nicht erweitert. Was die Person nicht darf, darf ihr Agent auch nicht.' },
-  { icon: ChevronsUpIcon, title: 'Freigaben gehen nach oben', text: 'Braucht eine Aktion mehr Befugnis, fragt der Agent die nächste Stelle in der Hierarchie.' },
-  { icon: UserXIcon, title: 'Offboarding wirkt sofort', text: 'Verlässt eine Person die Firma, verlieren ihre Agenten sofort ihre Berechtigung.' },
+const rules: Item[] = [
+  { icon: ShieldCheckIcon, title: 'Nie mehr als der Mensch', text: 'Rechte werden nur weitergegeben, nie erweitert. Beam wird das bei jeder Aktion prüfen.', planned: true },
+  { icon: ChevronsUpIcon, title: 'Freigaben gehen nach oben', text: 'Braucht eine Aktion mehr Befugnis, wird der Agent die nächste Stelle in der Hierarchie fragen.', planned: true },
+  { icon: UserXIcon, title: 'Offboarding wirkt sofort', text: 'Verlässt eine Person die Firma, wird Beam ihre Agenten sofort sperren.', planned: true },
 ]
 
 const steps = [
-  { title: 'Agent verbinden', text: 'Dein Agent bekommt eine Beam-ID, gebunden an dich und deine Firma. Über MCP, das Grok-Plugin oder das SDK.' },
+  { title: 'Agent verbinden', text: 'Dein Agent bekommt eine Beam-ID, gebunden an deine Firma. Über MCP, das Grok-Plugin oder das SDK.' },
   { title: 'Kontakt anfragen', text: 'Finde die Gegenseite im Verzeichnis oder über ihre Beam-ID. Erst wenn sie annimmt, können eure Agenten schreiben.' },
   { title: 'Sagen, was passieren soll', text: '„Schreib Lakis’ Agent das hier und schick ihm die Datei.“ Dein Agent signiert, verschlüsselt und fragt vorher um Freigabe, wo es nötig ist.' },
 ]
 
-const security: { icon: Icon; title: string; text: string }[] = [
+const security: Item[] = [
   { icon: KeyRoundIcon, title: 'Signaturen', text: 'Jede Nachricht trägt eine Ed25519-Signatur. Der Empfänger prüft sie gegen den öffentlichen Schlüssel der Beam-ID.' },
   { icon: LockIcon, title: 'Ende-zu-Ende-Verschlüsselung', text: 'Schlüsseltausch mit X25519, Inhalt mit AES-256-GCM. Entschlüsselt wird nur bei Absender und Empfänger.' },
-  { icon: FingerprintIcon, title: 'Vollmachtskette', text: 'Firma, Mensch und Vollmacht werden mitgeprüft. Fehlt ein Glied, sieht der Empfänger das sofort.' },
-  { icon: HandIcon, title: 'Freigaben', text: 'Der Agent zeigt eine Vorschau. Gesendet wird erst, wenn der Mensch zustimmt. Fehlt ihm die Befugnis, geht die Freigabe nach oben.' },
-  { icon: UserXIcon, title: 'Widerruf beim Offboarding', text: 'Wird eine Person aus der Firma entfernt, werden ihre Agenten sofort widerrufen.' },
+  { icon: FingerprintIcon, title: 'Vollmachtskette', text: 'Heute prüft der Empfänger Firma und Signatur. Vollmacht und Rechte des Menschen kommen als nächste Glieder dazu.', planned: true },
+  { icon: HandIcon, title: 'Freigaben', text: 'Der Agent zeigt eine Vorschau, gesendet wird erst nach Zustimmung des Menschen. Die Eskalation an Vorgesetzte ist im Aufbau.' },
+  { icon: UserXIcon, title: 'Widerruf beim Offboarding', text: 'Wird eine Person aus der Firma entfernt, wird Beam ihre Agenten sofort widerrufen.', planned: true },
   { icon: SlidersHorizontalIcon, title: 'Policy beim Betreiber', text: 'Erlaubte Aktionen und Mindest-Vertrauensstufe legt der Betreiber fest. Ein Prompt kann sie nicht aushebeln.' },
 ]
 
@@ -107,7 +110,7 @@ beam_send confirmed=true`,
 const faqs = [
   {
     q: 'Was ist eine Beam-ID?',
-    a: 'Die Adresse eines Agenten, zum Beispiel lakis@firma-b.beam.directory. Sie ist an einen Schlüssel, einen Menschen und eine Firma gebunden.',
+    a: 'Die Adresse eines Agenten, zum Beispiel lakis@firma-b.beam.directory. Sie ist an einen Schlüssel und eine Firma gebunden. Die Bindung an einen geprüften Menschen ist im Aufbau.',
   },
   {
     q: 'Kann Beam meine Nachrichten lesen?',
@@ -182,7 +185,7 @@ function ChatPreview() {
           Erhalten. Ich lege es Lakis zur Freigabe vor.
         </div>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <CheckIcon className="size-2.5 text-success" /> Kette geprüft: Firma, Mensch, Vollmacht
+          <CheckIcon className="size-2.5 text-success" /> Absender geprüft: Firma, Signatur
         </span>
       </div>
     </div>
@@ -212,8 +215,8 @@ export function LandingPage() {
               Die Vertrauensschicht für <span className="beam-text-gradient">KI{'‑'}Agenten.</span>
             </h1>
             <p className="max-w-2xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">
-              Agenten schreiben sich signiert und Ende-zu-Ende verschlüsselt. Hinter jeder Nachricht steht eine geprüfte Kette aus Firma,
-              Mensch und Vollmacht. Kein Agent darf mehr als sein Mensch.
+              Agenten schreiben sich signiert und Ende-zu-Ende verschlüsselt. Dahinter steht eine Kette aus Firma, Mensch und Vollmacht,
+              nach einem Grundsatz: Kein Agent darf mehr als sein Mensch.
             </p>
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
@@ -251,7 +254,7 @@ export function LandingPage() {
             id="kette-title"
             eyebrow="Die Kette"
             title="Ein Agent darf nie mehr als sein Mensch."
-            lead="Beam bindet jeden Agenten an einen Menschen und jeden Menschen an eine geprüfte Firma. Der Empfänger sieht diese Kette bei jeder Nachricht, innerhalb einer Firma und zwischen Firmen."
+            lead="Jeder Agent gehört zu einer geprüften Firma, innerhalb einer Firma und zwischen Firmen. Heute prüft der Empfänger Firma und Signatur. Mensch, Vollmacht und Hierarchie kommen als nächste Glieder dazu."
           />
           <ol className="relative grid gap-4 md:grid-cols-3">
             <span
@@ -261,10 +264,13 @@ export function LandingPage() {
             {chain.map((item, index) => (
               <li key={item.title} className="beam-surface relative flex flex-col gap-3 rounded-2xl border p-5 sm:p-6">
                 <div className="flex items-center justify-between">
-                  <IconTile icon={item.icon} className="border-beam/30" />
+                  <IconTile icon={item.icon} className={item.planned ? 'border-dashed' : 'border-beam/30'} />
                   <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
                 </div>
-                <h3 className="text-lg font-semibold tracking-tight">{item.title}</h3>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="text-lg font-semibold tracking-tight">{item.title}</h3>
+                  {item.planned ? <InProgressBadge /> : null}
+                </div>
                 <p className="text-sm leading-6 text-muted-foreground">{item.text}</p>
               </li>
             ))}
@@ -273,8 +279,9 @@ export function LandingPage() {
             {rules.map((rule) => (
               <li key={rule.title} className="flex gap-4">
                 <rule.icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-beam" />
-                <div className="flex flex-col gap-1">
+                <div className="flex flex-col gap-1.5">
                   <h3 className="font-semibold tracking-tight">{rule.title}</h3>
+                  {rule.planned ? <InProgressBadge /> : null}
                   <p className="text-sm leading-6 text-muted-foreground">{rule.text}</p>
                 </div>
               </li>
@@ -317,7 +324,7 @@ export function LandingPage() {
             >
               <ChatPreview />
             </BentoCard>
-            <BentoCard icon={AtSignIcon} title="Beam-IDs" text="Eine eindeutige Adresse pro Agent, an Schlüssel, Mensch und Firma gebunden.">
+            <BentoCard icon={AtSignIcon} title="Beam-IDs" text="Eine eindeutige Adresse pro Agent, an Schlüssel und Firma gebunden.">
               <span aria-hidden="true" className="w-fit max-w-full truncate rounded-md border bg-background/70 px-2 py-1 font-mono text-xs text-muted-foreground">
                 lakis@firma-b.beam.directory
               </span>
@@ -397,12 +404,15 @@ export function LandingPage() {
             id="sicherheit-title"
             eyebrow="Sicherheit"
             title="Mechanismen statt Versprechen."
-            lead="Was Beam technisch tut, damit eine Nachricht echt, vertraulich und berechtigt ist."
+            lead="Was Beam technisch tut, damit eine Nachricht echt und vertraulich ist, und was als Nächstes kommt."
           />
           <ul className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2 lg:grid-cols-3">
             {security.map((item) => (
               <li key={item.title} className="flex flex-col gap-3 bg-background p-6">
-                <item.icon aria-hidden="true" className="size-5 text-beam" />
+                <div className="flex items-start justify-between gap-3">
+                  <item.icon aria-hidden="true" className={cn('size-5', item.planned ? 'text-muted-foreground' : 'text-beam')} />
+                  {item.planned ? <InProgressBadge /> : null}
+                </div>
                 <h3 className="font-semibold tracking-tight">{item.title}</h3>
                 <p className="text-sm leading-6 text-muted-foreground">{item.text}</p>
               </li>

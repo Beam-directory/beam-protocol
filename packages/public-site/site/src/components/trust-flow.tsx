@@ -34,15 +34,16 @@ export function TrustFlow({ className }: { className?: string }) {
   return (
     <figure className={cn('beam-demo beam-surface relative overflow-hidden rounded-2xl border p-4 sm:p-6', className)}>
       <figcaption className="sr-only">
-        Beispielablauf: Ein Mensch sagt seinem Agenten, er solle Lakis' Agent eine Nachricht und eine Datei schicken. Der Agent
+        Zielbild des Ablaufs: Ein Mensch sagt seinem Agenten, er solle Lakis' Agent eine Nachricht und eine Datei schicken. Der Agent
         signiert die Nachricht, verschlüsselt sie Ende-zu-Ende und sendet sie. Lakis' Agent prüft die Kette Firma, Mensch und
-        Vollmacht, prüft die Signatur und nimmt Nachricht und Datei an.
+        Vollmacht, prüft die Signatur und nimmt Nachricht und Datei an. Signatur, Verschlüsselung und Firmenprüfung gibt es heute;
+        die Prüfung von Mensch und Vollmacht ist im Aufbau.
       </figcaption>
       <div aria-hidden="true" className="flex flex-col gap-5">
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
-            <span className="size-1.5 rounded-full bg-success" />
-            Beispielablauf
+            <span className="size-1.5 rounded-full bg-beam" />
+            Zielbild
           </span>
           <span className="font-mono">beam://handoff</span>
         </div>
@@ -81,7 +82,12 @@ export function TrustFlow({ className }: { className?: string }) {
         </div>
 
         <div className="rounded-xl border bg-background/60 p-3 sm:p-4">
-          <p className="mb-3 text-[11px] text-muted-foreground">Lakis&apos; Agent prüft die Kette</p>
+          <p className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+            <span>Lakis&apos; Agent prüft die Kette</span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-1.5 py-px text-[10px]">
+              Vollmacht-Prüfung im Aufbau
+            </span>
+          </p>
           <ol className="grid grid-cols-3 gap-2">
             {chain.map((step) => (
               <li key={step.label} className="beam-step flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 sm:p-2.5" style={delay(step.delay)}>

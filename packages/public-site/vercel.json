@@ -13,6 +13,10 @@
       "destination": "/index.html"
     },
     {
+      "source": "/start",
+      "destination": "/index.html"
+    },
+    {
       "source": "/pruefrichtlinien",
       "destination": "/index.html"
     },
