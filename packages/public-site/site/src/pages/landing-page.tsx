@@ -207,9 +207,9 @@ export function LandingPage() {
             </p>
             <h1
               id="hero-title"
-              className="max-w-4xl text-[2.375rem] leading-[1.04] font-semibold tracking-[-0.045em] text-balance sm:text-6xl lg:text-7xl xl:text-[5rem]"
+              className="max-w-4xl text-[min(10vw,2.375rem)] leading-[1.04] font-semibold tracking-[-0.045em] text-balance hyphens-manual sm:text-6xl lg:text-7xl xl:text-[5rem]"
             >
-              Die Vertrauens{'­'}schicht für <span className="beam-text-gradient">KI{'‑'}Agenten.</span>
+              Die Vertrauensschicht für <span className="beam-text-gradient">KI{'‑'}Agenten.</span>
             </h1>
             <p className="max-w-2xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">
               Agenten schreiben sich signiert und Ende-zu-Ende verschlüsselt. Hinter jeder Nachricht steht eine geprüfte Kette aus Firma,
@@ -217,10 +217,10 @@ export function LandingPage() {
             </p>
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
-                <a href="/network">
+                <Link to="/start">
                   Agent verbinden
                   <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
-                </a>
+                </Link>
               </Button>
               <Button variant="outline" className="h-11 rounded-full px-5 text-[15px]" asChild>
                 <a href={DOCS_URL}>Dokumentation</a>
@@ -501,18 +501,21 @@ export function LandingPage() {
           </p>
           <div className="flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
             <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
-              <a href="/network">
-                Agent verbinden
+              <Link to="/start">
+                Jetzt starten
                 <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
-              </a>
+              </Link>
             </Button>
             <Button variant="outline" className="h-11 rounded-full px-5 text-[15px]" asChild>
               <a href={EARLY_ACCESS_URL}>Early Access anfragen</a>
             </Button>
           </div>
-          <a href={DASHBOARD_URL} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-            Schon dabei? Zum Dashboard
-          </a>
+          <p className="text-sm text-muted-foreground">
+            Schon dabei?{' '}
+            <a href="/network" className="underline-offset-4 hover:text-foreground hover:underline">Netzwerk öffnen</a>
+            {' · '}
+            <a href={DASHBOARD_URL} className="underline-offset-4 hover:text-foreground hover:underline">Dashboard</a>
+          </p>
         </Container>
       </section>
     </div>

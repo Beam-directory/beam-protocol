@@ -6,6 +6,7 @@ import { DirectoryPage } from '@/pages/directory-page'
 import { GuidelinesPage } from '@/pages/guidelines-page'
 import { ImpressumPage } from '@/pages/impressum-page'
 import { LandingPage } from '@/pages/landing-page'
+import { StartPage } from '@/pages/start-page'
 
 export default function App() {
   return (
@@ -13,6 +14,7 @@ export default function App() {
       <SiteShell>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/start" element={<StartPage />} />
           <Route path="/siegel-beantragen" element={<ApplyPage />} />
           <Route path="/verzeichnis" element={<DirectoryPage />} />
           <Route path="/pruefrichtlinien" element={<GuidelinesPage />} />

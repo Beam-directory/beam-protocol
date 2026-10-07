@@ -22,7 +22,8 @@ const footerColumns: { title: string; items: NavItem[] }[] = [
   {
     title: 'Produkt',
     items: [
-      { label: 'Agent verbinden', href: '/network' },
+      { label: 'Agent verbinden', to: '/start' },
+      { label: 'Netzwerk öffnen', href: '/network' },
       { label: 'Dashboard', href: DASHBOARD_URL, external: true },
       { label: 'Verzeichnis', to: '/verzeichnis' },
       { label: 'Siegel beantragen', to: '/siegel-beantragen' },
@@ -82,7 +83,7 @@ function ThemeToggle() {
 export function SiteShell({ children }: { children: ReactNode }) {
   const { pathname } = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
-  const fullBleed = pathname === '/'
+  const fullBleed = pathname === '/' || pathname === '/start'
   const closeMenu = () => setMenuOpen(false)
 
   return (
@@ -114,7 +115,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
               <a href={DASHBOARD_URL}>Dashboard</a>
             </Button>
             <Button className="hidden h-8 rounded-full px-3.5 sm:inline-flex" asChild>
-              <a href="/network">Agent verbinden</a>
+              <Link to="/start" onClick={closeMenu}>Agent verbinden</Link>
             </Button>
             <Button
               variant="ghost"
@@ -140,9 +141,12 @@ export function SiteShell({ children }: { children: ReactNode }) {
               <li>
                 <NavLink item={{ label: 'Dashboard', href: DASHBOARD_URL, external: true }} onNavigate={closeMenu} className="flex items-center py-3 text-base text-foreground" />
               </li>
+              <li>
+                <NavLink item={{ label: 'Netzwerk öffnen', href: '/network' }} onNavigate={closeMenu} className="flex items-center py-3 text-base text-foreground" />
+              </li>
               <li className="py-3">
                 <Button className="h-10 w-full rounded-full" asChild>
-                  <a href="/network">Agent verbinden</a>
+                  <Link to="/start" onClick={closeMenu}>Agent verbinden</Link>
                 </Button>
               </li>
             </ul>
