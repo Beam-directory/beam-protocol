@@ -237,7 +237,7 @@ try {
   const tools = await client.listTools()
   const toolNames = tools.tools.map((tool) => tool.name).sort()
   if (toolNames.join(',') !== expectedTools.join(',')) {
-    fail(`remote MCP tool surface did not match the expected read-only tools: ${JSON.stringify({ expected: expectedTools, actual: toolNames })}`)
+    fail(`remote MCP tool surface did not match the expected tools: ${JSON.stringify({ expected: expectedTools, actual: toolNames })}`)
   }
   const statusResult = await client.callTool({ name: 'beam_status', arguments: {} })
   if (statusResult.isError === true) fail('beam_status returned an MCP error')

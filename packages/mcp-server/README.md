@@ -168,7 +168,9 @@ Network send also requires a dedicated X25519 keypair mounted as
 `BEAM_DH_PUBLIC_KEY_BASE64_FILE` and `BEAM_DH_PRIVATE_KEY_BASE64_FILE`, with the
 public half registered on the connector's Beam identity. The connector
 decrypts inbox content and encrypts outgoing Network messages locally; the
-Directory receives only the signed opaque envelope.
+Directory receives only the signed opaque envelope. Inbox text, attachment
+names, and connection-request notes are labeled untrusted. The connector does
+not treat that text as an instruction.
 
 ### Connect Grok
 

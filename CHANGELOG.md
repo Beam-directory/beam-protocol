@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Hosted MCP pilot
+- enable Beam Network reads and confirmed sends on the COPPEN Fly profile for `grok@coppen.beam.directory`
+- label inbox text, attachment names, and connection-request notes as untrusted remote content
+- keep `beam:send` optional in Keycloak unless the operator passes `--enable-send-scope`
+
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
 - mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email

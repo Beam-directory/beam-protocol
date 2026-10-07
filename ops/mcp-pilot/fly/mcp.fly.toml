@@ -31,8 +31,8 @@ kill_timeout = 20
   BEAM_MCP_REQUIRE_VERIFIED_TARGET = "true"
   BEAM_MCP_MIN_VERIFICATION_TIER = "business"
   BEAM_MCP_MIN_TRUST_SCORE = "0.5"
-  BEAM_MCP_ENABLE_NETWORK = "false"
-  BEAM_MCP_ENABLE_SEND = "false"
+  BEAM_MCP_ENABLE_NETWORK = "true"
+  BEAM_MCP_ENABLE_SEND = "true"
 
 [[files]]
   guest_path = "/run/secrets/oauth_client_secret"
