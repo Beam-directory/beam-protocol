@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { generateKeyPairSync } from 'node:crypto'
 import test from 'node:test'
 import { createDatabase, getOrg, markOrgVerified, updatePublicEndpointShieldPolicy } from './db.js'
 import { createApp } from './server.js'
@@ -101,10 +102,17 @@ test('verified organization claims issue Beam IDs and clear claim expiry', async
     const issued = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ agentName: 'grok', capabilities: ['conversation.message'] }),
+      body: JSON.stringify({
+        agentName: 'grok',
+        capabilities: ['conversation.message'],
+        publicKey: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      }),
     }))
     assert.equal(issued.status, 201)
-    assert.equal((await issued.json() as { beamId: string }).beamId, 'grok@acme.beam.directory')
+    const issuedBody = await issued.json() as { beamId: string; privateKey?: string; publicKey: string }
+    assert.equal(issuedBody.beamId, 'grok@acme.beam.directory')
+    assert.equal(issuedBody.privateKey, undefined)
+    assert.ok(issuedBody.publicKey)
   } finally {
     db.close()
   }

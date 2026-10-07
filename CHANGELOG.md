@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### Trust layer: organization identity and key custody
+- bind an organization to its full registrable domain, so `coppen.de` and `coppen.at` cannot share one namespace
+- accept DNS TXT or `https://<domain>/.well-known/beam-verification` as the one-time domain proof
+- record Handelsregister or LEI filings per organization, with a manual representation review and an audit trail
+- stop generating agent signing keys on organization and workspace issuance; require a client public key
+- allow signing-key rotation only with the current key's signature or the owning organization's API key
+
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
 - mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email

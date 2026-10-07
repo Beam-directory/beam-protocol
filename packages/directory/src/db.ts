@@ -1,6 +1,7 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
+import { ensureTrustOrgSchema } from './trust/schema.js'
 import type {
   AgentIntentStats,
   AgentKeyRow,
@@ -1232,6 +1233,7 @@ function initSchema(db: DB): void {
   `).run(backfillKeysCreatedAt)
 
   migrateIntentLifecycleModel(db)
+  ensureTrustOrgSchema(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
@@ -2665,9 +2667,20 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
   `).all(orgName) as Array<OrgAgentRow & Partial<AgentRow>>
 }
 
-export function markOrgVerified(db: DB, name: string): OrgRow | null {
+export function markOrgVerified(
+  db: DB,
+  name: string,
+  via: 'dns' | 'well-known' | null = null,
+): OrgRow | null {
   const now = nowIso()
-  db.prepare('UPDATE orgs SET verified = 1, verified_at = ?, claim_expires_at = NULL WHERE name = ?').run(now, name)
+  db.prepare(`
+    UPDATE orgs
+    SET verified = 1,
+        verified_at = ?,
+        claim_expires_at = NULL,
+        domain_verified_via = COALESCE(?, domain_verified_via)
+    WHERE name = ?
+  `).run(now, via, name)
   return getOrg(db, name)
 }
 
