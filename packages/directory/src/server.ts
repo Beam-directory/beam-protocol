@@ -13,6 +13,7 @@ import { billingRouter } from './routes/billing.js'
 import { businessVerificationRouter } from './routes/business-verify.js'
 import { credentialsRouter } from './routes/credentials.js'
 import { delegationsRouter } from './routes/delegations.js'
+import { mandatesRouter } from './routes/mandates.js'
 import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { identityClaimsRouter } from './routes/identity-claims.js'
@@ -4022,6 +4023,7 @@ export function createApp(db: Database): Hono {
   app.route('/agents', businessVerificationRouter(db))
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
+  app.route('/agents', mandatesRouter(db))
   app.route('/agents', reportsRouter(db))
   app.route('/agents', credentialsRouter(db))
   app.route('/agents', didRouter(db))
@@ -4650,6 +4652,9 @@ export function createApp(db: Database): Hono {
         }
         if (err.code === 'FORBIDDEN') {
           return c.json({ error: err.message, errorCode: 'FORBIDDEN' }, 403)
+        }
+        if (err.code === 'ACCEPTANCE_DENIED') {
+          return c.json({ error: err.message, errorCode: 'ACCEPTANCE_DENIED' }, 403)
         }
         if (err.code === 'RATE_LIMITED') {
           return c.json({ error: err.message, errorCode: 'RATE_LIMITED' }, 429)

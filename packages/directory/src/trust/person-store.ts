@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
+import { revokeActiveMandatesForPerson } from './mandate-store.js'
 import type { ScopeGrant } from './scopes.js'
 
 export type PersonRow = {
@@ -249,7 +250,10 @@ export function suspendAgentsForPerson(db: Database, personId: string, at: strin
   return result.changes
 }
 
-export function offboardPerson(db: Database, person: PersonRow): { person: PersonRow; suspendedAgents: number } {
+export function offboardPerson(
+  db: Database,
+  person: PersonRow,
+): { person: PersonRow; suspendedAgents: number; revokedMandates: number } {
   const at = person.offboarded_at ?? new Date().toISOString()
   if (person.status !== 'offboarded') {
     db.prepare(`
@@ -259,7 +263,8 @@ export function offboardPerson(db: Database, person: PersonRow): { person: Perso
     `).run(at, person.id)
   }
   const suspendedAgents = suspendAgentsForPerson(db, person.id, at)
-  return { person: getPerson(db, person.id) as PersonRow, suspendedAgents }
+  const revokedMandates = revokeActiveMandatesForPerson(db, person.id, at)
+  return { person: getPerson(db, person.id) as PersonRow, suspendedAgents, revokedMandates }
 }
 
 export function setAgentResponsiblePerson(db: Database, beamId: string, personId: string): void {

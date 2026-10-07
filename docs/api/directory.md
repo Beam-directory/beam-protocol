@@ -163,13 +163,69 @@ The organization API key can replace the public key or the rights of an active p
 POST /orgs/coppen/people/:id/offboard
 ```
 
-Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
+Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change, every agent they own is suspended, and every active mandate they signed is revoked. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
 
 ### Organization agents
 
 `POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key, and may set `responsiblePersonId`. The directory does not generate or return a private key. Omitting the public key returns `400 PUBLIC_KEY_REQUIRED`.
 
-Mandates and the first contact request are the remaining onboarding steps.
+### Mandates
+
+A mandate is signed by the agent's responsible person. The signed object is canonical JSON (sorted keys) of:
+
+```json
+{
+  "type": "mandate",
+  "jti": "8-80 url-safe characters",
+  "version": 1,
+  "personId": "<responsible person id>",
+  "agentBeamId": "agent@coppen.beam.directory",
+  "org": "coppen",
+  "scopes": { "actions": ["read", "order"], "order": { "maxAmount": "100.00", "currency": "EUR" } },
+  "expiresAt": "2026-12-01T00:00:00.000Z",
+  "escalationPersonId": null
+}
+```
+
+`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead.
+
+```http
+POST /agents/agent@coppen.beam.directory/mandates
+{ "jti": "...", "scopes": {}, "expiresAt": "...", "escalationPersonId": null, "signature": "<person signature>" }
+```
+
+Scopes wider than the person's rights return `400 MANDATE_EXCEEDS_RIGHTS`. Replaying the same signed payload, including after revoke or offboarding, returns `409 MANDATE_REPLAY` and does not insert a row.
+
+```http
+POST /agents/agent@coppen.beam.directory/mandates/:jti/revoke
+{ "signature": "<signature over {type:'mandate-revoke', jti, personId}>" }
+```
+
+Delegations keep the previous signed payload. A client may add `nonce` (8–128 url-safe characters) inside that signed object. After revoke, the same signed payload, or the same grantor, grantee, scope, and expiry, returns `409 DELEGATION_REPLAY`.
+
+### Trust assertion and acceptance
+
+```http
+GET /agents/agent@coppen.beam.directory/trust-assertion
+```
+
+The directory signs `{v, beamId, org, person, mandate, issuedAt, expiresAt}` with the stable issuer key. The response adds `signature` and `publicKey`. The assertion expires after 15 minutes. Without `BEAM_DIRECTORY_SIGNING_PRIVATE_KEY` and `BEAM_DIRECTORY_SIGNING_PUBLIC_KEY` the route returns `503 ISSUER_KEY_REQUIRED`. Intent delivery still proceeds and carries `trustAssertion: null` beside the frame. A configured issuer adds the assertion beside the frame and on direct HTTP delivery; the signed intent frame itself is unchanged. A result signature is also stored on `intent_log.result_signature`.
+
+```http
+PUT /agents/agent@coppen.beam.directory/acceptance
+x-api-key: beam_org_...
+
+{
+  "allowedOrgDomains": ["coppen.de"],
+  "allowedScopes": ["read"],
+  "allowedAgents": [],
+  "requireKnownContact": false
+}
+```
+
+The organization API key or a signature of the agent's current key over `{type:'acceptance', beamId, allowedOrgDomains, allowedScopes, allowedAgents, requireKnownContact}` is required. An agent API key alone is not enough. No stored rule means the existing ACL still applies. An empty list does not filter that dimension. A stored rule that rejects the sender returns `403 ACCEPTANCE_DENIED`.
+
+The first contact request remains `POST /network/connections`.
 
 ## `POST /register`
 

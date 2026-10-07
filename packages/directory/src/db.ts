@@ -3996,17 +3996,44 @@ export function listRevokedAgentKeys(db: DB): AgentKeyRow[] {
   `).all() as AgentKeyRow[]
 }
 
+export class DelegationReplayError extends Error {
+  readonly code = 'DELEGATION_REPLAY'
+
+  constructor() {
+    super('This signed delegation was already used and cannot be created again')
+  }
+}
+
 export function createDelegation(
   db: DB,
-  input: { grantorBeamId: string; granteeBeamId: string; scope: string; expiresAt: number },
+  input: { grantorBeamId: string; granteeBeamId: string; scope: string; expiresAt: number; payloadHash: string },
 ): DelegationRow {
   const createdAt = nowMs()
-  const result = db.prepare(`
-    INSERT INTO delegations (grantor_beam_id, grantee_beam_id, scope, created_at, expires_at, revoked)
-    VALUES (?, ?, ?, ?, ?, 0)
-  `).run(input.grantorBeamId, input.granteeBeamId, input.scope, createdAt, input.expiresAt)
+  const insert = db.transaction(() => {
+    const priorHash = db.prepare('SELECT id FROM delegations WHERE payload_hash = ?').get(input.payloadHash) as { id: number } | undefined
+    if (priorHash) {
+      throw new DelegationReplayError()
+    }
+    const revokedTuple = db.prepare(`
+      SELECT id FROM delegations
+      WHERE revoked = 1
+        AND grantor_beam_id = ?
+        AND grantee_beam_id = ?
+        AND scope = ?
+        AND expires_at = ?
+    `).get(input.grantorBeamId, input.granteeBeamId, input.scope, input.expiresAt) as { id: number } | undefined
+    if (revokedTuple) {
+      throw new DelegationReplayError()
+    }
 
-  return db.prepare('SELECT * FROM delegations WHERE id = ?').get(Number(result.lastInsertRowid)) as DelegationRow
+    const result = db.prepare(`
+      INSERT INTO delegations (grantor_beam_id, grantee_beam_id, scope, created_at, expires_at, revoked, payload_hash)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+    `).run(input.grantorBeamId, input.granteeBeamId, input.scope, createdAt, input.expiresAt, input.payloadHash)
+    return Number(result.lastInsertRowid)
+  })
+
+  return db.prepare('SELECT * FROM delegations WHERE id = ?').get(insert()) as DelegationRow
 }
 
 export function listActiveDelegations(db: DB, beamId: string, currentTime = nowMs()): DelegationRow[] {
@@ -4120,7 +4147,8 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
       completed_at = NULL,
       round_trip_latency_ms = NULL,
       error_code = NULL,
-      result_json = NULL
+      result_json = NULL,
+      result_signature = NULL
   `).run(
     frame.nonce,
     frame.from,
@@ -4169,6 +4197,7 @@ export function finalizeIntentLog(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
 ): void {
   const completedAt = nowIso()
@@ -4189,6 +4218,7 @@ export function reconcileIntentLog(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
 ): void {
   const completedAt = nowIso()
@@ -4205,6 +4235,7 @@ function writeIntentLogFinalState(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
   completedAt: string,
 ): void {
@@ -4215,7 +4246,8 @@ function writeIntentLogFinalState(
         round_trip_latency_ms = ?,
         status = ?,
         error_code = ?,
-        result_json = ?
+        result_json = ?,
+        result_signature = COALESCE(?, result_signature)
     WHERE nonce = ?
   `).run(
     completedAt,
@@ -4223,6 +4255,7 @@ function writeIntentLogFinalState(
     input.status,
     input.errorCode ?? null,
     input.resultJson ?? null,
+    input.resultSignature ?? null,
     input.nonce,
   )
 
