@@ -36,7 +36,7 @@ jobs:
           cache: npm
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Build directory
         run: npm run build --workspace=@beam-protocol/directory

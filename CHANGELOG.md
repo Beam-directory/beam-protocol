@@ -2,6 +2,55 @@
 
 ## Unreleased
 
+### Trust layer: organization identity and key custody
+- bind an organization to its full registrable domain, so `coppen.de` and `coppen.at` cannot share one namespace
+- accept DNS TXT or `https://<domain>/.well-known/beam-verification` as the one-time domain proof
+- record Handelsregister or LEI filings per organization, with a manual representation review and an audit trail
+- stop generating agent signing keys on organization and workspace issuance; require a client public key
+- allow signing-key rotation only with the current key's signature, the owning organization's API key, or the active responsible person
+- assign the public Beam label only after domain verification; pending claims use a collision-free `--` namespace (`coppen.co.uk` is `coppen--co-uk`, `coppen-co.uk` is `coppen-co--uk`)
+- require a fresh signed nonce, the organization key, or an admin session before `PATCH /agents/:id/config` can change `dhPublicKey` or `httpEndpoint`
+- log and expose on `/health` when duplicate domains prevent the unique domain index
+
+### Breaking
+- workspace and organization clients must generate the Ed25519 key themselves and send `publicKey`; the directory no longer returns a private key
+- `bk_` alone can no longer rotate a signing key or replace `dhPublicKey` / `httpEndpoint`
+- Network, the MCP pilot scripts, and the OpenClaw scripts sign `PATCH /agents/:id/config`; the agent API key is still sent, so the same request works on directory 1.7.0
+- `scripts/production/claim-organization.mjs` stores the server-assigned name and writes the organization API key before any later check
+- `POST /agents/keypair/x25519` is removed
+- npm 10 or newer is required to install this repository
+- disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
+
+### Trust layer: untrusted content and mandate limits
+- deliver message and file bytes as labeled untrusted data, separate from sender assertion, scopes, and metadata
+- require catalog intents for orders, payments, schedule commits, and file sends, and hold anything outside the mandate for a person instead of delivering it
+- keep unknown senders as a contact request for the responsible person
+- record injection reports and let an operator suspend the agent, person, or organization
+- reject a suspended organization on intent and network send
+- match approvals to an organization by exact agent or person organization, and require the person's signature (the organization key is the audited emergency path)
+- count `order.place` and `payment.submit` toward the mandate's server UTC day, and release that reservation when the recipient never receives the intent
+- revoke mandates and delegations when an abuse review blocks an agent, and record an operator note when that suspension or an organization suspension is lifted
+- return HTTP 202 `APPROVAL_REQUIRED` from the TypeScript SDK as `{ executed: false }` instead of a delivered result; the CLI prints the hold and the MCP gateway does not report it as delivered
+- treat HTTP 202 `APPROVAL_REQUIRED` as a non-success in the Python SDK and as not retryable in the message bus
+
+### Trust layer: mandates and recipient acceptance
+- record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified
+- reject a replay of a revoked mandate or delegation; offboarding, a rights cut, a key change, and a change of responsible person revoke mandates and delegations that no longer hold
+- let the person, their active supervisor, or the organization key revoke one mandate
+- publish a trust assertion signed by the stable directory issuer for public agents, the agent, accepted contacts, or the organization key; person ids in it are SHA-256 refs and the assertion includes `suspended`
+- let a recipient store acceptance rules for organizations, scopes, agents, and known contacts, bound to a monotonic version, nonce, and timestamp
+- keep the responder signature on `intent_log.result_signature`
+
+### Trust layer: people and hierarchy
+- add organization people with role, supervisor, and a rights ceiling
+- invite employees and accept the invitation with a client-generated public key
+- record KYC through a manual adapter; only an operator review can mark a person verified or rejected
+- import a Personio or Entra snapshot without calling either API; match an existing person by external id or email and update their rights
+- replace an active person's public key or rights with `PATCH /orgs/:name/people/:id`; a new key returns KYC to `pending`
+- reject a child scope that drops a limit the parent still has
+- offboard a person immediately and suspend every agent they are responsible for
+- refuse network connections, websocket sessions, and delegations for a suspended agent or an inactive responsible person
+
 ### Hosted MCP pilot
 - keep the COPPEN default Fly profile read-only; the separate send profile adds Network reads, token-confirmed writes, and a 30-per-hour send limit for `grok@coppen.beam.directory`
 

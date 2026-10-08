@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { generateKeyPairSync } from 'node:crypto'
 import { readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import process from 'node:process'
@@ -78,6 +79,10 @@ if (!apply) {
   process.exit(0)
 }
 
+const signingKey = generateKeyPairSync('ed25519')
+const publicKeyBase64 = signingKey.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+const privateKeyBase64 = signingKey.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+
 const response = await fetch(`${orgCredential.directoryUrl}/orgs/${encodeURIComponent(orgCredential.name)}/agents`, {
   method: 'POST',
   headers: {
@@ -86,7 +91,7 @@ const response = await fetch(`${orgCredential.directoryUrl}/orgs/${encodeURIComp
     'Content-Type': 'application/json',
     'User-Agent': 'beam-organization-onboarding/1.0',
   },
-  body: JSON.stringify({ agentName, displayName, capabilities }),
+  body: JSON.stringify({ agentName, displayName, capabilities, publicKey: publicKeyBase64 }),
   signal: AbortSignal.timeout(15_000),
 })
 
@@ -100,8 +105,11 @@ try {
 if (!response.ok) {
   fail(`Directory agent issuance failed with HTTP ${response.status}: ${payload?.errorCode ?? payload?.error ?? 'unknown error'}`)
 }
-if (payload?.beamId !== beamId || typeof payload?.apiKey !== 'string' || typeof payload?.privateKeyBase64 !== 'string') {
-  fail('Directory response did not contain the expected one-time agent credential')
+if (payload?.beamId !== beamId || typeof payload?.apiKey !== 'string' || payload?.publicKeyBase64 !== publicKeyBase64) {
+  fail('Directory response did not contain the expected agent credential')
+}
+if (payload.privateKey || payload.privateKeyBase64) {
+  fail('Directory returned a private key')
 }
 
 const credential = {
@@ -111,8 +119,8 @@ const credential = {
   displayName: payload.displayName,
   org: payload.org,
   capabilities: payload.capabilities,
-  publicKeyBase64: payload.publicKeyBase64,
-  privateKeyBase64: payload.privateKeyBase64,
+  publicKeyBase64,
+  privateKeyBase64,
   apiKey: payload.apiKey,
   directoryUrl: orgCredential.directoryUrl,
   createdAt: payload.createdAt,

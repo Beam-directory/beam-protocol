@@ -8,7 +8,8 @@ COPY package.json package-lock.json ./
 COPY packages/sdk-typescript/package.json packages/sdk-typescript/tsconfig.json ./packages/sdk-typescript/
 COPY packages/mcp-server/package.json packages/mcp-server/tsconfig.json ./packages/mcp-server/
 
-RUN npm ci --ignore-scripts \
+RUN node -e "const v=require('node:child_process').execSync('npm -v').toString().trim(); if(Number(v.split('.')[0])<10){console.error('npm '+v+' is too old; need npm >= 10'); process.exit(1)}" \
+ && npm ci --ignore-scripts \
   --workspace=beam-protocol-sdk \
   --workspace=@beam-protocol/mcp-server \
   --include-workspace-root=false

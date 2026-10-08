@@ -54,6 +54,23 @@ function createEphemeralIdentity(): IssuerIdentity {
   }
 }
 
+export class IssuerKeyRequiredError extends Error {
+  readonly code = 'ISSUER_KEY_REQUIRED'
+
+  constructor() {
+    super('BEAM_DIRECTORY_SIGNING_PRIVATE_KEY and BEAM_DIRECTORY_SIGNING_PUBLIC_KEY are required')
+  }
+}
+
+/** Trust assertions fail closed. Existing verifiable credentials may still use the ephemeral issuer. */
+export function requireStableDirectoryIssuer(): IssuerIdentity {
+  const identity = loadIdentityFromEnv()
+  if (!identity) {
+    throw new IssuerKeyRequiredError()
+  }
+  return identity
+}
+
 export function getDirectoryIssuerIdentity(): IssuerIdentity {
   if (!cachedIdentity) {
     cachedIdentity = loadIdentityFromEnv() ?? createEphemeralIdentity()

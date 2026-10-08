@@ -16,6 +16,8 @@ import {
 } from '../db.js'
 import { toBeamDID } from '../did.js'
 import type { AgentRow, BeamConnectionRow, BeamConnectionStatus } from '../types.js'
+import { agentOperationBlock } from '../trust/person-store.js'
+import { senderOrgSuspended } from '../trust/suspension.js'
 import { broadcastNetworkEvent, isAgentConnected } from '../websocket.js'
 
 const BEAM_ID_RE = /^[a-z0-9][a-z0-9_-]{1,62}@(?:[a-z0-9](?:[a-z0-9.-]{0,124}[a-z0-9])?\.)?beam\.directory$/
@@ -43,6 +45,14 @@ export function authenticateNetworkIdentity(db: Database, request: Request): Aut
   }
 
   return { agent: agent as AgentRow }
+}
+
+export function suspendedNetworkIdentity(db: Database, request: Request): { error: string; errorCode: string } | null {
+  const auth = authenticateNetworkIdentity(db, request)
+  if (!auth) {
+    return null
+  }
+  return agentOperationBlock(db, auth.agent)
 }
 
 export function isNetworkAssured(db: Database, agent: AgentRow): boolean {
@@ -190,6 +200,10 @@ export function networkRouter(db: Database): Hono {
   router.use('*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Pragma', 'no-cache')
+    const blocked = suspendedNetworkIdentity(db, c.req.raw)
+    if (blocked) {
+      return c.json({ error: blocked.error, errorCode: blocked.errorCode }, 403)
+    }
     await next()
   })
 
@@ -314,6 +328,9 @@ export function networkRouter(db: Database): Hono {
     if (!recipient || !isNetworkAssured(db, recipient)) {
       return c.json({ error: 'That verified Beam identity was not found', errorCode: 'RECIPIENT_NOT_FOUND' }, 404)
     }
+    if (senderOrgSuspended(db, auth.agent.beam_id)) {
+      return c.json({ error: 'Organization is suspended', errorCode: 'ORG_SUSPENDED' }, 403)
+    }
 
     const proof = verifyNetworkSignedMutation(db, auth.agent, raw, {
       type: 'network.connection.request',
@@ -325,11 +342,13 @@ export function networkRouter(db: Database): Hono {
       return c.json({ error: proof.error, errorCode: proof.errorCode }, proof.status)
     }
 
+    const heldForPersonId = recipient.responsible_person_id
     const result = createBeamConnectionRequest(db, {
       requesterBeamId: auth.agent.beam_id,
       recipientBeamId,
       message: message || null,
       signature: proof.signature,
+      heldForPersonId,
     })
     if (!result.created) {
       const errorCode = result.connection.status === 'blocked' ? 'CONNECTION_BLOCKED' : 'CONNECTION_EXISTS'
@@ -348,7 +367,7 @@ export function networkRouter(db: Database): Hono {
       target: recipientBeamId,
       details: { connectionId: result.connection.connection_id },
     })
-    broadcastNetworkEvent([auth.agent.beam_id, recipientBeamId], {
+    broadcastNetworkEvent(heldForPersonId ? [auth.agent.beam_id] : [auth.agent.beam_id, recipientBeamId], {
       type: 'network.connection.updated',
       connectionId: result.connection.connection_id,
       status: result.connection.status,

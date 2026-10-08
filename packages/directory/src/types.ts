@@ -54,6 +54,7 @@ export interface IntentLogRow {
   status: IntentLifecycleStatus
   error_code: string | null
   result_json: string | null
+  result_signature: string | null
 }
 
 export interface IntentTraceEventRow {
@@ -650,6 +651,7 @@ export interface BeamConnectionRow {
   created_at: string
   updated_at: string
   responded_at: string | null
+  held_for_person_id: string | null
 }
 
 export interface OrgRow {
@@ -663,6 +665,9 @@ export interface OrgRow {
   claim_expires_at: string | null
   created_at: string
   verified_at: string | null
+  domain_verified_via: 'dns' | 'well-known' | null
+  requested_name: string | null
+  suspended_at: string | null
 }
 
 export interface OrgAgentRow {
@@ -701,6 +706,8 @@ export interface AgentRow {
   http_endpoint: string | null
   dh_public_key: string | null
   plan: 'free' | 'pro' | 'business' | 'enterprise'
+  responsible_person_id: string | null
+  suspended_at: string | null
   created_at: string
   last_seen: string
 }
@@ -751,6 +758,7 @@ export interface DelegationRow {
   created_at: number
   expires_at: number
   revoked: number
+  payload_hash: string | null
 }
 
 export interface ReportRow {

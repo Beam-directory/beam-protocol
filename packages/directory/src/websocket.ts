@@ -29,7 +29,12 @@ import {
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
+import { agentOperationBlock } from './trust/person-store.js'
 import { getAdminSessionFromRequest } from './admin-auth.js'
+import { acceptanceDenial } from './trust/acceptance.js'
+import { holdConsequentialIntent, releaseOrderSpend } from './trust/consequential.js'
+import { senderOrgSuspended } from './trust/suspension.js'
+import { untrustedIntentEnvelope } from './trust/untrusted.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 import { consumeWebSocketTicket } from './websocket-ticket.js'
@@ -120,11 +125,13 @@ setInterval(() => {
 }, 60_000).unref()
 
 export class RelayError extends Error {
-  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'IN_PROGRESS'
+  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'ACCEPTANCE_DENIED' | 'ORG_SUSPENDED' | 'APPROVAL_REQUIRED' | 'IN_PROGRESS'
+  approvalId?: string
 
-  constructor(code: RelayError['code'], message: string) {
+  constructor(code: RelayError['code'], message: string, approvalId?: string) {
     super(message)
     this.code = code
+    this.approvalId = approvalId
   }
 }
 
@@ -408,6 +415,7 @@ function finalizeIntentWithResult(
     latencyMs,
     errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(result),
+    resultSignature: result.signature ?? null,
   })
 }
 
@@ -531,6 +539,9 @@ function finalizeFailedIntent(
   })
 
   finalizeIntentWithResult(db, frame, result, options.latencyMs)
+  if (options.errorCode !== 'TIMEOUT') {
+    releaseOrderSpend(db, frame.nonce)
+  }
   recordIntentStage(db, frame, 'failed', {
     transport: options.transport,
     latencyMs: options.latencyMs,
@@ -750,6 +761,7 @@ async function attemptDirectHttpDelivery(
         payload: frame.payload,
         nonce: frame.nonce,
         timestamp: frame.timestamp,
+        ...untrustedIntentEnvelope(db, frame),
       }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -865,6 +877,11 @@ export function createWebSocketServer(db: Database): WebSocketServer {
     )
     if (!authenticatedViaApiKey) {
       ws.close(1008, 'Valid WebSocket credential required')
+      return
+    }
+    const blocked = agent ? agentOperationBlock(db, agent) : null
+    if (blocked) {
+      ws.close(1008, blocked.error)
       return
     }
 
@@ -1094,6 +1111,7 @@ export async function relayIntentFromHttp(
       type: 'intent',
       frame: prepared,
       senderPublicKey,
+      ...untrustedIntentEnvelope(db, prepared),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1409,6 +1427,7 @@ async function handleIntent(
       frame: prepared,
       senderPublicKey: senderAgent.public_key,
       actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+      ...untrustedIntentEnvelope(db, prepared),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1663,6 +1682,16 @@ export function canActOnBehalf(
   claimedFromBeamId: string,
   intentType: string,
 ): boolean {
+  const connected = getAgent(db, connectedBeamId)
+  if (!connected || agentOperationBlock(db, connected)) {
+    return false
+  }
+  if (connectedBeamId !== claimedFromBeamId) {
+    const grantor = getAgent(db, claimedFromBeamId)
+    if (grantor && agentOperationBlock(db, grantor)) {
+      return false
+    }
+  }
   if (connectedBeamId === claimedFromBeamId) {
     return true
   }
@@ -1678,6 +1707,10 @@ function resolveIntentSender(db: Database, connectedBeamId: string, frame: Inten
   const senderAgent = getAgent(db, connectedBeamId)
   if (!senderAgent) {
     throw new RelayError('BAD_REQUEST', 'Sender is not registered in the directory')
+  }
+  const connectedBlock = agentOperationBlock(db, senderAgent)
+  if (connectedBlock) {
+    throw new RelayError(connectedBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', connectedBlock.error)
   }
 
   if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
@@ -1706,6 +1739,17 @@ function enforceSecurityChecks(
     throw new RelayError('BAD_REQUEST', 'Signature verification failed')
   }
 
+  const actingAgent = getAgent(db, frame.from)
+  if (actingAgent) {
+    const actingBlock = agentOperationBlock(db, actingAgent)
+    if (actingBlock) {
+      throw new RelayError(actingBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', actingBlock.error)
+    }
+  }
+  if (senderOrgSuspended(db, frame.from)) {
+    throw new RelayError('ORG_SUSPENDED', `Organization of ${frame.from} is suspended`)
+  }
+
   const localTarget = getAgent(db, frame.to)
   if (localTarget && !options.skipLocalAclCheck && !isIntentAllowed(db, {
     targetBeamId: frame.to,
@@ -1720,7 +1764,30 @@ function enforceSecurityChecks(
     throw new RelayError('BAD_REQUEST', payloadValidation.error ?? 'Invalid payload')
   }
 
-  enforceReplayProtection(db, frame)
+  const senderAgent = getAgent(db, frame.from)
+  if (senderAgent?.suspended_at) {
+    throw new RelayError('FORBIDDEN', `Agent ${frame.from} is suspended`)
+  }
+
+  const denied = acceptanceDenial(db, frame)
+  if (denied) {
+    throw new RelayError('ACCEPTANCE_DENIED', denied)
+  }
+
+  const held = holdConsequentialIntent(db, frame)
+  if (held?.kind === 'reject') {
+    throw new RelayError('BAD_REQUEST', held.message)
+  }
+  if (held?.kind === 'approval') {
+    throw new RelayError('APPROVAL_REQUIRED', held.reason, held.approvalId)
+  }
+
+  try {
+    enforceReplayProtection(db, frame)
+  } catch (error) {
+    if (held?.kind === 'reserved') releaseOrderSpend(db, frame.nonce)
+    throw error
+  }
 }
 
 function enforceReplayProtection(db: Database, frame: IntentFrame): void {
@@ -1858,6 +1925,7 @@ function handleResult(
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(frame),
+    resultSignature: frame.signature ?? null,
   }
   if (recoveringFailedAttempt) {
     reconcileIntentLog(db, finalState)

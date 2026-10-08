@@ -13,13 +13,18 @@ import { billingRouter } from './routes/billing.js'
 import { businessVerificationRouter } from './routes/business-verify.js'
 import { credentialsRouter } from './routes/credentials.js'
 import { delegationsRouter } from './routes/delegations.js'
+import { mandatesRouter } from './routes/mandates.js'
+import { abuseAdminRouter, abuseNetworkRouter, agentSuspensionRouter, orgSuspensionRouter } from './routes/abuse.js'
+import { trustInboxRouter } from './routes/trust-inbox.js'
 import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
 import { identityClaimsRouter } from './routes/identity-claims.js'
 import { agentKeysRouter, revokedKeysRouter } from './routes/keys.js'
 import { networkRouter } from './routes/network.js'
 import { networkMessagingRouter } from './routes/network-messaging.js'
+import { orgRegistryAdminRouter } from './routes/org-registry-admin.js'
 import { orgsRouter } from './routes/orgs.js'
+import { peopleAdminRouter, peopleInvitationRouter, peopleRouter } from './routes/people.js'
 import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter, type AlertItem } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
 import { shieldRouter } from './routes/shield.js'
@@ -4007,8 +4012,17 @@ export function createApp(db: Database): Hono {
   })
 
   app.route('/orgs', orgsRouter(db))
+  app.route('/orgs', peopleRouter(db))
+  app.route('/orgs', trustInboxRouter(db))
+  app.route('/people', peopleInvitationRouter(db))
+  app.route('/admin/people', peopleAdminRouter(db))
+  app.route('/admin/orgs', orgRegistryAdminRouter(db))
+  app.route('/admin/orgs', orgSuspensionRouter(db))
+  app.route('/admin/abuse', abuseAdminRouter(db))
+  app.route('/admin/agents', agentSuspensionRouter(db))
   app.route('/identity-claims', identityClaimsRouter(db))
   app.route('/network', networkRouter(db))
+  app.route('/network', abuseNetworkRouter(db))
   app.route('/network', networkMessagingRouter(db))
   app.route('/agents', agentsRouter(db))
   app.route('/agents', webSocketTicketRouter(db))
@@ -4016,6 +4030,7 @@ export function createApp(db: Database): Hono {
   app.route('/agents', businessVerificationRouter(db))
   app.route('/agents', agentKeysRouter(db))
   app.route('/agents', delegationsRouter(db))
+  app.route('/agents', mandatesRouter(db))
   app.route('/agents', reportsRouter(db))
   app.route('/agents', credentialsRouter(db))
   app.route('/agents', didRouter(db))
@@ -4645,6 +4660,15 @@ export function createApp(db: Database): Hono {
         if (err.code === 'FORBIDDEN') {
           return c.json({ error: err.message, errorCode: 'FORBIDDEN' }, 403)
         }
+        if (err.code === 'ACCEPTANCE_DENIED') {
+          return c.json({ error: err.message, errorCode: 'ACCEPTANCE_DENIED' }, 403)
+        }
+        if (err.code === 'ORG_SUSPENDED') {
+          return c.json({ error: err.message, errorCode: 'ORG_SUSPENDED' }, 403)
+        }
+        if (err.code === 'APPROVAL_REQUIRED') {
+          return c.json({ error: err.message, errorCode: 'APPROVAL_REQUIRED', approvalId: err.approvalId, executed: false }, 202)
+        }
         if (err.code === 'RATE_LIMITED') {
           return c.json({ error: err.message, errorCode: 'RATE_LIMITED' }, 429)
         }
@@ -4703,6 +4727,7 @@ export function createApp(db: Database): Hono {
 
     try {
       const row = db.prepare('SELECT 1 AS ok').get() as { ok: number } | undefined
+      const domainUniqueIndex = Boolean(db.prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'index' AND name = 'idx_orgs_domain_unique'`).get())
 
       return c.json({
         status: 'ok',
@@ -4716,6 +4741,10 @@ export function createApp(db: Database): Hono {
         release: releaseInfo,
         db: {
           status: row?.ok === 1 ? 'ok' : 'error',
+          domainUniqueIndex,
+          ...(domainUniqueIndex ? {} : {
+            domainUniqueIndexWarning: 'idx_orgs_domain_unique was skipped because duplicate organization domains exist',
+          }),
         },
       })
     } catch (error) {
