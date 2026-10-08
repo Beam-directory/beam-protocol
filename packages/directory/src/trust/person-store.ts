@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
+import { revokeActiveMandatesForAgent, revokeActiveMandatesForPerson, revokeMandatesOutsideRights } from './mandate-store.js'
 import type { ScopeGrant } from './scopes.js'
 
 export type PersonRow = {
@@ -145,10 +146,11 @@ export function updatePersonRecord(
     id,
   )
   if (keyChanged) {
-    // The previous KYC decision does not cover the new key. setPersonKyc also
-    // revokes this person's active mandates once that table exists.
+    // The previous KYC decision does not cover the new key. A non-verified
+    // status revokes this person's active mandates.
     setPersonKyc(db, id, { status: 'pending', provider: null, reference: null })
   }
+  revokeMandatesOutsideRights(db, id, input.rights)
   return getPerson(db, id)
 }
 
@@ -162,6 +164,9 @@ export function setPersonKyc(
     SET kyc_status = ?, kyc_provider = ?, kyc_reference = ?
     WHERE id = ?
   `).run(input.status, input.provider, input.reference, id)
+  if (input.status !== 'verified') {
+    revokeActiveMandatesForPerson(db, id, new Date().toISOString())
+  }
   return getPerson(db, id)
 }
 
@@ -249,7 +254,19 @@ export function suspendAgentsForPerson(db: Database, personId: string, at: strin
   return result.changes
 }
 
-export function offboardPerson(db: Database, person: PersonRow): { person: PersonRow; suspendedAgents: number } {
+function revokeDelegationsForBeam(db: Database, beamId: string): number {
+  const result = db.prepare(`
+    UPDATE delegations
+    SET revoked = 1
+    WHERE revoked = 0 AND (grantor_beam_id = ? OR grantee_beam_id = ?)
+  `).run(beamId, beamId)
+  return result.changes
+}
+
+export function offboardPerson(
+  db: Database,
+  person: PersonRow,
+): { person: PersonRow; suspendedAgents: number; revokedMandates: number; revokedDelegations: number } {
   const at = person.offboarded_at ?? new Date().toISOString()
   if (person.status !== 'offboarded') {
     db.prepare(`
@@ -258,8 +275,26 @@ export function offboardPerson(db: Database, person: PersonRow): { person: Perso
       WHERE id = ?
     `).run(at, person.id)
   }
+  const agents = db.prepare('SELECT beam_id FROM agents WHERE responsible_person_id = ?').all(person.id) as Array<{ beam_id: string }>
+  let revokedDelegations = 0
+  for (const agent of agents) {
+    revokedDelegations += revokeDelegationsForBeam(db, agent.beam_id)
+  }
   const suspendedAgents = suspendAgentsForPerson(db, person.id, at)
-  return { person: getPerson(db, person.id) as PersonRow, suspendedAgents }
+  const revokedMandates = revokeActiveMandatesForPerson(db, person.id, at)
+  return { person: getPerson(db, person.id) as PersonRow, suspendedAgents, revokedMandates, revokedDelegations }
+}
+
+export function replaceResponsiblePerson(
+  db: Database,
+  beamId: string,
+  personId: string,
+): { revokedMandates: number; revokedDelegations: number } {
+  const at = new Date().toISOString()
+  const revokedMandates = revokeActiveMandatesForAgent(db, beamId, at)
+  const revokedDelegations = revokeDelegationsForBeam(db, beamId)
+  setAgentResponsiblePerson(db, beamId, personId)
+  return { revokedMandates, revokedDelegations }
 }
 
 export function setAgentResponsiblePerson(db: Database, beamId: string, personId: string): void {

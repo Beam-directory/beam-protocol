@@ -54,6 +54,7 @@ export interface IntentLogRow {
   status: IntentLifecycleStatus
   error_code: string | null
   result_json: string | null
+  result_signature: string | null
 }
 
 export interface IntentTraceEventRow {
@@ -755,6 +756,7 @@ export interface DelegationRow {
   created_at: number
   expires_at: number
   revoked: number
+  payload_hash: string | null
 }
 
 export interface ReportRow {

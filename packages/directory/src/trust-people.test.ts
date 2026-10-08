@@ -344,6 +344,7 @@ test('a suspended agent cannot open a network connection or use a delegation', a
       granteeBeamId: buyer.beamId,
       scope: 'conversation.message',
       expiresAt: Date.now() + 60_000,
+      payloadHash: randomBytes(16).toString('hex'),
     })
     assert.equal(canActOnBehalf(db, buyer.beamId, vendor.beamId, 'conversation.message'), true)
 

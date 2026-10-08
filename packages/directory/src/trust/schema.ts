@@ -92,6 +92,38 @@ function ensureTrustPersonSchema(db: Database): void {
       WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
     CREATE INDEX IF NOT EXISTS idx_persons_supervisor ON persons(supervisor_person_id);
 
+    CREATE TABLE IF NOT EXISTS mandates (
+      id TEXT PRIMARY KEY,
+      jti TEXT NOT NULL UNIQUE,
+      version INTEGER NOT NULL,
+      person_id TEXT NOT NULL,
+      agent_beam_id TEXT NOT NULL,
+      org_name TEXT NOT NULL,
+      scopes_json TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      escalation_person_id TEXT,
+      signature TEXT NOT NULL,
+      payload_hash TEXT NOT NULL UNIQUE,
+      status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+      revoked_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES persons(id),
+      FOREIGN KEY (agent_beam_id) REFERENCES agents(beam_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_mandates_agent_status ON mandates(agent_beam_id, status);
+    CREATE INDEX IF NOT EXISTS idx_mandates_person_status ON mandates(person_id, status);
+
+    CREATE TABLE IF NOT EXISTS acceptance_rules (
+      owner_beam_id TEXT PRIMARY KEY,
+      allowed_org_domains TEXT NOT NULL DEFAULT '[]',
+      allowed_scopes TEXT NOT NULL DEFAULT '[]',
+      allowed_agents TEXT NOT NULL DEFAULT '[]',
+      require_known_contact INTEGER NOT NULL DEFAULT 1,
+      version INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (owner_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS person_invitations (
       id TEXT PRIMARY KEY,
       org_name TEXT NOT NULL,
@@ -105,5 +137,13 @@ function ensureTrustPersonSchema(db: Database): void {
       created_at TEXT NOT NULL,
       FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE
     );
+  `)
+  ensureColumn(db, 'acceptance_rules', 'version', 'INTEGER NOT NULL DEFAULT 0')
+  ensureColumn(db, 'delegations', 'payload_hash', 'TEXT')
+  ensureColumn(db, 'intent_log', 'result_signature', 'TEXT')
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_delegations_payload_hash
+      ON delegations(payload_hash)
+      WHERE payload_hash IS NOT NULL
   `)
 }

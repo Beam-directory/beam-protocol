@@ -31,6 +31,8 @@ import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from 
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
 import { agentOperationBlock } from './trust/person-store.js'
 import { getAdminSessionFromRequest } from './admin-auth.js'
+import { acceptanceDenial } from './trust/acceptance.js'
+import { loadTrustAssertion } from './trust/assertion.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 import { consumeWebSocketTicket } from './websocket-ticket.js'
@@ -121,7 +123,7 @@ setInterval(() => {
 }, 60_000).unref()
 
 export class RelayError extends Error {
-  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'IN_PROGRESS'
+  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'ACCEPTANCE_DENIED' | 'IN_PROGRESS'
 
   constructor(code: RelayError['code'], message: string) {
     super(message)
@@ -409,6 +411,7 @@ function finalizeIntentWithResult(
     latencyMs,
     errorCode: result.success ? undefined : (result.errorCode ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(result),
+    resultSignature: result.signature ?? null,
   })
 }
 
@@ -751,6 +754,7 @@ async function attemptDirectHttpDelivery(
         payload: frame.payload,
         nonce: frame.nonce,
         timestamp: frame.timestamp,
+        trustAssertion: loadTrustAssertion(db, frame.from),
       }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -1099,6 +1103,7 @@ export async function relayIntentFromHttp(
       type: 'intent',
       frame: prepared,
       senderPublicKey,
+      trustAssertion: loadTrustAssertion(db, prepared.from),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1414,6 +1419,7 @@ async function handleIntent(
       frame: prepared,
       senderPublicKey: senderAgent.public_key,
       actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
+      trustAssertion: loadTrustAssertion(db, prepared.from),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1747,6 +1753,16 @@ function enforceSecurityChecks(
     throw new RelayError('BAD_REQUEST', payloadValidation.error ?? 'Invalid payload')
   }
 
+  const senderAgent = getAgent(db, frame.from)
+  if (senderAgent?.suspended_at) {
+    throw new RelayError('FORBIDDEN', `Agent ${frame.from} is suspended`)
+  }
+
+  const denied = acceptanceDenial(db, frame)
+  if (denied) {
+    throw new RelayError('ACCEPTANCE_DENIED', denied)
+  }
+
   enforceReplayProtection(db, frame)
 }
 
@@ -1885,6 +1901,7 @@ function handleResult(
     latencyMs: resolvedLatencyMs,
     errorCode: frame.success ? undefined : (frame.errorCode ?? existing.error_code ?? 'RESULT_ERROR'),
     resultJson: serializeResultFrame(frame),
+    resultSignature: frame.signature ?? null,
   }
   if (recoveringFailedAttempt) {
     reconcileIntentLog(db, finalState)

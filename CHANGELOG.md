@@ -21,6 +21,14 @@
 - npm 10 or newer is required to install this repository
 - disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
 
+### Trust layer: mandates and recipient acceptance
+- record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified
+- reject a replay of a revoked mandate or delegation; offboarding, a rights cut, a key change, and a change of responsible person revoke mandates and delegations that no longer hold
+- let the person, their active supervisor, or the organization key revoke one mandate
+- publish a trust assertion signed by the stable directory issuer for public agents, the agent, accepted contacts, or the organization key; person ids in it are SHA-256 refs and the assertion includes `suspended`
+- let a recipient store acceptance rules for organizations, scopes, agents, and known contacts, bound to a monotonic version, nonce, and timestamp
+- keep the responder signature on `intent_log.result_signature`
+
 ### Trust layer: people and hierarchy
 - add organization people with role, supervisor, and a rights ceiling
 - invite employees and accept the invitation with a client-generated public key

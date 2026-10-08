@@ -10,6 +10,7 @@ import {
   deleteExpiredOrgClaim,
   getOrg,
   getOrgByApiKeyHash,
+  getAgent,
   getOrgByDomain,
   listOrgAgents,
   logAuditEvent,
@@ -19,7 +20,7 @@ import {
 import { seedAclsFromCatalog } from '../acl.js'
 import { createAgentApiKey, hashApiKey as hashAgentApiKey } from '../api-key.js'
 import { isEd25519Spki } from '../key-validation.js'
-import { getPerson, setAgentResponsiblePerson } from '../trust/person-store.js'
+import { getPerson, replaceResponsiblePerson, setAgentResponsiblePerson } from '../trust/person-store.js'
 import { namespaceForDomain, namespaceMatchesDomain, registrableDomain } from '../trust/org-domain.js'
 import { parseRegistryClaim } from '../trust/registry-format.js'
 import {
@@ -409,6 +410,56 @@ export function orgsRouter(db: Database): Hono {
       console.error('Org agent registration error:', err)
       return c.json({ error: 'Failed to register agent', errorCode: 'DB_ERROR' }, 500)
     }
+  })
+
+  router.put('/:name/agents/:agentName/responsible-person', async (c) => {
+    const requestedName = normalizeOrgName(c.req.param('name'))
+    const org = resolveOrg(db, requestedName, c.req.raw)
+    const name = org?.name ?? requestedName
+    if (!org) {
+      return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
+    }
+    const auth = requireOrgApiKey(c, org)
+    if (auth) return auth
+    const agentName = (c.req.param('agentName') ?? '').trim().toLowerCase()
+    if (!AGENT_NAME_RE.test(agentName)) {
+      return c.json({ error: 'Invalid agent name', errorCode: 'INVALID_AGENT_NAME' }, 400)
+    }
+    const beamId = `${agentName}@${org.beam_domain}`
+    const agent = getAgent(db, beamId)
+    if (!agent || agent.org !== name) {
+      return c.json({ error: 'Agent not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
+    }
+    const personId = typeof (body as Record<string, unknown>)['responsiblePersonId'] === 'string'
+      ? String((body as Record<string, unknown>)['responsiblePersonId']).trim()
+      : ''
+    const person = personId ? getPerson(db, personId) : null
+    if (!person || person.org_name !== name || person.status !== 'active') {
+      return c.json({
+        error: 'responsiblePersonId must be an active person in this organization',
+        errorCode: 'RESPONSIBLE_PERSON_REQUIRED',
+      }, 400)
+    }
+    if (agent.responsible_person_id === person.id) {
+      return c.json({ beamId, responsiblePersonId: person.id, revokedMandates: 0, revokedDelegations: 0 })
+    }
+    const result = replaceResponsiblePerson(db, beamId, person.id)
+    logAuditEvent(db, {
+      action: 'org.agent.responsible_person_changed',
+      actor: `org:${name}`,
+      target: beamId,
+      details: { from: agent.responsible_person_id, to: person.id, ...result },
+    })
+    return c.json({ beamId, responsiblePersonId: person.id, ...result })
   })
 
   router.post('/:name/verify', async (c) => {

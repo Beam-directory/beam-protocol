@@ -67,6 +67,18 @@ export function amountToCents(value: string): bigint {
   return BigInt(cents)
 }
 
+const INTENT_SCOPE: Record<string, ScopeAction> = {
+  'schedule.commit': 'schedule.commit',
+  'file.send': 'file.send',
+  'file.forward': 'file.send',
+  'order.place': 'order',
+  'payment.submit': 'order',
+}
+
+export function scopeActionForIntent(intent: string): ScopeAction | null {
+  return INTENT_SCOPE[intent] ?? null
+}
+
 export function scopeWithin(child: ScopeGrant, parent: ScopeGrant): boolean {
   if (child.actions.some((action) => !parent.actions.includes(action))) {
     return false
