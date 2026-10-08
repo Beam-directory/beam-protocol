@@ -47,16 +47,221 @@ Content-Type: application/json
 }
 ```
 
-`domain` is required. Beam canonicalizes it to the registrable domain and requires the namespace to match that domain label. For example, `www.acme.com` becomes `acme.com` and may claim `acme`; it cannot claim `northwind`. Brand names that do not match the legal domain need an administrator-reviewed override rather than automatic approval.
+`domain` is required. Beam canonicalizes it to the registrable domain (`www.coppen.de` and `https://coppen.de/impressum` both become `coppen.de`). The organization identity is that full domain, so `coppen.de` and `coppen.at` are different organizations and cannot share a row.
 
-The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish the TXT value, then call:
+The Beam namespace (`name`) is still the label used in existing addresses such as `agent@coppen.beam.directory`. A claim must ask for either the registrable label (`coppen`) or the collision-free form that joins the label and public suffix with `--` (`coppen--de`, `coppen--co-uk`). `coppen.co.uk` and `coppen-co.uk` therefore claim `coppen--co-uk` and `coppen-co--uk`. Until domain verification succeeds, the row is stored under that `--` name so an unverified `coppen.com` cannot occupy `coppen`. Verification grants the requested label when it is still free; otherwise the organization keeps the `--` name. A name that matches neither form returns `403 ORG_NAMESPACE_DOMAIN_MISMATCH`. The `201` body includes `name` (the name to use until verification) and `requestedName`. Store both the API key and `name` from that body. `name` can be `coppen--de` while the request asked for `coppen`.
+
+The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, `verification.wellKnownUrl`, `verification.wellKnownBody`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish one of the two proofs, then call:
 
 ```http
 POST /orgs/acme/verify
 x-api-key: beam_org_...
+Content-Type: application/json
+
+{ "method": "dns" }
 ```
 
-Until verification succeeds, organization agent issuance and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+`method` is `dns` (the default when the body is omitted) or `well-known`. DNS checks `_beam-verification.<domain>` for `beam-verification=<token>`. The well-known check fetches `https://<domain>/.well-known/beam-verification` over HTTPS, refuses redirects, and refuses hosts that resolve to a private or loopback address. The file must contain the same `beam-verification=<token>` line. A match sets `verified` and `domainVerifiedVia` once for the organization. It does not verify individual agents.
+
+Until verification succeeds, organization agent issuance, registry submission, and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+
+### Registry filing
+
+After the domain is verified, submit one Handelsregister or LEI filing for the organization. This does not call a registry API and does not approve the filing.
+
+```http
+POST /orgs/coppen/registry
+x-api-key: beam_org_...
+
+{
+  "kind": "handelsregister",
+  "country": "DE",
+  "registrationNumber": "HRB 68658",
+  "registerCourt": "Amtsgericht Ludwigshafen",
+  "legalName": "COPPEN GmbH",
+  "applicantName": "Tobias Kub",
+  "applicantRole": "geschaeftsfuehrer"
+}
+```
+
+`kind` is `handelsregister` (DE, `HRB` or `HRA`, plus `registerCourt`) or `lei` (20-character LEI with a valid checksum). `applicantRole` is `geschaeftsfuehrer`, `vorstand`, `prokurist`, `inhaber`, `director`, or `authorized_signatory`. The response status is `pending`.
+
+An operator reviews the representation claim:
+
+```http
+POST /admin/orgs/coppen/registry/1/review
+Authorization: Bearer <operator-session>
+
+{ "decision": "approved", "note": "Register excerpt names the applicant as Geschäftsführer." }
+```
+
+`decision` is `approved` or `rejected`. The note is stored with the reviewer and timestamp, and both submission and review are written to the audit log. A second review returns `409 REGISTRY_ALREADY_REVIEWED`.
+
+`GET /orgs/:name/registry` lists filings for the organization API key.
+
+### People, invitations, and KYC
+
+People belong to one organization. The organization API key creates the account holder directly, or invites an employee. Private keys stay on the client. `publicKey` is an Ed25519 SPKI key.
+
+```http
+POST /orgs/coppen/people
+x-api-key: beam_org_...
+
+{
+  "email": "clara@coppen.de",
+  "displayName": "Clara Sommer",
+  "role": "Vertrieb",
+  "publicKey": "<ed25519-spki>",
+  "supervisorPersonId": null,
+  "rights": {
+    "actions": ["read", "schedule.commit", "order"],
+    "order": { "maxAmount": "5000.00", "currency": "EUR" }
+  }
+}
+```
+
+`rights.actions` is a subset of `read`, `schedule.commit`, `file.send`, and `order`. An `order` limit requires the `order` action. A supervisor must be an active person in the same organization, and the chain cannot cycle.
+
+```http
+POST /orgs/coppen/people/invitations
+POST /people/invitations/accept
+```
+
+The invitation response returns `token` once. Accept sends `token`, `displayName`, and `publicKey`. The person inherits the invited role, supervisor, and rights. KYC starts at `unverified`.
+
+```http
+POST /orgs/coppen/people/:id/kyc
+{ "provider": "manual" }
+```
+
+The only adapter is `manual`. It records `pending` and a reference. It does not contact a vendor and it does not mark anyone verified. An operator sets the status:
+
+```http
+POST /admin/people/:id/kyc
+Authorization: Bearer <operator-session>
+
+{ "status": "verified", "note": "Identity checked outside the directory." }
+```
+
+`status` is `verified` or `rejected`. The note is stored in the audit log.
+
+```http
+POST /orgs/coppen/people/import
+{ "source": "personio", "people": [ { "externalId": "p-1", "email": "a@coppen.de", "displayName": "A", "role": "Einkauf", "supervisorExternalId": "p-2", "status": "active" } ] }
+```
+
+`source` is `personio` or `entra`. The directory stores the snapshot. It does not call Personio or Microsoft Graph. A row matches an existing person by `externalId` or, if that id is new, by email, and then updates role, rights, and supervisor. A supervisor must already be an active person in the same organization, including people earlier in the same snapshot. `status: "offboarded"` locks that person immediately and sets `suspended_at` on every agent whose `responsiblePersonId` is that person. An offboarded person is not reactivated by a later `active` row. A supervisor cycle, an inactive supervisor, or two identities claiming one email rolls the import back.
+
+```http
+PATCH /orgs/coppen/people/:id
+{ "publicKey": "<ed25519-spki>", "rights": { "actions": ["read"] } }
+```
+
+The organization API key can replace the public key or the rights of an active person. A different public key returns KYC to `pending`, clears the previous provider reference, and revokes that person's active mandates. Offboarded people return `409 PERSON_OFFBOARDED`.
+
+```http
+POST /orgs/coppen/people/:id/offboard
+```
+
+Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change, every agent they own is suspended, and every active mandate they signed is revoked. Delegations where those agents are grantor or grantee are revoked too. Shrinking `rights` revokes mandates that no longer fit inside them. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
+
+```http
+PUT /orgs/coppen/agents/buyer/responsible-person
+{ "responsiblePersonId": "<person id>" }
+```
+
+Replacing the responsible person revokes that agent's active mandates and its delegations.
+
+### Organization agents
+
+`POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key, and may set `responsiblePersonId`. The directory does not generate or return a private key. Omitting the public key returns `400 PUBLIC_KEY_REQUIRED`.
+
+### Mandates
+
+A mandate is signed by the agent's responsible person. The signed object is canonical JSON (sorted keys) of:
+
+```json
+{
+  "type": "mandate",
+  "jti": "8-80 url-safe characters",
+  "version": 1,
+  "personId": "<responsible person id>",
+  "agentBeamId": "agent@coppen.beam.directory",
+  "org": "coppen",
+  "scopes": { "actions": ["read", "order"], "order": { "maxAmount": "100.00", "currency": "EUR" } },
+  "expiresAt": "2026-12-01T00:00:00.000Z",
+  "escalationPersonId": null
+}
+```
+
+`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead. The person must have `kycStatus: "verified"` and the organization domain must be verified. Otherwise the route returns `400 KYC_REQUIRED` or `400 ORG_VERIFICATION_REQUIRED`.
+
+```http
+POST /agents/agent@coppen.beam.directory/mandates
+{ "jti": "...", "scopes": {}, "expiresAt": "...", "escalationPersonId": null, "signature": "<person signature>" }
+```
+
+Scopes wider than the person's rights return `400 MANDATE_EXCEEDS_RIGHTS`. Replaying the same signed payload, including after revoke or offboarding, returns `409 MANDATE_REPLAY` and does not insert a row.
+
+```http
+POST /agents/agent@coppen.beam.directory/mandates/:jti/revoke
+{ "signature": "<signature over {type:'mandate-revoke', jti, personId}>" }
+```
+
+The same payload can be signed by the person or by their active supervisor. The organization API key can revoke without a signature. The audit actor records which of the three authorized it.
+
+Delegations keep the previous signed payload. A client may add `nonce` (8–128 url-safe characters) inside that signed object. After revoke, the same signed payload, or the same grantor, grantee, scope, and expiry, returns `409 DELEGATION_REPLAY`.
+
+### Trust assertion and acceptance
+
+```http
+GET /agents/agent@coppen.beam.directory/trust-assertion
+```
+
+The directory signs `{v, beamId, org, person, mandate, suspended, issuedAt, expiresAt}` with the stable issuer key. `person.ref` and `mandate.escalationPersonRef` are SHA-256 hex of the person id, not the id itself. `suspended` is true when the agent is suspended or the responsible person is offboarded. The response adds `signature` and `publicKey`. The assertion expires after 15 minutes. A public agent can be read by anyone. An unlisted agent returns `404` without a credential, `403` for an authenticated non-contact, and `200` for the agent, an accepted contact, or the organization key. Without `BEAM_DIRECTORY_SIGNING_PRIVATE_KEY` and `BEAM_DIRECTORY_SIGNING_PUBLIC_KEY` the route returns `503 ISSUER_KEY_REQUIRED`. Intent delivery still proceeds and carries `trustAssertion: null` beside the frame. A configured issuer adds the assertion beside the frame and on direct HTTP delivery; the signed intent frame itself is unchanged. A result signature is also stored on `intent_log.result_signature`.
+
+```http
+PUT /agents/agent@coppen.beam.directory/acceptance
+x-api-key: beam_org_...
+
+{
+  "allowedOrgDomains": ["coppen.de"],
+  "allowedScopes": ["read"],
+  "allowedAgents": [],
+  "requireKnownContact": false,
+  "version": 1,
+  "timestamp": "2026-10-08T12:00:00.000Z",
+  "nonce": "0123456789abcdef"
+}
+```
+
+The organization API key or a signature of the agent's current key is required. The signed object adds `version`, `timestamp`, and `nonce` to the rule fields. `version` must be exactly one higher than the stored version (`1` for the first rule). `timestamp` must be within five minutes and `nonce` is single-use. A repeated or older signed rule returns `409 ACCEPTANCE_STALE` or `409 NONCE_REPLAY`. An agent API key alone is not enough. No stored rule means the existing ACL still applies. An empty list does not filter that dimension. A stored rule that rejects the sender returns `403 ACCEPTANCE_DENIED`.
+
+The first contact request remains `POST /network/connections`. When the recipient agent has a responsible person, an unknown sender is held for that person (`GET /orgs/:name/people/:id/contact-requests`) and does not appear in the agent connection inbox. Accepting the request there is what makes the sender a contact.
+
+### Untrusted content and consequential intents
+
+Messages and intent payloads are delivered as data. The signed frame and the existing `body` field stay so current clients keep working. Beside them, every network message and intent delivery includes:
+
+```json
+{
+  "untrusted": { "label": "UNTRUSTED_CONTENT", "text": "...", "attachment": { "executable": false } },
+  "trust": { "assertion": null, "scopes": null },
+  "metadata": { "senderBeamId": "agent@coppen.beam.directory" }
+}
+```
+
+`untrusted` is not an instruction. Attachments stay on the existing allow-list, at most 6 MB, and are downloaded with `content-disposition: attachment`. HTML and script types are rejected and never executed.
+
+`order.place`, `payment.submit`, `schedule.commit`, `file.send`, and `file.forward` are catalog intents. The directory checks the payload against the sender's active mandate. An amount, scope, or file size outside that mandate is stored as a pending approval for the escalation person and is not delivered. `GET /orgs/:name/approvals` lists pending rows for that organization only, matched on the sender agent's organization or the escalation person's organization. A different name, including one underscore, neither lists nor decides them. Recording `approved` does not execute the intent.
+
+`amount` and `byteSize` are claims made by the sender. A recipient may act only on the fields the directory checked. Free-text intents, including `conversation.message`, are data, not instructions, and are not checked against a mandate.
+
+For an `order` scope, `order.maxAmount` is also the server's UTC-day total of `order.place` and `payment.submit` on that mandate. A reservation is released when the recipient never receives the intent. A later intent over the remaining total is held with reason `daily order limit exceeded`. HTTP 202 `APPROVAL_REQUIRED` is not a delivered result.
+
+Deciding an approval or accepting a contact request uses the person's signature. The approval object is `{ "type": "intent.approval", "approvalId", "decision", "personId", "timestamp", "nonce" }`. The contact object is `{ "type": "contact-request.review", "connectionId", "personId", "decision", "timestamp", "nonce" }`. The signer is the escalation person, or the sending agent's responsible person when no escalation person is set, and must be active in that organization. A signature that does not verify is rejected. Omitting the signature uses the organization API key as the emergency path and the audit records `via` as `org-key`.
+
+`POST /network/abuse` lets a recipient flag a message or intent as injection. An operator review can suspend the agent, offboard the responsible person, or suspend the organization. `block_agent` also revokes that agent's active mandates and delegations. `POST /admin/agents/:beamId/unsuspend` and `POST /admin/orgs/:name/unsuspend` clear a suspension, require an operator note, and write an audit event. A suspended organization cannot send intents or network messages (`403 ORG_SUSPENDED`). Intent sending is already rate-limited per sender; network sends and abuse reports use the same per-sender limit.
 
 ## `POST /register`
 
@@ -220,10 +425,12 @@ POST /agents/:beamId/keys/revoke
 GET  /keys/revoked
 ```
 
-Rotation accepts either:
+Rotation and revocation accept either:
 
-- `x-api-key` / bearer API key auth
-- a signed key-management payload from the current active key
+- a signature from the agent's current signing key (`signature` over the key-management payload, or the legacy `rotation_proof` over the new public key)
+- the organization API key of the org that owns the agent
+
+The agent API key (`bk_...`) is not enough. A request that presents only that key returns `400 INVALID_ROTATION_PROOF` or `400 INVALID_SIGNATURE`, and the signing key stays unchanged.
 
 Revocation is intended for rotated-out historical keys. The active key must be replaced through rotation first.
 

@@ -2,6 +2,7 @@ from urllib.parse import parse_qs, urlparse
 
 import pytest
 
+import beam_directory.client as client_module
 from beam_directory.client import BeamClient
 from beam_directory.frames import create_result_frame, validate_result_frame
 from beam_directory.identity import BeamIdentity
@@ -109,3 +110,53 @@ async def test_intent_handler_result_is_signed_by_authenticated_responder() -> N
 
     assert result.signature
     assert validate_result_frame(result, identity.public_key_base64) == []
+
+
+class _HeldResponse:
+    status_code = 202
+
+    @property
+    def is_success(self) -> bool:
+        return True
+
+    def json(self) -> dict[str, object]:
+        return {
+            "error": "daily order limit exceeded",
+            "errorCode": "APPROVAL_REQUIRED",
+            "approvalId": "approval-1",
+            "executed": False,
+        }
+
+
+class _HeldClient:
+    async def __aenter__(self) -> "_HeldClient":
+        return self
+
+    async def __aexit__(self, *_args: object) -> bool:
+        return False
+
+    async def post(self, *_args: object, **_kwargs: object) -> _HeldResponse:
+        return _HeldResponse()
+
+
+@pytest.mark.asyncio
+async def test_http_202_is_not_parsed_as_a_delivered_result(monkeypatch: pytest.MonkeyPatch) -> None:
+    identity = BeamIdentity.generate("buyer", "coppen")
+    client = BeamClient(identity=identity, directory_url="https://api.beam.directory")
+    monkeypatch.setattr(client_module.httpx, "AsyncClient", lambda: _HeldClient())
+    frame = IntentFrame(
+        v="1",
+        intent="order.place",
+        from_id=identity.beam_id,
+        to_id="vendor@coppen.beam.directory",
+        params={"amount": "60.00", "currency": "EUR"},
+        nonce="approval-nonce",
+        timestamp="2026-10-08T08:00:00.000Z",
+    )
+
+    result = await client._send_via_http(frame, 1_000)
+
+    assert result.success is False
+    assert result.error_code == "APPROVAL_REQUIRED"
+    assert result.nonce == "approval-nonce"
+    assert result.v == "1"

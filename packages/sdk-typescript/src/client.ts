@@ -19,6 +19,7 @@ import type {
   KeyRevocationResult,
   Report,
   ResultFrame,
+  IntentSendResult,
   BeamIdentityData,
 } from './types.js'
 
@@ -347,7 +348,7 @@ export class BeamClient {
     intent: string,
     payload?: Record<string, unknown>,
     timeoutMs = 30_000
-  ): Promise<ResultFrame> {
+  ): Promise<IntentSendResult> {
     const frame = this._identity
       ? createIntentFrame({ intent, from: this._beamId, to, payload }, this._identity)
       : {
@@ -389,7 +390,7 @@ export class BeamClient {
     })
   }
 
-  private async _sendViaHttp(frame: IntentFrame): Promise<ResultFrame> {
+  private async _sendViaHttp(frame: IntentFrame): Promise<IntentSendResult> {
     const baseUrl = this._directoryUrl.replace(/\/$/, '')
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this._apiKey) {
@@ -400,10 +401,27 @@ export class BeamClient {
       headers,
       body: JSON.stringify(frame)
     })
+    let body: Record<string, unknown> = {}
+    try {
+      body = await res.json() as Record<string, unknown>
+    } catch {
+      if (!res.ok) {
+        throw new Error(`HTTP intent delivery failed: ${res.status} ${res.statusText}`)
+      }
+      throw new Error('HTTP intent delivery returned a body that is not JSON')
+    }
+    if (res.status === 202 || body['errorCode'] === 'APPROVAL_REQUIRED') {
+      return {
+        executed: false,
+        approvalId: typeof body['approvalId'] === 'string' ? body['approvalId'] : '',
+        errorCode: 'APPROVAL_REQUIRED',
+        error: typeof body['error'] === 'string' ? body['error'] : undefined,
+      }
+    }
     if (!res.ok) {
       throw new Error(`HTTP intent delivery failed: ${res.status} ${res.statusText}`)
     }
-    return res.json() as Promise<ResultFrame>
+    return body as unknown as ResultFrame
   }
 
   on(intent: string, handler: IntentHandler): this {
@@ -446,6 +464,9 @@ export class BeamClient {
       payload,
       options?.timeoutMs ?? 60_000
     )
+    if ('executed' in result) {
+      throw new Error(result.error ?? 'Approval required before this message can be treated as delivered')
+    }
 
     return {
       message: (result.payload?.['message'] as string) ?? '',

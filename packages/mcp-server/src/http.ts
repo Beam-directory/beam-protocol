@@ -130,12 +130,13 @@ export function createBeamMcpHttpHandler(options: {
   minimumTrustScore: number
   auditSink?: (record: BeamMcpRemoteAuditRecord) => void
 }): McpHttpHandler {
-  const requiredScopes = options.config.enableSend ? ['beam:read', 'beam:send'] : ['beam:read']
+  const requiredScopes = ['beam:read']
+  const scopesSupported = options.config.enableSend ? ['beam:read', 'beam:send'] : ['beam:read']
   const metadataOptions = {
     oauthMetadata: options.oauthMetadata,
     resourceServerUrl: options.config.publicUrl,
     serviceDocumentationUrl: new URL('https://docs.beam.directory/guide/trust-assurance'),
-    scopesSupported: requiredScopes,
+    scopesSupported,
     resourceName: 'Beam trusted agent handoffs',
     dangerouslyAllowInsecureIssuerUrl: options.config.oauth.issuer.protocol === 'http:',
   }
@@ -155,6 +156,7 @@ export function createBeamMcpHttpHandler(options: {
     minimumTrustScore: options.minimumTrustScore,
     authorizationScopes: new Set(context.authInfo?.scopes ?? []),
     enableSend: options.config.enableSend,
+    sendLimitPerHour: options.config.sendLimitPerHour,
     audit: (event) => {
       const record = createAuditRecord(context.authInfo, event)
       if (options.auditSink) options.auditSink(record)
@@ -218,7 +220,13 @@ export async function startBeamMcpHttpServer(): Promise<{ server: HttpServer; cl
     gateway: {
       getStats: () => client.getStats(),
       lookup: (beamId) => client.directory.lookup(beamId),
-      send: (to, intent, payload, timeoutMs) => client.send(to, intent, payload, timeoutMs),
+      send: async (to, intent, payload, timeoutMs) => {
+        const result = await client.send(to, intent, payload, timeoutMs)
+        if ('executed' in result) {
+          throw new Error(result.error ?? `Approval required (${result.approvalId})`)
+        }
+        return result
+      },
     },
     networkGateway: httpConfig.enableNetwork ? createBeamNetworkGateway(beamConfig) : undefined,
     ownBeamId: beamConfig.beamId,

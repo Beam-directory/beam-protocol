@@ -39,6 +39,7 @@ import {
   type WorkspaceTimelineEntry,
   type WorkspaceTimelineEventKind,
 } from '../lib/api'
+import { generateEd25519Identity, withLocalSigningKey } from '../lib/identity-keys'
 import { formatDateTime, formatLatency, formatNumber, formatRelativeTime } from '../lib/utils'
 
 const FALLBACK_CONVERSATION_INTENT: IntentCatalogItem = {
@@ -1000,10 +1001,13 @@ export default function WorkspacesPage() {
   async function handleReissueCredential(binding: WorkspaceIdentityBinding) {
     if (!selectedWorkspace) return
     await runAction(`binding-credential-${binding.id}`, async () => {
-      const response = await directoryApi.reissueWorkspaceIdentityCredential(selectedWorkspace.slug, binding.id)
+      const keys = await generateEd25519Identity()
+      const response = await directoryApi.reissueWorkspaceIdentityCredential(selectedWorkspace.slug, binding.id, {
+        publicKey: keys.publicKeyBase64,
+      })
       setIssuedCredential({
         bindingId: binding.id,
-        bundle: response.credential,
+        bundle: withLocalSigningKey(response.credential, keys),
       })
       await loadWorkspaceSurface(selectedWorkspace.slug)
     }, `${binding.beamId} local credential reissued.`)

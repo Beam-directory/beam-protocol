@@ -3,6 +3,7 @@ import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
 import { generateKeyPairSync } from 'node:crypto'
+import { signedAgentConfigBody } from '../production/agent-config.mjs'
 import { optionalFlag, requestJson } from '../production/shared.mjs'
 import {
   loadOpenClawAdminSession,
@@ -73,13 +74,18 @@ async function syncDirectoryEncryptionKey(identity) {
   if (!identity.apiKey || !identity.dhPublicKeyBase64) {
     return
   }
+  if (!identity.privateKeyBase64) {
+    throw new Error(`Cannot register the encryption key for ${identity.beamId} without its Ed25519 private key`)
+  }
   await requestJson(`${directoryUrl}/agents/${encodeURIComponent(identity.beamId)}/config`, {
     method: 'PATCH',
     headers: {
       Authorization: `Bearer ${identity.apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ dhPublicKey: identity.dhPublicKeyBase64 }),
+    body: JSON.stringify(signedAgentConfigBody(identity.privateKeyBase64, identity.beamId, {
+      dhPublicKey: identity.dhPublicKeyBase64,
+    })),
   })
 }
 

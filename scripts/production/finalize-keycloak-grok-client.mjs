@@ -34,11 +34,14 @@ function safeBaseUrl(raw) {
 }
 
 const apply = process.argv.includes('--apply')
+const enableSendScope = process.argv.includes('--enable-send-scope')
 const baseUrl = safeBaseUrl(valueAfter('--base-url') ?? 'https://identity.beam.directory')
 const realm = (valueAfter('--realm') ?? 'beam-mcp-pilot').trim()
 const adminUsername = (valueAfter('--admin-username') ?? 'beam-bootstrap').trim()
 const adminPasswordFile = valueAfter('--admin-password-file')
 const clientUuid = valueAfter('--client-uuid')?.trim()
+const optionalScopes = ['beam:read', ...(enableSendScope ? ['beam:send'] : [])]
+const clientName = enableSendScope ? 'Grok / Beam send pilot' : 'Grok / Beam read-only pilot'
 
 if (!/^[a-z0-9-]{1,63}$/.test(realm)) fail('--realm is invalid')
 if (!/^[a-zA-Z0-9._-]{1,64}$/.test(adminUsername)) fail('--admin-username is invalid')
@@ -55,8 +58,9 @@ const plan = {
   expectedOrigin: EXPECTED_ORIGIN,
   pkceMethod: 'S256',
   defaultScopes: ['beam-mcp-audience'],
-  optionalScopes: ['beam:read'],
-  sendScopeAssigned: false,
+  optionalScopes,
+  clientName,
+  sendScopeAssigned: enableSendScope,
   registrationAccessTokenAction: 'rotate and discard',
 }
 
@@ -105,7 +109,9 @@ const realmPath = `/admin/realms/${encodeURIComponent(realm)}`
 const clientPath = `${realmPath}/clients/${encodeURIComponent(clientUuid)}`
 const client = await request(clientPath, { token: adminToken })
 
-if (!['Grok', 'Grok / Beam read-only pilot'].includes(client.name)) fail('client name is not the expected Grok client')
+if (!['Grok', 'Grok / Beam read-only pilot', 'Grok / Beam send pilot'].includes(client.name)) {
+  fail('client name is not the expected Grok client')
+}
 if (client.publicClient !== true) fail('Grok client is not public')
 if (client.redirectUris?.length !== 1 || client.redirectUris[0] !== EXPECTED_REDIRECT) fail('Grok redirect URI is not exact')
 if (client.webOrigins?.length !== 1 || client.webOrigins[0] !== EXPECTED_ORIGIN) fail('Grok web origin is not exact')
@@ -120,7 +126,7 @@ await request(clientPath, {
   expected: [204],
   body: {
     ...client,
-    name: 'Grok / Beam read-only pilot',
+    name: clientName,
     enabled: true,
     consentRequired: true,
     fullScopeAllowed: false,
@@ -141,7 +147,10 @@ await request(clientPath, {
 const allScopes = await request(`${realmPath}/client-scopes`, { token: adminToken })
 const audienceScope = allScopes.find((scope) => scope.name === 'beam-mcp-audience')
 const readScope = allScopes.find((scope) => scope.name === 'beam:read')
+const sendScope = allScopes.find((scope) => scope.name === 'beam:send')
 if (!audienceScope?.id || !readScope?.id) fail('required Beam client scopes are missing')
+if (enableSendScope && !sendScope?.id) fail('beam:send client scope does not exist')
+const retainedOptionalScopeIds = new Set([readScope.id, ...(enableSendScope ? [sendScope.id] : [])])
 
 const defaultScopes = await request(`${clientPath}/default-client-scopes`, { token: adminToken })
 for (const scope of defaultScopes) {
@@ -156,15 +165,16 @@ if (!defaultScopes.some((scope) => scope.id === audienceScope.id)) {
   })
 }
 
-const optionalScopes = await request(`${clientPath}/optional-client-scopes`, { token: adminToken })
-for (const scope of optionalScopes) {
-  if (scope.id === readScope.id) continue
+const assignedOptionalScopes = await request(`${clientPath}/optional-client-scopes`, { token: adminToken })
+for (const scope of assignedOptionalScopes) {
+  if (retainedOptionalScopeIds.has(scope.id)) continue
   await request(`${clientPath}/optional-client-scopes/${encodeURIComponent(scope.id)}`, {
     method: 'DELETE', token: adminToken, expected: [204],
   })
 }
-if (!optionalScopes.some((scope) => scope.id === readScope.id)) {
-  await request(`${clientPath}/optional-client-scopes/${encodeURIComponent(readScope.id)}`, {
+for (const scopeId of retainedOptionalScopeIds) {
+  if (assignedOptionalScopes.some((scope) => scope.id === scopeId)) continue
+  await request(`${clientPath}/optional-client-scopes/${encodeURIComponent(scopeId)}`, {
     method: 'PUT', token: adminToken, expected: [204],
   })
 }
@@ -196,8 +206,13 @@ const result = {
   registrationAccessTokenRotatedAndDiscarded: true,
   sendScopeAssigned: [...verifiedDefaultScopes, ...verifiedOptionalScopes].some((scope) => scope.name === 'beam:send'),
 }
-if (!result.ok || result.sendScopeAssigned) fail('final client verification failed')
+if (!result.ok) fail('final client verification failed')
 if (JSON.stringify(result.defaultScopes) !== JSON.stringify(['beam-mcp-audience'])) fail('default scopes are not minimal')
-if (JSON.stringify(result.optionalScopes) !== JSON.stringify(['beam:read'])) fail('optional scopes are not read-only')
+if (result.defaultScopes.includes('beam:send')) fail('beam:send must stay optional')
+const verifiedOptionalScopeNames = [...result.optionalScopes].sort()
+if (JSON.stringify(verifiedOptionalScopeNames) !== JSON.stringify([...optionalScopes].sort())) {
+  fail(enableSendScope ? 'optional scopes are not the approved send profile' : 'optional scopes are not read-only')
+}
+if (result.sendScopeAssigned !== enableSendScope) fail('send scope assignment does not match the requested profile')
 
 console.log(JSON.stringify(result, null, 2))

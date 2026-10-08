@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
+import { namespaceForDomain } from './trust/org-domain.js'
+import { ensureTrustOrgSchema } from './trust/schema.js'
 import type {
   AgentIntentStats,
   AgentKeyRow,
@@ -1232,6 +1234,7 @@ function initSchema(db: DB): void {
   `).run(backfillKeysCreatedAt)
 
   migrateIntentLifecycleModel(db)
+  ensureTrustOrgSchema(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
@@ -1428,6 +1431,7 @@ export function createOrg(
     apiKeyHash: string
     verificationToken: string
     claimExpiresAt?: string | null
+    requestedName?: string | null
   }
 ): OrgRow {
   const now = nowIso()
@@ -1444,8 +1448,9 @@ export function createOrg(
       verified,
       claim_expires_at,
       created_at,
-      verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
+      verified_at,
+      requested_name
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?)
   `).run(
     input.name,
     input.displayName,
@@ -1455,6 +1460,7 @@ export function createOrg(
     input.verificationToken,
     input.claimExpiresAt ?? new Date(Date.now() + (72 * 60 * 60 * 1000)).toISOString(),
     now,
+    input.requestedName ?? null,
   )
 
   return getOrg(db, input.name) as OrgRow
@@ -2665,10 +2671,102 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
   `).all(orgName) as Array<OrgAgentRow & Partial<AgentRow>>
 }
 
-export function markOrgVerified(db: DB, name: string): OrgRow | null {
+function tableExists(db: DB, tableName: string): boolean {
+  return Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tableName))
+}
+
+function renameOrg(db: DB, from: string, to: string): void {
+  const org = getOrg(db, from)
+  if (!org || from === to || getOrg(db, to)) {
+    return
+  }
+  const nextDomain = buildBeamDomain(to)
+  const previousSuffix = `@${org.beam_domain}`
+  const nextSuffix = `@${nextDomain}`
+  const foreignKeys = db.pragma('foreign_keys', { simple: true })
+  db.pragma('foreign_keys = OFF')
+  try {
+    const apply = db.transaction(() => {
+      db.prepare('UPDATE orgs SET name = ?, beam_domain = ? WHERE name = ?').run(to, nextDomain, from)
+      if (tableExists(db, 'org_agents')) {
+        db.prepare('UPDATE org_agents SET org_name = ?, beam_id = replace(beam_id, ?, ?) WHERE org_name = ?')
+          .run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'workspaces')) {
+        db.prepare('UPDATE workspaces SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'agents')) {
+        db.prepare('UPDATE agents SET org = ?, beam_id = replace(beam_id, ?, ?) WHERE org = ?')
+          .run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'org_registry_filings')) {
+        db.prepare('UPDATE org_registry_filings SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'persons')) {
+        db.prepare('UPDATE persons SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'person_invitations')) {
+        db.prepare('UPDATE person_invitations SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'mandates')) {
+        db.prepare(`
+          UPDATE mandates
+          SET org_name = ?, agent_beam_id = replace(agent_beam_id, ?, ?)
+          WHERE org_name = ?
+        `).run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'acceptance_rules')) {
+        db.prepare(`
+          UPDATE acceptance_rules
+          SET owner_beam_id = replace(owner_beam_id, ?, ?)
+          WHERE substr(owner_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+      }
+      if (tableExists(db, 'delegations')) {
+        db.prepare(`
+          UPDATE delegations
+          SET grantor_beam_id = replace(grantor_beam_id, ?, ?)
+          WHERE substr(grantor_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+        db.prepare(`
+          UPDATE delegations
+          SET grantee_beam_id = replace(grantee_beam_id, ?, ?)
+          WHERE substr(grantee_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+      }
+    })
+    apply()
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+  }
+}
+
+export function markOrgVerified(
+  db: DB,
+  name: string,
+  via: 'dns' | 'well-known' | null = null,
+): OrgRow | null {
+  const current = getOrg(db, name)
+  if (!current) {
+    return null
+  }
+  const allowed = current.domain ? namespaceForDomain(current.domain) : null
+  const requested = current.requested_name
+  let publicName = current.name
+  if (requested && allowed && requested === allowed.label && current.name !== requested && !getOrg(db, requested)) {
+    renameOrg(db, current.name, requested)
+    publicName = requested
+  }
   const now = nowIso()
-  db.prepare('UPDATE orgs SET verified = 1, verified_at = ?, claim_expires_at = NULL WHERE name = ?').run(now, name)
-  return getOrg(db, name)
+  db.prepare(`
+    UPDATE orgs
+    SET verified = 1,
+        verified_at = ?,
+        claim_expires_at = NULL,
+        domain_verified_via = COALESCE(?, domain_verified_via)
+    WHERE name = ?
+  `).run(now, via, publicName)
+  return getOrg(db, publicName)
 }
 
 function orgExists(db: DB, name: string): boolean {
@@ -3262,6 +3360,7 @@ export function listBeamConnections(
     SELECT *
     FROM beam_connections
     WHERE (requester_beam_id = ? OR recipient_beam_id = ?)
+      AND (held_for_person_id IS NULL OR recipient_beam_id <> ?)
       ${statusClause}
     ORDER BY
       CASE WHEN status = 'pending' AND recipient_beam_id = ? THEN 0
@@ -3269,7 +3368,7 @@ export function listBeamConnections(
            ELSE 2 END,
       updated_at DESC,
       connection_id ASC
-  `).all(beamId, beamId, ...normalizedStatuses, beamId) as BeamConnectionRow[]
+  `).all(beamId, beamId, beamId, ...normalizedStatuses, beamId) as BeamConnectionRow[]
 }
 
 export function createBeamConnectionRequest(
@@ -3279,6 +3378,7 @@ export function createBeamConnectionRequest(
     recipientBeamId: string
     message: string | null
     signature: string
+    heldForPersonId?: string | null
   },
 ): { connection: BeamConnectionRow; created: boolean } {
   const create = db.transaction(() => {
@@ -3306,9 +3406,10 @@ export function createBeamConnectionRequest(
         blocked_by_beam_id,
         created_at,
         updated_at,
-        responded_at
+        responded_at,
+        held_for_person_id
       )
-      VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?, NULL)
+      VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?, NULL, ?)
     `).run(
       connectionId,
       beamConnectionPairKey(input.requesterBeamId, input.recipientBeamId),
@@ -3318,6 +3419,7 @@ export function createBeamConnectionRequest(
       input.signature,
       now,
       now,
+      input.heldForPersonId ?? null,
     )
 
     return {
@@ -3924,17 +4026,44 @@ export function listRevokedAgentKeys(db: DB): AgentKeyRow[] {
   `).all() as AgentKeyRow[]
 }
 
+export class DelegationReplayError extends Error {
+  readonly code = 'DELEGATION_REPLAY'
+
+  constructor() {
+    super('This signed delegation was already used and cannot be created again')
+  }
+}
+
 export function createDelegation(
   db: DB,
-  input: { grantorBeamId: string; granteeBeamId: string; scope: string; expiresAt: number },
+  input: { grantorBeamId: string; granteeBeamId: string; scope: string; expiresAt: number; payloadHash: string },
 ): DelegationRow {
   const createdAt = nowMs()
-  const result = db.prepare(`
-    INSERT INTO delegations (grantor_beam_id, grantee_beam_id, scope, created_at, expires_at, revoked)
-    VALUES (?, ?, ?, ?, ?, 0)
-  `).run(input.grantorBeamId, input.granteeBeamId, input.scope, createdAt, input.expiresAt)
+  const insert = db.transaction(() => {
+    const priorHash = db.prepare('SELECT id FROM delegations WHERE payload_hash = ?').get(input.payloadHash) as { id: number } | undefined
+    if (priorHash) {
+      throw new DelegationReplayError()
+    }
+    const revokedTuple = db.prepare(`
+      SELECT id FROM delegations
+      WHERE revoked = 1
+        AND grantor_beam_id = ?
+        AND grantee_beam_id = ?
+        AND scope = ?
+        AND expires_at = ?
+    `).get(input.grantorBeamId, input.granteeBeamId, input.scope, input.expiresAt) as { id: number } | undefined
+    if (revokedTuple) {
+      throw new DelegationReplayError()
+    }
 
-  return db.prepare('SELECT * FROM delegations WHERE id = ?').get(Number(result.lastInsertRowid)) as DelegationRow
+    const result = db.prepare(`
+      INSERT INTO delegations (grantor_beam_id, grantee_beam_id, scope, created_at, expires_at, revoked, payload_hash)
+      VALUES (?, ?, ?, ?, ?, 0, ?)
+    `).run(input.grantorBeamId, input.granteeBeamId, input.scope, createdAt, input.expiresAt, input.payloadHash)
+    return Number(result.lastInsertRowid)
+  })
+
+  return db.prepare('SELECT * FROM delegations WHERE id = ?').get(insert()) as DelegationRow
 }
 
 export function listActiveDelegations(db: DB, beamId: string, currentTime = nowMs()): DelegationRow[] {
@@ -4048,7 +4177,8 @@ export function logIntentStart(db: DB, frame: IntentFrame): void {
       completed_at = NULL,
       round_trip_latency_ms = NULL,
       error_code = NULL,
-      result_json = NULL
+      result_json = NULL,
+      result_signature = NULL
   `).run(
     frame.nonce,
     frame.from,
@@ -4097,6 +4227,7 @@ export function finalizeIntentLog(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
 ): void {
   const completedAt = nowIso()
@@ -4117,6 +4248,7 @@ export function reconcileIntentLog(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
 ): void {
   const completedAt = nowIso()
@@ -4133,6 +4265,7 @@ function writeIntentLogFinalState(
     latencyMs: number | null
     errorCode?: string
     resultJson?: string | null
+    resultSignature?: string | null
   },
   completedAt: string,
 ): void {
@@ -4143,7 +4276,8 @@ function writeIntentLogFinalState(
         round_trip_latency_ms = ?,
         status = ?,
         error_code = ?,
-        result_json = ?
+        result_json = ?,
+        result_signature = COALESCE(?, result_signature)
     WHERE nonce = ?
   `).run(
     completedAt,
@@ -4151,6 +4285,7 @@ function writeIntentLogFinalState(
     input.status,
     input.errorCode ?? null,
     input.resultJson ?? null,
+    input.resultSignature ?? null,
     input.nonce,
   )
 

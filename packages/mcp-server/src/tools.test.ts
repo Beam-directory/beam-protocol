@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
 import type { AgentProfile, AgentRecord, BeamIdString, ResultFrame } from 'beam-protocol-sdk'
+import { resetConfirmationsForTests } from './confirmation.js'
+import { resetSendRateLimitForTests } from './send-rate.js'
 import { createBeamToolHandlers, type BeamGateway } from './tools.js'
 
 const ownBeamId = 'grok@acme.beam.directory' as BeamIdString
@@ -187,19 +189,82 @@ test('federated assurance assertions cannot satisfy local verification policy', 
   assert.equal(sends.length, 0)
 })
 
-test('confirmed send delivers a signed result', async () => {
+test('confirmed send delivers a signed result only with the prepared token', async () => {
+  resetConfirmationsForTests()
+  resetSendRateLimitForTests()
   const { gateway, sends } = fixture()
   const handlers = createBeamToolHandlers({ gateway, ownBeamId, allowedIntents: new Set(['conversation.message']) })
+  const message = 'Please take over this support case'
+  await assert.rejects(
+    handlers.send({ to: targetBeamId, message, confirmed: true }),
+    /confirmation token is required/,
+  )
+  const preview = await handlers.prepareHandoff({ to: targetBeamId, message, context: { ticket: 'SUP-42' } })
+  const token = String(preview['confirmationToken'])
+  await assert.rejects(
+    handlers.send({ to: targetBeamId, message, confirmed: true, confirmationToken: token }),
+    /does not match this exact action/,
+  )
   const result = await handlers.send({
     to: targetBeamId,
-    message: 'Please take over this support case',
+    message,
     context: { ticket: 'SUP-42' },
     confirmed: true,
+    confirmationToken: token,
     timeoutMs: 10_000,
   })
   assert.equal(sends.length, 1)
   assert.equal((result['result'] as Record<string, unknown>)['signed'], true)
   assert.equal(result['delivered'], true)
+  await assert.rejects(
+    handlers.send({
+      to: targetBeamId,
+      message,
+      context: { ticket: 'SUP-42' },
+      confirmed: true,
+      confirmationToken: token,
+    }),
+    /prepare this exact action again/,
+  )
+  assert.equal(sends.length, 1)
+})
+
+test('send rate limit counts delivered handoffs per identity', async () => {
+  resetConfirmationsForTests()
+  resetSendRateLimitForTests()
+  const { gateway, sends } = fixture()
+  const handlers = createBeamToolHandlers({
+    gateway,
+    ownBeamId,
+    allowedIntents: new Set(['conversation.message']),
+    sendLimitPerHour: 1,
+  })
+  const first = await handlers.prepareHandoff({ to: targetBeamId, message: 'One' })
+  const second = await handlers.prepareHandoff({ to: targetBeamId, message: 'Two' })
+  await handlers.send({
+    to: targetBeamId,
+    message: 'One',
+    confirmed: true,
+    confirmationToken: String(first['confirmationToken']),
+  })
+  await assert.rejects(
+    handlers.send({
+      to: targetBeamId,
+      message: 'Two',
+      confirmed: true,
+      confirmationToken: String(second['confirmationToken']),
+    }),
+    /Send rate limit exceeded: 1 external sends per hour/,
+  )
+  assert.equal(sends.length, 1)
+  resetSendRateLimitForTests()
+  await handlers.send({
+    to: targetBeamId,
+    message: 'Two',
+    confirmed: true,
+    confirmationToken: String(second['confirmationToken']),
+  })
+  assert.equal(sends.length, 2)
 })
 
 test('unknown target is rejected before delivery', async () => {

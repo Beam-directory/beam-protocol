@@ -1,8 +1,9 @@
-import { createHash, generateKeyPairSync, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, randomUUID, timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole, requireAdminSession, type AdminSession } from '../admin-auth.js'
 import { createAgentApiKey, hashApiKey } from '../api-key.js'
+import { isEd25519Spki } from '../key-validation.js'
 import {
   createWorkspace,
   createWorkspaceIdentityBinding,
@@ -237,9 +238,7 @@ type SerializedWorkspaceIdentityCredential = {
   directoryUrl: string
   generatedAt: string
   publicKey: string
-  privateKey: string
   publicKeyBase64: string
-  privateKeyBase64: string
   apiKey: string
   urls: {
     didResolution: string
@@ -663,7 +662,6 @@ function buildWorkspaceIdentityCredential(input: {
   displayName: string | null
   workspaceSlug: string
   publicKeyBase64: string
-  privateKeyBase64: string
   apiKey: string
 }): SerializedWorkspaceIdentityCredential {
   const urls = buildWorkspaceIdentityDid(input.beamId)
@@ -676,9 +674,7 @@ function buildWorkspaceIdentityCredential(input: {
     directoryUrl: getDirectoryBaseUrl(),
     generatedAt: new Date().toISOString(),
     publicKey: input.publicKeyBase64,
-    privateKey: input.privateKeyBase64,
     publicKeyBase64: input.publicKeyBase64,
-    privateKeyBase64: input.privateKeyBase64,
     apiKey: input.apiKey,
     urls: {
       didResolution: urls.resolutionUrl,
@@ -3859,9 +3855,13 @@ export function workspacesRouter(db: Database): Hono {
       return c.json({ error: 'Workspace identity already exists', errorCode: 'WORKSPACE_IDENTITY_EXISTS' }, 409)
     }
 
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-    const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
-    const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    const publicKeyBase64 = typeof raw['publicKey'] === 'string' ? raw['publicKey'].trim() : ''
+    if (!isEd25519Spki(publicKeyBase64)) {
+      return c.json({
+        error: 'publicKey must be a client-generated Ed25519 SPKI key. The directory does not generate private keys.',
+        errorCode: 'PUBLIC_KEY_REQUIRED',
+      }, 400)
+    }
     const apiKey = createAgentApiKey(beamId)
 
     try {
@@ -3919,7 +3919,6 @@ export function workspacesRouter(db: Database): Hono {
           displayName: provision.agent.display_name,
           workspaceSlug: workspace.slug,
           publicKeyBase64,
-          privateKeyBase64,
           apiKey,
         }),
       }, 201)
@@ -4148,9 +4147,24 @@ export function workspacesRouter(db: Database): Hono {
       return c.json({ error: 'Local Beam identity not found', errorCode: 'AGENT_NOT_FOUND' }, 404)
     }
 
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-    const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
-    const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be an object', errorCode: 'INVALID_BODY' }, 400)
+    }
+    const publicKeyBase64 = typeof (body as Record<string, unknown>)['publicKey'] === 'string'
+      ? String((body as Record<string, unknown>)['publicKey']).trim()
+      : ''
+    if (!isEd25519Spki(publicKeyBase64) || publicKeyBase64 === agent.public_key) {
+      return c.json({
+        error: 'publicKey must be a new client-generated Ed25519 SPKI key. The directory does not generate private keys.',
+        errorCode: 'PUBLIC_KEY_REQUIRED',
+      }, 400)
+    }
     const apiKey = createAgentApiKey(agent.beam_id)
     const updatedAgent = registerAgent(db, {
       beamId: agent.beam_id,
@@ -4193,7 +4207,6 @@ export function workspacesRouter(db: Database): Hono {
       displayName: updatedAgent.display_name,
       workspaceSlug: workspace.slug,
       publicKeyBase64,
-      privateKeyBase64,
       apiKey,
     })
 

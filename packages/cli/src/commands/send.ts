@@ -61,6 +61,20 @@ export async function cmdSend(
       return
     }
 
+    if ('executed' in result) {
+      console.log('')
+      console.log(chalk.bold.yellow('Intent held for approval'))
+      console.log(chalk.dim('─'.repeat(40)))
+      console.log(`${chalk.cyan('Approval:')} ${result.approvalId}`)
+      console.log(`${chalk.cyan('Code:')}     ${result.errorCode}`)
+      if (result.error) {
+        console.log(`${chalk.cyan('Error:')}    ${result.error}`)
+      }
+      console.log(`${chalk.cyan('Latency:')}  ${elapsed}ms`)
+      console.log('')
+      return
+    }
+
     if (result.success) {
       console.log('')
       console.log(chalk.bold.green('✅ Intent delivered successfully'))

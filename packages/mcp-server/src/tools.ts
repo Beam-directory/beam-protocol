@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto'
+import { consumeConfirmation, issueConfirmation, canonicalDigest } from './confirmation.js'
+import { assertSendCapacity, recordSend } from './send-rate.js'
 import type {
   AgentRecord,
   AgentProfile,
@@ -55,6 +57,7 @@ export interface BeamPrepareHandoffInput {
 
 export interface BeamSendInput extends BeamPrepareHandoffInput {
   confirmed: boolean
+  confirmationToken?: string
   timeoutMs?: number
 }
 
@@ -145,6 +148,17 @@ async function requireTarget(gateway: BeamGateway, to: BeamIdString): Promise<Ag
   return target
 }
 
+function handoffSubject(validated: { to: BeamIdString; intent: string; payload: Record<string, unknown> }): Record<string, unknown> {
+  const message = typeof validated.payload['message'] === 'string' ? validated.payload['message'] : ''
+  return {
+    action: 'beam_send',
+    to: validated.to,
+    intent: validated.intent,
+    messageSha256: createHash('sha256').update(message, 'utf8').digest('hex'),
+    contextSha256: validated.payload['context'] === undefined ? null : canonicalDigest(validated.payload['context']),
+  }
+}
+
 function warningsFor(
   target: AgentRecord,
   intent: string,
@@ -178,9 +192,11 @@ export function createBeamToolHandlers(options: {
   requireVerifiedTarget?: boolean
   minimumVerificationTier?: VerificationTier
   minimumTrustScore?: number
+  sendLimitPerHour?: number
 }): BeamToolHandlers {
   const { gateway, ownBeamId, allowedIntents } = options
   const requireVerifiedTarget = options.requireVerifiedTarget ?? true
+  const sendLimitPerHour = options.sendLimitPerHour ?? 30
   const policy = {
     requireVerifiedTarget,
     minimumVerificationTier: options.minimumVerificationTier ?? (requireVerifiedTarget ? 'verified' : 'basic'),
@@ -212,6 +228,7 @@ export function createBeamToolHandlers(options: {
       const validated = validatePayload(input, allowedIntents)
       const target = await requireTarget(gateway, validated.to)
       const warnings = warningsFor(target, validated.intent, policy)
+      const confirmation = issueConfirmation(handoffSubject(validated))
       return {
         ready: warnings.length === 0,
         requiresHumanConfirmation: true,
@@ -222,6 +239,7 @@ export function createBeamToolHandlers(options: {
         messageSha256: createHash('sha256').update(input.message, 'utf8').digest('hex'),
         target: publicAgent(target),
         warnings,
+        ...confirmation,
       }
     },
 
@@ -239,6 +257,12 @@ export function createBeamToolHandlers(options: {
       if (!Number.isInteger(timeoutMs) || timeoutMs < MIN_TIMEOUT_MS || timeoutMs > MAX_TIMEOUT_MS) {
         throw new Error(`timeoutMs must be an integer between ${MIN_TIMEOUT_MS} and ${MAX_TIMEOUT_MS}`)
       }
+      if (!input.confirmationToken) {
+        throw new Error('External delivery blocked: a server-issued confirmation token is required')
+      }
+      assertSendCapacity(ownBeamId, sendLimitPerHour)
+      consumeConfirmation(input.confirmationToken, handoffSubject(validated))
+      recordSend(ownBeamId)
 
       const result = await gateway.send(validated.to, validated.intent, validated.payload, timeoutMs)
       return {

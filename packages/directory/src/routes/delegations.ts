@@ -1,7 +1,8 @@
+import { createHash } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import type { DelegationRow } from '../types.js'
-import { createDelegation, getAgent, listActiveDelegations, revokeDelegation } from '../db.js'
+import { createDelegation, DelegationReplayError, getAgent, listActiveDelegations, revokeDelegation } from '../db.js'
 import { verifyPayload } from '../crypto.js'
 import { BEAM_ID_RE } from '../validation.js'
 
@@ -47,6 +48,7 @@ export function delegationsRouter(db: Database): Hono {
     const scope = String(raw.scope ?? '').trim()
     const expiresAt = Number(raw.expires_at ?? 0)
     const signature = String(raw.signature ?? '').trim()
+    const nonce = raw.nonce === undefined || raw.nonce === null ? undefined : String(raw.nonce)
 
     if (!BEAM_ID_RE.test(granteeBeamId) || !scope || !Number.isFinite(expiresAt) || !signature) {
       return c.json({ error: 'grantee_beam_id, scope, expires_at and signature are required', errorCode: 'INVALID_DELEGATION' }, 400)
@@ -54,6 +56,9 @@ export function delegationsRouter(db: Database): Hono {
 
     if (expiresAt <= Date.now()) {
       return c.json({ error: 'expires_at must be in the future', errorCode: 'INVALID_DELEGATION' }, 400)
+    }
+    if (nonce !== undefined && !/^[A-Za-z0-9_-]{8,128}$/.test(nonce)) {
+      return c.json({ error: 'nonce must be 8 to 128 url-safe characters', errorCode: 'INVALID_DELEGATION' }, 400)
     }
 
     const grantee = getAgent(db, granteeBeamId)
@@ -67,18 +72,28 @@ export function delegationsRouter(db: Database): Hono {
       grantee_beam_id: granteeBeamId,
       scope,
       expires_at: expiresAt,
+      ...(nonce ? { nonce } : {}),
     })
 
     if (!verifyPayload(payload, signature, grantor.public_key)) {
       return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
 
-    const delegation = createDelegation(db, {
-      grantorBeamId: beamId,
-      granteeBeamId,
-      scope,
-      expiresAt,
-    })
+    let delegation
+    try {
+      delegation = createDelegation(db, {
+        grantorBeamId: beamId,
+        granteeBeamId,
+        scope,
+        expiresAt,
+        payloadHash: createHash('sha256').update(payload).digest('hex'),
+      })
+    } catch (error) {
+      if (error instanceof DelegationReplayError) {
+        return c.json({ error: error.message, errorCode: error.code }, 409)
+      }
+      throw error
+    }
 
     return c.json(serializeDelegation(delegation), 201)
   })

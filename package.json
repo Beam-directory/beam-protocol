@@ -89,7 +89,8 @@
     "typecheck:workspaces": "npm run typecheck --if-present --workspace=packages/sdk-typescript --workspace=packages/cli --workspace=packages/echo-agent --workspace=packages/create-beam-agent --workspace=packages/dashboard --workspace=packages/directory --workspace=packages/message-bus --workspace=packages/a2a-adapter --workspace=packages/mcp-server --workspace=@beam-protocol/public-site"
   },
   "engines": {
-    "node": ">=20.19.0"
+    "node": ">=20.19.0",
+    "npm": ">=10"
   },
   "keywords": [
     "agent-to-agent",

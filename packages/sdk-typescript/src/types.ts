@@ -45,6 +45,15 @@ export interface ResultFrame {
   signature?: string
 }
 
+export interface ApprovalRequired {
+  executed: false
+  approvalId: string
+  errorCode: 'APPROVAL_REQUIRED'
+  error?: string
+}
+
+export type IntentSendResult = ResultFrame | ApprovalRequired
+
 export interface AgentRegistration {
   beamId: BeamIdString
   displayName: string

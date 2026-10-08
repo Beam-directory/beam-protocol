@@ -1,6 +1,7 @@
 const RETRY_BACKOFF_SECONDS = [30, 60, 120, 240, 480] as const
 
 const NON_RETRYABLE_ERROR_CODES = new Set([
+  'APPROVAL_REQUIRED',
   'BAD_REQUEST',
   'FORBIDDEN',
   'INVALID_INTENT',
@@ -33,6 +34,7 @@ export function computeRetryAt(retryCount: number, seed: string, nowSeconds = Da
 }
 
 export function isRetryableDirectoryError(errorCode?: string, status?: number): boolean {
+  if (status === 202) return false
   if (errorCode && NON_RETRYABLE_ERROR_CODES.has(errorCode)) {
     return false
   }
