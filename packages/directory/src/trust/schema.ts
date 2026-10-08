@@ -15,6 +15,7 @@ function ensureColumn(db: Database, tableName: string, columnName: string, defin
 
 export function ensureTrustOrgSchema(db: Database): void {
   ensureColumn(db, 'orgs', 'domain_verified_via', 'TEXT')
+  ensureColumn(db, 'orgs', 'requested_name', 'TEXT')
   db.exec(`
     CREATE TABLE IF NOT EXISTS org_registry_filings (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -50,5 +51,13 @@ export function ensureTrustOrgSchema(db: Database): void {
       ON orgs(domain)
       WHERE domain IS NOT NULL AND domain != ''
     `)
+    return
   }
+
+  const domains = duplicates.map((row) => row.domain).join(', ')
+  console.error(`[trust] SKIPPED unique index idx_orgs_domain_unique because these domains are duplicated: ${domains}`)
+  db.prepare(`
+    INSERT INTO audit_log (action, actor, target, timestamp, details)
+    VALUES ('org.domain_index.skipped', 'system', 'idx_orgs_domain_unique', ?, ?)
+  `).run(new Date().toISOString(), JSON.stringify({ domains: duplicates.map((row) => row.domain) }))
 }

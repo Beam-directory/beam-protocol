@@ -1803,9 +1803,9 @@ export interface WorkspaceIdentityCredentialBundle {
   directoryUrl: string
   generatedAt: string
   publicKey: string
-  privateKey: string
+  privateKey?: string
   publicKeyBase64: string
-  privateKeyBase64: string
+  privateKeyBase64?: string
   apiKey: string
   urls: {
     didResolution: string
@@ -1827,6 +1827,7 @@ export interface WorkspaceIdentityProvisionInput {
   bindingType?: 'agent' | 'service'
   runtimeType?: string
   orgApiKey?: string
+  publicKey: string
 }
 
 export interface WorkspaceIdentityProvisionResponse {
@@ -3439,8 +3440,9 @@ export const directoryApi = {
     method: 'PATCH',
     body: JSON.stringify(input),
   }, { admin: true }),
-  reissueWorkspaceIdentityCredential: (slug: string, id: number) => request<WorkspaceIdentityReissueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}/reissue-local-credential`, {
+  reissueWorkspaceIdentityCredential: (slug: string, id: number, input: { publicKey: string }) => request<WorkspaceIdentityReissueResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/identities/${id}/reissue-local-credential`, {
     method: 'POST',
+    body: JSON.stringify(input),
   }, { admin: true }),
   listWorkspacePartnerChannels: (slug: string) => request<WorkspacePartnerChannelsResponse>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, undefined, { admin: true }),
   createWorkspacePartnerChannel: (slug: string, input: WorkspacePartnerChannelCreateInput) => request<{ channel: WorkspacePartnerChannel }>(`/admin/workspaces/${encodeURIComponent(slug)}/partner-channels`, {

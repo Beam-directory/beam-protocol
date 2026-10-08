@@ -9,6 +9,7 @@ import {
   createOrg,
   deleteExpiredOrgClaim,
   getOrg,
+  getOrgByApiKeyHash,
   getOrgByDomain,
   listOrgAgents,
   logAuditEvent,
@@ -88,9 +89,26 @@ function requireOrgApiKey(c: Context, org: OrgRow): Response | null {
   return null
 }
 
+function resolveOrg(db: Database, name: string, request: Request): OrgRow | null {
+  const direct = getOrg(db, name)
+  if (direct) {
+    return direct
+  }
+  const supplied = getSuppliedApiKey(request)
+  if (!supplied) {
+    return null
+  }
+  const byKey = getOrgByApiKeyHash(db, hashApiKey(supplied))
+  if (byKey && byKey.requested_name === name) {
+    return byKey
+  }
+  return null
+}
+
 function serializeOrg(row: OrgRow): object {
   return {
     name: row.name,
+    requestedName: row.requested_name,
     displayName: row.display_name,
     domain: row.domain,
     beamDomain: row.beam_domain,
@@ -179,13 +197,14 @@ export function orgsRouter(db: Database): Hono {
       }, 403)
     }
 
+    const storedName = allowedNamespace.disambiguated
     const apiKey = createApiKey()
     const verificationToken = createVerificationToken()
     let reclaimedExpiredClaim = false
 
     try {
       const org = db.transaction(() => {
-        const existingOrg = getOrg(db, name)
+        const existingOrg = getOrg(db, storedName)
         if (existingOrg) {
           const released = claimExpired(existingOrg) && deleteExpiredOrgClaim(db, existingOrg.name)
           reclaimedExpiredClaim ||= released
@@ -210,18 +229,19 @@ export function orgsRouter(db: Database): Hono {
         }
 
         return createOrg(db, {
-          name,
+          name: storedName,
           displayName,
           domain,
           apiKeyHash: hashApiKey(apiKey),
           verificationToken,
+          requestedName: name,
         })
       })()
       logAuditEvent(db, {
         action: reclaimedExpiredClaim ? 'org.claim.reclaimed' : 'org.claim.created',
-        actor: `org:${name}`,
-        target: name,
-        details: { domain, claimExpiresAt: org.claim_expires_at },
+        actor: `org:${org.name}`,
+        target: org.name,
+        details: { domain, requestedName: name, claimExpiresAt: org.claim_expires_at },
       })
       c.header('Cache-Control', 'no-store')
       return c.json({
@@ -239,7 +259,7 @@ export function orgsRouter(db: Database): Hono {
 
   router.get('/:name', (c) => {
     const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const org = resolveOrg(db, name, c.req.raw)
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -250,7 +270,7 @@ export function orgsRouter(db: Database): Hono {
     }
 
     try {
-      const agents = listOrgAgents(db, name)
+      const agents = listOrgAgents(db, org.name)
       return c.json({
         org: serializeOrg(org),
         agents: agents.map(serializeOrgAgent),
@@ -263,8 +283,9 @@ export function orgsRouter(db: Database): Hono {
   })
 
   router.post('/:name/agents', async (c) => {
-    const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const requestedName = normalizeOrgName(c.req.param('name'))
+    const org = resolveOrg(db, requestedName, c.req.raw)
+    const name = org?.name ?? requestedName
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -377,8 +398,9 @@ export function orgsRouter(db: Database): Hono {
   })
 
   router.post('/:name/verify', async (c) => {
-    const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const requestedName = normalizeOrgName(c.req.param('name'))
+    const org = resolveOrg(db, requestedName, c.req.raw)
+    const name = org?.name ?? requestedName
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -527,11 +549,12 @@ function loadOwnedOrg(
   c: Context,
   db: Database,
 ): { name: string; org: OrgRow } | Response {
-  const name = normalizeOrgName(c.req.param('name') ?? '')
-  const org = getOrg(db, name)
+  const requestedName = normalizeOrgName(c.req.param('name') ?? '')
+  const org = resolveOrg(db, requestedName, c.req.raw)
   if (!org) {
-    return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
+    return c.json({ error: `Organization ${requestedName} not found`, errorCode: 'NOT_FOUND' }, 404)
   }
+  const name = org.name
   const auth = requireOrgApiKey(c, org)
   if (auth) {
     return auth

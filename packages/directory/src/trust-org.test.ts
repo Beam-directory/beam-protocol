@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import test from 'node:test'
 import { createAdminSession } from './admin-auth.js'
-import { assignDirectoryRole, createDatabase, getAgent, listAuditLog, registerAgent } from './db.js'
+import { assignDirectoryRole, createDatabase, createOrg, getAgent, getOrg, listAuditLog, markOrgVerified, registerAgent } from './db.js'
 import { createAgentApiKey, hashApiKey } from './api-key.js'
 import { signPayload } from './crypto.js'
 import { getLocalDirectoryUrl } from './federation.js'
 import { createApp } from './server.js'
+import { ensureTrustOrgSchema } from './trust/schema.js'
+import { namespaceForDomain } from './trust/org-domain.js'
 import { isPublicAddress, bodyContainsVerification } from './trust/well-known.js'
 import { isValidLei } from './trust/registry-format.js'
 
@@ -36,26 +38,22 @@ test('coppen.de and coppen.at are different organizations', async () => {
       body: JSON.stringify({ name: 'coppen', displayName: 'COPPEN GmbH', domain: 'https://www.coppen.de' }),
     }))
     assert.equal(de.status, 201)
-    const deBody = await de.json() as { domain: string; name: string }
+    const deBody = await de.json() as { domain: string; name: string; requestedName: string }
     assert.equal(deBody.domain, 'coppen.de')
-    assert.equal(deBody.name, 'coppen')
-
-    const collided = await app.request(new Request('http://localhost/orgs', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.21' },
-      body: JSON.stringify({ name: 'coppen', displayName: 'Coppen AT', domain: 'coppen.at' }),
-    }))
-    assert.equal(collided.status, 409)
+    assert.equal(deBody.name, 'coppen--de')
+    assert.equal(deBody.requestedName, 'coppen')
+    assert.equal(markOrgVerified(db, deBody.name)?.name, 'coppen')
 
     const at = await app.request(new Request('http://localhost/orgs', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.22' },
-      body: JSON.stringify({ name: 'coppen-at', displayName: 'Coppen AT', domain: 'coppen.at' }),
+      body: JSON.stringify({ name: 'coppen', displayName: 'Coppen AT', domain: 'coppen.at' }),
     }))
     assert.equal(at.status, 201)
     const atBody = await at.json() as { domain: string; name: string }
     assert.equal(atBody.domain, 'coppen.at')
-    assert.equal(atBody.name, 'coppen-at')
+    assert.equal(atBody.name, 'coppen--at')
+    assert.equal(markOrgVerified(db, atBody.name)?.name, 'coppen--at')
     assert.notEqual(deBody.domain, atBody.domain)
   } finally {
     db.close()
@@ -72,8 +70,8 @@ test('organization agents require a client public key and API keys cannot rotate
       headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.30' },
       body: JSON.stringify({ name: 'acme', displayName: 'Acme', domain: 'acme.example' }),
     }))
-    const { apiKey } = await created.json() as { apiKey: string }
-    db.prepare('UPDATE orgs SET verified = 1, claim_expires_at = NULL WHERE name = ?').run('acme')
+    const { apiKey, name } = await created.json() as { apiKey: string; name: string }
+    assert.equal(markOrgVerified(db, name)?.name, 'acme')
 
     const missingKey = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',
@@ -178,8 +176,8 @@ test('registry filings stay pending until a reviewer records the representation 
       headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.40' },
       body: JSON.stringify({ name: 'coppen', displayName: 'COPPEN GmbH', domain: 'coppen.de' }),
     }))
-    const { apiKey } = await created.json() as { apiKey: string }
-    db.prepare('UPDATE orgs SET verified = 1, claim_expires_at = NULL, domain_verified_via = ? WHERE name = ?').run('dns', 'coppen')
+    const { apiKey, name } = await created.json() as { apiKey: string; name: string }
+    assert.equal(markOrgVerified(db, name, 'dns')?.name, 'coppen')
 
     const submitted = await app.request(new Request('http://localhost/orgs/coppen/registry', {
       method: 'POST',
@@ -230,8 +228,165 @@ test('registry filings stay pending until a reviewer records the representation 
     assert.equal(isPublicAddress('127.0.0.1'), false)
     assert.equal(isPublicAddress('10.1.2.3'), false)
     assert.equal(isPublicAddress('8.8.8.8'), true)
+    assert.equal(isPublicAddress('2001:4860:4860::8888'), true)
+    for (const address of [
+      '::ffff:7f00:1',
+      '::ffff:127.0.0.1',
+      '64:ff9b::a00:1',
+      '2002:a00:1::1',
+      'fec0::1',
+      '::127.0.0.1',
+      '198.18.0.1',
+      '192.0.0.8',
+      '::1',
+      'fc00::1',
+      'fe80::1',
+    ]) {
+      assert.equal(isPublicAddress(address), false, address)
+    }
     assert.equal(bodyContainsVerification('beam-verification=abc\n', 'abc'), true)
     assert.equal(bodyContainsVerification('beam-verification=other', 'abc'), false)
+  } finally {
+    db.close()
+  }
+})
+
+test('unverified claims do not occupy the public label and suffix slugs do not collide', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    const app = createApp(db)
+    const claim = async (name: string, domain: string, ip: string) => {
+      const response = await app.request(new Request('http://localhost/orgs', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-forwarded-for': ip },
+        body: JSON.stringify({ name, displayName: name, domain }),
+      }))
+      const body = await response.json() as { name?: string; requestedName?: string; errorCode?: string }
+      return { status: response.status, body }
+    }
+
+    const squatter = await claim('coppen', 'coppen.com', '203.0.113.50')
+    assert.equal(squatter.status, 201)
+    assert.equal(squatter.body.name, 'coppen--com')
+    assert.equal(getOrg(db, 'coppen'), null)
+
+    const hyphenSquatter = await claim('coppen-de', 'coppen-de.com', '203.0.113.51')
+    assert.equal(hyphenSquatter.status, 201)
+    assert.equal(hyphenSquatter.body.name, 'coppen-de--com')
+
+    const real = await claim('coppen', 'coppen.de', '203.0.113.52')
+    assert.equal(real.status, 201)
+    assert.equal(real.body.name, 'coppen--de')
+    const promoted = markOrgVerified(db, 'coppen--de')
+    assert.equal(promoted?.name, 'coppen')
+    assert.equal(getOrg(db, 'coppen')?.domain, 'coppen.de')
+
+    assert.equal(namespaceForDomain('coppen.co.uk')?.disambiguated, 'coppen--co-uk')
+    assert.equal(namespaceForDomain('coppen-co.uk')?.disambiguated, 'coppen-co--uk')
+    const uk = await claim('coppen', 'coppen.co.uk', '203.0.113.53')
+    const hyphenUk = await claim('coppen-co', 'coppen-co.uk', '203.0.113.54')
+    assert.equal(uk.status, 201)
+    assert.equal(hyphenUk.status, 201)
+    assert.notEqual(uk.body.name, hyphenUk.body.name)
+  } finally {
+    db.close()
+  }
+})
+
+test('agent config changes to the encryption key require a signature, organization key, or admin', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    const app = createApp(db)
+    const created = await app.request(new Request('http://localhost/orgs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.60' },
+      body: JSON.stringify({ name: 'acme', displayName: 'Acme', domain: 'acme.example' }),
+    }))
+    const { apiKey, name } = await created.json() as { apiKey: string; name: string }
+    assert.equal(markOrgVerified(db, name)?.name, 'acme')
+    const signing = generateKeyPairSync('ed25519')
+    const publicKey = signing.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+    const issued = await app.request(new Request('http://localhost/orgs/acme/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ agentName: 'otto', publicKey }),
+    }))
+    const { beamId, apiKey: agentKey } = await issued.json() as { beamId: string; apiKey: string }
+    const dh = generateKeyPairSync('x25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+    const endpoint = 'https://hooks.example/beam'
+
+    const apiKeyOnly = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': agentKey },
+      body: JSON.stringify({ dhPublicKey: dh, httpEndpoint: endpoint }),
+    }))
+    assert.equal(apiKeyOnly.status, 401)
+    assert.equal(getAgent(db, beamId)?.dh_public_key, null)
+
+    const timestamp = new Date().toISOString()
+    const nonce = `nonce-${randomBytes(12).toString('hex')}`
+    const payload = { type: 'agent.config', beamId, httpEndpoint: endpoint, dhPublicKey: dh, timestamp, nonce }
+    const signature = signPayload(payload, signing.privateKey)
+    const signed = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, signature }),
+    }))
+    assert.equal(signed.status, 200)
+    assert.equal(getAgent(db, beamId)?.dh_public_key, dh)
+    assert.equal(getAgent(db, beamId)?.http_endpoint, endpoint)
+
+    const replay = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ ...payload, signature }),
+    }))
+    assert.equal(replay.status, 409)
+
+    const replacement = generateKeyPairSync('x25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+    const byOrg = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/config`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ dhPublicKey: replacement }),
+    }))
+    assert.equal(byOrg.status, 200)
+    assert.equal(getAgent(db, beamId)?.dh_public_key, replacement)
+  } finally {
+    db.close()
+  }
+})
+
+test('skipping the unique domain index is logged', () => {
+  const db = createDatabase(':memory:')
+  try {
+    createOrg(db, {
+      name: 'left',
+      displayName: 'Left',
+      domain: 'shared.example',
+      apiKeyHash: 'a'.repeat(64),
+      verificationToken: 'left-token',
+    })
+    db.exec('DROP INDEX IF EXISTS idx_orgs_domain_unique')
+    createOrg(db, {
+      name: 'right',
+      displayName: 'Right',
+      domain: 'shared.example',
+      apiKeyHash: 'b'.repeat(64),
+      verificationToken: 'right-token',
+    })
+    const lines: string[] = []
+    const original = console.error
+    console.error = (...args: unknown[]) => {
+      lines.push(args.map(String).join(' '))
+    }
+    try {
+      ensureTrustOrgSchema(db)
+    } finally {
+      console.error = original
+    }
+    assert.match(lines.join('\n'), /SKIPPED unique index idx_orgs_domain_unique/)
+    assert.equal(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = 'idx_orgs_domain_unique'`).get(), undefined)
+    assert.equal(listAuditLog(db, { action: 'org.domain_index.skipped', limit: 5 }).length, 1)
   } finally {
     db.close()
   }

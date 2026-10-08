@@ -23,8 +23,10 @@ export function registrableDomain(value: string): string | null {
 /**
  * The beam namespace stays a single label so existing addresses such as
  * `agent@coppen.beam.directory` keep working. The legal identity is the full
- * registrable domain. `coppen.de` may use `coppen` or `coppen-de`; `coppen.at`
- * uses `coppen` only while that label is free, otherwise `coppen-at`.
+ * registrable domain. Until the domain is verified, the claim is stored under
+ * the disambiguated form. `--` separates the label from the suffix so
+ * `coppen.co.uk` (`coppen--co-uk`) cannot collide with `coppen-co.uk`
+ * (`coppen-co--uk`). The short label is granted only after verification.
  */
 export function namespaceForDomain(domain: string): DomainNamespace | null {
   const registrable = registrableDomain(domain)
@@ -33,11 +35,11 @@ export function namespaceForDomain(domain: string): DomainNamespace | null {
   }
   const label = getDomainWithoutSuffix(registrable, { allowPrivateDomains: true })?.toLowerCase() ?? ''
   const suffix = getPublicSuffix(registrable, { allowPrivateDomains: true })?.toLowerCase() ?? ''
-  if (!label || !suffix || !NAMESPACE_RE.test(label)) {
+  if (!label || !suffix || !NAMESPACE_RE.test(slug(label))) {
     return null
   }
-  const disambiguated = `${slug(label)}-${slug(suffix)}`
-  if (!NAMESPACE_RE.test(disambiguated)) {
+  const disambiguated = `${slug(label)}--${slug(suffix)}`
+  if (!NAMESPACE_RE.test(disambiguated) || disambiguated === slug(label)) {
     return null
   }
   return { domain: registrable, label: slug(label), disambiguated }

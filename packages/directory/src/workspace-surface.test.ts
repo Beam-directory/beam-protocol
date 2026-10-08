@@ -472,9 +472,9 @@ test('organization workspace onboarding requires namespace proof and reserves th
       body: JSON.stringify({ name: 'acme', displayName: 'Acme GmbH', domain: 'acme.example' }),
     }))
     assert.equal(orgResponse.status, 201)
-    const orgBody = await orgResponse.json() as { apiKey: string }
+    const orgBody = await orgResponse.json() as { apiKey: string; name: string }
     assert.match(orgResponse.headers.get('cache-control') ?? '', /no-store/i)
-    markOrgVerified(db, 'acme')
+    assert.equal(markOrgVerified(db, orgBody.name)?.name, 'acme')
 
     const orgAgentResponse = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',

@@ -7,6 +7,7 @@ import {
   type WorkspaceIdentityProvisionResponse,
   type WorkspaceRecord,
 } from '../lib/api'
+import { generateEd25519Identity, withLocalSigningKey } from '../lib/identity-keys'
 
 function credentialDownloadName(beamId: string): string {
   return `${beamId.replace(/[^a-z0-9._-]+/gi, '-')}.beam-identity.json`
@@ -196,6 +197,7 @@ export default function RegisterPage() {
       setError(null)
       setResult(null)
       setDownloaded(false)
+      const keys = await generateEd25519Identity()
       const response = await directoryApi.provisionWorkspaceIdentity(selectedWorkspace.slug, {
         agentName: agentName.trim().toLowerCase(),
         displayName: displayName.trim(),
@@ -203,10 +205,14 @@ export default function RegisterPage() {
         description: description.trim(),
         bindingType,
         runtimeType: 'mcp:dedicated-tenant',
+        publicKey: keys.publicKeyBase64,
         ...(selectedWorkspace.orgName ? { orgApiKey: orgApiKey.trim() } : {}),
       })
       setOrgApiKey('')
-      setResult(response)
+      setResult({
+        ...response,
+        credential: withLocalSigningKey(response.credential, keys),
+      })
     } catch (reason) {
       setError(reason instanceof ApiError ? reason.message : 'Failed to provision Beam identity')
     } finally {
@@ -234,7 +240,7 @@ export default function RegisterPage() {
         <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-orange-600 dark:text-orange-300">Beam onboarding</div>
         <h1 className="mt-3 text-3xl font-semibold tracking-tight">Create the identity Grok will use</h1>
         <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-          The workspace reserves one Beam ID, binds it to your tenant, and returns its signing key plus API key exactly once. Nothing secret is written to browser storage.
+          This browser generates the signing key. The workspace stores only the public key and returns the API key once. Download the bundle before leaving; Beam never sees the private key.
         </p>
         <div className="mt-6 grid gap-3 md:grid-cols-5">
           <Step number="1" title="Organization" detail="Prove the company domain." />
@@ -251,7 +257,7 @@ export default function RegisterPage() {
             <div className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-400">Organization prerequisite</div>
             <div className="panel-title mt-2">Claim and verify the company namespace</div>
             <p className="mt-2 max-w-3xl text-sm leading-6 text-slate-600 dark:text-slate-300">
-              The namespace must match the registrable company domain. A pending claim expires after 72 hours, and no organization Beam ID can be issued before DNS verification succeeds.
+              The namespace must match the registrable company domain. Until DNS verification succeeds, the claim is stored under a temporary name and no organization Beam ID can be issued. Download the organization credential again after verification; that file carries the public Beam name. A pending claim expires after 72 hours.
             </p>
           </div>
           {orgClaim ? (

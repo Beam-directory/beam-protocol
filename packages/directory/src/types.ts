@@ -664,6 +664,7 @@ export interface OrgRow {
   created_at: string
   verified_at: string | null
   domain_verified_via: 'dns' | 'well-known' | null
+  requested_name: string | null
 }
 
 export interface OrgAgentRow {

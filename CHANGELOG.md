@@ -8,6 +8,14 @@
 - record Handelsregister or LEI filings per organization, with a manual representation review and an audit trail
 - stop generating agent signing keys on organization and workspace issuance; require a client public key
 - allow signing-key rotation only with the current key's signature or the owning organization's API key
+- assign the public Beam label only after domain verification; pending claims use a collision-free `--` namespace (`coppen.co.uk` is `coppen--co-uk`, `coppen-co.uk` is `coppen-co--uk`)
+- require a fresh signed nonce, the organization key, or an admin session before `PATCH /agents/:id/config` can change `dhPublicKey` or `httpEndpoint`
+- log and expose on `/health` when duplicate domains prevent the unique domain index
+
+### Breaking
+- workspace and organization clients must generate the Ed25519 key themselves and send `publicKey`; the directory no longer returns a private key
+- `bk_` alone can no longer rotate a signing key or replace `dhPublicKey` / `httpEndpoint`
+- disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
 
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents

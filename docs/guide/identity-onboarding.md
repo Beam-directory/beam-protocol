@@ -15,8 +15,8 @@ Personal identities use `agent@beam.directory`. Organization identities use `age
 
 Before creating the first organization workspace or Beam ID:
 
-1. Claim the namespace with its registrable company domain. The namespace must match the domain label; `acme.com` may claim `acme`.
-2. Download the one-time `beam-org-claim/v1` credential. Beam stores only its hash and the dashboard does not put it in browser storage.
+1. Claim the namespace with its registrable company domain. `acme.com` may request `acme`. The public name is assigned only after the domain proof succeeds; until then the claim is stored as `acme--com`.
+2. Download the one-time `beam-org-claim/v1` credential. Beam stores only its hash and the dashboard does not put it in browser storage. Download it again after verification so the file contains the public name.
 3. Publish the supplied `_beam-verification` DNS TXT record within 72 hours.
 4. Run the verification check. Unverified organizations cannot create organization workspaces or agent identities.
 5. Create the organization workspace, then issue its first Beam ID.
@@ -30,7 +30,7 @@ The dashboard route `/register` implements the managed path:
 1. Sign in, verify the organization namespace if necessary, and select a workspace you own.
 2. Choose the agent name, display name, type, and capabilities.
 3. For an organization workspace, provide its organization API key. The value is checked for that request and is not stored in the workspace or audit log.
-4. Beam atomically reserves the Beam ID, creates an Ed25519 keypair and agent API key, and binds the identity to the workspace.
+4. The browser generates the Ed25519 keypair. Beam reserves the Beam ID, stores the public key, creates the agent API key, and binds the identity to the workspace.
 5. Download the one-time `beam-local-identity/v1` bundle. The response is `Cache-Control: no-store`; secret material is not written to browser storage or rendered as text.
 6. Provision one dedicated read-only MCP tenant from the bundle. Put the private key, agent API key, and OAuth client secret in the tenant secret store.
 7. In Grok or Codex, add the tenant's public HTTPS MCP URL and complete OAuth.

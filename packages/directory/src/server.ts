@@ -4705,6 +4705,7 @@ export function createApp(db: Database): Hono {
 
     try {
       const row = db.prepare('SELECT 1 AS ok').get() as { ok: number } | undefined
+      const domainUniqueIndex = Boolean(db.prepare(`SELECT 1 AS ok FROM sqlite_master WHERE type = 'index' AND name = 'idx_orgs_domain_unique'`).get())
 
       return c.json({
         status: 'ok',
@@ -4718,6 +4719,10 @@ export function createApp(db: Database): Hono {
         release: releaseInfo,
         db: {
           status: row?.ok === 1 ? 'ok' : 'error',
+          domainUniqueIndex,
+          ...(domainUniqueIndex ? {} : {
+            domainUniqueIndexWarning: 'idx_orgs_domain_unique was skipped because duplicate organization domains exist',
+          }),
         },
       })
     } catch (error) {
