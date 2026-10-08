@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict'
-import { generateKeyPairSync } from 'node:crypto'
+import { generateKeyPairSync, randomBytes } from 'node:crypto'
 import test from 'node:test'
 import { createAdminSession } from './admin-auth.js'
-import { assignDirectoryRole, createDatabase, getAgent, markOrgVerified } from './db.js'
+import { assignDirectoryRole, createDatabase, createDelegation, getAgent, markOrgVerified } from './db.js'
 import { signPayload } from './crypto.js'
 import { getLocalDirectoryUrl } from './federation.js'
 import { createApp } from './server.js'
+import { scopeWithin, type ScopeGrant } from './trust/scopes.js'
+import { canActOnBehalf } from './websocket.js'
 
 function publicKeyOf(keys = generateKeyPairSync('ed25519')): { publicKey: string; privateKey: ReturnType<typeof generateKeyPairSync>['privateKey'] } {
   return {
@@ -266,6 +268,148 @@ test('manual KYC review is the only way to mark a person verified', async () => 
     }))
     assert.equal(reviewed.status, 200)
     assert.equal((await reviewed.json() as { person: { kycStatus: string; kycProvider: string } }).person.kycStatus, 'verified')
+  } finally {
+    db.close()
+  }
+})
+
+test('scopeWithin rejects a child that drops a parent limit', () => {
+  const parent: ScopeGrant = {
+    actions: ['order', 'file.send'],
+    order: { maxAmount: '100.00', currency: 'EUR' },
+    file: { maxBytes: 1000 },
+  }
+  assert.equal(scopeWithin({ actions: ['order'], order: { maxAmount: '100.00', currency: 'EUR' } }, parent), true)
+  assert.equal(scopeWithin({ actions: ['order'] }, parent), false)
+  assert.equal(scopeWithin({ actions: ['file.send'] }, parent), false)
+  assert.equal(scopeWithin({ actions: ['read'] }, { actions: ['read'] }), true)
+})
+
+test('a suspended agent cannot open a network connection or use a delegation', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'people-test-secret'
+    const app = createApp(db)
+    const apiKey = await createVerifiedOrg(app, db)
+    const personKeys = publicKeyOf()
+    const buyerKeys = publicKeyOf()
+    const vendorKeys = publicKeyOf()
+    const person = await app.request(new Request('http://localhost/orgs/coppen/people', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ email: 'clara@coppen.de', displayName: 'Clara', role: 'Einkauf', publicKey: personKeys.publicKey }),
+    }))
+    const personId = (await person.json() as { person: { id: string } }).person.id
+    const issue = async (agentName: string, publicKey: string, responsiblePersonId?: string) => {
+      const response = await app.request(new Request('http://localhost/orgs/coppen/agents', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+        body: JSON.stringify({ agentName, publicKey, ...(responsiblePersonId ? { responsiblePersonId } : {}) }),
+      }))
+      assert.equal(response.status, 201)
+      return await response.json() as { beamId: string; apiKey: string }
+    }
+    const buyer = await issue('buyer', buyerKeys.publicKey, personId)
+    const vendor = await issue('vendor', vendorKeys.publicKey)
+    createDelegation(db, {
+      grantorBeamId: vendor.beamId,
+      granteeBeamId: buyer.beamId,
+      scope: 'conversation.message',
+      expiresAt: Date.now() + 60_000,
+    })
+    assert.equal(canActOnBehalf(db, buyer.beamId, vendor.beamId, 'conversation.message'), true)
+
+    const offboarded = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}/offboard`, {
+      method: 'POST',
+      headers: { 'x-api-key': apiKey },
+    }))
+    assert.equal(offboarded.status, 200)
+    assert.equal(canActOnBehalf(db, buyer.beamId, vendor.beamId, 'conversation.message'), false)
+    assert.equal(canActOnBehalf(db, buyer.beamId, buyer.beamId, 'conversation.message'), false)
+
+    const timestamp = new Date().toISOString()
+    const nonce = `nonce-${randomBytes(12).toString('hex')}`
+    const payload = {
+      type: 'network.connection.request',
+      requesterBeamId: buyer.beamId,
+      recipientBeamId: vendor.beamId,
+      message: 'hi',
+      timestamp,
+      nonce,
+    }
+    const connection = await app.request(new Request('http://localhost/network/connections', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': buyer.apiKey },
+      body: JSON.stringify({ ...payload, signature: signPayload(payload, buyerKeys.privateKey) }),
+    }))
+    assert.equal(connection.status, 403)
+    assert.equal((await connection.json() as { errorCode: string }).errorCode, 'AGENT_SUSPENDED')
+  } finally {
+    db.close()
+  }
+})
+
+test('person import upserts by email and only accepts an active supervisor', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'people-test-secret'
+    const app = createApp(db)
+    const apiKey = await createVerifiedOrg(app, db)
+    const created = await app.request(new Request('http://localhost/orgs/coppen/people', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({
+        email: 'clara@coppen.de',
+        displayName: 'Clara',
+        role: 'Einkauf',
+        publicKey: publicKeyOf().publicKey,
+        rights: { actions: ['order'], order: { maxAmount: '100.00', currency: 'EUR' } },
+      }),
+    }))
+    assert.equal(created.status, 201)
+    const personId = (await created.json() as { person: { id: string; publicKey: string | null } }).person.id
+    const imported = await app.request(new Request('http://localhost/orgs/coppen/people/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({
+        source: 'personio',
+        people: [{
+          externalId: 'p-clara',
+          email: 'clara@coppen.de',
+          displayName: 'Clara',
+          role: 'Einkauf',
+          status: 'active',
+          rights: { actions: [] },
+        }],
+      }),
+    }))
+    assert.equal(imported.status, 200)
+    const stored = db.prepare('SELECT rights_json, external_id FROM persons WHERE id = ?').get(personId) as { rights_json: string; external_id: string }
+    assert.equal(stored.external_id, 'p-clara')
+    assert.equal(stored.rights_json, JSON.stringify({ actions: [] }))
+
+    const replacement = publicKeyOf()
+    const patched = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ publicKey: replacement.publicKey }),
+    }))
+    assert.equal(patched.status, 200)
+    assert.equal((await patched.json() as { person: { publicKey: string } }).person.publicKey, replacement.publicKey)
+
+    const inactive = await app.request(new Request('http://localhost/orgs/coppen/people/import', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({
+        source: 'personio',
+        people: [
+          { externalId: 'p-clara', email: 'clara@coppen.de', displayName: 'Clara', role: 'Einkauf', status: 'offboarded' },
+          { externalId: 'p-new', email: 'new@coppen.de', displayName: 'Neu', role: 'Einkauf', status: 'active', supervisorExternalId: 'p-clara' },
+        ],
+      }),
+    }))
+    assert.equal(inactive.status, 400)
+    assert.equal((await inactive.json() as { errorCode: string }).errorCode, 'INVALID_IMPORT')
   } finally {
     db.close()
   }

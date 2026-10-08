@@ -216,6 +216,22 @@ export function findPersonByExternalId(
   return row ?? null
 }
 
+export function agentOperationBlock(
+  db: Database,
+  agent: { suspended_at: string | null; responsible_person_id: string | null },
+): { error: string; errorCode: 'AGENT_SUSPENDED' | 'PERSON_OFFBOARDED' } | null {
+  if (agent.suspended_at) {
+    return { error: 'This agent is suspended', errorCode: 'AGENT_SUSPENDED' }
+  }
+  if (agent.responsible_person_id) {
+    const person = getPerson(db, agent.responsible_person_id)
+    if (!person || person.status !== 'active') {
+      return { error: 'The responsible person is not active', errorCode: 'PERSON_OFFBOARDED' }
+    }
+  }
+  return null
+}
+
 export function suspendAgentsForPerson(db: Database, personId: string, at: string): number {
   const result = db.prepare(`
     UPDATE agents

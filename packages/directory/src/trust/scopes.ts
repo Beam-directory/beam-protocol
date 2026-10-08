@@ -71,16 +71,16 @@ export function scopeWithin(child: ScopeGrant, parent: ScopeGrant): boolean {
   if (child.actions.some((action) => !parent.actions.includes(action))) {
     return false
   }
-  if (child.order) {
-    if (!parent.order || parent.order.currency !== child.order.currency) {
+  if (child.actions.includes('order') && parent.order) {
+    if (!child.order || parent.order.currency !== child.order.currency) {
       return false
     }
     if (amountToCents(child.order.maxAmount) > amountToCents(parent.order.maxAmount)) {
       return false
     }
   }
-  if (child.file) {
-    if (!parent.file || child.file.maxBytes > parent.file.maxBytes) {
+  if (child.actions.includes('file.send') && parent.file) {
+    if (!child.file || child.file.maxBytes > parent.file.maxBytes) {
       return false
     }
   }

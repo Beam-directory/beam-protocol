@@ -29,6 +29,7 @@ import {
 import { validateIntentPayload } from './validation.js'
 import { checkAgentRateLimit, getRateLimitPerMinute, pruneRateLimitState } from './rate-limit.js'
 import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
+import { agentOperationBlock } from './trust/person-store.js'
 import { getAdminSessionFromRequest } from './admin-auth.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
@@ -867,6 +868,10 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       ws.close(1008, 'Valid WebSocket credential required')
       return
     }
+    if (agent && agentOperationBlock(db, agent)) {
+      ws.close(1008, 'Agent is suspended')
+      return
+    }
 
     const wasOffline = openSessions(beamId).length === 0
     const sessions = connections.get(beamId) ?? new Set<ConnectionSession>()
@@ -1663,6 +1668,16 @@ export function canActOnBehalf(
   claimedFromBeamId: string,
   intentType: string,
 ): boolean {
+  const connected = getAgent(db, connectedBeamId)
+  if (!connected || agentOperationBlock(db, connected)) {
+    return false
+  }
+  if (connectedBeamId !== claimedFromBeamId) {
+    const grantor = getAgent(db, claimedFromBeamId)
+    if (grantor && agentOperationBlock(db, grantor)) {
+      return false
+    }
+  }
   if (connectedBeamId === claimedFromBeamId) {
     return true
   }
@@ -1678,6 +1693,10 @@ function resolveIntentSender(db: Database, connectedBeamId: string, frame: Inten
   const senderAgent = getAgent(db, connectedBeamId)
   if (!senderAgent) {
     throw new RelayError('BAD_REQUEST', 'Sender is not registered in the directory')
+  }
+  const connectedBlock = agentOperationBlock(db, senderAgent)
+  if (connectedBlock) {
+    throw new RelayError('FORBIDDEN', connectedBlock.error)
   }
 
   if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
@@ -1704,6 +1723,14 @@ function enforceSecurityChecks(
 
   if (!options.skipSignatureVerification && !verifyIntentSignature(frame, senderPublicKey)) {
     throw new RelayError('BAD_REQUEST', 'Signature verification failed')
+  }
+
+  const actingAgent = getAgent(db, frame.from)
+  if (actingAgent) {
+    const actingBlock = agentOperationBlock(db, actingAgent)
+    if (actingBlock) {
+      throw new RelayError('FORBIDDEN', actingBlock.error)
+    }
   }
 
   const localTarget = getAgent(db, frame.to)

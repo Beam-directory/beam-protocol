@@ -150,13 +150,20 @@ POST /orgs/coppen/people/import
 { "source": "personio", "people": [ { "externalId": "p-1", "email": "a@coppen.de", "displayName": "A", "role": "Einkauf", "supervisorExternalId": "p-2", "status": "active" } ] }
 ```
 
-`source` is `personio` or `entra`. The directory stores the snapshot. It does not call Personio or Microsoft Graph. `status: "offboarded"` locks that person immediately and sets `suspended_at` on every agent whose `responsiblePersonId` is that person. An offboarded person is not reactivated by a later `active` row. A supervisor cycle is rejected and the import is rolled back.
+`source` is `personio` or `entra`. The directory stores the snapshot. It does not call Personio or Microsoft Graph. A row matches an existing person by `externalId` or, if that id is new, by email, and then updates role, rights, and supervisor. A supervisor must already be an active person in the same organization, including people earlier in the same snapshot. `status: "offboarded"` locks that person immediately and sets `suspended_at` on every agent whose `responsiblePersonId` is that person. An offboarded person is not reactivated by a later `active` row. A supervisor cycle, an inactive supervisor, or two identities claiming one email rolls the import back.
+
+```http
+PATCH /orgs/coppen/people/:id
+{ "publicKey": "<ed25519-spki>", "rights": { "actions": ["read"] } }
+```
+
+The organization API key can replace the public key or the rights of an active person. Offboarded people return `409 PERSON_OFFBOARDED`.
 
 ```http
 POST /orgs/coppen/people/:id/offboard
 ```
 
-Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change.
+Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
 
 ### Organization agents
 

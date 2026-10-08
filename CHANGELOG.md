@@ -25,8 +25,11 @@
 - add organization people with role, supervisor, and a rights ceiling
 - invite employees and accept the invitation with a client-generated public key
 - record KYC through a manual adapter; only an operator review can mark a person verified or rejected
-- import a Personio or Entra snapshot without calling either API
+- import a Personio or Entra snapshot without calling either API; match an existing person by external id or email and update their rights
+- replace an active person's public key or rights with `PATCH /orgs/:name/people/:id`
+- reject a child scope that drops a limit the parent still has
 - offboard a person immediately and suspend every agent they are responsible for
+- refuse network connections, websocket sessions, and delegations for a suspended agent or an inactive responsible person
 
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents

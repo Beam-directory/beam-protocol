@@ -226,14 +226,33 @@ export function peopleRouter(db: Database): Hono {
       const ids = new Map<string, string>()
       let offboarded = 0
       for (const record of prepared) {
-        const existing = findPersonByExternalId(db, owned.name, source, record.externalId)
+        const byExternal = findPersonByExternalId(db, owned.name, source, record.externalId)
+        const byEmail = getPersonByEmail(db, owned.name, record.email)
+        if (byExternal && byEmail && byExternal.id !== byEmail.id) {
+          throw new ImportError(`email ${record.email} belongs to a different person than ${record.externalId}`)
+        }
+        const existing = byExternal ?? byEmail
         if (existing) {
-          const supervisor = existing.supervisor_person_id
+          if (
+            existing.external_id
+            && existing.external_source
+            && (existing.external_source !== source || existing.external_id !== record.externalId)
+          ) {
+            throw new ImportError(`email ${record.email} is already linked to ${existing.external_source}:${existing.external_id}`)
+          }
+          if (existing.status === 'offboarded' && record.status === 'active') {
+            ids.set(record.externalId, existing.id)
+            continue
+          }
+          if (!existing.external_id) {
+            db.prepare('UPDATE persons SET external_source = ?, external_id = ? WHERE id = ?')
+              .run(source, record.externalId, existing.id)
+          }
           updatePersonRecord(db, existing.id, {
             email: record.email,
             displayName: record.displayName,
             role: record.role,
-            supervisorPersonId: supervisor,
+            supervisorPersonId: existing.supervisor_person_id,
             rights: record.rights,
           })
           ids.set(record.externalId, existing.id)
@@ -256,15 +275,22 @@ export function peopleRouter(db: Database): Hono {
       for (const record of prepared) {
         const personId = ids.get(record.externalId)
         if (!personId) continue
+        const person = getPerson(db, personId)
+        if (!person) continue
+        if (person.status === 'offboarded' && record.status === 'active') {
+          continue
+        }
         const supervisorId = record.supervisorExternalId ? ids.get(record.supervisorExternalId) ?? findPersonByExternalId(db, owned.name, source, record.supervisorExternalId)?.id ?? null : null
-        if (record.supervisorExternalId && !supervisorId) {
-          throw new ImportError(`Unknown supervisor ${record.supervisorExternalId}`)
+        if (record.supervisorExternalId) {
+          const incoming = prepared.find((item) => item.externalId === record.supervisorExternalId)
+          const supervisor = supervisorId ? getPerson(db, supervisorId) : null
+          if (!supervisorId || incoming?.status === 'offboarded' || !supervisor || supervisor.org_name !== owned.name || supervisor.status !== 'active') {
+            throw new ImportError(`Supervisor ${record.supervisorExternalId} is not an active person`)
+          }
         }
         if (supervisorCreatesCycle(db, personId, supervisorId)) {
           throw new ImportError(`Supervisor cycle at ${record.externalId}`)
         }
-        const person = getPerson(db, personId)
-        if (!person) continue
         updatePersonRecord(db, personId, {
           email: record.email,
           displayName: record.displayName,
@@ -299,6 +325,49 @@ export function peopleRouter(db: Database): Hono {
       }
       throw error
     }
+  })
+
+  router.patch('/:name/people/:id', async (c) => {
+    const owned = orgApiKey(c, db)
+    if (owned instanceof Response) return owned
+    const person = getPerson(db, c.req.param('id'))
+    if (!person || person.org_name !== owned.name) {
+      return c.json({ error: 'Person not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    if (person.status !== 'active') {
+      return c.json({ error: 'Offboarded people cannot change keys or rights', errorCode: 'PERSON_OFFBOARDED' }, 409)
+    }
+    const raw = await readObject(c)
+    if (raw instanceof Response) return raw
+    const currentRights = parseScopeGrant(JSON.parse(person.rights_json) as unknown)
+    if (!currentRights) {
+      return c.json({ error: 'Stored rights are invalid', errorCode: 'INVALID_RIGHTS' }, 500)
+    }
+    const rights = rightsFrom(raw, currentRights)
+    if (rights instanceof Response) return rights
+    let publicKey = person.public_key
+    if ('publicKey' in raw) {
+      const supplied = typeof raw['publicKey'] === 'string' ? raw['publicKey'].trim() : ''
+      if (!isEd25519Spki(supplied)) {
+        return c.json({ error: 'publicKey must be an Ed25519 SPKI key', errorCode: 'PUBLIC_KEY_REQUIRED' }, 400)
+      }
+      publicKey = supplied
+    }
+    const updated = updatePersonRecord(db, person.id, {
+      email: person.email,
+      displayName: person.display_name,
+      role: person.role,
+      supervisorPersonId: person.supervisor_person_id,
+      rights,
+      publicKey,
+    })
+    logAuditEvent(db, {
+      action: 'org.person.updated',
+      actor: `org:${owned.name}`,
+      target: person.id,
+      details: { rightsChanged: JSON.stringify(rights) !== person.rights_json, publicKeyChanged: publicKey !== person.public_key },
+    })
+    return c.json({ person: serializePerson(updated as PersonRow) })
   })
 
   router.post('/:name/people/:id/offboard', (c) => {
