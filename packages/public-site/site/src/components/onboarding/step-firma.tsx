@@ -4,10 +4,11 @@ import { Button } from '@/components/ui/button'
 import { ComingSoonCard } from '@/components/onboarding/coming-soon'
 import { CopyField, LiveBadge, Notice, Panel, Spinner, StatusBadge, TextField, downloadJson } from '@/components/onboarding/primitives'
 import type { StepProps } from '@/components/onboarding/types'
-import { checkDomainVerification, createOrg, describeError, getOrg, type OrgRecord } from '@/lib/onboarding-api'
+import { checkDomainVerification, classifyOrgConflict, createOrg, describeError, getOrg, type OrgRecord } from '@/lib/onboarding-api'
 import {
   deriveOrgName,
   normalizeDomain,
+  suggestDisambiguatedOrgName,
   validateDisplayName,
   validateDomain,
   validateRegistration,
@@ -28,6 +29,8 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
   const [resumeMode, setResumeMode] = useState(false)
   const [resumeName, setResumeName] = useState(progress.orgName)
   const [resumeKey, setResumeKey] = useState('')
+  const [suggestion, setSuggestion] = useState<string | null>(null)
+  const [suffixUnsupported, setSuffixUnsupported] = useState(false)
 
   const orgName = deriveOrgName(progress.domain)
   const claimed = Boolean(progress.orgName && secrets.orgApiKey)
@@ -45,22 +48,36 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
     })
   }
 
+  async function claimWith(name: string, isSuggestion: boolean) {
+    setPending('claim')
+    setError(null)
+    setSuffixUnsupported(false)
+    try {
+      const org = await createOrg({ name, displayName: progress.displayName.trim(), domain: normalizeDomain(progress.domain) })
+      setSecrets({ orgApiKey: org.apiKey, orgKeySaved: false })
+      setSuggestion(null)
+      applyOrg(org)
+    } catch (claimError) {
+      const conflict = classifyOrgConflict(claimError)
+      if (isSuggestion && conflict === 'suffix-not-supported') {
+        // The current backend only accepts the plain label; no claim was created.
+        setSuffixUnsupported(true)
+        return
+      }
+      setSuggestion(conflict === 'name' && !isSuggestion ? suggestDisambiguatedOrgName(progress.domain) : null)
+      setError(describeError(claimError))
+    } finally {
+      setPending(null)
+    }
+  }
+
   async function onClaim(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const errors = { displayName: validateDisplayName(progress.displayName), domain: validateDomain(progress.domain) }
     setFieldErrors(errors)
     if (errors.displayName || errors.domain) return
-    setPending('claim')
-    setError(null)
-    try {
-      const org = await createOrg({ name: orgName, displayName: progress.displayName.trim(), domain: normalizeDomain(progress.domain) })
-      setSecrets({ orgApiKey: org.apiKey, orgKeySaved: false })
-      applyOrg(org)
-    } catch (claimError) {
-      setError(describeError(claimError))
-    } finally {
-      setPending(null)
-    }
+    setSuggestion(null)
+    await claimWith(orgName, false)
   }
 
   async function onResume(event: FormEvent<HTMLFormElement>) {
@@ -151,7 +168,11 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                   id="org-domain"
                   label="Domain"
                   value={progress.domain}
-                  onChange={(value) => update({ domain: value })}
+                  onChange={(value) => {
+                    update({ domain: value })
+                    setSuggestion(null)
+                    setSuffixUnsupported(false)
+                  }}
                   inputMode="url"
                   autoComplete="url"
                   placeholder="firma.de"
@@ -160,6 +181,22 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                 />
               </div>
               {error ? <Notice tone="error">{error}</Notice> : null}
+              {suggestion && !suffixUnsupported ? (
+                <div className="flex flex-col items-start gap-2 rounded-xl border p-3.5 text-sm">
+                  <p className="text-muted-foreground">
+                    Vorschlag für einen eigenen Namensraum: <span className="font-mono text-foreground">{suggestion}</span>, Agenten heißen dann
+                    name@{suggestion}.beam.directory.
+                  </p>
+                  <Button type="button" variant="outline" className="h-9 rounded-full px-4" disabled={pending !== null} onClick={() => void claimWith(suggestion, true)}>
+                    {pending === 'claim' ? <Spinner label="Wird angelegt" /> : <>Als {suggestion} anlegen</>}
+                  </Button>
+                </div>
+              ) : null}
+              {suffixUnsupported && suggestion ? (
+                <ComingSoonCard capability="suffixedOrgName" title={`Namensraum ${suggestion}`} company={progress.displayName}>
+                  Namen mit Länderendung unterstützt Beam nach dem nächsten Update. Es wurde nichts angelegt. Melde dich, dann reservieren wir ihn.
+                </ComingSoonCard>
+              ) : null}
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" className="h-10 rounded-full px-5" disabled={pending !== null}>
                   {pending === 'claim' ? <Spinner label="Wird angelegt" /> : <><GlobeIcon aria-hidden="true" /> Domain beanspruchen</>}

@@ -99,7 +99,8 @@ export function StepVerbinden({ progress, secrets }: Pick<StepProps, 'progress' 
       <Panel title="Mit deinem Assistenten verbinden" badge={<LiveBadge />}>
         <p className="text-sm leading-6 text-muted-foreground">
           Der Beam-MCP-Server läuft lokal mit den Schlüsseln aus deiner Wiederherstellungsdatei oder als eigener Tenant mit OAuth.
-          Gesendet wird nur nach deiner Freigabe.
+          Vor dem Senden zeigt der Assistent eine Vorschau, du bestätigst im Chat. Übergaben über MCP sind signiert, aber nicht
+          Ende-zu-Ende verschlüsselt; das gilt für Chats und Dateien unter /network.
         </p>
         <CodeWindow snippets={connectSnippets(beamId)} label="Einrichtung je Assistent" />
         <p className="text-xs leading-5 text-muted-foreground">

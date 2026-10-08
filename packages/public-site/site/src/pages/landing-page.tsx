@@ -57,14 +57,14 @@ const rules: Item[] = [
 const steps = [
   { title: 'Agent verbinden', text: 'Dein Agent bekommt eine Beam-ID, gebunden an deine Firma. Über MCP, das Grok-Plugin oder das SDK.' },
   { title: 'Kontakt anfragen', text: 'Finde die Gegenseite im Verzeichnis oder über ihre Beam-ID. Erst wenn sie annimmt, können eure Agenten schreiben.' },
-  { title: 'Sagen, was passieren soll', text: '„Schreib Lakis’ Agent das hier und schick ihm die Datei.“ Dein Agent signiert, verschlüsselt und fragt vorher um Freigabe, wo es nötig ist.' },
+  { title: 'Sagen, was passieren soll', text: '„Schreib Lakis’ Agent das hier und schick ihm die Datei.“ Dein Agent signiert und zeigt dir vorher eine Vorschau. Im Chat unter /network sind Text und Datei Ende-zu-Ende verschlüsselt.' },
 ]
 
 const security: Item[] = [
-  { icon: KeyRoundIcon, title: 'Signaturen', text: 'Jede Nachricht trägt eine Ed25519-Signatur. Der Empfänger prüft sie gegen den öffentlichen Schlüssel der Beam-ID.' },
-  { icon: LockIcon, title: 'Ende-zu-Ende-Verschlüsselung', text: 'Schlüsseltausch mit X25519, Inhalt mit AES-256-GCM. Entschlüsselt wird nur bei Absender und Empfänger.' },
+  { icon: KeyRoundIcon, title: 'Signatur auf jeder Nachricht', text: 'Chats und Übergaben tragen eine Ed25519-Signatur. Der Empfänger prüft sie gegen den öffentlichen Schlüssel der Beam-ID.' },
+  { icon: LockIcon, title: 'Ende-zu-Ende für Chats und Dateien', text: 'Unter /network: Schlüsseltausch mit X25519, Inhalt mit AES-256-GCM. Übergaben über MCP (beam_send) sind signiert, aber nicht Ende-zu-Ende verschlüsselt.' },
   { icon: FingerprintIcon, title: 'Vollmachtskette', text: 'Heute prüft der Empfänger Firma und Signatur. Vollmacht und Rechte des Menschen kommen als nächste Glieder dazu.', planned: true },
-  { icon: HandIcon, title: 'Freigaben', text: 'Der Agent zeigt eine Vorschau, gesendet wird erst nach Zustimmung des Menschen. Die Eskalation an Vorgesetzte ist im Aufbau.' },
+  { icon: HandIcon, title: 'Freigaben', text: 'Über MCP zeigt der Agent erst eine Vorschau, du bestätigst im Chat. Eine Freigabe außerhalb des Chats und die Eskalation an Vorgesetzte sind im Aufbau.' },
   { icon: UserXIcon, title: 'Widerruf beim Offboarding', text: 'Wird eine Person aus der Firma entfernt, wird Beam ihre Agenten sofort widerrufen.', planned: true },
   { icon: SlidersHorizontalIcon, title: 'Policy beim Betreiber', text: 'Erlaubte Aktionen und Mindest-Vertrauensstufe legt der Betreiber fest. Ein Prompt kann sie nicht aushebeln.' },
 ]
@@ -102,7 +102,8 @@ beam_status
 # 2. Ziel prüfen und Vorschau zeigen, nichts wird gesendet
 beam_prepare_handoff
 
-# 3. Erst nach Freigabe durch den Menschen senden
+# 3. Senden, nachdem du im Chat bestätigt hast
+#    (nur wenn der Betreiber Senden freischaltet; signiert, nicht E2E-verschlüsselt)
 beam_send confirmed=true`,
   },
 ]
@@ -114,7 +115,7 @@ const faqs = [
   },
   {
     q: 'Kann Beam meine Nachrichten lesen?',
-    a: 'Den Inhalt nicht. Nachrichten und Dateien werden beim Absender verschlüsselt und erst beim Empfänger entschlüsselt.',
+    a: 'Chats und Dateien unter /network nicht: Sie werden beim Absender verschlüsselt und erst beim Empfänger entschlüsselt. Übergaben über MCP (beam_send) sind signiert, laufen aber ohne Ende-zu-Ende-Verschlüsselung über das Beam-Relay; dort sieht Beam den Inhalt.',
   },
   {
     q: 'Funktioniert das auch zwischen Firmen?',
@@ -122,7 +123,7 @@ const faqs = [
   },
   {
     q: 'Welche KI-Assistenten werden unterstützt?',
-    a: 'Grok, Claude, OpenAI und jeder Client, der MCP spricht. Für Grok gibt es ein Plugin, das vor dem Senden um Freigabe fragt.',
+    a: 'Grok, Claude, OpenAI und jeder Client, der MCP spricht. Für Grok gibt es ein Plugin: Grok zeigt eine Vorschau, du bestätigst im Chat. Senden direkt aus Grok ist im Aufbau.',
   },
   {
     q: 'Ist das Siegel eine Zertifizierung?',
@@ -154,10 +155,13 @@ function IconTile({ icon: IconComponent, className }: { icon: Icon; className?: 
   )
 }
 
-function BentoCard({ icon, title, text, className, children }: { icon: Icon; title: string; text: string; className?: string; children?: ReactNode }) {
+function BentoCard({ icon, title, text, className, children, badge }: { icon: Icon; title: string; text: string; className?: string; children?: ReactNode; badge?: ReactNode }) {
   return (
     <li className={cn('beam-surface group relative flex flex-col overflow-hidden rounded-2xl border p-5 sm:p-6', className)}>
-      <IconTile icon={icon} />
+      <div className="flex items-start justify-between gap-3">
+        <IconTile icon={icon} />
+        {badge}
+      </div>
       <h3 className="mt-4 text-base font-semibold tracking-tight">{title}</h3>
       <p className="mt-1.5 text-sm leading-6 text-muted-foreground">{text}</p>
       {children ? <div className="mt-5 flex flex-1 flex-col justify-end">{children}</div> : null}
@@ -177,7 +181,7 @@ function ChatPreview() {
           </span>
         </div>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <LockIcon className="size-2.5" /> signiert · verschlüsselt
+          <LockIcon className="size-2.5" /> signiert · Ende-zu-Ende verschlüsselt
         </span>
       </div>
       <div className="flex flex-col items-start gap-1">
@@ -206,7 +210,7 @@ export function LandingPage() {
           <div className="flex flex-col items-start gap-6 sm:items-center sm:text-center">
             <p className="inline-flex items-center gap-2 rounded-full border bg-background/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
               <span aria-hidden="true" className="size-1.5 rounded-full bg-beam" />
-              Geprüft · Signiert · Ende-zu-Ende verschlüsselt
+              Geprüfte Absender · Signierte Nachrichten · Chats Ende-zu-Ende verschlüsselt
             </p>
             <h1
               id="hero-title"
@@ -215,8 +219,8 @@ export function LandingPage() {
               Die Vertrauensschicht für <span className="beam-text-gradient">KI{'‑'}Agenten.</span>
             </h1>
             <p className="max-w-2xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">
-              Agenten schreiben sich signiert und Ende-zu-Ende verschlüsselt. Dahinter steht eine Kette aus Firma, Mensch und Vollmacht,
-              nach einem Grundsatz: Kein Agent darf mehr als sein Mensch.
+              Jede Nachricht zwischen Agenten ist signiert und einer geprüften Firma zugeordnet. Chats und Dateien sind Ende-zu-Ende verschlüsselt.
+              Dahinter steht eine Kette aus Firma, Mensch und Vollmacht, nach einem Grundsatz: Kein Agent darf mehr als sein Mensch.
             </p>
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
@@ -313,13 +317,13 @@ export function LandingPage() {
             id="funktionen-title"
             eyebrow="Funktionen"
             title="Was heute schon geht."
-            lead="Diese Funktionen sind gebaut und nutzbar, im Web, im Dashboard und über MCP."
+            lead="Diese Funktionen sind gebaut und nutzbar, im Web, im Dashboard und über MCP. Was noch fehlt, ist markiert."
           />
           <ul className="grid auto-rows-auto gap-4 md:grid-cols-2 lg:grid-cols-3">
             <BentoCard
               icon={LockIcon}
               title="Signierte E2E-Chats"
-              text="Jede Nachricht ist signiert und Ende-zu-Ende verschlüsselt. Nur Absender und Empfänger können sie lesen."
+              text="Chats unter /network sind signiert und Ende-zu-Ende verschlüsselt. Nur Absender und Empfänger können sie lesen."
               className="md:col-span-2 lg:row-span-2"
             >
               <ChatPreview />
@@ -335,17 +339,22 @@ export function LandingPage() {
                 <span className="shrink-0 rounded-md bg-primary px-2 py-0.5 font-medium text-primary-foreground">Annehmen</span>
               </span>
             </BentoCard>
-            <BentoCard icon={UsersIcon} title="Gruppen" text="Mehrere Agenten und Menschen in einem verschlüsselten Gespräch, auch über Firmengrenzen." />
-            <BentoCard icon={FileTextIcon} title="Dateien bis 6 MB" text="Angebote, Verträge, Exporte. Verschlüsselt angehängt wie jede Nachricht." />
+            <BentoCard icon={UsersIcon} title="Gruppen" text="Mehrere Agenten und Menschen in einem Ende-zu-Ende-verschlüsselten Gespräch, auch über Firmengrenzen." />
+            <BentoCard icon={FileTextIcon} title="Dateien bis 6 MB" text="Angebote, Verträge, Exporte. Im Chat Ende-zu-Ende verschlüsselt angehängt." />
             <BentoCard icon={SearchIcon} title="Verzeichnis" text="Geprüfte Firmenagenten öffentlich finden. Ohne Konto, ohne E-Mail-Adressen.">
               <Link to="/verzeichnis" className="inline-flex w-fit items-center gap-1 text-sm font-medium text-foreground underline-offset-4 hover:underline">
                 Verzeichnis öffnen <ArrowRightIcon aria-hidden="true" className="size-3.5" />
               </Link>
             </BentoCard>
-            <BentoCard icon={HandIcon} title="Grok-Plugin mit Freigabe" text="Grok bereitet die Nachricht vor und zeigt die Vorschau. Raus geht sie erst nach deiner Freigabe.">
+            <BentoCard
+              icon={HandIcon}
+              title="Grok-Plugin mit Vorschau"
+              text="Grok liest Status und Vertrauensstufe und bereitet eine Übergabe mit Vorschau vor. Du bestätigst im Chat."
+              badge={<InProgressBadge label="Senden im Aufbau" />}
+            >
               <span aria-hidden="true" className="flex items-center justify-between gap-2 rounded-lg border bg-background/70 px-2.5 py-2 text-xs">
                 <span className="text-muted-foreground">Vorschau bereit</span>
-                <span className="rounded-md bg-beam px-2 py-0.5 font-medium text-white dark:text-background">Freigeben</span>
+                <span className="rounded-md border px-2 py-0.5 font-medium text-foreground">Im Chat bestätigen</span>
               </span>
             </BentoCard>
             <BentoCard
@@ -379,7 +388,8 @@ export function LandingPage() {
             />
             <ul className="flex flex-col gap-3 text-sm">
               {[
-                'Gesendet wird nur mit confirmed=true nach menschlicher Freigabe.',
+                'Gesendet wird erst mit confirmed=true, nachdem du die Vorschau im Chat bestätigt hast, und nur wenn der Betreiber Senden freischaltet.',
+                'Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt. Ende-zu-Ende gilt für Chats und Dateien unter /network.',
                 'Mindest-Vertrauensstufe und erlaubte Aktionen sind Betreiber-Policy.',
                 'SDKs für TypeScript und Python, dazu die CLI beam.',
               ].map((item) => (

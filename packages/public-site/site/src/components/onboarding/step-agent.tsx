@@ -118,7 +118,7 @@ export function StepAgent({ progress, update, secrets, setSecrets }: StepProps) 
         <div className="flex flex-col gap-1 text-sm leading-6">
           <p className="font-medium">Der private Schlüssel verlässt diesen Browser nie.</p>
           <p className="text-muted-foreground">
-            Das Schlüsselpaar entsteht hier mit WebCrypto (Ed25519 zum Signieren, X25519 für Ende-zu-Ende-Verschlüsselung).
+            Das Schlüsselpaar entsteht hier mit WebCrypto (Ed25519 zum Signieren, X25519 für Ende-zu-Ende-verschlüsselte Chats unter /network).
             Beam bekommt nur die öffentlichen Schlüssel. Den privaten Schlüssel sicherst du selbst in einer Wiederherstellungsdatei.
           </p>
         </div>

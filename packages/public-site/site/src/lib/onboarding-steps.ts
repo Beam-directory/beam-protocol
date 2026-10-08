@@ -44,6 +44,22 @@ export function deriveOrgName(domain: string): string {
   return registrable.split('.')[0] ?? ''
 }
 
+function slugOrgPart(value: string): string {
+  return value.toLowerCase().replace(/[_.]/g, '-')
+}
+
+/**
+ * Alternative namespace when the plain label is taken, built like the backend (PR #211, trust/org-domain.ts):
+ * label of the registrable domain + "-" + public suffix, both slugged. "coppen.at" -> "coppen-at",
+ * "coppen.co.uk" -> "coppen-co-uk". Returns null for input that is not a valid domain.
+ */
+export function suggestDisambiguatedOrgName(domain: string): string | null {
+  if (validateDomain(domain)) return null
+  const [label, ...suffix] = registrableDomain(domain).split('.')
+  if (!label || suffix.length === 0) return null
+  return `${slugOrgPart(label)}-${slugOrgPart(suffix.join('.'))}`
+}
+
 export function validateDomain(domain: string): string | null {
   const normalized = normalizeDomain(domain)
   if (!normalized) return 'Bitte die Domain der Firma angeben.'

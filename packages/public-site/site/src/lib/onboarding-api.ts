@@ -1,4 +1,8 @@
 /**
+ * TODO Nach Backend-Deploy (#211–#215): registerAgent → POST /orgs/:name/agents mit publicKey + responsiblePersonId;
+ * submitBusinessRegistration → POST /orgs/:name/registry; well-known, Personen/KYC/Mandate in CAPABILITIES auf live;
+ * Namensraum mit Länderendung (label-suffix) wird dann vom Server akzeptiert.
+ *
  * Onboarding API client. ALL onboarding calls go through this module so endpoints can be swapped in one place
  * when the onboarding backend (built in a parallel PR) lands.
  *
@@ -23,6 +27,8 @@
  * - inviteEmployee                 only admin workspace invitations in the dashboard, not for org identities
  * - issueMandate                   /agents/:beamId/delegate is agent-to-agent with a free-text scope;
  *                                  no person-issued mandate, no amount limits, no escalation
+ * - suffixedOrgName                createOrg with a "label-suffix" name (e.g. coppen-at) is sent to POST /orgs, but the
+ *                                  current backend still answers 403 ORG_NAMESPACE_DOMAIN_MISMATCH (accepted after #211)
  */
 import { directoryApiBase } from './directory-client'
 import { signMutation } from './agent-keys'
@@ -45,6 +51,7 @@ export type Capability =
   | 'syncEmployeeDirectory'
   | 'inviteEmployee'
   | 'issueMandate'
+  | 'suffixedOrgName'
 
 export type CapabilityStatus = 'live' | 'unavailable'
 
@@ -66,6 +73,7 @@ export const CAPABILITIES: Record<Capability, CapabilityStatus> = {
   syncEmployeeDirectory: 'unavailable',
   inviteEmployee: 'unavailable',
   issueMandate: 'unavailable',
+  suffixedOrgName: 'unavailable',
 }
 
 export function isAvailable(capability: Capability): boolean {
@@ -102,10 +110,10 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_ORG_NAME: 'Der Namensraum darf nur Kleinbuchstaben, Ziffern, Bindestriche und Unterstriche enthalten.',
   INVALID_DOMAIN: 'Bitte eine gültige Domain angeben, zum Beispiel firma.de.',
   ORG_NAMESPACE_DOMAIN_MISMATCH: 'Der Namensraum muss zum Namen der Domain passen (firma.de → firma).',
-  ORG_EXISTS: 'Diese Firma ist bereits registriert und verifiziert.',
+  ORG_EXISTS: 'Dieser Namensraum ist bereits an eine verifizierte Firma vergeben.',
   ORG_CLAIM_PENDING: 'Für diesen Namensraum läuft bereits eine Anmeldung. Mit dem Org-Schlüssel kannst du sie fortsetzen.',
-  DOMAIN_EXISTS: 'Diese Domain ist bereits einer verifizierten Firma zugeordnet.',
-  DOMAIN_CLAIM_PENDING: 'Für diese Domain läuft bereits eine Anmeldung.',
+  DOMAIN_EXISTS: 'Diese Domain ist bereits einer verifizierten Firma zugeordnet. Melde dich bei uns, falls das nicht stimmt.',
+  DOMAIN_CLAIM_PENDING: 'Für diese Domain läuft bereits eine Anmeldung. Mit dem Org-Schlüssel kannst du sie fortsetzen.',
   ORG_CLAIM_EXPIRED: 'Die Anmeldung ist abgelaufen. Bitte die Domain neu beanspruchen.',
   TXT_NOT_FOUND: 'Der DNS-TXT-Eintrag wurde noch nicht gefunden. DNS-Änderungen brauchen manchmal etwas Zeit.',
   DNS_LOOKUP_FAILED: 'Die DNS-Abfrage ist fehlgeschlagen. Bitte später erneut prüfen.',
@@ -132,6 +140,19 @@ const ERROR_MESSAGES: Record<string, string> = {
   INVALID_EMAIL: 'Bitte eine gültige E-Mail-Adresse angeben.',
   RATE_LIMITED: 'Zu viele Anfragen. Bitte kurz warten.',
   NETWORK_ERROR: 'Beam ist gerade nicht erreichbar. Bitte Verbindung prüfen und erneut versuchen.',
+}
+
+/**
+ * Classifies a failed createOrg (routes/orgs.ts): 'name' = the namespace is taken or pending (409 ORG_EXISTS /
+ * ORG_CLAIM_PENDING, a label-suffix name can help), 'domain' = the domain itself is claimed (no suggestion),
+ * 'suffix-not-supported' = the backend does not accept label-suffix names yet (403 ORG_NAMESPACE_DOMAIN_MISMATCH).
+ */
+export function classifyOrgConflict(error: unknown): 'name' | 'domain' | 'suffix-not-supported' | null {
+  if (!(error instanceof OnboardingApiError)) return null
+  if (error.code === 'ORG_EXISTS' || error.code === 'ORG_CLAIM_PENDING') return 'name'
+  if (error.code === 'DOMAIN_EXISTS' || error.code === 'DOMAIN_CLAIM_PENDING') return 'domain'
+  if (error.code === 'ORG_NAMESPACE_DOMAIN_MISMATCH') return 'suffix-not-supported'
+  return null
 }
 
 export function describeError(error: unknown): string {

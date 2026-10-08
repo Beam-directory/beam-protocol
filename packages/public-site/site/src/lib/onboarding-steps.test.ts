@@ -10,6 +10,7 @@ import {
   loadProgress,
   mandatePreview,
   saveProgress,
+  suggestDisambiguatedOrgName,
   validateAgentName,
   validateDomain,
   validateMandate,
@@ -33,6 +34,16 @@ describe('org namespace', () => {
     expect(deriveOrgName('team.firma.de')).toBe('firma')
     expect(deriveOrgName('shop.firma.co.uk')).toBe('firma')
     expect(deriveOrgName('mein-betrieb.com')).toBe('mein-betrieb')
+  })
+
+  it('suggests a label-suffix namespace like the backend (#211)', () => {
+    expect(suggestDisambiguatedOrgName('coppen.at')).toBe('coppen-at')
+    expect(suggestDisambiguatedOrgName('coppen.co.uk')).toBe('coppen-co-uk')
+    expect(suggestDisambiguatedOrgName('www.coppen.de')).toBe('coppen-de')
+    expect(suggestDisambiguatedOrgName('https://Shop.Coppen.AT/kontakt')).toBe('coppen-at')
+    expect(suggestDisambiguatedOrgName('coppen')).toBeNull()
+    expect(suggestDisambiguatedOrgName('')).toBeNull()
+    expect(suggestDisambiguatedOrgName('not a domain')).toBeNull()
   })
 
   it('validates domains', () => {

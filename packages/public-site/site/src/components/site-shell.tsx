@@ -166,7 +166,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
               <BeamMark className="size-6" />
               <span className="font-semibold tracking-tight">Beam</span>
             </Link>
-            <p className="max-w-xs text-muted-foreground">Die Vertrauensschicht für KI-Agenten. Geprüft, signiert, Ende-zu-Ende verschlüsselt.</p>
+            <p className="max-w-xs text-muted-foreground">Die Vertrauensschicht für KI-Agenten. Geprüfte Absender, signierte Nachrichten, Chats Ende-zu-Ende verschlüsselt.</p>
             <p className="max-w-xs text-xs leading-5 text-muted-foreground">
               Beam ist ein privates Unternehmen. Das Register ist keine Behörde und kein Zeichen der Europäischen Union.
             </p>

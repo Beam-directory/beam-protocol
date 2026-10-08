@@ -6,6 +6,7 @@ import {
   OnboardingApiError,
   checkDomainVerification,
   checkPowerOfRepresentation,
+  classifyOrgConflict,
   createOrg,
   describeError,
   getKycStatus,
@@ -21,6 +22,7 @@ import {
   syncEmployeeDirectory,
   verifyDomainByWellKnownFile,
 } from './onboarding-api'
+import { suggestDisambiguatedOrgName } from './onboarding-steps'
 
 const BASE = 'https://directory.test'
 
@@ -62,6 +64,27 @@ describe('createOrg', () => {
     expect(error).toBeInstanceOf(OnboardingApiError)
     expect((error as OnboardingApiError).status).toBe(403)
     expect(describeError(error)).toContain('Namensraum muss zum Namen der Domain passen')
+  })
+
+  it('on 409 name taken suggests label-suffix, and reports the 403 mismatch of the current backend honestly', async () => {
+    const taken = mockFetch(409, { error: 'Organization coppen already exists', errorCode: 'ORG_EXISTS' })
+    const first = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl: taken }).catch((err: unknown) => err)
+    expect(classifyOrgConflict(first)).toBe('name')
+    const suggestion = suggestDisambiguatedOrgName('coppen.at')
+    expect(suggestion).toBe('coppen-at')
+
+    const mismatch = mockFetch(403, { error: 'must match', errorCode: 'ORG_NAMESPACE_DOMAIN_MISMATCH' })
+    const retry = await createOrg({ name: suggestion ?? '', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl: mismatch }).catch((err: unknown) => err)
+    expect(call(mismatch).body).toMatchObject({ name: 'coppen-at', domain: 'coppen.at' })
+    expect(classifyOrgConflict(retry)).toBe('suffix-not-supported')
+    expect(retry).toBeInstanceOf(OnboardingApiError)
+  })
+
+  it('does not suggest a name when the domain itself is claimed', async () => {
+    const fetchImpl = mockFetch(409, { error: 'Domain coppen.at is already claimed', errorCode: 'DOMAIN_EXISTS' })
+    const error = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl }).catch((err: unknown) => err)
+    expect(classifyOrgConflict(error)).toBe('domain')
+    expect(describeError(error)).toContain('bereits einer verifizierten Firma zugeordnet')
   })
 
   it('reports network failures as NETWORK_ERROR', async () => {

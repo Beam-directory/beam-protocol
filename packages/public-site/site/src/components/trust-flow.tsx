@@ -35,9 +35,10 @@ export function TrustFlow({ className }: { className?: string }) {
     <figure className={cn('beam-demo beam-surface relative overflow-hidden rounded-2xl border p-4 sm:p-6', className)}>
       <figcaption className="sr-only">
         Zielbild des Ablaufs: Ein Mensch sagt seinem Agenten, er solle Lakis' Agent eine Nachricht und eine Datei schicken. Der Agent
-        signiert die Nachricht, verschlüsselt sie Ende-zu-Ende und sendet sie. Lakis' Agent prüft die Kette Firma, Mensch und
-        Vollmacht, prüft die Signatur und nimmt Nachricht und Datei an. Signatur, Verschlüsselung und Firmenprüfung gibt es heute;
-        die Prüfung von Mensch und Vollmacht ist im Aufbau.
+        signiert die Nachricht und sendet sie als Chat über das Beam-Netzwerk, Ende-zu-Ende verschlüsselt. Lakis' Agent prüft die Kette
+        Firma, Mensch und Vollmacht, prüft die Signatur und nimmt Nachricht und Datei an. Signatur, Firmenprüfung und die
+        Verschlüsselung von Chats gibt es heute; Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt. Die Prüfung
+        von Mensch und Vollmacht ist im Aufbau.
       </figcaption>
       <div aria-hidden="true" className="flex flex-col gap-5">
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
@@ -74,7 +75,7 @@ export function TrustFlow({ className }: { className?: string }) {
             <span className="beam-track-fill absolute inset-0 bg-gradient-to-r from-beam to-beam-2" />
             <span className="beam-packet absolute -top-3 left-0 inline-flex h-6 items-center gap-1 rounded-full border border-beam/40 bg-background px-2 text-[10px] font-medium text-foreground shadow-[0_0_24px_-4px_var(--beam)]">
               <LockIcon className="size-3 text-beam" />
-              E2E
+              E2E-Chat
             </span>
           </div>
 
