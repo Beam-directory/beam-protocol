@@ -1,58 +1,60 @@
 /**
- * TODO Nach Backend-Deploy (#211–#215): registerAgent → POST /orgs/:name/agents mit publicKey + responsiblePersonId;
- * submitBusinessRegistration → POST /orgs/:name/registry; well-known, Personen/KYC/Mandate in CAPABILITIES auf live;
- * Namensraum mit Länderendung (label-suffix) wird dann vom Server akzeptiert.
+ * Onboarding API client for directory v1.8.0.
  *
- * Onboarding API client. ALL onboarding calls go through this module so endpoints can be swapped in one place
- * when the onboarding backend (built in a parallel PR) lands.
+ * Live routes (packages/directory/src):
+ * - createOrg                 POST /orgs                                          routes/orgs.ts
+ * - getOrg                    GET  /orgs/:name                                    routes/orgs.ts
+ * - checkDomainVerification   POST /orgs/:name/verify   { method: dns | well-known }
+ * - submitOrgRegistry         POST /orgs/:name/registry                           routes/orgs.ts
+ * - getOrgRegistry            GET  /orgs/:name/registry
+ * - createPerson              POST /orgs/:name/people                             routes/people.ts
+ * - listPeople                GET  /orgs/:name/people
+ * - requestManualKyc          POST /orgs/:name/people/:id/kyc   { provider: "manual" }
+ * - inviteEmployee            POST /orgs/:name/people/invitations
+ * - acceptInvitation          POST /people/invitations/accept
+ * - registerAgent             POST /orgs/:name/agents     publicKey + responsiblePersonId
+ * - publishEncryptionKey      PATCH /agents/:beamId/config  signed by the agent key
+ * - issueMandate              POST /agents/:beamId/mandates signed by the person key
+ * - getTrustAssertion         GET  /agents/:beamId/trust-assertion
+ * - getNetworkIdentity        GET  /network/me
+ * - sendContactRequest        POST /network/connections (signed)
+ * - registerInterest          POST /waitlist
  *
- * Live today (routes in packages/directory/src):
- * - createOrg                      POST /orgs                              routes/orgs.ts
- * - getOrg                         GET  /orgs/:name                        routes/orgs.ts
- * - checkDomainVerification        POST /orgs/:name/verify  (DNS TXT)      routes/orgs.ts
- * - registerAgent                  POST /agents/register    (Ed25519 SPKI) routes/agents.ts
- * - submitBusinessRegistration     POST /agents/:beamId/verify-business    routes/business-verify.ts
- *                                  (DE: format check + manual review; UK: Companies House lookup + review)
- * - getBusinessStatus              GET  /agents/:beamId/business-status    routes/business-verify.ts
- * - getNetworkIdentity             GET  /network/me                        routes/network.ts
- * - sendContactRequest             POST /network/connections (signed)      routes/network.ts
- * - registerInterest               POST /waitlist                          server.ts
+ * The directory never receives a private key. Signing uses a non-extractable CryptoKey in this tab.
  *
- * Pending backend (these throw NotAvailableYet and never make a request):
- * - verifyDomainByWellKnownFile    no /.well-known/ verification route
- * - lookupLei                      no LEI lookup
- * - checkPowerOfRepresentation     no Vertretungsberechtigung check
- * - startKyc / getKycStatus        no ID-document KYC
- * - syncEmployeeDirectory          no Personio / Microsoft Entra sync
- * - inviteEmployee                 only admin workspace invitations in the dashboard, not for org identities
- * - issueMandate                   /agents/:beamId/delegate is agent-to-agent with a free-text scope;
- *                                  no person-issued mandate, no amount limits, no escalation
- * - suffixedOrgName                createOrg with a "label-suffix" name (e.g. coppen-at) is sent to POST /orgs, but the
- *                                  current backend still answers 403 ORG_NAMESPACE_DOMAIN_MISMATCH (accepted after #211)
+ * Still not real, and still marked in the UI:
+ * - thirdPartyKyc            the only KYC provider is "manual"; no ID-document vendor
+ * - syncEmployeeDirectory    no Personio or Microsoft Entra connection
+ * - checkPowerOfRepresentation  the filing records a claimed role; nothing checks the register
+ * - grokSending              sending from Grok is off until a separate decision
  */
 import type { Messages } from '../i18n/en.ts'
+import { createNonce, KeySupportError, signCanonical, signMutation } from './agent-keys'
 import { directoryApiBase } from './directory-client'
-import { KeySupportError, signMutation } from './agent-keys'
+import type { MandatePayload, ScopeGrant } from './onboarding-steps'
 
 export type Capability =
   | 'createOrg'
   | 'getOrg'
   | 'checkDomainVerification'
+  | 'verifyDomainByWellKnownFile'
+  | 'submitOrgRegistry'
+  | 'createPerson'
+  | 'requestManualKyc'
+  | 'getKycStatus'
+  | 'inviteEmployee'
+  | 'acceptInvitation'
   | 'registerAgent'
-  | 'submitBusinessRegistration'
-  | 'getBusinessStatus'
+  | 'publishEncryptionKey'
+  | 'issueMandate'
+  | 'getTrustAssertion'
   | 'getNetworkIdentity'
   | 'sendContactRequest'
   | 'registerInterest'
-  | 'verifyDomainByWellKnownFile'
-  | 'lookupLei'
-  | 'checkPowerOfRepresentation'
-  | 'startKyc'
-  | 'getKycStatus'
+  | 'thirdPartyKyc'
   | 'syncEmployeeDirectory'
-  | 'inviteEmployee'
-  | 'issueMandate'
-  | 'suffixedOrgName'
+  | 'checkPowerOfRepresentation'
+  | 'grokSending'
 
 export type CapabilityStatus = 'live' | 'unavailable'
 
@@ -60,21 +62,24 @@ export const CAPABILITIES: Record<Capability, CapabilityStatus> = {
   createOrg: 'live',
   getOrg: 'live',
   checkDomainVerification: 'live',
+  verifyDomainByWellKnownFile: 'live',
+  submitOrgRegistry: 'live',
+  createPerson: 'live',
+  requestManualKyc: 'live',
+  getKycStatus: 'live',
+  inviteEmployee: 'live',
+  acceptInvitation: 'live',
   registerAgent: 'live',
-  submitBusinessRegistration: 'live',
-  getBusinessStatus: 'live',
+  publishEncryptionKey: 'live',
+  issueMandate: 'live',
+  getTrustAssertion: 'live',
   getNetworkIdentity: 'live',
   sendContactRequest: 'live',
   registerInterest: 'live',
-  verifyDomainByWellKnownFile: 'unavailable',
-  lookupLei: 'unavailable',
-  checkPowerOfRepresentation: 'unavailable',
-  startKyc: 'unavailable',
-  getKycStatus: 'unavailable',
+  thirdPartyKyc: 'unavailable',
   syncEmployeeDirectory: 'unavailable',
-  inviteEmployee: 'unavailable',
-  issueMandate: 'unavailable',
-  suffixedOrgName: 'unavailable',
+  checkPowerOfRepresentation: 'unavailable',
+  grokSending: 'unavailable',
 }
 
 export function isAvailable(capability: Capability): boolean {
@@ -107,9 +112,9 @@ export class OnboardingApiError extends Error {
 }
 
 /**
- * Classifies a failed createOrg (routes/orgs.ts): 'name' = the namespace is taken or pending (409 ORG_EXISTS /
- * ORG_CLAIM_PENDING, a label-suffix name can help), 'domain' = the domain itself is claimed (no suggestion),
- * 'suffix-not-supported' = the backend does not accept label-suffix names yet (403 ORG_NAMESPACE_DOMAIN_MISMATCH).
+ * Classifies a failed createOrg (routes/orgs.ts): 'name' = the claim is taken (409),
+ * 'domain' = the domain itself is claimed, 'suffix-not-supported' = the name is neither the label
+ * nor the label--suffix form the directory accepts.
  */
 export function classifyOrgConflict(error: unknown): 'name' | 'domain' | 'suffix-not-supported' | null {
   if (!(error instanceof OnboardingApiError)) return null
@@ -130,6 +135,18 @@ export function describeError(error: unknown, messages: Messages['errors']): str
   return messages.generic
 }
 
+export async function checkPowerOfRepresentation(): Promise<never> {
+  throw new NotAvailableYet('checkPowerOfRepresentation')
+}
+
+export async function syncEmployeeDirectory(): Promise<never> {
+  throw new NotAvailableYet('syncEmployeeDirectory')
+}
+
+export async function startThirdPartyKyc(): Promise<never> {
+  throw new NotAvailableYet('thirdPartyKyc')
+}
+
 type FetchLike = typeof fetch
 
 export interface ClientOptions {
@@ -143,7 +160,7 @@ function asRecord(value: unknown): Record<string, unknown> {
 
 async function request(
   path: string,
-  init: { method: 'GET' | 'POST'; body?: unknown; apiKey?: string; okStatuses?: number[] },
+  init: { method: 'GET' | 'POST' | 'PATCH'; body?: unknown; apiKey?: string; okStatuses?: number[] },
   options: ClientOptions = {},
 ): Promise<{ status: number; body: Record<string, unknown> }> {
   const baseUrl = (options.baseUrl ?? directoryApiBase()).replace(/\/$/, '')
@@ -194,16 +211,20 @@ function strOrNull(value: unknown): string | null {
 export interface DnsChallenge {
   txtName: string
   txtValue: string
+  wellKnownUrl: string
+  wellKnownBody: string
 }
 
 export interface OrgRecord {
   name: string
+  requestedName: string
   displayName: string
   domain: string
   beamDomain: string
   verified: boolean
   claimExpiresAt: string | null
   verifiedAt: string | null
+  domainVerifiedVia: '' | 'dns' | 'well-known'
   verification: DnsChallenge | null
 }
 
@@ -214,21 +235,29 @@ export interface OrgClaim extends OrgRecord {
 
 function parseOrg(raw: Record<string, unknown>): OrgRecord {
   const verification = asRecord(raw.verification)
+  const via = raw.domainVerifiedVia
   return {
     name: str(raw.name),
+    requestedName: str(raw.requestedName) || str(raw.name),
     displayName: str(raw.displayName) || str(raw.name),
     domain: str(raw.domain),
     beamDomain: str(raw.beamDomain),
     verified: raw.verified === true,
     claimExpiresAt: strOrNull(raw.claimExpiresAt),
     verifiedAt: strOrNull(raw.verifiedAt),
+    domainVerifiedVia: via === 'dns' || via === 'well-known' ? via : '',
     verification: verification.txtName && verification.txtValue
-      ? { txtName: str(verification.txtName), txtValue: str(verification.txtValue) }
+      ? {
+          txtName: str(verification.txtName),
+          txtValue: str(verification.txtValue),
+          wellKnownUrl: str(verification.wellKnownUrl),
+          wellKnownBody: str(verification.wellKnownBody) || str(verification.txtValue),
+        }
       : null,
   }
 }
 
-/** POST /orgs (routes/orgs.ts). Creates a namespace claim and returns the DNS challenge plus the org API key. */
+/** POST /orgs (routes/orgs.ts). The stored name is label--suffix until the domain is verified. */
 export async function createOrg(
   input: { name: string; displayName: string; domain: string },
   options?: ClientOptions,
@@ -246,125 +275,240 @@ export async function getOrg(name: string, apiKey: string, options?: ClientOptio
 }
 
 export type DomainCheck =
-  | { verified: true; org: OrgRecord }
-  | { verified: false; expected: string; txtName: string; records: string[] }
+  | { verified: true; method: 'dns' | 'well-known'; org: OrgRecord }
+  | { verified: false; method: 'dns' | 'well-known'; expected: string; txtName: string; wellKnownUrl: string; records: string[]; errorCode: string }
 
-/** POST /orgs/:name/verify (routes/orgs.ts). Looks up the DNS TXT record; 409 means "not found yet". */
-export async function checkDomainVerification(name: string, apiKey: string, options?: ClientOptions): Promise<DomainCheck> {
+/**
+ * POST /orgs/:name/verify. method "dns" looks up the TXT record. method "well-known" fetches
+ * https://domain/.well-known/beam-verification. 409 means the proof is not there yet.
+ */
+export async function checkDomainVerification(
+  name: string,
+  apiKey: string,
+  method: 'dns' | 'well-known' = 'dns',
+  options?: ClientOptions,
+): Promise<DomainCheck> {
   const { status, body } = await request(
     `/orgs/${encodeURIComponent(name)}/verify`,
-    { method: 'POST', apiKey, okStatuses: [409] },
+    { method: 'POST', apiKey, body: { method }, okStatuses: [409] },
     options,
   )
-  if (status === 409 && body.errorCode === 'TXT_NOT_FOUND') {
+  if (status === 409 && (body.errorCode === 'TXT_NOT_FOUND' || body.errorCode === 'WELL_KNOWN_NOT_FOUND')) {
     return {
       verified: false,
+      method,
       expected: str(body.expected),
       txtName: str(body.txtName),
+      wellKnownUrl: str(body.wellKnownUrl),
       records: Array.isArray(body.records) ? body.records.filter((value): value is string => typeof value === 'string') : [],
+      errorCode: str(body.errorCode),
     }
   }
   if (status === 409) {
     throw new OnboardingApiError(str(body.error), status, str(body.errorCode) || 'REQUEST_FAILED', body)
   }
-  return { verified: true, org: parseOrg(asRecord(body.org)) }
+  const org = parseOrg(asRecord(body.org))
+  return { verified: true, method, org: { ...org, domainVerifiedVia: org.domainVerifiedVia || method } }
 }
 
-export async function verifyDomainByWellKnownFile(): Promise<never> {
-  throw new NotAvailableYet('verifyDomainByWellKnownFile')
-}
-
-export async function lookupLei(): Promise<never> {
-  throw new NotAvailableYet('lookupLei')
-}
-
-export async function checkPowerOfRepresentation(): Promise<never> {
-  throw new NotAvailableYet('checkPowerOfRepresentation')
-}
-
-export interface BusinessRegistrationInput {
-  country: 'DE' | 'UK'
+export interface RegistryFilingInput {
+  kind: 'handelsregister' | 'lei'
+  country: string
   registrationNumber: string
+  registerCourt?: string | null
   legalName: string
+  applicantName: string
+  applicantRole: string
 }
 
-export interface BusinessRegistrationResult {
-  status: 'pending' | 'verified' | 'failed' | string
-  reviewRequired: boolean
-  message: string
+export interface RegistryFiling {
+  id: number
+  kind: string
+  country: string
+  registrationNumber: string
+  registerCourt: string | null
+  legalName: string
+  applicantName: string
+  applicantRole: string
+  status: string
 }
 
-/**
- * POST /agents/:beamId/verify-business (routes/business-verify.ts). Needs the agent API key, so it runs after the
- * first agent exists. DE: format check, then manual review. UK: Companies House lookup, then review. Never "verified" here.
- */
-export async function submitBusinessRegistration(
-  beamId: string,
-  agentApiKey: string,
-  input: BusinessRegistrationInput,
+function parseFiling(raw: Record<string, unknown>): RegistryFiling {
+  return {
+    id: typeof raw.id === 'number' ? raw.id : 0,
+    kind: str(raw.kind),
+    country: str(raw.country),
+    registrationNumber: str(raw.registrationNumber),
+    registerCourt: strOrNull(raw.registerCourt),
+    legalName: str(raw.legalName),
+    applicantName: str(raw.applicantName),
+    applicantRole: str(raw.applicantRole),
+    status: str(raw.status) || 'pending',
+  }
+}
+
+/** POST /orgs/:name/registry. Format check only. Status stays pending until a Beam operator reviews it. */
+export async function submitOrgRegistry(
+  orgName: string,
+  apiKey: string,
+  input: RegistryFilingInput,
   options?: ClientOptions,
-): Promise<BusinessRegistrationResult> {
+): Promise<RegistryFiling> {
   const { body } = await request(
-    `/agents/${encodeURIComponent(beamId)}/verify-business`,
-    { method: 'POST', apiKey: agentApiKey, body: input },
+    `/orgs/${encodeURIComponent(orgName)}/registry`,
+    { method: 'POST', apiKey, body: input },
     options,
   )
-  return {
-    status: str(body.status) || 'pending',
-    reviewRequired: body.reviewRequired === true,
-    message: str(body.message),
-  }
+  return parseFiling(asRecord(body.filing))
 }
 
-export interface BusinessStatus {
-  verified: boolean
-  verificationTier: string
-  review: { status: string; legalName: string; registrationNumber: string } | null
-}
-
-/** GET /agents/:beamId/business-status (routes/business-verify.ts). */
-export async function getBusinessStatus(beamId: string, agentApiKey: string, options?: ClientOptions): Promise<BusinessStatus> {
-  const { body } = await request(`/agents/${encodeURIComponent(beamId)}/business-status`, { method: 'GET', apiKey: agentApiKey }, options)
-  const review = asRecord(body.businessVerification)
-  return {
-    verified: body.verified === true,
-    verificationTier: str(body.verificationTier) || 'basic',
-    review: body.businessVerification
-      ? { status: str(review.status), legalName: str(review.legalName), registrationNumber: str(review.registrationNumber) }
-      : null,
-  }
+export async function getOrgRegistry(orgName: string, apiKey: string, options?: ClientOptions): Promise<RegistryFiling[]> {
+  const { body } = await request(`/orgs/${encodeURIComponent(orgName)}/registry`, { method: 'GET', apiKey }, options)
+  return Array.isArray(body.filings) ? body.filings.map((entry) => parseFiling(asRecord(entry))) : []
 }
 
 /* ------------------------------------------------------------------ Person ----------------------------------------------------------------- */
 
-export async function startKyc(): Promise<never> {
-  throw new NotAvailableYet('startKyc')
+export interface PersonRecord {
+  id: string
+  org: string
+  email: string
+  displayName: string
+  role: string
+  supervisorPersonId: string | null
+  status: string
+  kycStatus: string
+  kycProvider: string | null
+  publicKey: string
+  rights: ScopeGrant | null
 }
 
-export async function getKycStatus(): Promise<never> {
-  throw new NotAvailableYet('getKycStatus')
+function parseRights(value: unknown): ScopeGrant | null {
+  const raw = asRecord(value)
+  if (!Array.isArray(raw.actions)) return null
+  const actions = raw.actions.filter((entry): entry is ScopeGrant['actions'][number] =>
+    entry === 'read' || entry === 'schedule.commit' || entry === 'file.send' || entry === 'order')
+  const orderRaw = asRecord(raw.order)
+  const order = orderRaw.maxAmount && orderRaw.currency
+    ? { maxAmount: str(orderRaw.maxAmount), currency: 'EUR' as const }
+    : undefined
+  return { actions, ...(order ? { order } : {}) }
 }
 
-export async function syncEmployeeDirectory(): Promise<never> {
-  throw new NotAvailableYet('syncEmployeeDirectory')
+function parsePerson(raw: Record<string, unknown>): PersonRecord {
+  return {
+    id: str(raw.id),
+    org: str(raw.org),
+    email: str(raw.email),
+    displayName: str(raw.displayName),
+    role: str(raw.role),
+    supervisorPersonId: strOrNull(raw.supervisorPersonId),
+    status: str(raw.status),
+    kycStatus: str(raw.kycStatus) || 'unverified',
+    kycProvider: strOrNull(raw.kycProvider),
+    publicKey: str(raw.publicKey),
+    rights: parseRights(raw.rights),
+  }
 }
 
-export async function inviteEmployee(): Promise<never> {
-  throw new NotAvailableYet('inviteEmployee')
+export async function createPerson(
+  orgName: string,
+  apiKey: string,
+  input: { email: string; displayName: string; role: string; publicKey: string; rights: ScopeGrant; supervisorPersonId?: string | null },
+  options?: ClientOptions,
+): Promise<PersonRecord> {
+  const { body } = await request(`/orgs/${encodeURIComponent(orgName)}/people`, {
+    method: 'POST',
+    apiKey,
+    body: {
+      email: input.email.trim().toLowerCase(),
+      displayName: input.displayName.trim(),
+      role: input.role.trim(),
+      publicKey: input.publicKey,
+      rights: input.rights,
+      ...(input.supervisorPersonId ? { supervisorPersonId: input.supervisorPersonId } : {}),
+    },
+  }, options)
+  return parsePerson(asRecord(body.person))
+}
+
+export async function listPeople(orgName: string, apiKey: string, options?: ClientOptions): Promise<PersonRecord[]> {
+  const { body } = await request(`/orgs/${encodeURIComponent(orgName)}/people`, { method: 'GET', apiKey }, options)
+  return Array.isArray(body.people) ? body.people.map((entry) => parsePerson(asRecord(entry))) : []
+}
+
+/** Records a manual KYC request. provider "manual" only. Status becomes pending, never verified, from this call. */
+export async function requestManualKyc(orgName: string, apiKey: string, personId: string, options?: ClientOptions): Promise<PersonRecord> {
+  const { body } = await request(`/orgs/${encodeURIComponent(orgName)}/people/${encodeURIComponent(personId)}/kyc`, {
+    method: 'POST',
+    apiKey,
+    body: { provider: 'manual' },
+  }, options)
+  return parsePerson(asRecord(body.person))
+}
+
+export async function getKycStatus(orgName: string, apiKey: string, personId: string, options?: ClientOptions): Promise<PersonRecord | null> {
+  const people = await listPeople(orgName, apiKey, options)
+  return people.find((person) => person.id === personId) ?? null
+}
+
+export interface InvitationResult {
+  invitationId: string
+  email: string
+  role: string
+  expiresAt: string
+  /** One-time token. Shown once, kept in memory only. */
+  token: string
+}
+
+export async function inviteEmployee(
+  orgName: string,
+  apiKey: string,
+  input: { email: string; role: string; rights: ScopeGrant; supervisorPersonId?: string | null },
+  options?: ClientOptions,
+): Promise<InvitationResult> {
+  const { body } = await request(`/orgs/${encodeURIComponent(orgName)}/people/invitations`, {
+    method: 'POST',
+    apiKey,
+    body: {
+      email: input.email.trim().toLowerCase(),
+      role: input.role.trim(),
+      rights: input.rights,
+      ...(input.supervisorPersonId ? { supervisorPersonId: input.supervisorPersonId } : {}),
+    },
+  }, options)
+  const token = str(body.token)
+  if (!token) throw new OnboardingApiError('Directory returned no invitation token', 500, 'INVALID_RESPONSE')
+  return {
+    invitationId: str(body.invitationId),
+    email: str(body.email),
+    role: str(body.role),
+    expiresAt: str(body.expiresAt),
+    token,
+  }
+}
+
+export async function acceptInvitation(
+  input: { token: string; displayName: string; publicKey: string },
+  options?: ClientOptions,
+): Promise<PersonRecord> {
+  const { body } = await request('/people/invitations/accept', {
+    method: 'POST',
+    body: { token: input.token.trim(), displayName: input.displayName.trim(), publicKey: input.publicKey },
+  }, options)
+  return parsePerson(asRecord(body.person))
 }
 
 /* ------------------------------------------------------------------ Agent ------------------------------------------------------------------ */
 
 export interface RegisterAgentInput {
-  beamId: string
-  org: string
+  orgName: string
+  agentName: string
   displayName: string
-  /** Ed25519 public key, base64 SPKI. Generated in the browser; the private key is never sent. */
+  /** Ed25519 public key, base64 SPKI. Generated in the browser. */
   publicKey: string
-  /** X25519 public key, base64 SPKI, for end-to-end encryption in /network. */
-  dhPublicKey: string
+  responsiblePersonId: string
   capabilities?: string[]
-  description?: string
 }
 
 export interface RegisteredAgent {
@@ -373,24 +517,22 @@ export interface RegisteredAgent {
   org: string
   /** Agent API key (bk_…). Secret, returned once. Keep in memory and in the user's recovery kit only. */
   apiKey: string
-  verificationTier: string
+  responsiblePersonId: string | null
 }
 
-/** POST /agents/register (routes/agents.ts). Org Beam IDs need the org API key and a verified org domain. */
+/** POST /orgs/:name/agents. The directory does not generate the key and does not accept a private key. */
 export async function registerAgent(input: RegisterAgentInput, orgApiKey: string, options?: ClientOptions): Promise<RegisteredAgent> {
   const { body } = await request(
-    '/agents/register',
+    `/orgs/${encodeURIComponent(input.orgName)}/agents`,
     {
       method: 'POST',
       apiKey: orgApiKey,
       body: {
-        beamId: input.beamId,
-        org: input.org,
+        agentName: input.agentName,
         displayName: input.displayName,
         publicKey: input.publicKey,
-        dhPublicKey: input.dhPublicKey,
+        responsiblePersonId: input.responsiblePersonId,
         capabilities: input.capabilities ?? [],
-        ...(input.description ? { description: input.description } : {}),
       },
     },
     options,
@@ -398,23 +540,95 @@ export async function registerAgent(input: RegisterAgentInput, orgApiKey: string
   const apiKey = str(body.apiKey)
   if (!apiKey) throw new OnboardingApiError('Directory returned no agent API key', 500, 'INVALID_RESPONSE')
   return {
-    beamId: str(body.beamId) || str(body.beam_id) || input.beamId,
-    displayName: str(body.displayName) || str(body.display_name) || input.displayName,
-    org: str(body.org) || input.org,
+    beamId: str(body.beamId),
+    displayName: str(body.displayName) || input.displayName,
+    org: str(body.org) || input.orgName,
     apiKey,
-    verificationTier: str(body.verificationTier) || str(body.verification_tier) || 'basic',
+    responsiblePersonId: strOrNull(body.responsiblePersonId),
   }
 }
 
-export type MandateScope =
-  | { kind: 'read' }
-  | { kind: 'accept-appointments' }
-  | { kind: 'send-files' }
-  | { kind: 'order'; maxAmountEur: number }
-  | { kind: 'escalate'; to: string }
+/**
+ * PATCH /agents/:beamId/config. Signed by the agent key, same canonical payload routes/agents.ts rebuilds:
+ * { type: 'agent.config', beamId, dhPublicKey, timestamp, nonce }.
+ */
+export async function publishEncryptionKey(
+  input: { beamId: string; dhPublicKey: string; signingKey: CryptoKey },
+  options?: ClientOptions,
+): Promise<void> {
+  const payload = {
+    type: 'agent.config' as const,
+    beamId: input.beamId,
+    dhPublicKey: input.dhPublicKey,
+    timestamp: new Date().toISOString(),
+    nonce: createNonce(),
+  }
+  const signature = await signCanonical(payload, input.signingKey)
+  await request(`/agents/${encodeURIComponent(input.beamId)}/config`, {
+    method: 'PATCH',
+    body: { ...payload, signature },
+  }, options)
+}
 
-export async function issueMandate(): Promise<never> {
-  throw new NotAvailableYet('issueMandate')
+export interface IssuedMandate {
+  jti: string
+  status: string
+  expiresAt: string
+  agentBeamId: string
+}
+
+/** POST /agents/:beamId/mandates. Signature is over the full mandate payload, with the person key. */
+export async function issueMandate(
+  input: { beamId: string; payload: MandatePayload; signingKey: CryptoKey },
+  options?: ClientOptions,
+): Promise<IssuedMandate> {
+  const signature = await signCanonical(input.payload, input.signingKey)
+  const { body } = await request(`/agents/${encodeURIComponent(input.beamId)}/mandates`, {
+    method: 'POST',
+    body: {
+      jti: input.payload.jti,
+      scopes: input.payload.scopes,
+      expiresAt: input.payload.expiresAt,
+      escalationPersonId: input.payload.escalationPersonId,
+      signature,
+    },
+  }, options)
+  const mandate = asRecord(body.mandate)
+  return {
+    jti: str(mandate.jti) || input.payload.jti,
+    status: str(mandate.status) || 'active',
+    expiresAt: str(mandate.expiresAt) || input.payload.expiresAt,
+    agentBeamId: str(mandate.agentBeamId) || input.beamId,
+  }
+}
+
+export interface TrustAssertionView {
+  beamId: string
+  orgName: string
+  orgVerified: boolean
+  registryStatus: string
+  personRole: string
+  kycStatus: string
+  mandateJti: string
+  suspended: boolean
+}
+
+/** GET /agents/:beamId/trust-assertion. Org key is required while the agent is unlisted. */
+export async function getTrustAssertion(beamId: string, orgApiKey: string, options?: ClientOptions): Promise<TrustAssertionView> {
+  const { body } = await request(`/agents/${encodeURIComponent(beamId)}/trust-assertion`, { method: 'GET', apiKey: orgApiKey }, options)
+  const org = asRecord(body.org)
+  const person = asRecord(body.person)
+  const mandate = asRecord(body.mandate)
+  return {
+    beamId: str(body.beamId) || beamId,
+    orgName: str(org.name),
+    orgVerified: org.verified === true,
+    registryStatus: str(org.registryStatus) || 'none',
+    personRole: str(person.role),
+    kycStatus: str(person.kycStatus),
+    mandateJti: str(mandate.jti),
+    suspended: body.suspended === true,
+  }
 }
 
 /* ------------------------------------------------------------------ Verbinden -------------------------------------------------------------- */

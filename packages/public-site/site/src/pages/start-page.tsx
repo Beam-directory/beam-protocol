@@ -38,6 +38,7 @@ export function StartPage() {
   const gate = canAdvance(stepId, {
     orgVerified: progress.orgVerified,
     orgKeyInMemory: Boolean(secrets.orgApiKey),
+    personReady: Boolean(progress.personId),
     agentRegistered: Boolean(progress.registeredBeamId),
   })
 
@@ -59,7 +60,11 @@ export function StartPage() {
   }, [step])
 
   // Warn before leaving while a one-time secret has not been saved yet.
-  const unsavedSecret = Boolean((secrets.orgApiKey && !secrets.orgKeySaved) || (secrets.agentApiKey && !secrets.kitSaved))
+  const unsavedSecret = Boolean(
+    (secrets.orgApiKey && !secrets.orgKeySaved)
+    || (secrets.personIdentity && !secrets.personKeySaved)
+    || (secrets.agentApiKey && !secrets.kitSaved),
+  )
   useEffect(() => {
     if (!unsavedSecret) return undefined
     const onBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -84,7 +89,7 @@ export function StartPage() {
     setMaxReached(0)
   }
 
-  const completed = [progress.orgVerified, false, Boolean(progress.registeredBeamId), false]
+  const completed = [progress.orgVerified, Boolean(progress.personId), Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
 
   return (
     <div className="relative isolate">
@@ -124,7 +129,7 @@ export function StartPage() {
           </div>
 
           {stepId === 'firma' ? <StepFirma progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
-          {stepId === 'person' ? <StepPerson progress={progress} /> : null}
+          {stepId === 'person' ? <StepPerson progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
           {stepId === 'agent' ? <StepAgent progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
           {stepId === 'verbinden' ? <StepVerbinden progress={progress} secrets={secrets} /> : null}
         </section>

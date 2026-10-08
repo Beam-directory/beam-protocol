@@ -1,10 +1,14 @@
-import type { AgentIdentity } from '@/lib/agent-keys'
+import type { AgentIdentity, SigningIdentity } from '@/lib/agent-keys'
 import type { OnboardingProgress } from '@/lib/onboarding-steps'
 
 /** Secrets of the current tab. Held in React state only: never written to any storage. */
 export interface OnboardingSecrets {
   orgApiKey: string | null
   orgKeySaved: boolean
+  personIdentity: SigningIdentity | null
+  personKeySaved: boolean
+  /** One-time employee invitation token. Shown once, never stored. */
+  invitationToken: string | null
   identity: AgentIdentity | null
   agentApiKey: string | null
   kitSaved: boolean
@@ -13,6 +17,9 @@ export interface OnboardingSecrets {
 export const EMPTY_SECRETS: OnboardingSecrets = {
   orgApiKey: null,
   orgKeySaved: false,
+  personIdentity: null,
+  personKeySaved: false,
+  invitationToken: null,
   identity: null,
   agentApiKey: null,
   kitSaved: false,

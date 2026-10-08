@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Public site
+- point company onboarding at the live directory routes: domain proof (DNS or `/.well-known`), register filing, person, manual KYC request, invitation, agent public key, signed encryption key, and a person-signed mandate
+- keep third-party ID checks, Personio sync, automatic representation checks, and sending from Grok marked as not available
+- private keys stay in the browser; the directory only receives public keys and signatures
 - Check a public Beam address on the website. The page loads the trust assertion and verifies the Ed25519 signature in the browser against the pinned directory key.
 - Add read-only MCP tool `beam_verify_agent`. It verifies the same assertion on the server and stays available when Network and send are off.
 - Export `verifyAgent(address)` from `beam-protocol-sdk` for the same check without MCP.

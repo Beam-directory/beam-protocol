@@ -118,6 +118,30 @@ export function TextField({
   )
 }
 
+export function SelectField({
+  id, label, value, onChange, children,
+}: {
+  id: string
+  label: string
+  value: string
+  onChange: (value: string) => void
+  children: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1.5">
+      <label htmlFor={id} className="text-sm font-medium">{label}</label>
+      <select
+        id={id}
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="h-10 rounded-lg border bg-background px-3 text-sm text-foreground"
+      >
+        {children}
+      </select>
+    </div>
+  )
+}
+
 export function CopyField({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {
   const { t } = useI18n()
   const [copied, setCopied] = useState(false)
