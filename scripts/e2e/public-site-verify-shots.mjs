@@ -20,7 +20,7 @@ const artifactDir = process.argv[2] ?? '/opt/cursor/artifacts/agent-trust-check'
 
 const AGENTS = {
   verified: 'jarvis@coppen.beam.directory',
-  'not-verified': 'booking@lufthansa.beam.directory',
+  'not-verified': 'fake-support@beam.directory',
 }
 const LOCALES = [
   ['en', '/verify'],

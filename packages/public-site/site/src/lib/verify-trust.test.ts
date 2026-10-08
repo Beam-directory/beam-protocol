@@ -95,8 +95,8 @@ describe('browser trust check', () => {
     expect(rejected.signature).toBe('invalid')
     expect(rejected.verified).toBe(false)
 
-    const bare = await signed(keys, 'booking@lufthansa.beam.directory', null)
-    const unverified = await checkAgentInBrowser('booking@lufthansa.beam.directory', {
+    const bare = await signed(keys, 'solo@beam.directory', null)
+    const unverified = await checkAgentInBrowser('solo@beam.directory', {
       directoryUrl: 'https://directory.test',
       pinnedPublicKey: keys.publicKey,
       now: NOW,

@@ -86,15 +86,6 @@ async function seed(dbPath) {
       signature: 'seed-signature',
       payloadHash: 'public-site-verify-jarvis-hash',
     })
-    registerAgent(db, {
-      beamId: 'booking@lufthansa.beam.directory',
-      displayName: 'Booking',
-      capabilities: [],
-      publicKey: agentKey(),
-      org: null,
-      personal: true,
-      visibility: 'public',
-    })
   } finally {
     db.close()
   }
@@ -203,14 +194,13 @@ try {
   const tampered = await page.getByTestId('agent-check-signature').innerText()
   if (!tampered.includes('one byte was changed')) throw new Error(`expected a tampered signature, got ${tampered}`)
 
-  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('booking@lufthansa.beam.directory')}`)
+  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('fake-support@beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
-  const bookingHeadline = await page.getByTestId('agent-check-headline').innerText()
-  if (bookingHeadline !== 'Not verified') throw new Error(`expected Not verified for booking, got ${bookingHeadline}`)
-  const bookingStatus = await page.getByTestId('agent-check-status').innerText()
-  if (!bookingStatus.includes('not verified')) throw new Error(`expected an unverified explanation, got ${bookingStatus}`)
-  const bookingOrg = await page.getByTestId('agent-check-org').innerText()
-  if (!bookingOrg.includes('No organisation record')) throw new Error(`expected no organisation, got ${bookingOrg}`)
+  const exampleHeadline = await page.getByTestId('agent-check-headline').innerText()
+  if (exampleHeadline !== 'Not verified') throw new Error(`expected Not verified for the example, got ${exampleHeadline}`)
+  const exampleStatus = await page.getByTestId('agent-check-status').innerText()
+  if (!exampleStatus.includes('Unlisted or not found')) throw new Error(`expected not found for the example, got ${exampleStatus}`)
+  if (!exampleStatus.includes('NOT verified')) throw new Error(`expected the untrusted line, got ${exampleStatus}`)
 
   await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('missing@coppen.beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
@@ -224,6 +214,7 @@ try {
 
   await page.goto(`${previewUrl}/`)
   await page.getByTestId('agent-check').waitFor()
+  await page.getByRole('button', { name: 'fake-support@beam.directory' }).waitFor()
   await page.getByRole('button', { name: 'jarvis@coppen.beam.directory' }).click()
   await page.getByTestId('agent-check-headline').filter({ hasText: 'Verified' }).waitFor({ timeout: 20_000 })
 

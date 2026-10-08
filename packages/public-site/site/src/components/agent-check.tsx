@@ -14,7 +14,7 @@ export const EXAMPLE_AGENTS = [
   'clara@coppen.beam.directory',
   'fischer@coppen.beam.directory',
   'wrenda@beam.directory',
-  'booking@lufthansa.beam.directory',
+  'fake-support@beam.directory',
 ] as const
 
 type Variant = 'embed' | 'page'
