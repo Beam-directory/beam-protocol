@@ -50,6 +50,16 @@ test('remote send capability requires an explicit valid boolean flag', () => {
   assert.throws(() => loadBeamMcpHttpConfig(typo), /must be true or false/)
 })
 
+test('send rate limit defaults to 30 per hour and rejects invalid values', () => {
+  assert.equal(loadBeamMcpHttpConfig(baseEnv()).sendLimitPerHour, 30)
+  const configured = baseEnv()
+  configured['BEAM_MCP_SEND_LIMIT_PER_HOUR'] = '12'
+  assert.equal(loadBeamMcpHttpConfig(configured).sendLimitPerHour, 12)
+  const invalid = baseEnv()
+  invalid['BEAM_MCP_SEND_LIMIT_PER_HOUR'] = '0'
+  assert.throws(() => loadBeamMcpHttpConfig(invalid), /BEAM_MCP_SEND_LIMIT_PER_HOUR/)
+})
+
 test('remote Network tools require a separate explicit valid boolean flag', () => {
   const enabled = baseEnv()
   enabled['BEAM_MCP_ENABLE_NETWORK'] = 'true'

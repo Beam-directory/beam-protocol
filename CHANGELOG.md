@@ -51,6 +51,9 @@
 - offboard a person immediately and suspend every agent they are responsible for
 - refuse network connections, websocket sessions, and delegations for a suspended agent or an inactive responsible person
 
+### Hosted MCP pilot
+- keep the COPPEN default Fly profile read-only; the separate send profile adds Network reads, token-confirmed writes, and a 30-per-hour send limit for `grok@coppen.beam.directory`
+
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
 - mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email
