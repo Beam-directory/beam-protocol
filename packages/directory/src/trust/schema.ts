@@ -160,6 +160,16 @@ function ensureTrustPersonSchema(db: Database): void {
     CREATE INDEX IF NOT EXISTS idx_intent_approvals_person
       ON intent_approvals(escalation_person_id, status, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS mandate_order_spend (
+      nonce TEXT PRIMARY KEY,
+      mandate_jti TEXT NOT NULL,
+      day TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mandate_order_spend_day
+      ON mandate_order_spend(mandate_jti, day);
+
     CREATE TABLE IF NOT EXISTS abuse_reports (
       id TEXT PRIMARY KEY,
       reporter_beam_id TEXT NOT NULL,

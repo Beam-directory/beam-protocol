@@ -231,8 +231,14 @@ export function findPersonByExternalId(
 
 export function agentOperationBlock(
   db: Database,
-  agent: { suspended_at: string | null; responsible_person_id: string | null },
-): { error: string; errorCode: 'AGENT_SUSPENDED' | 'PERSON_OFFBOARDED' } | null {
+  agent: { suspended_at: string | null; responsible_person_id: string | null; org?: string | null },
+): { error: string; errorCode: 'AGENT_SUSPENDED' | 'PERSON_OFFBOARDED' | 'ORG_SUSPENDED' } | null {
+  if (agent.org) {
+    const org = db.prepare('SELECT suspended_at FROM orgs WHERE name = ?').get(agent.org) as { suspended_at: string | null } | undefined
+    if (org?.suspended_at) {
+      return { error: 'This organization is suspended', errorCode: 'ORG_SUSPENDED' }
+    }
+  }
   if (agent.suspended_at) {
     return { error: 'This agent is suspended', errorCode: 'AGENT_SUSPENDED' }
   }
@@ -283,6 +289,17 @@ export function offboardPerson(
   const suspendedAgents = suspendAgentsForPerson(db, person.id, at)
   const revokedMandates = revokeActiveMandatesForPerson(db, person.id, at)
   return { person: getPerson(db, person.id) as PersonRow, suspendedAgents, revokedMandates, revokedDelegations }
+}
+
+export function revokeAgentAuthority(
+  db: Database,
+  beamId: string,
+  at = new Date().toISOString(),
+): { revokedMandates: number; revokedDelegations: number } {
+  return {
+    revokedMandates: revokeActiveMandatesForAgent(db, beamId, at),
+    revokedDelegations: revokeDelegationsForBeam(db, beamId),
+  }
 }
 
 export function replaceResponsiblePerson(

@@ -16,6 +16,15 @@ export function suspendOrg(db: Database, orgName: string, at = new Date().toISOS
   return result.changes === 1
 }
 
+export function unsuspendOrg(db: Database, orgName: string): boolean {
+  const result = db.prepare(`
+    UPDATE orgs
+    SET suspended_at = NULL
+    WHERE name = ? AND suspended_at IS NOT NULL
+  `).run(orgName)
+  return result.changes === 1
+}
+
 export function orgIsSuspended(db: Database, orgName: string): boolean {
   return Boolean(getOrg(db, orgName)?.suspended_at)
 }

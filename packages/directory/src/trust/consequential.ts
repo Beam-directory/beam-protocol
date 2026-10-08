@@ -5,7 +5,7 @@ import { isAllowedAttachmentMime } from './attachments.js'
 import { getActiveMandate } from './mandate-store.js'
 import { getAgent } from '../db.js'
 import { getPerson } from './person-store.js'
-import { moneyWithinLimit, parseScopeGrant, scopeActionForIntent, type ScopeAction, type ScopeGrant } from './scopes.js'
+import { amountToCents, moneyWithinLimit, parseScopeGrant, scopeActionForIntent, type ScopeAction, type ScopeGrant } from './scopes.js'
 
 export type ApprovalRow = {
   id: string
@@ -62,7 +62,10 @@ export function holdConsequentialIntent(
   const agent = getAgent(db, frame.from)
   const mandate = getActiveMandate(db, frame.from)
   const scopes = mandate ? parseScopeGrant(JSON.parse(mandate.scopes_json) as unknown) : null
-  const reason = scopes ? limitReason(action, scopes, frame.payload) : 'outside mandate scope'
+  let reason = scopes ? limitReason(action, scopes, frame.payload) : 'outside mandate scope'
+  if (!reason && action === 'order' && mandate && scopes?.order) {
+    reason = reserveOrderSpend(db, mandate.jti, frame, scopes.order)
+  }
   if (!reason) return null
 
   const escalationPersonId = mandate?.escalation_person_id
@@ -89,14 +92,20 @@ export function holdConsequentialIntent(
   return { kind: 'approval', approvalId: id, reason }
 }
 
+export function getApproval(db: Database, id: string): ApprovalRow | null {
+  const row = db.prepare('SELECT * FROM intent_approvals WHERE id = ?').get(id) as ApprovalRow | undefined
+  return row ?? null
+}
+
 export function listApprovalsForOrg(db: Database, orgName: string): ApprovalRow[] {
   return db.prepare(`
     SELECT a.*
     FROM intent_approvals a
+    LEFT JOIN agents sender ON sender.beam_id = a.from_beam_id
     LEFT JOIN persons p ON p.id = a.escalation_person_id
-    WHERE p.org_name = ? OR a.from_beam_id LIKE ?
+    WHERE sender.org = ? OR p.org_name = ?
     ORDER BY a.created_at DESC
-  `).all(orgName, `%@${orgName}.beam.directory`) as ApprovalRow[]
+  `).all(orgName, orgName) as ApprovalRow[]
 }
 
 export function decideApproval(
@@ -110,9 +119,37 @@ export function decideApproval(
     WHERE id = ? AND status = 'pending'
       AND (
         escalation_person_id IN (SELECT id FROM persons WHERE org_name = ?)
-        OR from_beam_id LIKE ?
+        OR from_beam_id IN (SELECT beam_id FROM agents WHERE org = ?)
       )
-  `).run(input.decision, decidedAt, input.id, input.orgName, `%@${input.orgName}.beam.directory`)
+  `).run(input.decision, decidedAt, input.id, input.orgName, input.orgName)
   if (result.changes !== 1) return null
   return db.prepare('SELECT * FROM intent_approvals WHERE id = ?').get(input.id) as ApprovalRow
+}
+
+function reserveOrderSpend(
+  db: Database,
+  mandateJti: string,
+  frame: IntentFrame,
+  limit: { maxAmount: string; currency: string },
+): string | null {
+  const amount = typeof frame.payload['amount'] === 'string' ? frame.payload['amount'].trim() : ''
+  const currency = typeof frame.payload['currency'] === 'string' ? frame.payload['currency'].trim().toUpperCase() : ''
+  if (!moneyWithinLimit(amount, currency, limit)) return 'order limit exceeded'
+  const cents = amountToCents(amount)
+  const day = new Date(frame.timestamp).toISOString().slice(0, 10)
+  const already = db.prepare('SELECT nonce FROM mandate_order_spend WHERE nonce = ?').get(frame.nonce)
+  if (already) return null
+  const spent = db.prepare(`
+    SELECT COALESCE(SUM(amount_cents), 0) AS total
+    FROM mandate_order_spend
+    WHERE mandate_jti = ? AND day = ?
+  `).get(mandateJti, day) as { total: number }
+  if (BigInt(spent.total) + cents > amountToCents(limit.maxAmount)) {
+    return 'daily order limit exceeded'
+  }
+  db.prepare(`
+    INSERT INTO mandate_order_spend (nonce, mandate_jti, day, amount_cents, created_at)
+    VALUES (?, ?, ?, ?, ?)
+  `).run(frame.nonce, mandateJti, day, Number(cents), new Date().toISOString())
+  return null
 }

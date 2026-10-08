@@ -84,7 +84,7 @@ export function buildTrustAssertion(db: Database, beamId: string, now = new Date
       ? { ref: personRef(person.id), role: person.role, kycStatus: person.kyc_status }
       : null,
     mandate: mandateView(mandate),
-    suspended: Boolean(agent.suspended_at) || person?.status === 'offboarded',
+    suspended: Boolean(agent.suspended_at) || person?.status === 'offboarded' || Boolean(org?.suspended_at),
     issuedAt,
     expiresAt,
   }

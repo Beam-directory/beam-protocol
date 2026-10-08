@@ -3,9 +3,43 @@ import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { hashApiKey } from '../api-key.js'
-import { getOrg, logAuditEvent } from '../db.js'
-import { decideApproval, listApprovalsForOrg } from '../trust/consequential.js'
-import { getPerson } from '../trust/person-store.js'
+import { verifyPayload } from '../crypto.js'
+import { getAgent, getOrg, logAuditEvent, recordNonce } from '../db.js'
+import { decideApproval, getApproval, listApprovalsForOrg } from '../trust/consequential.js'
+import { getPerson, type PersonRow } from '../trust/person-store.js'
+
+const NONCE_RE = /^[A-Za-z0-9_-]{16,128}$/
+const SIGNATURE_WINDOW_MS = 5 * 60 * 1000
+
+function jsonError(error: string, errorCode: string, status: 400 | 401 | 409): Response {
+  return new Response(JSON.stringify({ error, errorCode }), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  })
+}
+
+function readPersonSignature(
+  db: Database,
+  person: PersonRow,
+  raw: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): 'valid' | 'absent' | Response {
+  const signature = typeof raw['signature'] === 'string' ? raw['signature'].trim() : ''
+  if (!signature) return 'absent'
+  const timestamp = typeof raw['timestamp'] === 'string' ? raw['timestamp'] : ''
+  const timestampMs = Date.parse(timestamp)
+  const nonce = typeof raw['nonce'] === 'string' && NONCE_RE.test(raw['nonce']) ? raw['nonce'] : ''
+  if (!person.public_key || !Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > SIGNATURE_WINDOW_MS || !nonce) {
+    return jsonError('A fresh person signature is required', 'INVALID_PROOF', 400)
+  }
+  if (!verifyPayload({ ...payload, timestamp, nonce }, signature, person.public_key)) {
+    return jsonError('signature is invalid', 'INVALID_SIGNATURE', 400)
+  }
+  if (!recordNonce(db, nonce)) {
+    return jsonError('This signed request has already been used', 'NONCE_REPLAY', 409)
+  }
+  return 'valid'
+}
 
 function orgApiKey(c: Context, db: Database): { name: string } | Response {
   const name = (c.req.param('name') ?? '').trim().toLowerCase()
@@ -79,6 +113,14 @@ export function trustInboxRouter(db: Database): Hono {
     if (decision !== 'accepted' && decision !== 'declined') {
       return c.json({ error: 'decision must be accepted or declined', errorCode: 'INVALID_DECISION' }, 400)
     }
+    const body = raw as Record<string, unknown>
+    const signed = readPersonSignature(db, person, body, {
+      type: 'contact-request.review',
+      connectionId: c.req.param('connectionId'),
+      personId: person.id,
+      decision,
+    })
+    if (signed instanceof Response) return signed
     const now = new Date().toISOString()
     const result = db.prepare(`
       UPDATE beam_connections
@@ -90,9 +132,9 @@ export function trustInboxRouter(db: Database): Hono {
     }
     logAuditEvent(db, {
       action: 'network.contact_request.reviewed',
-      actor: `person:${person.id}`,
+      actor: signed === 'valid' ? `person:${person.id}` : `org:${owned.name}`,
       target: c.req.param('connectionId'),
-      details: { decision },
+      details: { decision, via: signed === 'valid' ? 'person' : 'org-key' },
     })
     return c.json({ connectionId: c.req.param('connectionId'), status: decision })
   })
@@ -134,13 +176,38 @@ export function trustInboxRouter(db: Database): Hono {
     if (decision !== 'approved' && decision !== 'rejected') {
       return c.json({ error: 'decision must be approved or rejected', errorCode: 'INVALID_DECISION' }, 400)
     }
-    const row = decideApproval(db, { id: c.req.param('id'), orgName: owned.name, decision })
+    const pending = getApproval(db, c.req.param('id'))
+    if (!pending || pending.status !== 'pending') {
+      return c.json({ error: 'Pending approval not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    const signerId = pending.escalation_person_id ?? getAgent(db, pending.from_beam_id)?.responsible_person_id ?? null
+    const signer = signerId ? getPerson(db, signerId) : null
+    const body = raw as Record<string, unknown>
+    const signature = typeof body['signature'] === 'string' ? body['signature'].trim() : ''
+    let via: 'person' | 'org-key' = 'org-key'
+    if (signature) {
+      if (!signer || signer.org_name !== owned.name || signer.status !== 'active') {
+        return c.json({ error: 'The escalation person must sign this approval', errorCode: 'INVALID_SIGNATURE' }, 400)
+      }
+      const signed = readPersonSignature(db, signer, body, {
+        type: 'intent.approval',
+        approvalId: pending.id,
+        decision,
+        personId: signer.id,
+      })
+      if (signed instanceof Response) return signed
+      if (signed !== 'valid') {
+        return c.json({ error: 'The escalation person must sign this approval', errorCode: 'INVALID_SIGNATURE' }, 400)
+      }
+      via = 'person'
+    }
+    const row = decideApproval(db, { id: pending.id, orgName: owned.name, decision })
     if (!row) return c.json({ error: 'Pending approval not found', errorCode: 'NOT_FOUND' }, 404)
     logAuditEvent(db, {
       action: 'intent.approval.decided',
-      actor: `org:${owned.name}`,
+      actor: via === 'person' ? `person:${signer?.id}` : `org:${owned.name}`,
       target: row.id,
-      details: { decision, executed: false },
+      details: { decision, executed: false, via },
     })
     return c.json({ id: row.id, status: row.status, executed: false })
   })

@@ -14,7 +14,7 @@ import { businessVerificationRouter } from './routes/business-verify.js'
 import { credentialsRouter } from './routes/credentials.js'
 import { delegationsRouter } from './routes/delegations.js'
 import { mandatesRouter } from './routes/mandates.js'
-import { abuseAdminRouter, abuseNetworkRouter, orgSuspensionRouter } from './routes/abuse.js'
+import { abuseAdminRouter, abuseNetworkRouter, agentSuspensionRouter, orgSuspensionRouter } from './routes/abuse.js'
 import { trustInboxRouter } from './routes/trust-inbox.js'
 import { didRouter } from './routes/did.js'
 import { federationRouter } from './routes/federation.js'
@@ -4019,6 +4019,7 @@ export function createApp(db: Database): Hono {
   app.route('/admin/orgs', orgRegistryAdminRouter(db))
   app.route('/admin/orgs', orgSuspensionRouter(db))
   app.route('/admin/abuse', abuseAdminRouter(db))
+  app.route('/admin/agents', agentSuspensionRouter(db))
   app.route('/identity-claims', identityClaimsRouter(db))
   app.route('/network', networkRouter(db))
   app.route('/network', abuseNetworkRouter(db))

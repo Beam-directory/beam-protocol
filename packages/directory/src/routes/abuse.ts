@@ -4,8 +4,8 @@ import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
 import { getAgent, getOrg, logAuditEvent } from '../db.js'
 import { checkAgentRateLimit } from '../rate-limit.js'
-import { offboardPerson, getPerson } from '../trust/person-store.js'
-import { suspendOrg } from '../trust/suspension.js'
+import { offboardPerson, getPerson, revokeAgentAuthority } from '../trust/person-store.js'
+import { suspendOrg, unsuspendOrg } from '../trust/suspension.js'
 import { BEAM_ID_RE } from '../validation.js'
 import { authenticateNetworkIdentity, verifyNetworkSignedMutation } from './network.js'
 
@@ -151,8 +151,13 @@ export function abuseAdminRouter(db: Database): Hono {
 
     const reviewedAt = new Date().toISOString()
     const target = getAgent(db, existing.target_beam_id)
+    let revokedMandates = 0
+    let revokedDelegations = 0
     if (decision === 'block_agent' && target) {
       db.prepare(`UPDATE agents SET suspended_at = COALESCE(suspended_at, ?) WHERE beam_id = ?`).run(reviewedAt, target.beam_id)
+      const revoked = revokeAgentAuthority(db, target.beam_id, reviewedAt)
+      revokedMandates = revoked.revokedMandates
+      revokedDelegations = revoked.revokedDelegations
     }
     if (decision === 'block_person' && target?.responsible_person_id) {
       const person = getPerson(db, target.responsible_person_id)
@@ -172,7 +177,7 @@ export function abuseAdminRouter(db: Database): Hono {
       action: 'abuse.reviewed',
       actor: auth.session.email,
       target: existing.target_beam_id,
-      details: { id, decision, note },
+      details: { id, decision, note, revokedMandates, revokedDelegations },
     })
     const row = db.prepare('SELECT * FROM abuse_reports WHERE id = ?').get(id) as AbuseRow
     return c.json({ report: serializeAbuse(row) })
@@ -213,6 +218,68 @@ export function orgSuspensionRouter(db: Database): Hono {
       details: { note },
     })
     return c.json({ org: name, suspendedAt: getOrg(db, name)?.suspended_at ?? at })
+  })
+
+  router.post('/:name/unsuspend', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) return auth
+    const name = (c.req.param('name') ?? '').trim().toLowerCase()
+    if (!getOrg(db, name)) return c.json({ error: 'Organization not found', errorCode: 'NOT_FOUND' }, 404)
+    let raw: unknown
+    try {
+      raw = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    const note = raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as Record<string, unknown>)['note'] === 'string'
+      ? String((raw as Record<string, unknown>)['note']).trim()
+      : ''
+    if (note.length < 3 || note.length > 2000) {
+      return c.json({ error: 'note must explain the unsuspend', errorCode: 'INVALID_REVIEW' }, 400)
+    }
+    unsuspendOrg(db, name)
+    logAuditEvent(db, {
+      action: 'org.unsuspended',
+      actor: auth.session.email,
+      target: name,
+      details: { note },
+    })
+    return c.json({ org: name, suspendedAt: null })
+  })
+
+  return router
+}
+
+export function agentSuspensionRouter(db: Database): Hono {
+  const router = new Hono()
+
+  router.post('/:beamId/unsuspend', async (c) => {
+    const auth = requireAdminRole(db, c.req.raw, 'operator')
+    if (auth instanceof Response) return auth
+    const beamId = decodeURIComponent(c.req.param('beamId') ?? '')
+    if (!BEAM_ID_RE.test(beamId) || !getAgent(db, beamId)) {
+      return c.json({ error: 'Agent not found', errorCode: 'NOT_FOUND' }, 404)
+    }
+    let raw: unknown
+    try {
+      raw = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    const note = raw && typeof raw === 'object' && !Array.isArray(raw) && typeof (raw as Record<string, unknown>)['note'] === 'string'
+      ? String((raw as Record<string, unknown>)['note']).trim()
+      : ''
+    if (note.length < 3 || note.length > 2000) {
+      return c.json({ error: 'note must explain the unsuspend', errorCode: 'INVALID_REVIEW' }, 400)
+    }
+    db.prepare('UPDATE agents SET suspended_at = NULL WHERE beam_id = ?').run(beamId)
+    logAuditEvent(db, {
+      action: 'agent.unsuspended',
+      actor: auth.session.email,
+      target: beamId,
+      details: { note },
+    })
+    return c.json({ beamId, suspendedAt: null })
   })
 
   return router

@@ -876,8 +876,9 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       ws.close(1008, 'Valid WebSocket credential required')
       return
     }
-    if (agent && agentOperationBlock(db, agent)) {
-      ws.close(1008, 'Agent is suspended')
+    const blocked = agent ? agentOperationBlock(db, agent) : null
+    if (blocked) {
+      ws.close(1008, blocked.error)
       return
     }
 
@@ -1706,7 +1707,7 @@ function resolveIntentSender(db: Database, connectedBeamId: string, frame: Inten
   }
   const connectedBlock = agentOperationBlock(db, senderAgent)
   if (connectedBlock) {
-    throw new RelayError('FORBIDDEN', connectedBlock.error)
+    throw new RelayError(connectedBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', connectedBlock.error)
   }
 
   if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
@@ -1739,7 +1740,7 @@ function enforceSecurityChecks(
   if (actingAgent) {
     const actingBlock = agentOperationBlock(db, actingAgent)
     if (actingBlock) {
-      throw new RelayError('FORBIDDEN', actingBlock.error)
+      throw new RelayError(actingBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', actingBlock.error)
     }
   }
   if (senderOrgSuspended(db, frame.from)) {

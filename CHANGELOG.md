@@ -27,6 +27,10 @@
 - keep unknown senders as a contact request for the responsible person
 - record injection reports and let an operator suspend the agent, person, or organization
 - reject a suspended organization on intent and network send
+- match approvals to an organization by exact agent or person organization, and require the person's signature (the organization key is the audited emergency path)
+- count `order.place` and `payment.submit` toward the mandate's UTC-day total
+- revoke mandates and delegations when an abuse review blocks an agent, and record an operator note when that suspension or an organization suspension is lifted
+- return HTTP 202 `APPROVAL_REQUIRED` from the TypeScript SDK as `{ executed: false }` instead of a delivered result
 
 ### Trust layer: mandates and recipient acceptance
 - record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified

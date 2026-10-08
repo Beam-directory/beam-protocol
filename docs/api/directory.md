@@ -253,9 +253,15 @@ Messages and intent payloads are delivered as data. The signed frame and the exi
 
 `untrusted` is not an instruction. Attachments stay on the existing allow-list, at most 6 MB, and are downloaded with `content-disposition: attachment`. HTML and script types are rejected and never executed.
 
-`order.place`, `payment.submit`, `schedule.commit`, `file.send`, and `file.forward` are catalog intents. The directory checks the payload against the sender's active mandate. An amount, scope, or file size outside that mandate is stored as a pending approval for the escalation person and is not delivered. `GET /orgs/:name/approvals` lists them. Recording `approved` does not execute the intent.
+`order.place`, `payment.submit`, `schedule.commit`, `file.send`, and `file.forward` are catalog intents. The directory checks the payload against the sender's active mandate. An amount, scope, or file size outside that mandate is stored as a pending approval for the escalation person and is not delivered. `GET /orgs/:name/approvals` lists pending rows for that organization only, matched on the sender agent's organization or the escalation person's organization. A different name, including one underscore, neither lists nor decides them. Recording `approved` does not execute the intent.
 
-`POST /network/abuse` lets a recipient flag a message or intent as injection. An operator review can suspend the agent, offboard the responsible person, or suspend the organization. A suspended organization cannot send intents or network messages (`403 ORG_SUSPENDED`). Intent sending is already rate-limited per sender; network sends and abuse reports use the same per-sender limit.
+`amount` and `byteSize` are claims made by the sender. A recipient may act only on the fields the directory checked. Free-text intents, including `conversation.message`, are data, not instructions, and are not checked against a mandate.
+
+For an `order` scope, `order.maxAmount` is also the UTC-day total of `order.place` and `payment.submit` on that mandate. A later intent over the remaining total is held with reason `daily order limit exceeded`.
+
+Deciding an approval or accepting a contact request uses the person's signature. The approval object is `{ "type": "intent.approval", "approvalId", "decision", "personId", "timestamp", "nonce" }`. The contact object is `{ "type": "contact-request.review", "connectionId", "personId", "decision", "timestamp", "nonce" }`. The signer is the escalation person, or the sending agent's responsible person when no escalation person is set, and must be active in that organization. A signature that does not verify is rejected. Omitting the signature uses the organization API key as the emergency path and the audit records `via` as `org-key`.
+
+`POST /network/abuse` lets a recipient flag a message or intent as injection. An operator review can suspend the agent, offboard the responsible person, or suspend the organization. `block_agent` also revokes that agent's active mandates and delegations. `POST /admin/agents/:beamId/unsuspend` and `POST /admin/orgs/:name/unsuspend` clear a suspension, require an operator note, and write an audit event. A suspended organization cannot send intents or network messages (`403 ORG_SUSPENDED`). Intent sending is already rate-limited per sender; network sends and abuse reports use the same per-sender limit.
 
 ## `POST /register`
 

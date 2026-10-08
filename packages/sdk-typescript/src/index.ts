@@ -32,6 +32,8 @@ export type {
   DirectoryStats,
   DomainVerification,
   IntentFrame,
+  IntentSendResult,
+  ApprovalRequired,
   KeyRotationResult,
   KeyRevocationResult,
   Report,
