@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest'
-import { base64ToBytes, canonicalize, generateAgentIdentity } from './agent-keys'
+import { base64ToBytes, canonicalize, generateAgentIdentity, generateSigningIdentity } from './agent-keys'
 import {
   CAPABILITIES,
   NotAvailableYet,
@@ -13,16 +13,15 @@ import {
   getOrg,
   inviteEmployee,
   issueMandate,
-  lookupLei,
   registerAgent,
   registerInterest,
+  requestManualKyc,
   sendContactRequest,
-  startKyc,
-  submitBusinessRegistration,
+  startThirdPartyKyc,
+  submitOrgRegistry,
   syncEmployeeDirectory,
-  verifyDomainByWellKnownFile,
 } from './onboarding-api'
-import { suggestDisambiguatedOrgName } from './onboarding-steps'
+import { mandatePayload } from './onboarding-steps'
 import { de } from '../i18n/de.ts'
 import { en } from '../i18n/en.ts'
 
@@ -42,11 +41,17 @@ function call(fetchImpl: ReturnType<typeof mockFetch>, index = 0) {
 }
 
 describe('createOrg', () => {
-  it('posts to /orgs and returns the DNS challenge and the one-time org key', async () => {
+  it('posts the requested short name and returns the DNS challenge and the one-time org key', async () => {
     const fetchImpl = mockFetch(201, {
-      name: 'firma', displayName: 'Firma GmbH', domain: 'firma.de', beamDomain: 'firma.beam.directory', verified: false,
+      name: 'firma--de', requestedName: 'firma', displayName: 'Firma GmbH', domain: 'firma.de',
+      beamDomain: 'firma--de.beam.directory', verified: false,
       claimExpiresAt: '2026-10-15T00:00:00.000Z', createdAt: 'x', verifiedAt: null,
-      verification: { txtName: '_beam-verification.firma.de', txtValue: 'beam-verification=abc' },
+      verification: {
+        txtName: '_beam-verification.firma.de',
+        txtValue: 'beam-verification=abc',
+        wellKnownUrl: 'https://firma.de/.well-known/beam-verification',
+        wellKnownBody: 'beam-verification=abc',
+      },
       apiKey: 'beam_org_secret',
     })
     const org = await createOrg({ name: 'firma', displayName: 'Firma GmbH', domain: 'firma.de' }, { baseUrl: BASE, fetchImpl })
@@ -56,11 +61,12 @@ describe('createOrg', () => {
     expect(sent.body).toEqual({ name: 'firma', displayName: 'Firma GmbH', domain: 'firma.de' })
     expect(sent.headers.authorization).toBeUndefined()
     expect(org.apiKey).toBe('beam_org_secret')
-    expect(org.verification).toEqual({ txtName: '_beam-verification.firma.de', txtValue: 'beam-verification=abc' })
-    expect(org.verified).toBe(false)
+    expect(org.name).toBe('firma--de')
+    expect(org.requestedName).toBe('firma')
+    expect(org.verification?.wellKnownUrl).toContain('/.well-known/beam-verification')
   })
 
-  it('maps directory error codes to a typed error with a German message', async () => {
+  it('maps directory error codes to a typed error in both languages', async () => {
     const fetchImpl = mockFetch(403, { error: 'mismatch', errorCode: 'ORG_NAMESPACE_DOMAIN_MISMATCH' })
     const error = await createOrg({ name: 'x', displayName: 'X', domain: 'firma.de' }, { baseUrl: BASE, fetchImpl }).catch((err: unknown) => err)
     expect(error).toBeInstanceOf(OnboardingApiError)
@@ -69,25 +75,15 @@ describe('createOrg', () => {
     expect(describeError(error, en.errors)).toContain('namespace has to match the domain name')
   })
 
-  it('on 409 name taken suggests label-suffix, and reports the 403 mismatch of the current backend honestly', async () => {
+  it('classifies a taken name separately from a taken domain', async () => {
     const taken = mockFetch(409, { error: 'Organization coppen already exists', errorCode: 'ORG_EXISTS' })
     const first = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl: taken }).catch((err: unknown) => err)
     expect(classifyOrgConflict(first)).toBe('name')
-    const suggestion = suggestDisambiguatedOrgName('coppen.at')
-    expect(suggestion).toBe('coppen-at')
 
-    const mismatch = mockFetch(403, { error: 'must match', errorCode: 'ORG_NAMESPACE_DOMAIN_MISMATCH' })
-    const retry = await createOrg({ name: suggestion ?? '', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl: mismatch }).catch((err: unknown) => err)
-    expect(call(mismatch).body).toMatchObject({ name: 'coppen-at', domain: 'coppen.at' })
-    expect(classifyOrgConflict(retry)).toBe('suffix-not-supported')
-    expect(retry).toBeInstanceOf(OnboardingApiError)
-  })
-
-  it('does not suggest a name when the domain itself is claimed', async () => {
-    const fetchImpl = mockFetch(409, { error: 'Domain coppen.at is already claimed', errorCode: 'DOMAIN_EXISTS' })
-    const error = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl }).catch((err: unknown) => err)
-    expect(classifyOrgConflict(error)).toBe('domain')
-    expect(describeError(error, de.errors)).toContain('bereits einer verifizierten Firma zugeordnet')
+    const domain = mockFetch(409, { error: 'Domain coppen.at is already claimed', errorCode: 'DOMAIN_EXISTS' })
+    const second = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl: domain }).catch((err: unknown) => err)
+    expect(classifyOrgConflict(second)).toBe('domain')
+    expect(describeError(second, de.errors)).toContain('bereits einer verifizierten Firma zugeordnet')
   })
 
   it('reports network failures as NETWORK_ERROR', async () => {
@@ -97,7 +93,7 @@ describe('createOrg', () => {
   })
 })
 
-describe('getOrg and checkDomainVerification', () => {
+describe('domain verification', () => {
   it('sends the org key as bearer token', async () => {
     const fetchImpl = mockFetch(200, { org: { name: 'firma', domain: 'firma.de', verified: true }, agents: [], total: 0 })
     const org = await getOrg('firma', 'beam_org_secret', { baseUrl: BASE, fetchImpl })
@@ -106,52 +102,108 @@ describe('getOrg and checkDomainVerification', () => {
     expect(org.verified).toBe(true)
   })
 
-  it('treats a 409 TXT_NOT_FOUND as "not verified yet" instead of an error', async () => {
+  it('posts method dns and treats TXT_NOT_FOUND as not verified yet', async () => {
     const fetchImpl = mockFetch(409, {
-      verified: false, txtName: '_beam-verification.firma.de', expected: 'beam-verification=abc', records: ['other'], errorCode: 'TXT_NOT_FOUND',
+      verified: false, method: 'dns', txtName: '_beam-verification.firma.de', expected: 'beam-verification=abc', records: ['other'], errorCode: 'TXT_NOT_FOUND',
     })
-    const result = await checkDomainVerification('firma', 'k', { baseUrl: BASE, fetchImpl })
-    expect(call(fetchImpl).url).toBe(`${BASE}/orgs/firma/verify`)
-    expect(result).toEqual({ verified: false, expected: 'beam-verification=abc', txtName: '_beam-verification.firma.de', records: ['other'] })
+    const result = await checkDomainVerification('firma--de', 'k', 'dns', { baseUrl: BASE, fetchImpl })
+    expect(call(fetchImpl).url).toBe(`${BASE}/orgs/firma--de/verify`)
+    expect(call(fetchImpl).body).toEqual({ method: 'dns' })
+    expect(result.verified).toBe(false)
+    if (!result.verified) expect(result.records).toEqual(['other'])
+  })
+
+  it('posts method well-known and treats a missing file as not verified yet', async () => {
+    const fetchImpl = mockFetch(409, {
+      verified: false, method: 'well-known', txtName: '_beam-verification.firma.de',
+      wellKnownUrl: 'https://firma.de/.well-known/beam-verification', expected: 'beam-verification=abc', records: [], errorCode: 'WELL_KNOWN_NOT_FOUND',
+    })
+    const result = await checkDomainVerification('firma--de', 'k', 'well-known', { baseUrl: BASE, fetchImpl })
+    expect(call(fetchImpl).body).toEqual({ method: 'well-known' })
+    expect(result).toMatchObject({ verified: false, method: 'well-known', errorCode: 'WELL_KNOWN_NOT_FOUND' })
   })
 
   it('returns the verified org on success', async () => {
-    const fetchImpl = mockFetch(200, { verified: true, org: { name: 'firma', domain: 'firma.de', verified: true } })
-    const result = await checkDomainVerification('firma', 'k', { baseUrl: BASE, fetchImpl })
+    const fetchImpl = mockFetch(200, { verified: true, method: 'dns', org: { name: 'firma', domain: 'firma.de', verified: true, domainVerifiedVia: 'dns' } })
+    const result = await checkDomainVerification('firma', 'k', 'dns', { baseUrl: BASE, fetchImpl })
     expect(result.verified).toBe(true)
   })
-
-  it('throws for an expired claim', async () => {
-    const fetchImpl = mockFetch(410, { error: 'expired', errorCode: 'ORG_CLAIM_EXPIRED' })
-    await expect(checkDomainVerification('firma', 'k', { baseUrl: BASE, fetchImpl })).rejects.toMatchObject({ code: 'ORG_CLAIM_EXPIRED' })
-  })
 })
 
-describe('registerAgent', () => {
-  it('sends only public keys and the org key', async () => {
-    const fetchImpl = mockFetch(201, { beamId: 'einkauf@firma.beam.directory', displayName: 'Einkauf', org: 'firma', apiKey: 'bk_abc.def', verificationTier: 'basic' })
-    const result = await registerAgent({
-      beamId: 'einkauf@firma.beam.directory', org: 'firma', displayName: 'Einkauf', publicKey: 'PUB', dhPublicKey: 'DH',
-    }, 'beam_org_secret', { baseUrl: BASE, fetchImpl })
-    const sent = call(fetchImpl)
-    expect(sent.url).toBe(`${BASE}/agents/register`)
-    expect(sent.headers.authorization).toBe('Bearer beam_org_secret')
-    expect(sent.body).toEqual({ beamId: 'einkauf@firma.beam.directory', org: 'firma', displayName: 'Einkauf', publicKey: 'PUB', dhPublicKey: 'DH', capabilities: [] })
-    expect(JSON.stringify(sent.body)).not.toMatch(/private/i)
-    expect(result.apiKey).toBe('bk_abc.def')
-  })
-})
-
-describe('submitBusinessRegistration', () => {
-  it('posts the registry data with the agent key and reports a pending review, never verified', async () => {
-    const fetchImpl = mockFetch(202, { verified: false, status: 'pending', reviewRequired: true, message: 'Registration format accepted.' })
-    const result = await submitBusinessRegistration('einkauf@firma.beam.directory', 'bk_x', {
-      country: 'DE', registrationNumber: 'HRB 1234', legalName: 'Firma GmbH',
+describe('registry, people and agents', () => {
+  it('files a register entry on the org and reports pending', async () => {
+    const fetchImpl = mockFetch(201, { filing: { id: 1, kind: 'handelsregister', country: 'DE', registrationNumber: 'HRB 123456', status: 'pending', legalName: 'Firma GmbH', applicantName: 'Ada', applicantRole: 'geschaeftsfuehrer' } })
+    const result = await submitOrgRegistry('firma', 'beam_org_secret', {
+      kind: 'handelsregister', country: 'DE', registrationNumber: 'HRB 123456', registerCourt: 'Amtsgericht Berlin',
+      legalName: 'Firma GmbH', applicantName: 'Ada', applicantRole: 'geschaeftsfuehrer',
     }, { baseUrl: BASE, fetchImpl })
     const sent = call(fetchImpl)
-    expect(sent.url).toBe(`${BASE}/agents/einkauf%40firma.beam.directory/verify-business`)
-    expect(sent.headers.authorization).toBe('Bearer bk_x')
-    expect(result).toEqual({ status: 'pending', reviewRequired: true, message: 'Registration format accepted.' })
+    expect(sent.url).toBe(`${BASE}/orgs/firma/registry`)
+    expect(sent.headers.authorization).toBe('Bearer beam_org_secret')
+    expect(result.status).toBe('pending')
+  })
+
+  it('requests manual KYC and never sends a private key', async () => {
+    const fetchImpl = mockFetch(200, { person: { id: 'p1', kycStatus: 'pending', kycProvider: 'manual', email: 'ada@firma.de', displayName: 'Ada', role: 'Owner', publicKey: 'PUB', rights: { actions: ['read'] } } })
+    const person = await requestManualKyc('firma', 'k', 'p1', { baseUrl: BASE, fetchImpl })
+    const sent = call(fetchImpl)
+    expect(sent.url).toBe(`${BASE}/orgs/firma/people/p1/kyc`)
+    expect(sent.body).toEqual({ provider: 'manual' })
+    expect(JSON.stringify(sent.body)).not.toMatch(/private/i)
+    expect(person.kycStatus).toBe('pending')
+  })
+
+  it('registers an agent on the org route with the public key only', async () => {
+    const fetchImpl = mockFetch(201, { beamId: 'einkauf@firma.beam.directory', displayName: 'Einkauf', org: 'firma', apiKey: 'bk_abc.def', responsiblePersonId: 'p1' })
+    const result = await registerAgent({
+      orgName: 'firma', agentName: 'einkauf', displayName: 'Einkauf', publicKey: 'PUB', responsiblePersonId: 'p1',
+    }, 'beam_org_secret', { baseUrl: BASE, fetchImpl })
+    const sent = call(fetchImpl)
+    expect(sent.url).toBe(`${BASE}/orgs/firma/agents`)
+    expect(sent.body).toEqual({
+      agentName: 'einkauf', displayName: 'Einkauf', publicKey: 'PUB', responsiblePersonId: 'p1', capabilities: [],
+    })
+    expect(JSON.stringify(sent.body)).not.toMatch(/private|dhPublic/i)
+    expect(result.apiKey).toBe('bk_abc.def')
+  })
+
+  it('signs the full mandate payload with the person key and does not send that key', async () => {
+    const identity = await generateSigningIdentity()
+    const payload = mandatePayload({
+      jti: 'mandate01',
+      personId: 'p1',
+      agentBeamId: 'einkauf@firma.beam.directory',
+      org: 'firma',
+      scopes: { actions: ['read', 'file.send'] },
+      expiresAt: '2026-12-01T00:00:00.000Z',
+    })
+    const fetchImpl = mockFetch(201, { mandate: { jti: 'mandate01', status: 'active', expiresAt: payload.expiresAt, agentBeamId: payload.agentBeamId } })
+    const issued = await issueMandate({ beamId: payload.agentBeamId, payload, signingKey: identity.signingKey }, { baseUrl: BASE, fetchImpl })
+    const sent = call(fetchImpl)
+    expect(sent.url).toBe(`${BASE}/agents/${encodeURIComponent(payload.agentBeamId)}/mandates`)
+    const body = sent.body as Record<string, unknown>
+    expect(body.jti).toBe('mandate01')
+    expect(body.escalationPersonId).toBeNull()
+    expect(JSON.stringify(body)).not.toContain(identity.privateKey)
+    const publicKey = await crypto.subtle.importKey('spki', base64ToBytes(identity.publicKey), { name: 'Ed25519' }, false, ['verify'])
+    const valid = await crypto.subtle.verify('Ed25519', publicKey, base64ToBytes(String(body.signature)), new TextEncoder().encode(JSON.stringify(canonicalize(payload))))
+    expect(valid).toBe(true)
+    expect(issued.status).toBe('active')
+  })
+
+  it('loads KYC status from the people list', async () => {
+    const fetchImpl = mockFetch(200, { people: [{ id: 'p1', kycStatus: 'verified', email: 'a@b.c', displayName: 'A', role: 'Owner', publicKey: 'PUB', rights: { actions: ['read'] } }] })
+    const person = await getKycStatus('firma', 'k', 'p1', { baseUrl: BASE, fetchImpl })
+    expect(call(fetchImpl).url).toBe(`${BASE}/orgs/firma/people`)
+    expect(person?.kycStatus).toBe('verified')
+  })
+
+  it('invites an employee without a private key', async () => {
+    const fetchImpl = mockFetch(201, { invitationId: 'i1', email: 'sam@firma.de', role: 'Buyer', expiresAt: '2026-11-01T00:00:00.000Z', token: 'once' })
+    const invite = await inviteEmployee('firma', 'k', { email: 'Sam@Firma.de', role: 'Buyer', rights: { actions: ['read'] }, supervisorPersonId: 'p1' }, { baseUrl: BASE, fetchImpl })
+    expect(call(fetchImpl).url).toBe(`${BASE}/orgs/firma/people/invitations`)
+    expect(call(fetchImpl).body).toMatchObject({ email: 'sam@firma.de', supervisorPersonId: 'p1' })
+    expect(invite.token).toBe('once')
   })
 })
 
@@ -173,9 +225,8 @@ describe('sendContactRequest', () => {
     const body = sent.body as Record<string, string>
     expect(body.type).toBe('network.connection.request')
     expect(body.recipientBeamId).toBe('lakis@partner.beam.directory')
-    expect(body.nonce).toMatch(/^[A-Za-z0-9_-]{16,128}$/)
+    expect(JSON.stringify(body)).not.toContain(identity.privateKey)
 
-    // Server side (routes/network.ts): verifyPayload({ ...payload, timestamp, nonce }, signature, publicKey)
     const { signature, ...signed } = body
     const publicKey = await crypto.subtle.importKey('spki', base64ToBytes(identity.publicKey), { name: 'Ed25519' }, false, ['verify'])
     const valid = await crypto.subtle.verify(
@@ -186,36 +237,37 @@ describe('sendContactRequest', () => {
   })
 })
 
-describe('registerInterest', () => {
-  it('uses the existing waitlist with a non-seal source', async () => {
+describe('what is still not real', () => {
+  it('records interest without unlocking anything', async () => {
     const fetchImpl = mockFetch(201, { ok: true, status: 'registered' })
-    await registerInterest({ email: 'A@Firma.de', company: 'Firma', capability: 'startKyc', note: 'bitte' }, { baseUrl: BASE, fetchImpl })
+    await registerInterest({ email: 'A@Firma.de', company: 'Firma', capability: 'thirdPartyKyc', note: 'bitte' }, { baseUrl: BASE, fetchImpl })
     const sent = call(fetchImpl)
     expect(sent.url).toBe(`${BASE}/waitlist`)
-    expect(sent.body).toMatchObject({ email: 'a@firma.de', source: 'onboarding-interest', workflowType: 'onboarding-startKyc', hp_company: '' })
+    expect(sent.body).toMatchObject({ email: 'a@firma.de', source: 'onboarding-interest', workflowType: 'onboarding-thirdPartyKyc', hp_company: '' })
   })
-})
 
-describe('unavailable capabilities', () => {
   const pending = [
-    ['verifyDomainByWellKnownFile', verifyDomainByWellKnownFile],
-    ['lookupLei', lookupLei],
     ['checkPowerOfRepresentation', checkPowerOfRepresentation],
-    ['startKyc', startKyc],
-    ['getKycStatus', getKycStatus],
+    ['startThirdPartyKyc', startThirdPartyKyc],
     ['syncEmployeeDirectory', syncEmployeeDirectory],
-    ['inviteEmployee', inviteEmployee],
-    ['issueMandate', issueMandate],
   ] as const
 
   it.each(pending)('%s throws NotAvailableYet without any request', async (name, fn) => {
     const spy = vi.spyOn(globalThis, 'fetch')
     const error = await fn().catch((err: unknown) => err)
     expect(error).toBeInstanceOf(NotAvailableYet)
-    expect((error as NotAvailableYet).capability).toBe(name)
-    expect((error as NotAvailableYet).status).toBe('unavailable')
-    expect(CAPABILITIES[name]).toBe('unavailable')
+    expect((error as NotAvailableYet).capability).toBe(name === 'startThirdPartyKyc' ? 'thirdPartyKyc' : name)
     expect(spy).not.toHaveBeenCalled()
     spy.mockRestore()
+  })
+
+  it('keeps Grok sending, third-party KYC, directory sync and representation checks unavailable', () => {
+    expect(CAPABILITIES.grokSending).toBe('unavailable')
+    expect(CAPABILITIES.thirdPartyKyc).toBe('unavailable')
+    expect(CAPABILITIES.syncEmployeeDirectory).toBe('unavailable')
+    expect(CAPABILITIES.checkPowerOfRepresentation).toBe('unavailable')
+    expect(CAPABILITIES.issueMandate).toBe('live')
+    expect(CAPABILITIES.verifyDomainByWellKnownFile).toBe('live')
+    expect(CAPABILITIES.requestManualKyc).toBe('live')
   })
 })

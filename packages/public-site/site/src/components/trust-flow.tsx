@@ -79,7 +79,7 @@ export function TrustFlow({ className }: { className?: string }) {
         <div className="rounded-xl border bg-background/60 p-3 sm:p-4">
           <p className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
             <span>{copy.checksTitle}</span>
-            <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-1.5 py-px text-[10px]">
+            <span className="inline-flex items-center gap-1 rounded-full border border-beam/30 bg-beam/10 px-1.5 py-px text-[10px] text-foreground">
               {copy.mandateNote}
             </span>
           </p>

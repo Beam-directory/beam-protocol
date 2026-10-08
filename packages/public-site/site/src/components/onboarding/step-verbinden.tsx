@@ -2,7 +2,7 @@ import { useState, type FormEvent } from 'react'
 import { ArrowRightIcon, SendIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { CodeWindow, type Snippet } from '@/components/code-window'
-import { LiveBadge, Notice, Panel, Spinner, StatusBadge, TextField } from '@/components/onboarding/primitives'
+import { LiveBadge, Notice, Panel, SoonBadge, Spinner, StatusBadge, TextField } from '@/components/onboarding/primitives'
 import type { StepProps } from '@/components/onboarding/types'
 import type { Messages } from '@/i18n/en'
 import { useI18n } from '@/i18n/context'
@@ -106,6 +106,13 @@ export function StepVerbinden({ progress, secrets }: Pick<StepProps, 'progress' 
           {copy.connectIntro} {copy.previewNote}
         </p>
         <CodeWindow snippets={connectSnippets(beamId, copy.snippetComments)} label={copy.setupLabel} />
+        <div className="flex flex-col gap-2 rounded-xl border border-dashed p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="text-sm font-medium">{copy.grokTitle}</p>
+            <SoonBadge />
+          </div>
+          <p className="text-sm leading-6 text-muted-foreground">{copy.grokText}</p>
+        </div>
         <p className="text-xs leading-5 text-muted-foreground">
           {copy.claudeNote}{' '}
           <a className="underline underline-offset-4 hover:text-foreground" href={DOCS_URL}>{copy.docs}</a>
