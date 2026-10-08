@@ -1,0 +1,21 @@
+{
+  "name": "braces",
+  "version": "3.0.4",
+  "description": "braces 3.0.3 plus the unreleased nesting-depth guard from micromatch/braces#72 (GHSA-vfj7-8cjw-p6xm). Upstream has not published a patched release.",
+  "license": "MIT",
+  "main": "index.js",
+  "files": [
+    "index.js",
+    "lib"
+  ],
+  "engines": {
+    "node": ">=8"
+  },
+  "dependencies": {
+    "fill-range": "^7.1.1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/micromatch/braces"
+  }
+}
