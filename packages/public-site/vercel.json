@@ -1,6 +1,18 @@
 {
   "rewrites": [
     {
+      "source": "/start",
+      "destination": "/start/index.html"
+    },
+    {
+      "source": "/de",
+      "destination": "/de/index.html"
+    },
+    {
+      "source": "/de/start",
+      "destination": "/de/start/index.html"
+    },
+    {
       "source": "/identity",
       "destination": "/identity.html"
     },
@@ -10,6 +22,10 @@
     },
     {
       "source": "/siegel-beantragen",
+      "destination": "/index.html"
+    },
+    {
+      "source": "/start",
       "destination": "/index.html"
     },
     {
