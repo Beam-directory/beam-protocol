@@ -23,7 +23,7 @@
   "dependencies": {
     "@modelcontextprotocol/node": "^2.0.0",
     "@modelcontextprotocol/server": "2.0.0",
-    "beam-protocol-sdk": "1.7.0",
+    "beam-protocol-sdk": "1.8.0",
     "zod": "^4.2.0"
   },
   "devDependencies": {
