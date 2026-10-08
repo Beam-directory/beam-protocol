@@ -6,6 +6,7 @@
  */
 import { spawn } from 'node:child_process'
 import { once } from 'node:events'
+import { renameSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import net from 'node:net'
@@ -108,17 +109,24 @@ try {
   })
   await videoContext.addInitScript(() => localStorage.setItem('theme', 'light'))
   const videoPage = await videoContext.newPage()
-  await videoPage.goto(`${base}/verify?agent=${encodeURIComponent(AGENTS.verified)}`)
+  await videoPage.goto(`${base}/verify`)
+  await videoPage.getByRole('button', { name: AGENTS.verified }).waitFor()
+  await videoPage.waitForTimeout(500)
+  await videoPage.getByRole('button', { name: AGENTS.verified }).click()
   await videoPage.getByTestId('agent-check-headline').waitFor({ timeout: 25_000 })
-  await videoPage.waitForTimeout(1200)
+  // Organisation, person, and mandate enter 0.6s apart. Hold so that stagger is in the recording.
+  await videoPage.waitForTimeout(2600)
   await videoPage.getByTestId('agent-check-tamper').click()
   await videoPage.getByTestId('agent-check-signature').filter({ hasText: 'byte' }).waitFor({ timeout: 25_000 })
-  await videoPage.waitForTimeout(800)
+  await videoPage.getByText('The key id still matches').waitFor({ timeout: 25_000 })
+  await videoPage.waitForTimeout(1000)
   const video = videoPage.video()
   await videoContext.close()
   if (video) {
     const saved = await video.path()
-    console.log(saved)
+    const target = path.join(artifactDir, 'verify-animation.webm')
+    renameSync(saved, target)
+    console.log(target)
   }
 } finally {
   await browser.close()

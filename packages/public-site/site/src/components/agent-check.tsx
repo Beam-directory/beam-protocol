@@ -55,6 +55,7 @@ export function AgentCheck({ variant }: { variant: Variant }) {
   const [result, setResult] = useState<TrustCheck | null>(null)
   const [copied, setCopied] = useState(false)
   const requestId = useRef(0)
+  const scrollLock = useRef<number | null>(null)
   const inputId = useId()
   const tamperHelpId = useId()
   const Title = variant === 'page' ? 'h1' : 'h2'
@@ -68,6 +69,15 @@ export function AgentCheck({ variant }: { variant: Variant }) {
       const next = await checkAgentInBrowser(address, { tamper: flip })
       if (requestId.current !== id) return
       setResult(next)
+      const locked = scrollLock.current
+      if (locked != null) {
+        scrollLock.current = null
+        const root = document.documentElement
+        const previous = root.style.scrollBehavior
+        root.style.scrollBehavior = 'auto'
+        window.scrollTo(0, locked)
+        root.style.scrollBehavior = previous
+      }
     } finally {
       if (requestId.current === id) setBusy(false)
     }
@@ -116,6 +126,7 @@ export function AgentCheck({ variant }: { variant: Variant }) {
 
   function onTamper() {
     if (!result || result.httpStatus !== 200) return
+    scrollLock.current = window.scrollY
     const next = !tamper
     setTamper(next)
     void run(result.address, next)
@@ -147,7 +158,7 @@ export function AgentCheck({ variant }: { variant: Variant }) {
           : copy.notVerified
 
   return (
-    <section aria-labelledby="agent-check-title" data-testid="agent-check" className="beam-surface w-full rounded-2xl border p-5 sm:p-6">
+    <section aria-labelledby="agent-check-title" data-testid="agent-check" className="beam-surface beam-check w-full rounded-2xl border p-5 sm:p-6">
       <div className="flex flex-col gap-2">
         <Title id="agent-check-title" className="text-2xl font-semibold tracking-tight text-balance sm:text-3xl">
           {copy.title}
@@ -228,7 +239,7 @@ export function AgentCheck({ variant }: { variant: Variant }) {
             {result.httpStatus === 200 ? (
               <>
                 {!result.claimsAuthenticated ? <p className="text-sm text-destructive">{copy.claimsUntrusted}</p> : null}
-                <ol className="grid gap-3 sm:grid-cols-3">
+                <ol key={result.address} className="grid gap-3 sm:grid-cols-3">
                   <ChainStep
                     delay="0s"
                     icon={BuildingIcon}
@@ -237,13 +248,13 @@ export function AgentCheck({ variant }: { variant: Variant }) {
                     body={result.org ? <OrgBody org={result.org} copy={copy} /> : <p>{copy.noOrg}</p>}
                   />
                   <ChainStep
-                    delay="0.08s"
+                    delay="0.6s"
                     icon={UserIcon}
                     title={copy.person}
                     body={result.owner ? <OwnerBody owner={result.owner} copy={copy} /> : <p>{copy.personEmpty}</p>}
                   />
                   <ChainStep
-                    delay="0.16s"
+                    delay="1.2s"
                     icon={ScrollTextIcon}
                     title={copy.mandate}
                     body={result.scopes ? <ScopeBody scopes={result.scopes} copy={copy} /> : <p>{copy.mandateEmpty}</p>}
@@ -270,8 +281,11 @@ export function AgentCheck({ variant }: { variant: Variant }) {
                 <p className="text-sm" data-testid="agent-check-signature">
                   <ShieldCheckIcon aria-hidden="true" className="mr-1 inline size-4" />
                   {signatureText(result.signature, copy)}
-                  {result.keyMatchesPin ? ` · ${copy.keyMatch}` : ` · ${copy.keyMismatch}`}
+                  {result.signature === 'valid' ? ` · ${result.keyMatchesPin ? copy.keyMatch : copy.keyMismatch}` : ''}
                 </p>
+                {result.signature !== 'valid' ? (
+                  <p className="text-sm text-muted-foreground">{result.keyMatchesPin ? copy.keyStillMatches : copy.keyMismatch}</p>
+                ) : null}
                 <button
                   type="button"
                   role="switch"
@@ -282,6 +296,7 @@ export function AgentCheck({ variant }: { variant: Variant }) {
                     'flex w-fit items-center gap-2 rounded-full border px-3 py-1.5 text-sm',
                     tamper ? 'border-destructive bg-destructive/10 text-destructive' : 'bg-background',
                   )}
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={onTamper}
                 >
                   {copy.tamper}
