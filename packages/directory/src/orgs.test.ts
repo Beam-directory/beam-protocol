@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { generateKeyPairSync } from 'node:crypto'
 import test from 'node:test'
 import { createDatabase, getOrg, markOrgVerified, updatePublicEndpointShieldPolicy } from './db.js'
 import { createApp } from './server.js'
@@ -43,12 +44,14 @@ test('organization claims require a matching registrable domain and expire fail-
       domain: 'www.acme.example',
     })
     assert.equal(created.status, 201)
-    const createdBody = await created.json() as { apiKey: string; domain: string; claimExpiresAt: string }
+    const createdBody = await created.json() as { apiKey: string; name: string; requestedName: string; domain: string; claimExpiresAt: string }
     assert.equal(createdBody.domain, 'acme.example')
+    assert.equal(createdBody.name, 'acme--example')
+    assert.equal(createdBody.requestedName, 'acme')
     assert.ok(Date.parse(createdBody.claimExpiresAt) > Date.now())
     assert.match(created.headers.get('cache-control') ?? '', /no-store/i)
 
-    const beforeVerification = await app.request(new Request('http://localhost/orgs/acme/agents', {
+    const beforeVerification = await app.request(new Request(`http://localhost/orgs/${createdBody.name}/agents`, {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': createdBody.apiKey },
       body: JSON.stringify({ agentName: 'grok', capabilities: ['conversation.message'] }),
@@ -58,9 +61,9 @@ test('organization claims require a matching registrable domain and expire fail-
 
     db.prepare('UPDATE orgs SET claim_expires_at = ? WHERE name = ?').run(
       new Date(Date.now() - 1_000).toISOString(),
-      'acme',
+      createdBody.name,
     )
-    const expiredVerification = await app.request(new Request('http://localhost/orgs/acme/verify', {
+    const expiredVerification = await app.request(new Request(`http://localhost/orgs/${createdBody.name}/verify`, {
       method: 'POST',
       headers: { 'x-api-key': createdBody.apiKey },
     }))
@@ -73,9 +76,11 @@ test('organization claims require a matching registrable domain and expire fail-
       domain: 'acme.example',
     }, '203.0.113.81')
     assert.equal(reclaimed.status, 201)
-    const reclaimedBody = await reclaimed.json() as { apiKey: string }
+    const reclaimedBody = await reclaimed.json() as { apiKey: string; name: string }
     assert.notEqual(reclaimedBody.apiKey, createdBody.apiKey)
-    assert.equal(getOrg(db, 'acme')?.display_name, 'Acme New Owner')
+    assert.equal(reclaimedBody.name, 'acme--example')
+    assert.equal(getOrg(db, 'acme--example')?.display_name, 'Acme New Owner')
+    assert.equal(getOrg(db, 'acme'), null)
   } finally {
     db.close()
   }
@@ -92,19 +97,27 @@ test('verified organization claims issue Beam IDs and clear claim expiry', async
       displayName: 'Acme',
       domain: 'acme.example',
     })
-    const { apiKey } = await created.json() as { apiKey: string }
+    const { apiKey, name } = await created.json() as { apiKey: string; name: string }
 
-    const verified = markOrgVerified(db, 'acme')
+    const verified = markOrgVerified(db, name)
+    assert.equal(verified?.name, 'acme')
     assert.equal(verified?.verified, 1)
     assert.equal(verified?.claim_expires_at, null)
 
     const issued = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
-      body: JSON.stringify({ agentName: 'grok', capabilities: ['conversation.message'] }),
+      body: JSON.stringify({
+        agentName: 'grok',
+        capabilities: ['conversation.message'],
+        publicKey: generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64'),
+      }),
     }))
     assert.equal(issued.status, 201)
-    assert.equal((await issued.json() as { beamId: string }).beamId, 'grok@acme.beam.directory')
+    const issuedBody = await issued.json() as { beamId: string; privateKey?: string; publicKey: string }
+    assert.equal(issuedBody.beamId, 'grok@acme.beam.directory')
+    assert.equal(issuedBody.privateKey, undefined)
+    assert.ok(issuedBody.publicKey)
   } finally {
     db.close()
   }

@@ -17,7 +17,8 @@ COPY index.html ./index.html
 COPY convex.json ./convex.json
 COPY src ./src
 
-RUN npm install && npm run build
+RUN node -e "const v=require('node:child_process').execSync('npm -v').toString().trim(); if(Number(v.split('.')[0])<10){console.error('npm '+v+' is too old; need npm >= 10'); process.exit(1)}" \
+ && npm install && npm run build
 
 EXPOSE 5173
 

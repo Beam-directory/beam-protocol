@@ -36,6 +36,7 @@ jobs:
           node-version: 22
       - name: Install and Build
         run: |
+          node scripts/require-npm.mjs
           cd docs
           npm install
           npm run build

@@ -36,7 +36,7 @@ jobs:
           cache: npm
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Audit workspace dependencies
         run: npm audit --audit-level=moderate
@@ -84,7 +84,7 @@ jobs:
           python-version: ${{ matrix.python }}
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Build workspaces
         run: npm run build
@@ -110,7 +110,7 @@ jobs:
 
       - name: Install docs dependencies
         working-directory: docs
-        run: npm ci
+        run: node ../scripts/require-npm.mjs && npm ci
 
       - name: Audit docs dependencies
         working-directory: docs
@@ -134,7 +134,7 @@ jobs:
           cache: npm
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Build workspaces
         run: npm run build
@@ -188,7 +188,7 @@ jobs:
           cache: npm
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Build hardened MCP image
         run: npm run container:build --workspace=@beam-protocol/mcp-server
@@ -317,7 +317,7 @@ jobs:
           cache: npm
 
       - name: Install workspace dependencies
-        run: npm ci
+        run: node scripts/require-npm.mjs && npm ci
 
       - name: Build workspaces
         run: npm run build

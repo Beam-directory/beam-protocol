@@ -1,16 +1,15 @@
-import { createHash, generateKeyPairSync, randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { resolveTxt } from 'node:dns/promises'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
-import { getDomain, getDomainWithoutSuffix } from 'tldts'
 import type { AgentRow, OrgAgentRow, OrgRow, RegisterRequest } from '../types.js'
 import { toBeamDID } from '../did.js'
 import {
-  buildBeamDomain,
   createOrg,
   deleteExpiredOrgClaim,
   getOrg,
+  getOrgByApiKeyHash,
   getOrgByDomain,
   listOrgAgents,
   logAuditEvent,
@@ -19,6 +18,15 @@ import {
 } from '../db.js'
 import { seedAclsFromCatalog } from '../acl.js'
 import { createAgentApiKey, hashApiKey as hashAgentApiKey } from '../api-key.js'
+import { isEd25519Spki } from '../key-validation.js'
+import { namespaceForDomain, namespaceMatchesDomain, registrableDomain } from '../trust/org-domain.js'
+import { parseRegistryClaim } from '../trust/registry-format.js'
+import {
+  createOrgRegistryFiling,
+  listOrgRegistryFilings,
+  serializeOrgRegistryFiling,
+} from '../trust/registry-store.js'
+import { bodyContainsVerification, fetchWellKnownVerification, verificationRecord, wellKnownUrl } from '../trust/well-known.js'
 
 const ORG_NAME_RE = /^[a-z0-9_-]+$/
 const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
@@ -30,10 +38,6 @@ function normalizeOrgName(value: string): string {
 
 function normalizeDomain(value: string): string {
   return value.trim().toLowerCase().replace(/^https?:\/\//, '').replace(/\/$/, '')
-}
-
-function namespaceFromDomain(domain: string): string | null {
-  return getDomainWithoutSuffix(domain, { allowPrivateDomains: true })?.toLowerCase() ?? null
 }
 
 function claimExpired(org: OrgRow, now = Date.now()): boolean {
@@ -85,9 +89,26 @@ function requireOrgApiKey(c: Context, org: OrgRow): Response | null {
   return null
 }
 
+function resolveOrg(db: Database, name: string, request: Request): OrgRow | null {
+  const direct = getOrg(db, name)
+  if (direct) {
+    return direct
+  }
+  const supplied = getSuppliedApiKey(request)
+  if (!supplied) {
+    return null
+  }
+  const byKey = getOrgByApiKeyHash(db, hashApiKey(supplied))
+  if (byKey && byKey.requested_name === name) {
+    return byKey
+  }
+  return null
+}
+
 function serializeOrg(row: OrgRow): object {
   return {
     name: row.name,
+    requestedName: row.requested_name,
     displayName: row.display_name,
     domain: row.domain,
     beamDomain: row.beam_domain,
@@ -95,10 +116,13 @@ function serializeOrg(row: OrgRow): object {
     claimExpiresAt: row.claim_expires_at,
     createdAt: row.created_at,
     verifiedAt: row.verified_at,
+    domainVerifiedVia: row.domain_verified_via,
     verification: row.domain
       ? {
           txtName: `_beam-verification.${row.domain}`,
-          txtValue: `beam-verification=${row.verification_token}`,
+          txtValue: verificationRecord(row.verification_token),
+          wellKnownUrl: wellKnownUrl(row.domain),
+          wellKnownBody: verificationRecord(row.verification_token),
         }
       : null,
   }
@@ -156,29 +180,31 @@ export function orgsRouter(db: Database): Hono {
       return c.json({ error: 'domain must be a valid DNS hostname', errorCode: 'INVALID_DOMAIN' }, 400)
     }
 
-    // Claims are always anchored at the registrable domain. This prevents a
-    // delegated subdomain such as team.example.com from claiming the broader
-    // example namespace while still accepting common www-prefixed input.
-    const domain = getDomain(suppliedDomain, { allowPrivateDomains: true })?.toLowerCase() ?? ''
-    const domainNamespace = namespaceFromDomain(domain)
-    if (!domainNamespace) {
+    // Claims are anchored at the registrable domain, so a delegated host such
+    // as team.example.com cannot claim a different organization than example.com.
+    // The namespace may be the domain label or the label plus public suffix.
+    // That keeps coppen.de and coppen.at from sharing one identity.
+    const domain = registrableDomain(suppliedDomain) ?? ''
+    const allowedNamespace = namespaceForDomain(domain)
+    if (!domain || !allowedNamespace) {
       return c.json({ error: 'domain must have a registrable DNS suffix', errorCode: 'INVALID_DOMAIN' }, 400)
     }
 
-    if (name.replaceAll('_', '-') !== domainNamespace.replaceAll('_', '-')) {
+    if (!namespaceMatchesDomain(name, domain)) {
       return c.json({
-        error: `Organization namespace ${name} must match the registrable domain name ${domainNamespace}`,
+        error: `Organization namespace ${name} must be ${allowedNamespace.label} or ${allowedNamespace.disambiguated} for ${domain}`,
         errorCode: 'ORG_NAMESPACE_DOMAIN_MISMATCH',
       }, 403)
     }
 
+    const storedName = allowedNamespace.disambiguated
     const apiKey = createApiKey()
     const verificationToken = createVerificationToken()
     let reclaimedExpiredClaim = false
 
     try {
       const org = db.transaction(() => {
-        const existingOrg = getOrg(db, name)
+        const existingOrg = getOrg(db, storedName)
         if (existingOrg) {
           const released = claimExpired(existingOrg) && deleteExpiredOrgClaim(db, existingOrg.name)
           reclaimedExpiredClaim ||= released
@@ -203,18 +229,19 @@ export function orgsRouter(db: Database): Hono {
         }
 
         return createOrg(db, {
-          name,
+          name: storedName,
           displayName,
           domain,
           apiKeyHash: hashApiKey(apiKey),
           verificationToken,
+          requestedName: name,
         })
       })()
       logAuditEvent(db, {
         action: reclaimedExpiredClaim ? 'org.claim.reclaimed' : 'org.claim.created',
-        actor: `org:${name}`,
-        target: name,
-        details: { domain, claimExpiresAt: org.claim_expires_at },
+        actor: `org:${org.name}`,
+        target: org.name,
+        details: { domain, requestedName: name, claimExpiresAt: org.claim_expires_at },
       })
       c.header('Cache-Control', 'no-store')
       return c.json({
@@ -232,7 +259,7 @@ export function orgsRouter(db: Database): Hono {
 
   router.get('/:name', (c) => {
     const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const org = resolveOrg(db, name, c.req.raw)
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -243,7 +270,7 @@ export function orgsRouter(db: Database): Hono {
     }
 
     try {
-      const agents = listOrgAgents(db, name)
+      const agents = listOrgAgents(db, org.name)
       return c.json({
         org: serializeOrg(org),
         agents: agents.map(serializeOrgAgent),
@@ -256,8 +283,9 @@ export function orgsRouter(db: Database): Hono {
   })
 
   router.post('/:name/agents', async (c) => {
-    const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const requestedName = normalizeOrgName(c.req.param('name'))
+    const org = resolveOrg(db, requestedName, c.req.raw)
+    const name = org?.name ?? requestedName
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -319,10 +347,15 @@ export function orgsRouter(db: Database): Hono {
       return c.json({ error: `Agent ${agentName} already exists`, errorCode: 'AGENT_EXISTS' }, 409)
     }
 
-    const { privateKey, publicKey } = generateKeyPairSync('ed25519')
-    const beamId = `${agentName}@${buildBeamDomain(name)}`
-    const publicKeyBase64 = (publicKey.export({ type: 'spki', format: 'der' }) as Buffer).toString('base64')
-    const privateKeyBase64 = (privateKey.export({ type: 'pkcs8', format: 'der' }) as Buffer).toString('base64')
+    const publicKeyBase64 = String(raw['publicKey'] ?? raw['public_key'] ?? '').trim()
+    if (!isEd25519Spki(publicKeyBase64)) {
+      return c.json({
+        error: 'publicKey must be a client-generated Ed25519 SPKI key. The directory does not generate private keys.',
+        errorCode: 'PUBLIC_KEY_REQUIRED',
+      }, 400)
+    }
+
+    const beamId = `${agentName}@${org.beam_domain}`
     const apiKey = createAgentApiKey(beamId)
 
     const request: RegisterRequest = {
@@ -351,9 +384,7 @@ export function orgsRouter(db: Database): Hono {
         org: agent.org,
         capabilities,
         publicKey: publicKeyBase64,
-        privateKey: privateKeyBase64,
         publicKeyBase64,
-        privateKeyBase64,
         apiKey,
         trustScore: agent.trust_score,
         verified: agent.verified === 1,
@@ -367,8 +398,9 @@ export function orgsRouter(db: Database): Hono {
   })
 
   router.post('/:name/verify', async (c) => {
-    const name = normalizeOrgName(c.req.param('name'))
-    const org = getOrg(db, name)
+    const requestedName = normalizeOrgName(c.req.param('name'))
+    const org = resolveOrg(db, requestedName, c.req.raw)
+    const name = org?.name ?? requestedName
     if (!org) {
       return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
     }
@@ -389,51 +421,186 @@ export function orgsRouter(db: Database): Hono {
       return c.json({ error: 'Organization has no DNS domain to verify', errorCode: 'NO_DOMAIN' }, 400)
     }
 
+    let method: 'dns' | 'well-known' = 'dns'
+    if ((c.req.header('content-type') ?? '').includes('application/json')) {
+      let body: unknown
+      try {
+        body = await c.req.json()
+      } catch {
+        return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+      }
+      if (body && typeof body === 'object' && !Array.isArray(body) && 'method' in body) {
+        const requested = (body as Record<string, unknown>)['method']
+        if (requested !== 'dns' && requested !== 'well-known') {
+          return c.json({ error: 'method must be dns or well-known', errorCode: 'INVALID_VERIFICATION_METHOD' }, 400)
+        }
+        method = requested
+      }
+    }
+
     const txtName = `_beam-verification.${org.domain}`
-    const expected = `beam-verification=${org.verification_token}`
+    const expected = verificationRecord(org.verification_token)
 
     try {
-      const records = await resolveTxt(txtName)
-      const values = records.map((entry) => entry.join(''))
-      const matched = values.includes(expected)
-
-      if (!matched) {
+      const matched = method === 'dns'
+        ? await dnsTxtMatches(txtName, expected)
+        : await wellKnownMatches(org.domain, org.verification_token)
+      if (!matched.ok) {
         return c.json({
           verified: false,
+          method,
           txtName,
+          wellKnownUrl: wellKnownUrl(org.domain),
           expected,
-          records: values,
-          error: 'DNS TXT record not found',
-          errorCode: 'TXT_NOT_FOUND',
-        }, 409)
+          records: matched.records,
+          error: matched.error,
+          errorCode: matched.errorCode,
+        }, matched.status)
       }
 
-      const updated = markOrgVerified(db, name)
+      const updated = markOrgVerified(db, name, method)
       logAuditEvent(db, {
         action: 'org.domain.verified',
         actor: `org:${name}`,
         target: name,
-        details: { domain: org.domain, txtName },
+        details: { domain: org.domain, method, txtName },
       })
       return c.json({
         verified: true,
+        method,
         txtName,
+        wellKnownUrl: wellKnownUrl(org.domain),
         expected,
         org: updated ? serializeOrg(updated) : serializeOrg(org),
       })
     } catch (err) {
-      const message = err instanceof Error ? err.message : 'DNS lookup failed'
+      const message = err instanceof Error ? err.message : 'Domain verification failed'
       return c.json({
         verified: false,
+        method,
         txtName,
+        wellKnownUrl: wellKnownUrl(org.domain),
         expected,
         error: message,
-        errorCode: 'DNS_LOOKUP_FAILED',
+        errorCode: method === 'dns' ? 'DNS_LOOKUP_FAILED' : 'WELL_KNOWN_LOOKUP_FAILED',
       }, 502)
     }
   })
 
+  router.post('/:name/registry', async (c) => {
+    const loaded = loadOwnedOrg(c, db)
+    if (loaded instanceof Response) {
+      return loaded
+    }
+    const { name, org } = loaded
+    if (org.verified !== 1) {
+      return c.json({
+        error: 'Verify the organization domain before submitting a registry filing',
+        errorCode: 'ORG_VERIFICATION_REQUIRED',
+      }, 403)
+    }
+
+    let body: unknown
+    try {
+      body = await c.req.json()
+    } catch {
+      return c.json({ error: 'Invalid JSON body', errorCode: 'INVALID_JSON' }, 400)
+    }
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      return c.json({ error: 'Body must be a JSON object', errorCode: 'INVALID_BODY' }, 400)
+    }
+    const parsed = parseRegistryClaim(body as Record<string, unknown>)
+    if ('error' in parsed) {
+      return c.json({ error: parsed.error, errorCode: 'INVALID_REGISTRY' }, 400)
+    }
+
+    const filing = createOrgRegistryFiling(db, name, parsed.claim)
+    logAuditEvent(db, {
+      action: 'org.registry.submitted',
+      actor: `org:${name}`,
+      target: `${name}:${filing.id}`,
+      details: {
+        kind: filing.kind,
+        country: filing.country,
+        registrationNumber: filing.registration_number,
+        applicantRole: filing.applicant_role,
+        status: filing.status,
+      },
+    })
+    return c.json({ filing: serializeOrgRegistryFiling(filing) }, 201)
+  })
+
+  router.get('/:name/registry', (c) => {
+    const loaded = loadOwnedOrg(c, db)
+    if (loaded instanceof Response) {
+      return loaded
+    }
+    const filings = listOrgRegistryFilings(db, loaded.name)
+    return c.json({
+      filings: filings.map(serializeOrgRegistryFiling),
+      total: filings.length,
+    })
+  })
+
   return router
+}
+
+function loadOwnedOrg(
+  c: Context,
+  db: Database,
+): { name: string; org: OrgRow } | Response {
+  const requestedName = normalizeOrgName(c.req.param('name') ?? '')
+  const org = resolveOrg(db, requestedName, c.req.raw)
+  if (!org) {
+    return c.json({ error: `Organization ${requestedName} not found`, errorCode: 'NOT_FOUND' }, 404)
+  }
+  const name = org.name
+  const auth = requireOrgApiKey(c, org)
+  if (auth) {
+    return auth
+  }
+  if (claimExpired(org)) {
+    return c.json({
+      error: 'Organization claim has expired; register the namespace again',
+      errorCode: 'ORG_CLAIM_EXPIRED',
+    }, 410)
+  }
+  return { name, org }
+}
+
+async function wellKnownMatches(
+  domain: string,
+  token: string,
+): Promise<{ ok: true } | { ok: false; error: string; errorCode: string; status: 409; records: string[] }> {
+  const body = await fetchWellKnownVerification(domain)
+  if (!bodyContainsVerification(body, token)) {
+    return {
+      ok: false,
+      error: 'Well-known verification record not found',
+      errorCode: 'WELL_KNOWN_NOT_FOUND',
+      status: 409,
+      records: [],
+    }
+  }
+  return { ok: true }
+}
+
+async function dnsTxtMatches(
+  txtName: string,
+  expected: string,
+): Promise<{ ok: true } | { ok: false; error: string; errorCode: string; status: 409; records: string[] }> {
+  const records = await resolveTxt(txtName)
+  const values = records.map((entry) => entry.join(''))
+  if (!values.includes(expected)) {
+    return {
+      ok: false,
+      error: 'DNS TXT record not found',
+      errorCode: 'TXT_NOT_FOUND',
+      status: 409,
+      records: values,
+    }
+  }
+  return { ok: true }
 }
 
 class OrgClaimConflictError extends Error {

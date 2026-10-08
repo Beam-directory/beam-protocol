@@ -2,6 +2,25 @@
 
 ## Unreleased
 
+### Trust layer: organization identity and key custody
+- bind an organization to its full registrable domain, so `coppen.de` and `coppen.at` cannot share one namespace
+- accept DNS TXT or `https://<domain>/.well-known/beam-verification` as the one-time domain proof
+- record Handelsregister or LEI filings per organization, with a manual representation review and an audit trail
+- stop generating agent signing keys on organization and workspace issuance; require a client public key
+- allow signing-key rotation only with the current key's signature or the owning organization's API key
+- assign the public Beam label only after domain verification; pending claims use a collision-free `--` namespace (`coppen.co.uk` is `coppen--co-uk`, `coppen-co.uk` is `coppen-co--uk`)
+- require a fresh signed nonce, the organization key, or an admin session before `PATCH /agents/:id/config` can change `dhPublicKey` or `httpEndpoint`
+- log and expose on `/health` when duplicate domains prevent the unique domain index
+
+### Breaking
+- workspace and organization clients must generate the Ed25519 key themselves and send `publicKey`; the directory no longer returns a private key
+- `bk_` alone can no longer rotate a signing key or replace `dhPublicKey` / `httpEndpoint`
+- Network, the MCP pilot scripts, and the OpenClaw scripts sign `PATCH /agents/:id/config`; the agent API key is still sent, so the same request works on directory 1.7.0
+- `scripts/production/claim-organization.mjs` stores the server-assigned name and writes the organization API key before any later check
+- `POST /agents/keypair/x25519` is removed
+- npm 10 or newer is required to install this repository
+- disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
+
 ### Verified agent registry
 - publish a German landing page for “Das geprüfte Register für KI-Agenten”, a seal application form, and public pages for verified company agents
 - mark the October 2026 prices as a single draft constant and store seal applications through the existing waitlist without payment or email

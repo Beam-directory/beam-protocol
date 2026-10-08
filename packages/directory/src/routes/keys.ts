@@ -8,9 +8,8 @@ import {
   revokeAgentKey,
   rotateAgentKey,
 } from '../db.js'
-import { verifyPayload } from '../crypto.js'
 import { BEAM_ID_RE } from '../validation.js'
-import { agentApiKeyMatches, getSuppliedApiKey } from '../api-key.js'
+import { keyChangeAuthorized } from '../trust/key-authority.js'
 import { serializeAgent, serializeAgentKey, serializeAgentKeyState } from '../utils/serialize.js'
 
 type KeyLifecycleErrorResponse = {
@@ -40,30 +39,14 @@ function buildAuthPayload(
 }
 
 function canManageKeys(
+  db: Database,
   agent: AgentRow,
   request: Request,
   payload: Record<string, unknown>,
   signature?: string,
   legacyProof?: { newPublicKey: string; rotationProof?: string },
 ): boolean {
-  const suppliedApiKey = getSuppliedApiKey(request)
-  if (agentApiKeyMatches(agent, suppliedApiKey)) {
-    return true
-  }
-
-  if (signature?.trim() && verifyPayload(payload, signature.trim(), agent.public_key)) {
-    return true
-  }
-
-  if (
-    legacyProof?.rotationProof
-    && legacyProof.newPublicKey
-    && verifyPayload(legacyProof.newPublicKey, legacyProof.rotationProof, agent.public_key)
-  ) {
-    return true
-  }
-
-  return false
+  return keyChangeAuthorized(db, agent, request, payload, signature, legacyProof)
 }
 
 function keyLifecycleErrorResponse(error: unknown): KeyLifecycleErrorResponse {
@@ -140,7 +123,7 @@ export function agentKeysRouter(db: Database): Hono {
       newPublicKey,
       timestamp,
     })
-    if (!canManageKeys(agent, c.req.raw, authPayload, signature, { newPublicKey, rotationProof })) {
+    if (!canManageKeys(db, agent, c.req.raw, authPayload, signature, { newPublicKey, rotationProof })) {
       return c.json({ error: 'rotation proof or signature is invalid', errorCode: 'INVALID_ROTATION_PROOF' }, 400)
     }
 
@@ -199,7 +182,7 @@ export function agentKeysRouter(db: Database): Hono {
       publicKey,
       timestamp,
     })
-    if (!canManageKeys(agent, c.req.raw, authPayload, signature)) {
+    if (!canManageKeys(db, agent, c.req.raw, authPayload, signature)) {
       return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
 

@@ -228,11 +228,20 @@ import {
 
     kit.identity = upgradedKit.identity
     kit.upgradedAt = upgradedKit.upgradedAt
+    await registerDirectoryEncryptionKey(kit, encryption.publicKey)
+    return importNetworkEncryptionPrivateKey(encryption)
+  }
+
+  async function registerDirectoryEncryptionKey(kit, dhPublicKey) {
+    const signed = await signMutation({
+      type: 'agent.config',
+      beamId: kit.beamId,
+      dhPublicKey,
+    })
     await api(`/agents/${encodeURIComponent(kit.beamId)}/config`, {
       method: 'PATCH',
-      body: JSON.stringify({ dhPublicKey: encryption.publicKey }),
+      body: JSON.stringify(signed),
     })
-    return importNetworkEncryptionPrivateKey(encryption)
   }
 
   async function reconcileDirectoryEncryptionKey(kit) {
@@ -243,10 +252,7 @@ import {
     const expected = kit.identity.encryption?.publicKey
     if (!expected) throw new Error('This Beam identity has no encryption public key.')
     if (current.identity.dhPublicKey !== expected) {
-      await api(`/agents/${encodeURIComponent(kit.beamId)}/config`, {
-        method: 'PATCH',
-        body: JSON.stringify({ dhPublicKey: expected }),
-      })
+      await registerDirectoryEncryptionKey(kit, expected)
     }
   }
 

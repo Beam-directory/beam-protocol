@@ -1,6 +1,8 @@
 import { randomBytes, randomUUID } from 'node:crypto'
 import Database from 'better-sqlite3'
 import type { Database as DB } from 'better-sqlite3'
+import { namespaceForDomain } from './trust/org-domain.js'
+import { ensureTrustOrgSchema } from './trust/schema.js'
 import type {
   AgentIntentStats,
   AgentKeyRow,
@@ -1232,6 +1234,7 @@ function initSchema(db: DB): void {
   `).run(backfillKeysCreatedAt)
 
   migrateIntentLifecycleModel(db)
+  ensureTrustOrgSchema(db)
 }
 
 function ensureColumn(db: DB, tableName: string, columnName: string, definition: string): void {
@@ -1428,6 +1431,7 @@ export function createOrg(
     apiKeyHash: string
     verificationToken: string
     claimExpiresAt?: string | null
+    requestedName?: string | null
   }
 ): OrgRow {
   const now = nowIso()
@@ -1444,8 +1448,9 @@ export function createOrg(
       verified,
       claim_expires_at,
       created_at,
-      verified_at
-    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL)
+      verified_at,
+      requested_name
+    ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, NULL, ?)
   `).run(
     input.name,
     input.displayName,
@@ -1455,6 +1460,7 @@ export function createOrg(
     input.verificationToken,
     input.claimExpiresAt ?? new Date(Date.now() + (72 * 60 * 60 * 1000)).toISOString(),
     now,
+    input.requestedName ?? null,
   )
 
   return getOrg(db, input.name) as OrgRow
@@ -2665,10 +2671,70 @@ export function listOrgAgents(db: DB, orgName: string): Array<OrgAgentRow & Part
   `).all(orgName) as Array<OrgAgentRow & Partial<AgentRow>>
 }
 
-export function markOrgVerified(db: DB, name: string): OrgRow | null {
+function tableExists(db: DB, tableName: string): boolean {
+  return Boolean(db.prepare(`SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?`).get(tableName))
+}
+
+function renameOrg(db: DB, from: string, to: string): void {
+  const org = getOrg(db, from)
+  if (!org || from === to || getOrg(db, to)) {
+    return
+  }
+  const nextDomain = buildBeamDomain(to)
+  const previousSuffix = `@${org.beam_domain}`
+  const nextSuffix = `@${nextDomain}`
+  const foreignKeys = db.pragma('foreign_keys', { simple: true })
+  db.pragma('foreign_keys = OFF')
+  try {
+    const apply = db.transaction(() => {
+      db.prepare('UPDATE orgs SET name = ?, beam_domain = ? WHERE name = ?').run(to, nextDomain, from)
+      if (tableExists(db, 'org_agents')) {
+        db.prepare('UPDATE org_agents SET org_name = ?, beam_id = replace(beam_id, ?, ?) WHERE org_name = ?')
+          .run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'workspaces')) {
+        db.prepare('UPDATE workspaces SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'agents')) {
+        db.prepare('UPDATE agents SET org = ?, beam_id = replace(beam_id, ?, ?) WHERE org = ?')
+          .run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'org_registry_filings')) {
+        db.prepare('UPDATE org_registry_filings SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+    })
+    apply()
+  } finally {
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+  }
+}
+
+export function markOrgVerified(
+  db: DB,
+  name: string,
+  via: 'dns' | 'well-known' | null = null,
+): OrgRow | null {
+  const current = getOrg(db, name)
+  if (!current) {
+    return null
+  }
+  const allowed = current.domain ? namespaceForDomain(current.domain) : null
+  const requested = current.requested_name
+  let publicName = current.name
+  if (requested && allowed && requested === allowed.label && current.name !== requested && !getOrg(db, requested)) {
+    renameOrg(db, current.name, requested)
+    publicName = requested
+  }
   const now = nowIso()
-  db.prepare('UPDATE orgs SET verified = 1, verified_at = ?, claim_expires_at = NULL WHERE name = ?').run(now, name)
-  return getOrg(db, name)
+  db.prepare(`
+    UPDATE orgs
+    SET verified = 1,
+        verified_at = ?,
+        claim_expires_at = NULL,
+        domain_verified_via = COALESCE(?, domain_verified_via)
+    WHERE name = ?
+  `).run(now, via, publicName)
+  return getOrg(db, publicName)
 }
 
 function orgExists(db: DB, name: string): boolean {

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { generateKeyPairSync } from 'node:crypto'
 import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
 import {
@@ -16,6 +17,10 @@ import {
   setIntentLifecycleStatus,
 } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
+
+function clientPublicKey(): string {
+  return generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+}
 
 function createAdminHeaders(
   db: ReturnType<typeof createDatabase>,
@@ -375,6 +380,7 @@ test('workspace identities expose explicit did control, per-binding partner over
         agentName: 'grok-bot',
         displayName: 'Grok Bot',
         capabilities: ['conversation.message', 'workspace.handoff.prepare'],
+        publicKey: clientPublicKey(),
       }),
     }))
     assert.equal(provisionResponse.status, 201)
@@ -384,9 +390,8 @@ test('workspace identities expose explicit did control, per-binding partner over
         beamId: string
         apiKey: string
         publicKey: string
-        privateKey: string
         publicKeyBase64: string
-        privateKeyBase64: string
+        privateKey?: string
       }
     }
     assert.equal(provisionBody.binding.beamId, 'grok-bot@beam.directory')
@@ -394,12 +399,16 @@ test('workspace identities expose explicit did control, per-binding partner over
     assert.equal(provisionBody.binding.canInitiateExternal, false)
     assert.match(provisionBody.credential.apiKey, /^bk_/)
     assert.equal(provisionBody.credential.publicKeyBase64, provisionBody.credential.publicKey)
-    assert.equal(provisionBody.credential.privateKeyBase64, provisionBody.credential.privateKey)
+    assert.equal(provisionBody.credential.privateKey, undefined)
     assert.equal(getAgent(db, 'grok-bot@beam.directory')?.api_key_hash?.length, 64)
 
     const reissueResponse = await app.request(new Request(`http://localhost/admin/workspaces/acme-agent-control/identities/${provisionBody.binding.id}/reissue-local-credential`, {
       method: 'POST',
-      headers: createAdminHeaders(db, 'admin@example.com', 'admin'),
+      headers: {
+        ...createAdminHeaders(db, 'admin@example.com', 'admin'),
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ publicKey: clientPublicKey() }),
     }))
     assert.equal(reissueResponse.status, 200)
     const reissueBody = await reissueResponse.json() as {
@@ -424,7 +433,7 @@ test('workspace identities expose explicit did control, per-binding partner over
         did: string
         apiKey: string
         publicKey: string
-        privateKey: string
+        privateKey?: string
         urls: {
           didResolution: string
           keys: string
@@ -438,7 +447,7 @@ test('workspace identities expose explicit did control, per-binding partner over
     assert.equal(reissueBody.credential.format, 'beam-local-identity/v1')
     assert.equal(reissueBody.credential.beamId, 'grok-bot@beam.directory')
     assert.equal(reissueBody.credential.did, 'did:beam:grok-bot')
-    assert.match(reissueBody.credential.privateKey, /^[A-Za-z0-9+/=]+$/)
+    assert.equal(reissueBody.credential.privateKey, undefined)
     assert.match(reissueBody.credential.publicKey, /^[A-Za-z0-9+/=]+$/)
     assert.match(reissueBody.credential.urls.didResolution, /\/did\//)
     assert.match(reissueBody.credential.urls.keys, /\/keys$/)
@@ -463,28 +472,32 @@ test('organization workspace onboarding requires namespace proof and reserves th
       body: JSON.stringify({ name: 'acme', displayName: 'Acme GmbH', domain: 'acme.example' }),
     }))
     assert.equal(orgResponse.status, 201)
-    const orgBody = await orgResponse.json() as { apiKey: string }
+    const orgBody = await orgResponse.json() as { apiKey: string; name: string }
     assert.match(orgResponse.headers.get('cache-control') ?? '', /no-store/i)
-    markOrgVerified(db, 'acme')
+    assert.equal(markOrgVerified(db, orgBody.name)?.name, 'acme')
 
     const orgAgentResponse = await app.request(new Request('http://localhost/orgs/acme/agents', {
       method: 'POST',
       headers: { 'content-type': 'application/json', 'x-api-key': orgBody.apiKey },
-      body: JSON.stringify({ agentName: 'support', displayName: 'Acme Support', capabilities: ['conversation.message'] }),
+      body: JSON.stringify({
+        agentName: 'support',
+        displayName: 'Acme Support',
+        capabilities: ['conversation.message'],
+        publicKey: clientPublicKey(),
+      }),
     }))
     assert.equal(orgAgentResponse.status, 201)
     const orgAgentBody = await orgAgentResponse.json() as {
       beamId: string
       apiKey: string
       publicKey: string
-      privateKey: string
+      privateKey?: string
       publicKeyBase64: string
-      privateKeyBase64: string
     }
     assert.equal(orgAgentBody.beamId, 'support@acme.beam.directory')
     assert.match(orgAgentBody.apiKey, /^bk_/)
     assert.equal(orgAgentBody.publicKeyBase64, orgAgentBody.publicKey)
-    assert.equal(orgAgentBody.privateKeyBase64, orgAgentBody.privateKey)
+    assert.equal(orgAgentBody.privateKey, undefined)
     assert.equal(getAgent(db, orgAgentBody.beamId)?.api_key_hash?.length, 64)
     assert.match(orgAgentResponse.headers.get('cache-control') ?? '', /no-store/i)
 
@@ -508,6 +521,7 @@ test('organization workspace onboarding requires namespace proof and reserves th
         agentName: 'grok',
         displayName: 'Acme Grok',
         capabilities: ['conversation.message'],
+        publicKey: clientPublicKey(),
         ...(orgApiKey ? { orgApiKey } : {}),
       }),
     }))

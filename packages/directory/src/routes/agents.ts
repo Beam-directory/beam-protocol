@@ -1,4 +1,5 @@
 import { createPublicKey, randomBytes, timingSafeEqual, verify } from 'node:crypto'
+import { verifyPayload } from '../crypto.js'
 import { Hono } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { getAdminSessionFromRequest, roleSatisfies } from '../admin-auth.js'
@@ -24,6 +25,7 @@ import {
   searchAgents,
   setAgentEmailToken,
   updateAgentProfile,
+  recordNonce,
   updateLastSeen,
   verifyAgentEmailToken,
 } from '../db.js'
@@ -32,6 +34,60 @@ import { isEd25519Spki, isX25519Spki } from '../key-validation.js'
 
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/
 const ALLOWED_TIERS = new Set<VerificationTier>(['basic', 'verified', 'business', 'enterprise'])
+
+const CONFIG_SIGNATURE_WINDOW_MS = 5 * 60 * 1000
+const CONFIG_NONCE_RE = /^[A-Za-z0-9_-]{16,128}$/
+
+function orgApiKeyAuthorizesAgent(db: Database, agent: AgentRow, request: Request): boolean {
+  if (!agent.org) {
+    return false
+  }
+  const supplied = getSuppliedApiKey(request)
+  if (!supplied.startsWith('beam_org_')) {
+    return false
+  }
+  const org = getOrg(db, agent.org)
+  if (!org) {
+    return false
+  }
+  const actual = Buffer.from(hashApiKey(supplied))
+  const expected = Buffer.from(org.api_key_hash)
+  return actual.length === expected.length && timingSafeEqual(actual, expected)
+}
+
+function verifyConfigSignature(
+  db: Database,
+  agent: AgentRow,
+  body: Record<string, unknown>,
+  signedConfig: Record<string, unknown>,
+): { ok: true } | { ok: false; error: string; errorCode: string; status: 400 | 401 | 409 } {
+  const timestamp = typeof body.timestamp === 'string' ? body.timestamp : ''
+  const nonce = typeof body.nonce === 'string' ? body.nonce : ''
+  const signature = typeof body.signature === 'string' ? body.signature : ''
+  const timestampMs = Date.parse(timestamp)
+  if (
+    timestamp.length < 20
+    || timestamp.length > 40
+    || !Number.isFinite(timestampMs)
+    || Math.abs(Date.now() - timestampMs) > CONFIG_SIGNATURE_WINDOW_MS
+    || !CONFIG_NONCE_RE.test(nonce)
+    || !signature
+  ) {
+    return {
+      ok: false,
+      error: 'dhPublicKey and httpEndpoint require a fresh signed nonce, the organization key, or an admin session',
+      errorCode: 'UNAUTHORIZED',
+      status: 401,
+    }
+  }
+  if (!verifyPayload({ ...signedConfig, timestamp, nonce }, signature, agent.public_key)) {
+    return { ok: false, error: 'Invalid signature', errorCode: 'INVALID_SIGNATURE', status: 401 }
+  }
+  if (!recordNonce(db, nonce)) {
+    return { ok: false, error: 'This signed request has already been used', errorCode: 'NONCE_REPLAY', status: 409 }
+  }
+  return { ok: true }
+}
 
 function canReadAgentContact(db: Database, request: Request, agent: AgentRow): boolean {
   const adminSession = getAdminSessionFromRequest(db, request)
@@ -894,25 +950,10 @@ export function agentsRouter(db: Database): Hono {
       return c.json({ error: 'Invalid JSON body' }, 400)
     }
 
-    // Auth: admin session or Ed25519 signature
-    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
-    const suppliedApiKey = getSuppliedApiKey(c.req.raw)
-    const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
-    const hasApiKey = agentApiKeyMatches(agent, suppliedApiKey)
-
-    if (!isAdmin && !hasApiKey) {
-      const { verifyPayload } = await import('../crypto.js')
-      const signature = typeof body.signature === 'string' ? body.signature : ''
-      const payload = { beamId, action: 'config', timestamp: body.timestamp }
-      if (!signature || !verifyPayload(payload, signature, agent.public_key)) {
-        return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
-      }
-    }
-
     const updates: string[] = []
     const params: unknown[] = []
+    const signedConfig: Record<string, unknown> = { type: 'agent.config', beamId }
 
-    // S4: HTTP endpoint
     if ('httpEndpoint' in body || 'http_endpoint' in body) {
       const endpoint = String(body.httpEndpoint ?? body.http_endpoint ?? '').trim()
       if (endpoint) {
@@ -925,9 +966,9 @@ export function agentsRouter(db: Database): Hono {
       }
       updates.push('http_endpoint = ?')
       params.push(endpoint || null)
+      signedConfig.httpEndpoint = endpoint || null
     }
 
-    // S5: DH public key for E2E
     if ('dhPublicKey' in body || 'dh_public_key' in body) {
       const dhKey = String(body.dhPublicKey ?? body.dh_public_key ?? '').trim()
       if (dhKey && !isX25519Spki(dhKey)) {
@@ -935,9 +976,19 @@ export function agentsRouter(db: Database): Hono {
       }
       updates.push('dh_public_key = ?')
       params.push(dhKey || null)
+      signedConfig.dhPublicKey = dhKey || null
     }
 
     if (updates.length === 0) return c.json({ error: 'No config fields to update' }, 400)
+
+    const adminSession = getAdminSessionFromRequest(db, c.req.raw)
+    const isAdmin = Boolean(adminSession && roleSatisfies(adminSession.role, 'admin'))
+    if (!isAdmin && !orgApiKeyAuthorizesAgent(db, agent, c.req.raw)) {
+      const proof = verifyConfigSignature(db, agent, body, signedConfig)
+      if (!proof.ok) {
+        return c.json({ error: proof.error, errorCode: proof.errorCode }, proof.status)
+      }
+    }
 
     params.push(beamId)
     db.prepare(`UPDATE agents SET ${updates.join(', ')} WHERE beam_id = ?`).run(...params)
@@ -946,18 +997,6 @@ export function agentsRouter(db: Database): Hono {
       beamId,
       httpEndpoint: updated.http_endpoint,
       dhPublicKey: updated.dh_public_key,
-    })
-  })
-
-  // S5: Generate X25519 keypair (utility endpoint for agents)
-  router.post('/keypair/x25519', async (c) => {
-    const { generateX25519KeyPair } = await import('../shield/encryption.js')
-    const pair = generateX25519KeyPair()
-    return c.json({
-      publicKey: pair.publicKey,
-      privateKey: pair.privateKey,
-      algorithm: 'x25519',
-      note: 'Store privateKey securely. Register publicKey as dhPublicKey on your agent.',
     })
   })
 

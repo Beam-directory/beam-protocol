@@ -3,7 +3,8 @@ FROM node:22-slim AS builder
 WORKDIR /app
 
 COPY package.json ./package.json
-RUN npm install
+RUN node -e "const v=require('node:child_process').execSync('npm -v').toString().trim(); if(Number(v.split('.')[0])<10){console.error('npm '+v+' is too old; need npm >= 10'); process.exit(1)}" \
+ && npm install
 
 COPY tsconfig.json ./tsconfig.json
 COPY src ./src

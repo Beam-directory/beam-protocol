@@ -47,16 +47,63 @@ Content-Type: application/json
 }
 ```
 
-`domain` is required. Beam canonicalizes it to the registrable domain and requires the namespace to match that domain label. For example, `www.acme.com` becomes `acme.com` and may claim `acme`; it cannot claim `northwind`. Brand names that do not match the legal domain need an administrator-reviewed override rather than automatic approval.
+`domain` is required. Beam canonicalizes it to the registrable domain (`www.coppen.de` and `https://coppen.de/impressum` both become `coppen.de`). The organization identity is that full domain, so `coppen.de` and `coppen.at` are different organizations and cannot share a row.
 
-The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish the TXT value, then call:
+The Beam namespace (`name`) is still the label used in existing addresses such as `agent@coppen.beam.directory`. A claim must ask for either the registrable label (`coppen`) or the collision-free form that joins the label and public suffix with `--` (`coppen--de`, `coppen--co-uk`). `coppen.co.uk` and `coppen-co.uk` therefore claim `coppen--co-uk` and `coppen-co--uk`. Until domain verification succeeds, the row is stored under that `--` name so an unverified `coppen.com` cannot occupy `coppen`. Verification grants the requested label when it is still free; otherwise the organization keeps the `--` name. A name that matches neither form returns `403 ORG_NAMESPACE_DOMAIN_MISMATCH`. The `201` body includes `name` (the name to use until verification) and `requestedName`. Store both the API key and `name` from that body. `name` can be `coppen--de` while the request asked for `coppen`.
+
+The `201` response is `Cache-Control: no-store` and returns the organization API key exactly once, together with `verification.txtName`, `verification.txtValue`, `verification.wellKnownUrl`, `verification.wellKnownBody`, and `claimExpiresAt`. An unverified claim expires after 72 hours. Store the key outside source control, publish one of the two proofs, then call:
 
 ```http
 POST /orgs/acme/verify
 x-api-key: beam_org_...
+Content-Type: application/json
+
+{ "method": "dns" }
 ```
 
-Until verification succeeds, organization agent issuance and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+`method` is `dns` (the default when the body is omitted) or `well-known`. DNS checks `_beam-verification.<domain>` for `beam-verification=<token>`. The well-known check fetches `https://<domain>/.well-known/beam-verification` over HTTPS, refuses redirects, and refuses hosts that resolve to a private or loopback address. The file must contain the same `beam-verification=<token>` line. A match sets `verified` and `domainVerifiedVia` once for the organization. It does not verify individual agents.
+
+Until verification succeeds, organization agent issuance, registry submission, and organization workspace creation return `403 ORG_VERIFICATION_REQUIRED`. Organization claim, verification, and issuance endpoints share the public registration rate limit.
+
+### Registry filing
+
+After the domain is verified, submit one Handelsregister or LEI filing for the organization. This does not call a registry API and does not approve the filing.
+
+```http
+POST /orgs/coppen/registry
+x-api-key: beam_org_...
+
+{
+  "kind": "handelsregister",
+  "country": "DE",
+  "registrationNumber": "HRB 68658",
+  "registerCourt": "Amtsgericht Ludwigshafen",
+  "legalName": "COPPEN GmbH",
+  "applicantName": "Tobias Kub",
+  "applicantRole": "geschaeftsfuehrer"
+}
+```
+
+`kind` is `handelsregister` (DE, `HRB` or `HRA`, plus `registerCourt`) or `lei` (20-character LEI with a valid checksum). `applicantRole` is `geschaeftsfuehrer`, `vorstand`, `prokurist`, `inhaber`, `director`, or `authorized_signatory`. The response status is `pending`.
+
+An operator reviews the representation claim:
+
+```http
+POST /admin/orgs/coppen/registry/1/review
+Authorization: Bearer <operator-session>
+
+{ "decision": "approved", "note": "Register excerpt names the applicant as Geschäftsführer." }
+```
+
+`decision` is `approved` or `rejected`. The note is stored with the reviewer and timestamp, and both submission and review are written to the audit log. A second review returns `409 REGISTRY_ALREADY_REVIEWED`.
+
+`GET /orgs/:name/registry` lists filings for the organization API key.
+
+### Organization agents
+
+`POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key. The directory does not generate or return a private key. Omitting it returns `400 PUBLIC_KEY_REQUIRED`.
+
+The following onboarding steps are not in this revision: person KYC, invitations, hierarchy, mandates, and the first contact request. They follow in later revisions of this API.
 
 ## `POST /register`
 
@@ -220,10 +267,12 @@ POST /agents/:beamId/keys/revoke
 GET  /keys/revoked
 ```
 
-Rotation accepts either:
+Rotation and revocation accept either:
 
-- `x-api-key` / bearer API key auth
-- a signed key-management payload from the current active key
+- a signature from the agent's current signing key (`signature` over the key-management payload, or the legacy `rotation_proof` over the new public key)
+- the organization API key of the org that owns the agent
+
+The agent API key (`bk_...`) is not enough. A request that presents only that key returns `400 INVALID_ROTATION_PROOF` or `400 INVALID_SIGNATURE`, and the signing key stays unchanged.
 
 Revocation is intended for rotated-out historical keys. The active key must be replaced through rotation first.
 
