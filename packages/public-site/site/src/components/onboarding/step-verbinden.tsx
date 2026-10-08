@@ -100,7 +100,7 @@ export function StepVerbinden({ progress, secrets }: Pick<StepProps, 'progress' 
   }
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" data-testid="step-verbinden">
       <Panel title={copy.connectPanel} badge={<LiveBadge />}>
         <p className="text-sm leading-6 text-muted-foreground">
           {copy.connectIntro} {copy.previewNote}

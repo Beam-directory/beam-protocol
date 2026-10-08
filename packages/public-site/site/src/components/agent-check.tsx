@@ -7,6 +7,7 @@ import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 import { SITE_ORIGIN, intlLocale } from '@/i18n/locale'
 import { checkAgentInBrowser, parseBeamAddress } from '@/lib/verify-trust.ts'
+import { formatLocalSummary, isVerifiedIndividual } from '@/lib/verify-display.ts'
 import type { AgentCheck as TrustCheck, PublicOrg, PublicOwner, PublicScopes, VerificationLevel } from 'beam-protocol-sdk/trust-assertion'
 
 export const EXAMPLE_AGENTS = [
@@ -24,23 +25,6 @@ function formatWhen(value: string | null, locale: string): string {
   const parsed = Date.parse(value)
   if (!Number.isFinite(parsed)) return '—'
   return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
-}
-
-function localSummary(
-  result: TrustCheck,
-  copy: {
-    verifiedPrefix: string
-    notVerifiedLine: string
-    onBehalfOf: (role: string) => string
-    may: (scopes: string) => string
-  },
-): string {
-  if (result.status === 'rate_limited' || result.status === 'api_error') return result.summary
-  if (!result.verified || !result.org) return copy.notVerifiedLine
-  const org = result.org.domain ? `${result.org.name} (${result.org.domain})` : result.org.name
-  const owner = result.owner ? `, ${copy.onBehalfOf(result.owner.role)}` : ''
-  const scopes = result.scopes ? `, ${copy.may(result.scopes.actions.join(', '))}` : ''
-  return `${copy.verifiedPrefix} ${org}${owner}${scopes}`
 }
 
 export function AgentCheck({ variant }: { variant: Variant }) {
@@ -132,7 +116,8 @@ export function AgentCheck({ variant }: { variant: Variant }) {
     void run(result.address, next)
   }
 
-  const summary = result ? localSummary(result, copy) : ''
+  const summary = result ? formatLocalSummary(result, copy) : ''
+  const individual = result ? isVerifiedIndividual(result) : false
   const sharePath = result && parseBeamAddress(result.address)
     ? `${href('verify')}?agent=${encodeURIComponent(result.address)}`
     : href('verify')
@@ -153,9 +138,11 @@ export function AgentCheck({ variant }: { variant: Variant }) {
       ? copy.rateLimited
       : result.status === 'api_error'
         ? copy.apiError
-        : result.verified
-          ? copy.verified
-          : copy.notVerified
+        : individual
+          ? copy.verifiedIndividual
+          : result.verified
+            ? copy.verified
+            : copy.notVerified
 
   return (
     <section aria-labelledby="agent-check-title" data-testid="agent-check" className="beam-surface beam-check w-full rounded-2xl border p-5 sm:p-6">
@@ -242,10 +229,12 @@ export function AgentCheck({ variant }: { variant: Variant }) {
                 <ol key={result.address} className="grid gap-3 sm:grid-cols-3">
                   <ChainStep
                     delay="0s"
-                    icon={BuildingIcon}
-                    title={copy.org}
-                    testId="agent-check-org"
-                    body={result.org ? <OrgBody org={result.org} copy={copy} /> : <p>{copy.noOrg}</p>}
+                    icon={individual ? UserIcon : BuildingIcon}
+                    title={individual ? copy.individual : copy.org}
+                    testId={individual ? 'agent-check-individual' : 'agent-check-org'}
+                    body={individual
+                      ? <IndividualBody copy={copy} />
+                      : result.org ? <OrgBody org={result.org} copy={copy} /> : <p>{copy.noOrg}</p>}
                   />
                   <ChainStep
                     delay="0.6s"
@@ -377,6 +366,17 @@ function ChainStep({
       </span>
       <div className="text-muted-foreground">{body}</div>
     </li>
+  )
+}
+
+function IndividualBody({ copy }: { copy: ReturnType<typeof useI18n>['t']['check'] }) {
+  return (
+    <div className="flex flex-col gap-1 text-foreground" data-testid="agent-check-individual-body">
+      <p className="font-medium">{copy.verifiedIndividual}</p>
+      <p>{copy.noCompany}</p>
+      <p>{copy.identityProvider}: {copy.providerStripe}</p>
+      <p>{copy.level}: {copy.levelPersonId}</p>
+    </div>
   )
 }
 

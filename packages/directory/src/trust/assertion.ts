@@ -19,7 +19,14 @@ export type TrustAssertion = {
     verified: boolean
     registryStatus: 'none' | 'pending' | 'approved' | 'rejected'
   } | null
-  person: { ref: string; role: string; kycStatus: string } | null
+  person: {
+    ref: string
+    role: string
+    kycStatus: string
+    subject?: 'individual'
+    level?: 'person_id_verified' | 'none'
+    provider?: 'stripe_identity' | null
+  } | null
   mandate: {
     jti: string
     scopes: ScopeGrant
@@ -43,6 +50,19 @@ function registryStatus(db: Database, orgName: string): 'none' | 'pending' | 'ap
 
 function personRef(id: string): string {
   return createHash('sha256').update(id).digest('hex')
+}
+
+function personView(person: ReturnType<typeof getPerson>): TrustAssertion['person'] {
+  if (!person) return null
+  const base = { ref: personRef(person.id), role: person.role, kycStatus: person.kyc_status }
+  if (person.subject_kind !== 'individual') return base
+  const stripeVerified = person.kyc_status === 'verified' && person.kyc_provider === 'stripe_identity'
+  return {
+    ...base,
+    subject: 'individual' as const,
+    level: stripeVerified ? 'person_id_verified' as const : 'none' as const,
+    provider: person.kyc_provider === 'stripe_identity' ? 'stripe_identity' as const : null,
+  }
 }
 
 function mandateView(row: MandateRow | null): TrustAssertion['mandate'] {
@@ -80,9 +100,7 @@ export function buildTrustAssertion(db: Database, beamId: string, now = new Date
           registryStatus: registryStatus(db, org.name),
         }
       : null,
-    person: person
-      ? { ref: personRef(person.id), role: person.role, kycStatus: person.kyc_status }
-      : null,
+    person: personView(person),
     mandate: mandateView(mandate),
     suspended: Boolean(agent.suspended_at) || person?.status === 'offboarded' || Boolean(org?.suspended_at),
     issuedAt,

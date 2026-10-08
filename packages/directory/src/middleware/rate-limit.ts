@@ -131,6 +131,48 @@ async function resolveBuckets(
     }
   }
 
+  if (method === 'POST' && path === '/people/individual/verification-sessions') {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'identity-verification',
+        limit: Math.min(3, policy.registrationPerMinute),
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.identity.verification',
+        payload: { path },
+      }],
+    }
+  }
+
+  if (method === 'POST' && /^\/orgs\/[^/]+\/people\/[^/]+\/kyc$/.test(path)) {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'identity-verification',
+        limit: policy.registrationPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.identity.verification',
+        payload: { path },
+      }],
+    }
+  }
+
+  if (method === 'POST' && (path === '/people/individual' || path === '/people/individual/agents')) {
+    return {
+      trusted: isTrusted(policy, ip),
+      buckets: [{
+        bucket: 'individual-registration',
+        limit: policy.registrationPerMinute,
+        actorKey: `ip:${ip}`,
+        actorLabel: `ip:${ip}`,
+        intentType: 'http.individual.register',
+        payload: { path },
+      }],
+    }
+  }
+
   if (method === 'POST' && (
     path === '/orgs'
     || /^\/orgs\/[^/]+\/(?:agents|verify)$/.test(path)

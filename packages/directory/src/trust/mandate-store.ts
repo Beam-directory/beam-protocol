@@ -44,14 +44,21 @@ export function getActiveMandate(db: Database, agentBeamId: string, at = new Dat
     SELECT m.* FROM mandates m
     JOIN agents a ON a.beam_id = m.agent_beam_id
     JOIN persons p ON p.id = m.person_id
-    JOIN orgs o ON o.name = m.org_name
+    LEFT JOIN orgs o ON o.name = m.org_name
     WHERE m.agent_beam_id = ?
       AND m.status = 'active'
       AND m.expires_at > ?
       AND a.responsible_person_id = m.person_id
       AND p.status = 'active'
       AND p.kyc_status = 'verified'
-      AND o.verified = 1
+      AND (
+        (p.subject_kind = 'organization' AND o.verified = 1)
+        OR (
+          p.subject_kind = 'individual'
+          AND p.kyc_provider = 'stripe_identity'
+          AND a.personal = 1
+        )
+      )
     ORDER BY m.created_at DESC, m.id DESC
     LIMIT 1
   `).get(agentBeamId, at) as MandateRow | undefined

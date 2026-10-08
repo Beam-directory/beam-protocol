@@ -3,9 +3,11 @@ import type { Database } from 'better-sqlite3'
 import { revokeActiveMandatesForAgent, revokeActiveMandatesForPerson, revokeMandatesOutsideRights } from './mandate-store.js'
 import type { ScopeGrant } from './scopes.js'
 
+export type PersonSubject = 'organization' | 'individual'
+
 export type PersonRow = {
   id: string
-  org_name: string
+  org_name: string | null
   email: string
   display_name: string
   role: string
@@ -20,6 +22,13 @@ export type PersonRow = {
   external_id: string | null
   offboarded_at: string | null
   created_at: string
+  subject_kind: PersonSubject
+  beam_handle: string | null
+  api_key_hash: string | null
+  verified_given_name: string | null
+  verified_family_name: string | null
+  issuing_country: string | null
+  kyc_verified_at: string | null
 }
 
 export type PersonInvitationRow = {
@@ -50,6 +59,25 @@ export function getPerson(db: Database, id: string): PersonRow | null {
 
 export function getPersonByEmail(db: Database, orgName: string, email: string): PersonRow | null {
   const row = db.prepare('SELECT * FROM persons WHERE org_name = ? AND email = ?').get(orgName, email) as PersonRow | undefined
+  return row ?? null
+}
+
+export function getIndividualByEmail(db: Database, email: string): PersonRow | null {
+  const row = db.prepare(`
+    SELECT * FROM persons WHERE subject_kind = 'individual' AND email = ?
+  `).get(email) as PersonRow | undefined
+  return row ?? null
+}
+
+export function getIndividualByHandle(db: Database, handle: string): PersonRow | null {
+  const row = db.prepare(`
+    SELECT * FROM persons WHERE subject_kind = 'individual' AND beam_handle = ?
+  `).get(handle) as PersonRow | undefined
+  return row ?? null
+}
+
+export function getPersonByApiKeyHash(db: Database, apiKeyHash: string): PersonRow | null {
+  const row = db.prepare('SELECT * FROM persons WHERE api_key_hash = ?').get(apiKeyHash) as PersonRow | undefined
   return row ?? null
 }
 
@@ -154,6 +182,39 @@ export function updatePersonRecord(
   return getPerson(db, id)
 }
 
+export function insertIndividualPerson(
+  db: Database,
+  input: {
+    email: string
+    displayName: string
+    publicKey: string
+    handle: string
+    apiKeyHash: string
+    rights: ScopeGrant
+  },
+): PersonRow {
+  const id = randomUUID()
+  const createdAt = new Date().toISOString()
+  db.prepare(`
+    INSERT INTO persons (
+      id, org_name, email, display_name, role, supervisor_person_id, status,
+      kyc_status, kyc_provider, kyc_reference, public_key, rights_json,
+      external_source, external_id, offboarded_at, created_at,
+      subject_kind, beam_handle, api_key_hash
+    ) VALUES (?, NULL, ?, ?, 'individual', NULL, 'active', 'unverified', NULL, NULL, ?, ?, NULL, NULL, NULL, ?, 'individual', ?, ?)
+  `).run(
+    id,
+    input.email,
+    input.displayName,
+    input.publicKey,
+    JSON.stringify(input.rights),
+    createdAt,
+    input.handle,
+    input.apiKeyHash,
+  )
+  return getPerson(db, id) as PersonRow
+}
+
 export function setPersonKyc(
   db: Database,
   id: string,
@@ -161,12 +222,58 @@ export function setPersonKyc(
 ): PersonRow | null {
   db.prepare(`
     UPDATE persons
-    SET kyc_status = ?, kyc_provider = ?, kyc_reference = ?
+    SET kyc_status = ?, kyc_provider = ?, kyc_reference = ?,
+        verified_given_name = CASE WHEN ? = 'verified' THEN verified_given_name ELSE NULL END,
+        verified_family_name = CASE WHEN ? = 'verified' THEN verified_family_name ELSE NULL END,
+        issuing_country = CASE WHEN ? = 'verified' THEN issuing_country ELSE NULL END,
+        kyc_verified_at = CASE WHEN ? = 'verified' THEN kyc_verified_at ELSE NULL END
     WHERE id = ?
-  `).run(input.status, input.provider, input.reference, id)
+  `).run(
+    input.status,
+    input.provider,
+    input.reference,
+    input.status,
+    input.status,
+    input.status,
+    input.status,
+    id,
+  )
   if (input.status !== 'verified') {
     revokeActiveMandatesForPerson(db, id, new Date().toISOString())
   }
+  return getPerson(db, id)
+}
+
+/** Writes only the minimised Stripe result. Callers must not pass document numbers, dates of birth, or images. */
+export function markStripeIdentityVerified(
+  db: Database,
+  id: string,
+  input: {
+    sessionId: string
+    givenName: string | null
+    familyName: string | null
+    issuingCountry: string | null
+    verifiedAt: string
+  },
+): PersonRow | null {
+  db.prepare(`
+    UPDATE persons
+    SET kyc_status = 'verified',
+        kyc_provider = 'stripe_identity',
+        kyc_reference = ?,
+        verified_given_name = ?,
+        verified_family_name = ?,
+        issuing_country = ?,
+        kyc_verified_at = ?
+    WHERE id = ?
+  `).run(
+    input.sessionId,
+    input.givenName,
+    input.familyName,
+    input.issuingCountry,
+    input.verifiedAt,
+    id,
+  )
   return getPerson(db, id)
 }
 
@@ -318,10 +425,16 @@ export function setAgentResponsiblePerson(db: Database, beamId: string, personId
   db.prepare('UPDATE agents SET responsible_person_id = ? WHERE beam_id = ?').run(personId, beamId)
 }
 
+export function individualBeamId(handle: string): string {
+  return `${handle}@beam.directory`
+}
+
 export function serializePerson(row: PersonRow): object {
   return {
     id: row.id,
     org: row.org_name,
+    subject: row.subject_kind ?? 'organization',
+    beamId: row.beam_handle ? individualBeamId(row.beam_handle) : null,
     email: row.email,
     displayName: row.display_name,
     role: row.role,
@@ -336,5 +449,9 @@ export function serializePerson(row: PersonRow): object {
     externalId: row.external_id,
     offboardedAt: row.offboarded_at,
     createdAt: row.created_at,
+    verifiedGivenName: row.verified_given_name ?? null,
+    verifiedFamilyName: row.verified_family_name ?? null,
+    issuingCountry: row.issuing_country ?? null,
+    verifiedAt: row.kyc_verified_at ?? null,
   }
 }

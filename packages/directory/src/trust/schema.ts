@@ -68,7 +68,7 @@ function ensureTrustPersonSchema(db: Database): void {
   db.exec(`
     CREATE TABLE IF NOT EXISTS persons (
       id TEXT PRIMARY KEY,
-      org_name TEXT NOT NULL,
+      org_name TEXT,
       email TEXT NOT NULL,
       display_name TEXT NOT NULL,
       role TEXT NOT NULL,
@@ -83,6 +83,13 @@ function ensureTrustPersonSchema(db: Database): void {
       external_id TEXT,
       offboarded_at TEXT,
       created_at TEXT NOT NULL,
+      subject_kind TEXT NOT NULL DEFAULT 'organization' CHECK(subject_kind IN ('organization', 'individual')),
+      beam_handle TEXT,
+      api_key_hash TEXT,
+      verified_given_name TEXT,
+      verified_family_name TEXT,
+      issuing_country TEXT,
+      kyc_verified_at TEXT,
       FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE,
       FOREIGN KEY (supervisor_person_id) REFERENCES persons(id)
     );
@@ -192,4 +199,120 @@ function ensureTrustPersonSchema(db: Database): void {
       ON delegations(payload_hash)
       WHERE payload_hash IS NOT NULL
   `)
+  migrateIndividualPersons(db)
+  ensureKycSessionTables(db)
+}
+
+const PERSON_COLUMNS = [
+  'id', 'org_name', 'email', 'display_name', 'role', 'supervisor_person_id', 'status',
+  'kyc_status', 'kyc_provider', 'kyc_reference', 'public_key', 'rights_json',
+  'external_source', 'external_id', 'offboarded_at', 'created_at',
+] as const
+
+function ensureIndividualPersonIndexes(db: Database): void {
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_org_email ON persons(org_name, email);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_external
+      ON persons(org_name, external_source, external_id)
+      WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_persons_supervisor ON persons(supervisor_person_id);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_individual_email
+      ON persons(email) WHERE subject_kind = 'individual';
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_individual_handle
+      ON persons(beam_handle) WHERE beam_handle IS NOT NULL;
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_api_key_hash
+      ON persons(api_key_hash) WHERE api_key_hash IS NOT NULL;
+  `)
+}
+
+function ensureKycSessionTables(db: Database): void {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS kyc_sessions (
+      id TEXT PRIMARY KEY,
+      person_id TEXT NOT NULL,
+      provider TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'requires_input', 'processing', 'verified', 'canceled')),
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      FOREIGN KEY (person_id) REFERENCES persons(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_kyc_sessions_person ON kyc_sessions(person_id, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS stripe_identity_events (
+      event_id TEXT PRIMARY KEY,
+      session_id TEXT,
+      event_type TEXT NOT NULL,
+      processed_at TEXT NOT NULL
+    );
+  `)
+}
+
+/**
+ * Persons created before private individuals had org_name NOT NULL.
+ * Rebuild so an individual can exist without an organisation row.
+ * legacy_alter_table keeps foreign keys pointed at "persons" across the rename.
+ */
+function migrateIndividualPersons(db: Database): void {
+  const info = db.prepare(`PRAGMA table_info(persons)`).all() as Array<{ name: string; notnull: number }>
+  if (info.length === 0) return
+  const org = info.find((column) => column.name === 'org_name')
+  const hasSubject = info.some((column) => column.name === 'subject_kind')
+  if (org && org.notnull === 0 && hasSubject) {
+    ensureIndividualPersonIndexes(db)
+    return
+  }
+
+  const foreignKeys = db.pragma('foreign_keys', { simple: true })
+  const legacyAlter = db.pragma('legacy_alter_table', { simple: true })
+  db.pragma('foreign_keys = OFF')
+  db.pragma('legacy_alter_table = ON')
+  try {
+    const apply = db.transaction(() => {
+      db.exec('ALTER TABLE persons RENAME TO persons_legacy')
+      db.exec(`
+        CREATE TABLE persons (
+          id TEXT PRIMARY KEY,
+          org_name TEXT,
+          email TEXT NOT NULL,
+          display_name TEXT NOT NULL,
+          role TEXT NOT NULL,
+          supervisor_person_id TEXT,
+          status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'offboarded')),
+          kyc_status TEXT NOT NULL DEFAULT 'unverified' CHECK(kyc_status IN ('unverified', 'pending', 'verified', 'rejected')),
+          kyc_provider TEXT,
+          kyc_reference TEXT,
+          public_key TEXT,
+          rights_json TEXT NOT NULL DEFAULT '{"actions":[]}',
+          external_source TEXT,
+          external_id TEXT,
+          offboarded_at TEXT,
+          created_at TEXT NOT NULL,
+          subject_kind TEXT NOT NULL DEFAULT 'organization' CHECK(subject_kind IN ('organization', 'individual')),
+          beam_handle TEXT,
+          api_key_hash TEXT,
+          verified_given_name TEXT,
+          verified_family_name TEXT,
+          issuing_country TEXT,
+          kyc_verified_at TEXT,
+          FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE,
+          FOREIGN KEY (supervisor_person_id) REFERENCES persons(id)
+        );
+      `)
+      db.exec(`
+        INSERT INTO persons (${PERSON_COLUMNS.join(', ')}, subject_kind)
+        SELECT ${PERSON_COLUMNS.join(', ')}, 'organization'
+        FROM persons_legacy
+      `)
+      db.exec('DROP TABLE persons_legacy')
+      ensureIndividualPersonIndexes(db)
+    })
+    apply()
+    const problems = db.prepare('PRAGMA foreign_key_check').all() as unknown[]
+    if (problems.length > 0) {
+      throw new Error(`persons migration left foreign key errors: ${JSON.stringify(problems)}`)
+    }
+  } finally {
+    db.pragma(`legacy_alter_table = ${legacyAlter ? 'ON' : 'OFF'}`)
+    db.pragma(`foreign_keys = ${foreignKeys ? 'ON' : 'OFF'}`)
+  }
 }

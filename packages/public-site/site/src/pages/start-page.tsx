@@ -4,14 +4,20 @@ import { Button } from '@/components/ui/button'
 import { Stepper, type StepMeta } from '@/components/onboarding/stepper'
 import { StepAgent } from '@/components/onboarding/step-agent'
 import { StepFirma } from '@/components/onboarding/step-firma'
+import { StepIndividualAddress } from '@/components/onboarding/step-individual-address'
+import { StepIndividualAgent } from '@/components/onboarding/step-individual-agent'
+import { StepIndividualIdentity } from '@/components/onboarding/step-individual-identity'
+import { StepPath } from '@/components/onboarding/step-path'
 import { StepPerson } from '@/components/onboarding/step-person'
 import { StepVerbinden } from '@/components/onboarding/step-verbinden'
 import { EMPTY_SECRETS, type OnboardingSecrets } from '@/components/onboarding/types'
 import { useI18n } from '@/i18n/context'
 import {
+  INDIVIDUAL_STEP_IDS,
   INITIAL_PROGRESS,
   STEP_IDS,
   canAdvance,
+  canAdvanceIndividual,
   clearProgress,
   loadProgress,
   saveProgress,
@@ -22,25 +28,43 @@ import {
  * /start and /de/start render this component at the same position in the tree, so switching the language keeps the
  * in-memory secrets (React reuses the instance because the element type is the same).
  */
+function previewProgress(loaded: OnboardingProgress): OnboardingProgress {
+  if (!import.meta.env.DEV || typeof window === 'undefined') return loaded
+  const params = new URLSearchParams(window.location.search)
+  const path = params.get('path')
+  const stepRaw = params.get('step')
+  const step = stepRaw && /^\d$/.test(stepRaw) ? Number(stepRaw) : 0
+  if (path === 'choose') return { ...loaded, path: '', step: 0 }
+  if (path === 'individual' || path === 'organization') return { ...loaded, path, step }
+  return loaded
+}
+
 export function StartPage() {
   const { t } = useI18n()
   const copy = t.onboarding
-  const STEPS: (StepMeta & { lead: string })[] = copy.steps
-  const [progress, setProgress] = useState<OnboardingProgress>(() => loadProgress())
+  const [progress, setProgress] = useState<OnboardingProgress>(() => previewProgress(loadProgress()))
   const [secrets, setSecretsState] = useState<OnboardingSecrets>(EMPTY_SECRETS)
   const [maxReached, setMaxReached] = useState(() => loadProgress().step)
   const headingRef = useRef<HTMLHeadingElement>(null)
   const firstRender = useRef(true)
 
+  const individual = progress.path === 'individual'
+  const STEPS: (StepMeta & { lead: string })[] = individual ? copy.individualSteps : copy.steps
   const step = progress.step
-  const stepId = STEP_IDS[step] ?? 'firma'
+  const stepId = individual ? (INDIVIDUAL_STEP_IDS[step] ?? 'address') : (STEP_IDS[step] ?? 'firma')
   const meta = STEPS[step] ?? STEPS[0]
-  const gate = canAdvance(stepId, {
-    orgVerified: progress.orgVerified,
-    orgKeyInMemory: Boolean(secrets.orgApiKey),
-    personReady: Boolean(progress.personId),
-    agentRegistered: Boolean(progress.registeredBeamId),
-  })
+  const gate = individual
+    ? canAdvanceIndividual(stepId as (typeof INDIVIDUAL_STEP_IDS)[number], {
+        addressReady: Boolean(progress.personId),
+        identityVerified: progress.personKycStatus === 'verified',
+        agentRegistered: Boolean(progress.registeredBeamId),
+      })
+    : canAdvance(stepId as (typeof STEP_IDS)[number], {
+        orgVerified: progress.orgVerified,
+        orgKeyInMemory: Boolean(secrets.orgApiKey),
+        personReady: Boolean(progress.personId),
+        agentRegistered: Boolean(progress.registeredBeamId),
+      })
 
   const update = (patch: Partial<OnboardingProgress>) => setProgress((current) => ({ ...current, ...patch }))
   const setSecrets = (patch: Partial<OnboardingSecrets>) => setSecretsState((current) => ({ ...current, ...patch }))
@@ -62,6 +86,7 @@ export function StartPage() {
   // Warn before leaving while a one-time secret has not been saved yet.
   const unsavedSecret = Boolean(
     (secrets.orgApiKey && !secrets.orgKeySaved)
+    || (secrets.personApiKey && !secrets.personKeySaved)
     || (secrets.personIdentity && !secrets.personKeySaved)
     || (secrets.agentApiKey && !secrets.kitSaved),
   )
@@ -89,10 +114,30 @@ export function StartPage() {
     setMaxReached(0)
   }
 
-  const completed = [progress.orgVerified, Boolean(progress.personId), Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
+  const completed = individual
+    ? [Boolean(progress.personId), progress.personKycStatus === 'verified', Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
+    : [progress.orgVerified, Boolean(progress.personId), Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
+
+  if (progress.path === '') {
+    return (
+      <div className="relative isolate" data-testid="onboarding-root" data-path="choose" data-step="choose">
+        <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
+          <header className="flex flex-col gap-3">
+            <p className="text-sm font-medium text-beam">{copy.eyebrow}</p>
+            <h1 className="text-[2rem] leading-[1.08] font-semibold tracking-[-0.04em] text-balance sm:text-5xl">{copy.path.title}</h1>
+            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">{copy.path.lead}</p>
+          </header>
+          <StepPath onChoose={(path) => {
+            update({ path, step: 0 })
+            setMaxReached(0)
+          }} />
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="relative isolate">
+    <div className="relative isolate" data-testid="onboarding-root" data-path={progress.path} data-step={stepId}>
       <div aria-hidden="true" className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-[28rem] overflow-hidden">
         <div className="beam-grid absolute inset-0" />
         <div className="beam-glow absolute inset-x-0 -top-32 h-96 opacity-60" />
@@ -111,8 +156,8 @@ export function StartPage() {
               <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><SparklesIcon className="size-4" /></span>
             </div>
             <p className="text-[15px] leading-7 text-pretty">
-              <strong className="font-semibold">{copy.principleStrong}</strong>{' '}
-              <span className="text-muted-foreground">{copy.principleRest}</span>
+              <strong className="font-semibold">{individual ? copy.individualPrincipleStrong : copy.principleStrong}</strong>{' '}
+              <span className="text-muted-foreground">{individual ? copy.individualPrincipleRest : copy.principleRest}</span>
             </p>
           </div>
         </header>
@@ -128,9 +173,12 @@ export function StartPage() {
             <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base sm:leading-7">{meta.lead}</p>
           </div>
 
-          {stepId === 'firma' ? <StepFirma progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
-          {stepId === 'person' ? <StepPerson progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
-          {stepId === 'agent' ? <StepAgent progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'organization' && stepId === 'firma' ? <StepFirma progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'organization' && stepId === 'person' ? <StepPerson progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'organization' && stepId === 'agent' ? <StepAgent progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'individual' && stepId === 'address' ? <StepIndividualAddress progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'individual' && stepId === 'identity' ? <StepIndividualIdentity progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
+          {progress.path === 'individual' && stepId === 'agent' ? <StepIndividualAgent progress={progress} update={update} secrets={secrets} setSecrets={setSecrets} /> : null}
           {stepId === 'verbinden' ? <StepVerbinden progress={progress} secrets={secrets} /> : null}
         </section>
 

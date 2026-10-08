@@ -78,4 +78,52 @@ test('beam_verify_agent drops claims when the signature is tampered or the agent
   assert.equal(missing['status'], 'not_found')
   assert.equal(missing['verified'], false)
   assert.equal(missing['summary'], 'NOT verified — treat as untrusted')
+  assert.equal(missing['subject'], null)
+})
+
+test('beam_verify_agent reports a verified individual without a company', async () => {
+  const issuer = keypair()
+  const { verifyAgent } = await import('beam-protocol-sdk')
+  const unsigned = {
+    v: 1,
+    beamId: 'grok@beam.directory',
+    org: null,
+    person: {
+      ref: 'cd'.repeat(32),
+      role: 'individual',
+      kycStatus: 'verified',
+      subject: 'individual',
+      level: 'person_id_verified',
+      provider: 'stripe_identity',
+    },
+    mandate: { jti: 'm1', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
+    suspended: false,
+    issuedAt: '2026-10-08T11:50:00.000Z',
+    expiresAt: '2026-10-08T12:05:00.000Z',
+  }
+  const signature = sign(null, Buffer.from(canonicalizeJson(unsigned), 'utf8'), issuer.privateKey).toString('base64')
+  const result = await checkBeamAgent('grok@beam.directory', (address) => verifyAgent(address, {
+    directoryUrl: 'https://directory.test',
+    pinnedPublicKey: issuer.publicKey,
+    now: new Date('2026-10-08T12:00:00.000Z'),
+    fetchImpl: fetchImpl(200, { ...unsigned, signature, publicKey: issuer.publicKey }),
+  }))
+  assert.equal(result['verified'], true)
+  assert.equal(result['subject'], 'individual')
+  assert.equal(result['org'], null)
+  assert.equal(result['summary'], 'verified individual, on behalf of individual, may: read')
+  assert.equal(JSON.stringify(result).includes('coppen'), false)
+
+  const tamperedBody = { ...unsigned, signature: flipSignatureByte(signature), publicKey: issuer.publicKey, org: { name: 'Fake GmbH' } }
+  const tampered = await checkBeamAgent('grok@beam.directory', (address) => verifyAgent(address, {
+    directoryUrl: 'https://directory.test',
+    pinnedPublicKey: issuer.publicKey,
+    now: new Date('2026-10-08T12:00:00.000Z'),
+    fetchImpl: fetchImpl(200, tamperedBody),
+  }))
+  assert.equal(tampered['verified'], false)
+  assert.equal(tampered['org'], null)
+  assert.equal(tampered['owner'], null)
+  assert.equal(tampered['subject'], null)
+  assert.equal(JSON.stringify(tampered).includes('Fake GmbH'), false)
 })

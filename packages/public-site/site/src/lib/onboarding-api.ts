@@ -23,7 +23,7 @@
  * The directory never receives a private key. Signing uses a non-extractable CryptoKey in this tab.
  *
  * Still not real, and still marked in the UI:
- * - thirdPartyKyc            the only KYC provider is "manual"; no ID-document vendor
+ * - thirdPartyKyc            company ID checks stay manual; Stripe Identity is the private-person path
  * - syncEmployeeDirectory    no Personio or Microsoft Entra connection
  * - checkPowerOfRepresentation  the filing records a claimed role; nothing checks the register
  * - grokSending              sending from Grok is off until a separate decision
@@ -52,6 +52,7 @@ export type Capability =
   | 'sendContactRequest'
   | 'registerInterest'
   | 'thirdPartyKyc'
+  | 'stripeIdentity'
   | 'syncEmployeeDirectory'
   | 'checkPowerOfRepresentation'
   | 'grokSending'
@@ -77,6 +78,7 @@ export const CAPABILITIES: Record<Capability, CapabilityStatus> = {
   sendContactRequest: 'live',
   registerInterest: 'live',
   thirdPartyKyc: 'unavailable',
+  stripeIdentity: 'live',
   syncEmployeeDirectory: 'unavailable',
   checkPowerOfRepresentation: 'unavailable',
   grokSending: 'unavailable',
@@ -608,6 +610,9 @@ export interface TrustAssertionView {
   orgVerified: boolean
   registryStatus: string
   personRole: string
+  personSubject: 'individual' | 'organization' | ''
+  personLevel: string
+  personProvider: string
   kycStatus: string
   mandateJti: string
   suspended: boolean
@@ -625,6 +630,9 @@ export async function getTrustAssertion(beamId: string, orgApiKey: string, optio
     orgVerified: org.verified === true,
     registryStatus: str(org.registryStatus) || 'none',
     personRole: str(person.role),
+    personSubject: person.subject === 'individual' ? 'individual' : person.subject === 'organization' ? 'organization' : '',
+    personLevel: str(person.level),
+    personProvider: str(person.provider),
     kycStatus: str(person.kycStatus),
     mandateJti: str(mandate.jti),
     suspended: body.suspended === true,
@@ -679,6 +687,128 @@ export async function sendContactRequest(
     connectionId: str(connection.connectionId),
     status: str(connection.status) || 'pending',
     recipientBeamId: str(connection.recipientBeamId) || recipientBeamId,
+  }
+}
+
+/* ------------------------------------------------------------------ Privatperson ---------------------------------------------------------- */
+
+export async function getIdentityProviderStatus(options?: ClientOptions): Promise<{ enabled: boolean }> {
+  const baseUrl = (options?.baseUrl ?? directoryApiBase()).replace(/\/$/, '')
+  const fetchImpl = options?.fetchImpl ?? globalThis.fetch.bind(globalThis)
+  try {
+    const response = await fetchImpl(`${baseUrl}/people/individual/provider`, {
+      method: 'GET',
+      headers: { accept: 'application/json' },
+      cache: 'no-store',
+      credentials: 'omit',
+      signal: AbortSignal.timeout(4000),
+    })
+    if (!response.ok) return { enabled: false }
+    const body = asRecord(await response.json())
+    return { enabled: body.enabled === true && body.provider === 'stripe_identity' }
+  } catch {
+    return { enabled: false }
+  }
+}
+
+export interface CreatedIndividual {
+  personId: string
+  apiKey: string
+  beamId: string
+  identityApiKey: string
+  kycStatus: string
+}
+
+/** POST /people/individual. Returns the person API key once. */
+export async function createIndividual(
+  input: { email: string; handle: string; displayName: string; publicKey: string },
+  options?: ClientOptions,
+): Promise<CreatedIndividual> {
+  const { body } = await request('/people/individual', { method: 'POST', body: input }, options)
+  const person = asRecord(body.person)
+  const identity = asRecord(body.identity)
+  const apiKey = str(body.apiKey)
+  const personId = str(person.id)
+  if (!apiKey || !personId) throw new OnboardingApiError('Directory returned no person key', 500, 'INVALID_RESPONSE')
+  return {
+    personId,
+    apiKey,
+    beamId: str(identity.beamId),
+    identityApiKey: str(identity.apiKey),
+    kycStatus: str(person.kycStatus) || 'unverified',
+  }
+}
+
+export interface IndividualProfile {
+  personId: string
+  kycStatus: string
+  kycProvider: string | null
+}
+
+/** GET /people/individual/me. Used after the person returns from the Stripe-hosted check. */
+export async function getIndividualProfile(personApiKey: string, options?: ClientOptions): Promise<IndividualProfile> {
+  const { body } = await request('/people/individual/me', { method: 'GET', apiKey: personApiKey }, options)
+  const person = asRecord(body.person)
+  const personId = str(person.id)
+  if (!personId) throw new OnboardingApiError('Directory returned no person', 500, 'INVALID_RESPONSE')
+  return {
+    personId,
+    kycStatus: str(person.kycStatus) || 'unverified',
+    kycProvider: strOrNull(person.kycProvider),
+  }
+}
+
+export interface IdentityVerification {
+  sessionId: string
+  url: string | null
+  status: string
+  reused: boolean
+}
+
+/** POST /people/individual/verification-sessions. Authenticated. Does not mark the person verified. */
+export async function startIndividualVerification(personApiKey: string, options?: ClientOptions): Promise<IdentityVerification> {
+  const { body } = await request('/people/individual/verification-sessions', {
+    method: 'POST',
+    apiKey: personApiKey,
+    body: {},
+    okStatuses: [409],
+  }, options)
+  const verification = asRecord(body.verification)
+  const sessionId = str(verification.sessionId)
+  if (!sessionId) {
+    const code = str(body.errorCode) || 'INVALID_RESPONSE'
+    throw new OnboardingApiError(str(body.error) || 'Directory returned no verification session', 409, code, body)
+  }
+  return {
+    sessionId,
+    url: strOrNull(verification.url),
+    status: str(verification.status),
+    reused: verification.reused === true || body.errorCode === 'VERIFICATION_SESSION_ACTIVE',
+  }
+}
+
+export async function registerIndividualAgent(
+  input: { agentName: string; displayName: string; publicKey: string; capabilities?: string[]; personApiKey: string },
+  options?: ClientOptions,
+): Promise<RegisteredAgent> {
+  const { body } = await request('/people/individual/agents', {
+    method: 'POST',
+    apiKey: input.personApiKey,
+    body: {
+      agentName: input.agentName,
+      displayName: input.displayName,
+      publicKey: input.publicKey,
+      capabilities: input.capabilities ?? [],
+    },
+  }, options)
+  const apiKey = str(body.apiKey)
+  if (!apiKey) throw new OnboardingApiError('Directory returned no agent API key', 500, 'INVALID_RESPONSE')
+  return {
+    beamId: str(body.beamId),
+    displayName: str(body.displayName) || input.displayName,
+    org: '',
+    apiKey,
+    responsiblePersonId: strOrNull(body.responsiblePersonId),
   }
 }
 

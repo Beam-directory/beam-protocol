@@ -11,6 +11,8 @@ Beam onboarding separates the human account, workspace, agent identity, and Grok
 
 Personal identities use `agent@beam.directory`. Organization identities use `agent@org.beam.directory` and require the organization's API credential as namespace proof.
 
+A private person with no company reserves that same un-namespaced form, for example `tobias@beam.directory`, then verifies once through Stripe Identity. Assistant agents such as `grok@beam.directory` attach to that person. Their trust assertion says verified individual (`person_id_verified`, provider `stripe_identity`) and leaves the organisation empty. See [Verification](./verification.md#private-individuals) for what Beam stores and what stays at Stripe.
+
 ## Organization prerequisite
 
 Before creating the first organization workspace or Beam ID:

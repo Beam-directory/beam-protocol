@@ -24,6 +24,7 @@ import { networkRouter } from './routes/network.js'
 import { networkMessagingRouter } from './routes/network-messaging.js'
 import { orgRegistryAdminRouter } from './routes/org-registry-admin.js'
 import { orgsRouter } from './routes/orgs.js'
+import { individualRouter, stripeIdentityWebhookRouter } from './routes/individuals.js'
 import { peopleAdminRouter, peopleInvitationRouter, peopleRouter } from './routes/people.js'
 import { buildAlerts, buildAlertsWithNotificationState, buildOverviewPayload, observabilityRouter, type AlertItem } from './routes/observability.js'
 import { reportsRouter } from './routes/reports.js'
@@ -4015,6 +4016,8 @@ export function createApp(db: Database): Hono {
   app.route('/orgs', peopleRouter(db))
   app.route('/orgs', trustInboxRouter(db))
   app.route('/people', peopleInvitationRouter(db))
+  app.route('/people', individualRouter(db))
+  app.route('/webhooks/stripe', stripeIdentityWebhookRouter(db))
   app.route('/admin/people', peopleAdminRouter(db))
   app.route('/admin/orgs', orgRegistryAdminRouter(db))
   app.route('/admin/orgs', orgSuspensionRouter(db))

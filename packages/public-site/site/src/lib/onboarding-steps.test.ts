@@ -6,6 +6,9 @@ import {
   PROGRESS_STORAGE_KEY,
   buildBeamId,
   canAdvance,
+  canAdvanceIndividual,
+  personalBeamId,
+  validatePersonalHandle,
   deriveOrgName,
   isValidLei,
   loadProgress,
@@ -129,6 +132,16 @@ describe('progress persistence', () => {
     expect(stored).not.toContain('PRIV')
     expect(stored).not.toContain('bk_x')
     expect(loadProgress(storage)).toMatchObject({ step: 2, orgName: 'firma' })
+  })
+
+  it('keeps a fresh visit on the path chooser and treats a saved company session as a company', () => {
+    const storage = memoryStorage()
+    expect(loadProgress(storage).path).toBe('')
+    storage.setItem(PROGRESS_STORAGE_KEY, JSON.stringify({ step: 1, orgName: 'coppen' }))
+    expect(loadProgress(storage).path).toBe('organization')
+    expect(validatePersonalHandle('tobias')).toBeNull()
+    expect(personalBeamId('tobias')).toBe('tobias@beam.directory')
+    expect(canAdvanceIndividual('identity', { addressReady: true, identityVerified: false, agentRegistered: false })).toEqual({ ok: false, reason: 'identity' })
   })
 
   it('falls back to the initial state on garbage', () => {

@@ -7,6 +7,8 @@ export interface OnboardingSecrets {
   orgKeySaved: boolean
   personIdentity: SigningIdentity | null
   personKeySaved: boolean
+  /** One-time person API key. Memory only, never sessionStorage. */
+  personApiKey: string | null
   /** One-time employee invitation token. Shown once, never stored. */
   invitationToken: string | null
   identity: AgentIdentity | null
@@ -19,6 +21,7 @@ export const EMPTY_SECRETS: OnboardingSecrets = {
   orgKeySaved: false,
   personIdentity: null,
   personKeySaved: false,
+  personApiKey: null,
   invitationToken: null,
   identity: null,
   agentApiKey: null,

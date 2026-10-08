@@ -56,6 +56,9 @@ export interface PublicOwner {
   role: string
   ref: string
   kycStatus: string
+  subject: 'individual' | null
+  level: 'person_id_verified' | 'none' | null
+  provider: 'stripe_identity' | null
 }
 
 export interface PublicScopes {
@@ -75,6 +78,8 @@ export interface AgentCheck {
   expired: boolean
   suspended: boolean
   org: PublicOrg | null
+  /** organisation when a verified company is present; individual only for a Stripe-verified private person. */
+  subject: 'organization' | 'individual' | null
   owner: PublicOwner | null
   scopes: PublicScopes | null
   issuedAt: string | null
@@ -192,7 +197,18 @@ function parseOwner(value: unknown): PublicOwner | null {
   const ref = typeof value['ref'] === 'string' && HEX_REF.test(value['ref']) ? value['ref'] : null
   const kycStatus = cleanText(value['kycStatus'], MAX_TEXT)
   if (!role || !ref || !kycStatus) return null
-  return { role, ref, kycStatus }
+  const subject = value['subject'] === 'individual' ? 'individual' as const : null
+  const level = value['level'] === 'person_id_verified' || value['level'] === 'none' ? value['level'] : null
+  const provider = value['provider'] === 'stripe_identity' ? 'stripe_identity' as const : null
+  return { role, ref, kycStatus, subject, level, provider }
+}
+
+function isVerifiedIndividual(org: PublicOrg | null, owner: PublicOwner | null): boolean {
+  return org === null
+    && owner?.subject === 'individual'
+    && owner.level === 'person_id_verified'
+    && owner.provider === 'stripe_identity'
+    && owner.kycStatus === 'verified'
 }
 
 function parseScopes(value: unknown): PublicScopes | null {
@@ -229,9 +245,15 @@ export function summaryLine(input: {
   org: PublicOrg | null
   owner: PublicOwner | null
   scopes: PublicScopes | null
+  subject?: 'organization' | 'individual' | null
 }): string {
   if (input.status === 'rate_limited') return 'rate limited — check not completed'
   if (input.status === 'api_error') return 'directory error — check not completed'
+  if (input.status === 'verified' && input.subject === 'individual' && !input.org) {
+    const ownerPart = input.owner ? `, on behalf of ${input.owner.role}` : ''
+    const scopePart = input.scopes ? `, may: ${input.scopes.actions.join(', ')}` : ''
+    return `verified individual${ownerPart}${scopePart}`.slice(0, 400)
+  }
   if (input.status !== 'verified' || !input.org) return 'NOT verified — treat as untrusted'
   const orgPart = input.org.domain ? `${input.org.name} (${input.org.domain})` : input.org.name
   const ownerPart = input.owner ? `, on behalf of ${input.owner.role}` : ''
@@ -250,6 +272,7 @@ function blank(address: string, pinnedKeyId: string, patch: Partial<AgentCheck>)
     expired: false,
     suspended: false,
     org: null,
+    subject: null,
     owner: null,
     scopes: null,
     issuedAt: null,
@@ -279,7 +302,7 @@ export function evaluateTrustCheck(input: {
     return blank(address, input.pinnedKeyId, {
       status: 'rate_limited',
       detail: 'rate_limited',
-      summary: summaryLine({ status: 'rate_limited', org: null, owner: null, scopes: null }),
+      summary: summaryLine({ status: 'rate_limited', org: null, owner: null, scopes: null, subject: null }),
       httpStatus: 429,
     })
   }
@@ -319,10 +342,18 @@ export function evaluateTrustCheck(input: {
   else if (!keyMatchesPin) detail = 'key_mismatch'
   else if (expired) detail = 'expired'
   else if (suspended) detail = 'suspended'
-  else if (!org) detail = 'no_org'
-  else if (!org.verified) detail = 'org_unverified'
-  const verified = claimsAuthenticated && !expired && !suspended && Boolean(org?.verified)
+  else if (!org && !isVerifiedIndividual(org, owner)) detail = 'no_org'
+  else if (org && !org.verified) detail = 'org_unverified'
+  const individual = isVerifiedIndividual(org, owner)
+  const verified = claimsAuthenticated && !expired && !suspended && (Boolean(org?.verified) || individual)
   const status: CheckStatus = verified ? 'verified' : 'unverified'
+  const subject: AgentCheck['subject'] = !claimsAuthenticated
+    ? null
+    : individual
+      ? 'individual'
+      : org?.verified
+        ? 'organization'
+        : null
   const shownOrg = claimsAuthenticated ? org : org
   return {
     address,
@@ -334,6 +365,7 @@ export function evaluateTrustCheck(input: {
     expired,
     suspended,
     org: shownOrg,
+    subject,
     owner: claimsAuthenticated ? owner : owner,
     scopes: claimsAuthenticated ? scopes : scopes,
     issuedAt,
@@ -346,6 +378,7 @@ export function evaluateTrustCheck(input: {
       org: verified ? org : null,
       owner: verified ? owner : null,
       scopes: verified ? scopes : null,
+      subject: verified ? subject : null,
     }),
     httpStatus: 200,
   }

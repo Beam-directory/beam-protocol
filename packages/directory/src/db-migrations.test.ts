@@ -409,3 +409,80 @@ test('createDatabase adds beam workspace control-plane tables to legacy database
     rmSync(root, { force: true, recursive: true })
   }
 })
+
+test('createDatabase rebuilds a legacy persons table so an individual can omit the organisation', () => {
+  const { root, dbPath } = createTempDbPath()
+  const seeded = createDatabase(dbPath)
+  const now = '2026-10-08T12:00:00.000Z'
+  seeded.prepare(`
+    INSERT INTO orgs (name, display_name, domain, beam_domain, api_key_hash, verification_token, verified, created_at)
+    VALUES ('coppen', 'COPPEN', 'coppen.de', 'coppen.beam.directory', 'hash', 'token', 1, ?)
+  `).run(now)
+  seeded.prepare(`
+    INSERT INTO persons (
+      id, org_name, email, display_name, role, status, kyc_status, rights_json, created_at, subject_kind
+    ) VALUES ('person-clara', 'coppen', 'clara@coppen.de', 'Clara', 'Einkauf', 'active', 'verified', '{"actions":["read"]}', ?, 'organization')
+  `).run(now)
+  seeded.close()
+
+  const legacy = new Database(dbPath)
+  legacy.pragma('foreign_keys = OFF')
+  legacy.pragma('legacy_alter_table = ON')
+  legacy.exec(`
+    ALTER TABLE persons RENAME TO persons_current;
+    CREATE TABLE persons (
+      id TEXT PRIMARY KEY,
+      org_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      supervisor_person_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active',
+      kyc_status TEXT NOT NULL DEFAULT 'unverified',
+      kyc_provider TEXT,
+      kyc_reference TEXT,
+      public_key TEXT,
+      rights_json TEXT NOT NULL DEFAULT '{"actions":[]}',
+      external_source TEXT,
+      external_id TEXT,
+      offboarded_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE
+    );
+    INSERT INTO persons (
+      id, org_name, email, display_name, role, supervisor_person_id, status, kyc_status,
+      kyc_provider, kyc_reference, public_key, rights_json, external_source, external_id, offboarded_at, created_at
+    )
+    SELECT
+      id, org_name, email, display_name, role, supervisor_person_id, status, kyc_status,
+      kyc_provider, kyc_reference, public_key, rights_json, external_source, external_id, offboarded_at, created_at
+    FROM persons_current;
+    DROP TABLE persons_current;
+  `)
+  legacy.close()
+
+  const db = createDatabase(dbPath)
+  try {
+    const columns = db.prepare('PRAGMA table_info(persons)').all() as Array<{ name: string; notnull: number }>
+    const org = columns.find((column) => column.name === 'org_name')
+    assert.equal(org?.notnull, 0)
+    assert.ok(columns.some((column) => column.name === 'subject_kind'))
+    const clara = db.prepare('SELECT email, org_name, subject_kind FROM persons WHERE id = ?').get('person-clara') as {
+      email: string
+      org_name: string
+      subject_kind: string
+    }
+    assert.equal(clara.email, 'clara@coppen.de')
+    assert.equal(clara.org_name, 'coppen')
+    assert.equal(clara.subject_kind, 'organization')
+    db.prepare(`
+      INSERT INTO persons (
+        id, org_name, email, display_name, role, status, kyc_status, rights_json, created_at, subject_kind, beam_handle
+      ) VALUES ('person-private', NULL, 'private@example.com', 'Private', 'individual', 'active', 'unverified', '{"actions":["read"]}', ?, 'individual', 'private')
+    `).run(now)
+    assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), [])
+  } finally {
+    db.close()
+    rmSync(root, { force: true, recursive: true })
+  }
+})
