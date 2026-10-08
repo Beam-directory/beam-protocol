@@ -107,6 +107,7 @@
     "url": "https://github.com/beam-directory/beam-protocol"
   },
   "devDependencies": {
+    "@modelcontextprotocol/client": "^2.2.0",
     "braces": "file:vendor/braces",
     "pixelmatch": "^7.1.0",
     "playwright": "^1.60.0",
