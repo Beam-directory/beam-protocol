@@ -127,6 +127,9 @@ export function updatePersonRecord(
     publicKey?: string | null
   },
 ): PersonRow | null {
+  const current = getPerson(db, id)
+  const nextKey = input.publicKey ?? null
+  const keyChanged = nextKey !== null && nextKey !== (current?.public_key ?? null)
   db.prepare(`
     UPDATE persons
     SET email = ?, display_name = ?, role = ?, supervisor_person_id = ?, rights_json = ?,
@@ -138,9 +141,14 @@ export function updatePersonRecord(
     input.role,
     input.supervisorPersonId,
     JSON.stringify(input.rights),
-    input.publicKey ?? null,
+    nextKey,
     id,
   )
+  if (keyChanged) {
+    // The previous KYC decision does not cover the new key. setPersonKyc also
+    // revokes this person's active mandates once that table exists.
+    setPersonKyc(db, id, { status: 'pending', provider: null, reference: null })
+  }
   return getPerson(db, id)
 }
 

@@ -268,6 +268,34 @@ test('manual KYC review is the only way to mark a person verified', async () => 
     }))
     assert.equal(reviewed.status, 200)
     assert.equal((await reviewed.json() as { person: { kycStatus: string; kycProvider: string } }).person.kycStatus, 'verified')
+
+    const rightsOnly = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ rights: { actions: ['read'] } }),
+    }))
+    assert.equal(rightsOnly.status, 200)
+    assert.equal((await rightsOnly.json() as { person: { kycStatus: string } }).person.kycStatus, 'verified')
+
+    const replacement = publicKeyOf()
+    const swapped = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ publicKey: replacement.publicKey }),
+    }))
+    assert.equal(swapped.status, 200)
+    const swappedPerson = (await swapped.json() as { person: { publicKey: string; kycStatus: string; kycProvider: string | null } }).person
+    assert.equal(swappedPerson.publicKey, replacement.publicKey)
+    assert.equal(swappedPerson.kycStatus, 'pending')
+    assert.equal(swappedPerson.kycProvider, null)
+
+    const sameKey = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ publicKey: replacement.publicKey, rights: { actions: ['read'] } }),
+    }))
+    assert.equal(sameKey.status, 200)
+    assert.equal((await sameKey.json() as { person: { kycStatus: string } }).person.kycStatus, 'pending')
   } finally {
     db.close()
   }
@@ -395,7 +423,9 @@ test('person import upserts by email and only accepts an active supervisor', asy
       body: JSON.stringify({ publicKey: replacement.publicKey }),
     }))
     assert.equal(patched.status, 200)
-    assert.equal((await patched.json() as { person: { publicKey: string } }).person.publicKey, replacement.publicKey)
+    const patchedPerson = (await patched.json() as { person: { publicKey: string; kycStatus: string } }).person
+    assert.equal(patchedPerson.publicKey, replacement.publicKey)
+    assert.equal(patchedPerson.kycStatus, 'pending')
 
     const inactive = await app.request(new Request('http://localhost/orgs/coppen/people/import', {
       method: 'POST',

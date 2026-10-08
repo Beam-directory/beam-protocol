@@ -26,7 +26,7 @@
 - invite employees and accept the invitation with a client-generated public key
 - record KYC through a manual adapter; only an operator review can mark a person verified or rejected
 - import a Personio or Entra snapshot without calling either API; match an existing person by external id or email and update their rights
-- replace an active person's public key or rights with `PATCH /orgs/:name/people/:id`
+- replace an active person's public key or rights with `PATCH /orgs/:name/people/:id`; a new key returns KYC to `pending`
 - reject a child scope that drops a limit the parent still has
 - offboard a person immediately and suspend every agent they are responsible for
 - refuse network connections, websocket sessions, and delegations for a suspended agent or an inactive responsible person
