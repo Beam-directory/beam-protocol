@@ -11,6 +11,17 @@ const stash = path.join(siteRoot, '.asset-stash')
 await mkdir(packageRoot, { recursive: true })
 await cp(path.join(dist, 'index.html'), path.join(packageRoot, 'index.html'))
 
+// Static per-language entries written by the beam-localized-html Vite plugin (see vite.config.ts).
+for (const entry of ['start/index.html', 'de/index.html', 'de/start/index.html']) {
+  await mkdir(path.dirname(path.join(packageRoot, entry)), { recursive: true })
+  await cp(path.join(dist, entry), path.join(packageRoot, entry))
+}
+
+// Files from site/public that Vercel serves from the package root.
+for (const file of ['robots.txt', 'sitemap.xml', 'favicon.svg', 'favicon-32.png', 'apple-touch-icon.png']) {
+  await cp(path.join(dist, file), path.join(packageRoot, file))
+}
+
 const staticAsset = /\.(png|jpe?g|gif|webp|svg|ico)$/i
 const preserved = []
 try {

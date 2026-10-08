@@ -6,8 +6,12 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: Georgia, "Palatino Linotype", Palatino, "Times New Roman", serif;
-    --font-sans: 'Geist Variable', sans-serif;
+    --font-heading: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-mono: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+    --color-beam: var(--beam);
+    --color-beam-2: var(--beam-2);
+    --color-success: var(--success);
     --color-sidebar-ring: var(--sidebar-ring);
     --color-sidebar-border: var(--sidebar-border);
     --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -49,30 +53,33 @@
 }
 
 :root {
-    --background: oklch(0.985 0.004 255);
-    --foreground: oklch(0.22 0.02 255);
-    --card: oklch(0.995 0.002 255);
-    --card-foreground: oklch(0.22 0.02 255);
-    --popover: oklch(0.995 0.002 255);
-    --popover-foreground: oklch(0.22 0.02 255);
-    --primary: oklch(0.34 0.08 255);
-    --primary-foreground: oklch(0.985 0.004 255);
-    --secondary: oklch(0.96 0.008 255);
-    --secondary-foreground: oklch(0.28 0.04 255);
-    --muted: oklch(0.96 0.006 255);
-    --muted-foreground: oklch(0.46 0.02 255);
-    --accent: oklch(0.95 0.012 255);
-    --accent-foreground: oklch(0.28 0.04 255);
+    --background: oklch(0.99 0.002 265);
+    --foreground: oklch(0.17 0.012 265);
+    --card: oklch(1 0 0);
+    --card-foreground: oklch(0.17 0.012 265);
+    --popover: oklch(1 0 0);
+    --popover-foreground: oklch(0.17 0.012 265);
+    --primary: oklch(0.2 0.015 265);
+    --primary-foreground: oklch(0.985 0.002 265);
+    --secondary: oklch(0.965 0.004 265);
+    --secondary-foreground: oklch(0.24 0.015 265);
+    --muted: oklch(0.965 0.004 265);
+    --muted-foreground: oklch(0.47 0.015 265);
+    --accent: oklch(0.955 0.008 265);
+    --accent-foreground: oklch(0.24 0.015 265);
     --destructive: oklch(0.577 0.245 27.325);
-    --border: oklch(0.9 0.012 255);
-    --input: oklch(0.9 0.012 255);
-    --ring: oklch(0.34 0.08 255);
+    --border: oklch(0.915 0.006 265);
+    --input: oklch(0.9 0.008 265);
+    --ring: oklch(0.55 0.2 262);
+    --beam: oklch(0.52 0.22 264);
+    --beam-2: oklch(0.6 0.15 205);
+    --success: oklch(0.52 0.14 155);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
     --chart-4: oklch(0.371 0 0);
     --chart-5: oklch(0.269 0 0);
-    --radius: 0.25rem;
+    --radius: 0.625rem;
     --sidebar: oklch(0.985 0 0);
     --sidebar-foreground: oklch(0.145 0 0);
     --sidebar-primary: oklch(0.205 0 0);
@@ -81,27 +88,31 @@
     --sidebar-accent-foreground: oklch(0.205 0 0);
     --sidebar-border: oklch(0.922 0 0);
     --sidebar-ring: oklch(0.708 0 0);
+    color-scheme: light;
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
-    --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
-    --popover-foreground: oklch(0.985 0 0);
-    --primary: oklch(0.72 0.08 255);
-    --primary-foreground: oklch(0.18 0.03 255);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
+    --background: oklch(0.135 0.01 268);
+    --foreground: oklch(0.97 0.004 265);
+    --card: oklch(0.175 0.012 268);
+    --card-foreground: oklch(0.97 0.004 265);
+    --popover: oklch(0.19 0.012 268);
+    --popover-foreground: oklch(0.97 0.004 265);
+    --primary: oklch(0.97 0.004 265);
+    --primary-foreground: oklch(0.17 0.012 265);
+    --secondary: oklch(0.23 0.012 268);
+    --secondary-foreground: oklch(0.97 0.004 265);
+    --muted: oklch(0.22 0.012 268);
+    --muted-foreground: oklch(0.72 0.012 265);
+    --accent: oklch(0.24 0.014 268);
+    --accent-foreground: oklch(0.97 0.004 265);
     --destructive: oklch(0.704 0.191 22.216);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --border: oklch(1 0 0 / 9%);
+    --input: oklch(1 0 0 / 14%);
+    --ring: oklch(0.72 0.15 262);
+    --beam: oklch(0.72 0.16 262);
+    --beam-2: oklch(0.8 0.12 200);
+    --success: oklch(0.78 0.15 155);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -115,19 +126,181 @@
     --sidebar-accent-foreground: oklch(0.985 0 0);
     --sidebar-border: oklch(1 0 0 / 10%);
     --sidebar-ring: oklch(0.556 0 0);
+    color-scheme: dark;
 }
 
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
+  }
   html {
     @apply font-sans;
-    }
+    scroll-behavior: smooth;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    text-rendering: optimizeLegibility;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-feature-settings: "ss01", "cv11";
+  }
   h1, h2, h3 {
     font-family: var(--font-heading);
-    }
+    letter-spacing: -0.02em;
+  }
+  ::selection {
+    background: color-mix(in oklch, var(--beam) 30%, transparent);
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+  /* Covers transitions and the accordion/spinner animations from tw-animate-css as well. */
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+@layer components {
+  /* Fine grid that fades out towards the edges. */
+  .beam-grid {
+    background-image:
+      linear-gradient(to right, color-mix(in oklch, var(--foreground) 7%, transparent) 1px, transparent 1px),
+      linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 7%, transparent) 1px, transparent 1px);
+    background-size: 48px 48px;
+    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 30%, transparent 75%);
+  }
+
+  /* Soft colour glow behind hero and final call to action. */
+  .beam-glow {
+    background:
+      radial-gradient(40% 50% at 30% 20%, color-mix(in oklch, var(--beam) 32%, transparent), transparent 70%),
+      radial-gradient(35% 45% at 72% 30%, color-mix(in oklch, var(--beam-2) 22%, transparent), transparent 70%);
+    filter: blur(20px);
+  }
+
+  /* Static film grain from an inline SVG, very low opacity. */
+  .beam-noise {
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+    opacity: 0.035;
+    mix-blend-mode: overlay;
+  }
+  .dark .beam-noise {
+    opacity: 0.06;
+  }
+
+  .beam-text-gradient {
+    background-image: linear-gradient(100deg, var(--beam) 10%, var(--beam-2) 90%);
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* Card surface with a hairline highlight on the top edge. */
+  .beam-surface {
+    background:
+      linear-gradient(to bottom, color-mix(in oklch, var(--foreground) 3%, transparent), transparent 40%),
+      var(--card);
+    box-shadow:
+      inset 0 1px 0 0 color-mix(in oklch, var(--foreground) 6%, transparent),
+      0 1px 2px 0 oklch(0 0 0 / 4%);
+  }
+  .dark .beam-surface {
+    box-shadow:
+      inset 0 1px 0 0 oklch(1 0 0 / 6%),
+      0 20px 40px -24px oklch(0 0 0 / 60%);
+  }
+}
+
+/*
+ * Hero animation: Agent A signs, the encrypted packet travels to Agent B,
+ * Agent B checks the chain Firma -> Mensch -> Vollmacht. One 8 s cycle;
+ * staggered steps share the cycle through animation-delay.
+ */
+.beam-demo {
+  --beam-cycle: 8s;
+}
+.beam-track {
+  container-type: inline-size;
+}
+.beam-packet {
+  animation: beam-packet var(--beam-cycle) cubic-bezier(0.65, 0, 0.35, 1) infinite both;
+}
+.beam-track-fill {
+  transform-origin: left;
+  animation: beam-track var(--beam-cycle) cubic-bezier(0.65, 0, 0.35, 1) infinite both;
+}
+.beam-sign {
+  animation: beam-sign var(--beam-cycle) ease-out infinite both;
+}
+.beam-step {
+  animation: beam-step var(--beam-cycle) ease-out infinite both;
+  animation-delay: var(--beam-delay, 0s);
+}
+.beam-step-icon {
+  animation: beam-step-icon var(--beam-cycle) cubic-bezier(0.34, 1.56, 0.64, 1) infinite both;
+  animation-delay: var(--beam-delay, 0s);
+}
+.beam-pulse {
+  animation: beam-pulse 2.4s ease-in-out infinite;
+}
+
+@keyframes beam-sign {
+  0%, 3% { opacity: 0; transform: translateY(4px) scale(0.96); }
+  9%, 90% { opacity: 1; transform: none; }
+  97%, 100% { opacity: 0; transform: none; }
+}
+@keyframes beam-packet {
+  0%, 12% { transform: translateX(0); opacity: 0; }
+  16% { transform: translateX(0); opacity: 1; }
+  50% { transform: translateX(calc(100cqw - 100%)); opacity: 1; }
+  56%, 100% { transform: translateX(calc(100cqw - 100%)); opacity: 0; }
+}
+@keyframes beam-track {
+  0%, 14% { transform: scaleX(0); opacity: 1; }
+  50%, 90% { transform: scaleX(1); opacity: 1; }
+  97%, 100% { transform: scaleX(1); opacity: 0; }
+}
+/* Steps start with their delay and switch off again before the next cycle reaches them. */
+@keyframes beam-step {
+  0% { opacity: 0.45; }
+  3%, 38% { opacity: 1; }
+  44%, 100% { opacity: 0.45; }
+}
+@keyframes beam-step-icon {
+  0% { opacity: 0; transform: scale(0.4); }
+  4%, 38% { opacity: 1; transform: scale(1); }
+  44%, 100% { opacity: 0; transform: scale(0.4); }
+}
+@keyframes beam-pulse {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .beam-packet,
+  .beam-track-fill,
+  .beam-sign,
+  .beam-step,
+  .beam-step-icon,
+  .beam-pulse {
+    animation: none !important;
+  }
+  .beam-packet {
+    transform: translateX(calc(50cqw - 50%));
+  }
+  .beam-sign,
+  .beam-step,
+  .beam-step-icon {
+    opacity: 1;
+    transform: none;
+  }
 }
