@@ -26,6 +26,8 @@ export type TrustAssertion = {
     subject?: 'individual'
     level?: 'person_id_verified' | 'none'
     provider?: 'stripe_identity' | null
+    /** First name and last initial, or the person's Beam address. Never the full family name. */
+    publicName?: string | null
   } | null
   mandate: {
     jti: string
@@ -52,6 +54,37 @@ function personRef(id: string): string {
   return createHash('sha256').update(id).digest('hex')
 }
 
+function labelPart(value: string | null): string | null {
+  if (!value) return null
+  const cleaned = value.replace(/[\u0000-\u001F\u007F]/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!cleaned) return null
+  return cleaned.slice(0, 40)
+}
+
+function familyInitial(family: string): string | null {
+  const first = Array.from(family)[0]
+  if (!first || !/^\p{L}$/u.test(first)) return null
+  return first.toLocaleUpperCase('en-US')
+}
+
+/**
+ * Public label for a private person. Full verified names stay in the directory.
+ * The assertion gets the given name plus the family initial, or the Beam address
+ * when Stripe has not returned both names.
+ */
+export function publicIndividualName(input: {
+  givenName: string | null
+  familyName: string | null
+  beamHandle: string | null
+}): string | null {
+  const given = labelPart(input.givenName)
+  const initial = labelPart(input.familyName) ? familyInitial(labelPart(input.familyName) as string) : null
+  if (given && initial) return `${given} ${initial}.`
+  const handle = input.beamHandle?.trim().toLowerCase() ?? ''
+  if (/^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/.test(handle)) return `${handle}@beam.directory`
+  return null
+}
+
 function personView(person: ReturnType<typeof getPerson>): TrustAssertion['person'] {
   if (!person) return null
   const base = { ref: personRef(person.id), role: person.role, kycStatus: person.kyc_status }
@@ -62,6 +95,11 @@ function personView(person: ReturnType<typeof getPerson>): TrustAssertion['perso
     subject: 'individual' as const,
     level: stripeVerified ? 'person_id_verified' as const : 'none' as const,
     provider: person.kyc_provider === 'stripe_identity' ? 'stripe_identity' as const : null,
+    publicName: publicIndividualName({
+      givenName: person.verified_given_name,
+      familyName: person.verified_family_name,
+      beamHandle: person.beam_handle,
+    }),
   }
 }
 

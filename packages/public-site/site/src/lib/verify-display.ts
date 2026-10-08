@@ -1,4 +1,4 @@
-import type { AgentCheck } from 'beam-protocol-sdk/trust-assertion'
+import { individualOwnerLabel, type AgentCheck } from 'beam-protocol-sdk/trust-assertion'
 
 export function isVerifiedIndividual(result: Pick<AgentCheck, 'verified' | 'subject' | 'org'>): boolean {
   return result.verified === true && result.subject === 'individual' && result.org === null
@@ -16,7 +16,8 @@ export function formatLocalSummary(
 ): string {
   if (result.status === 'rate_limited' || result.status === 'api_error') return result.summary
   if (isVerifiedIndividual(result)) {
-    const owner = result.owner ? `, ${copy.onBehalfOf(result.owner.role)}` : ''
+    const label = individualOwnerLabel(result.owner)
+    const owner = label ? `, ${copy.onBehalfOf(label)}` : ''
     const scopes = result.scopes ? `, ${copy.may(result.scopes.actions.join(', '))}` : ''
     return `${copy.verifiedIndividualPrefix}${owner}${scopes}`
   }

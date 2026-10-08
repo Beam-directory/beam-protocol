@@ -23,6 +23,7 @@ function check(patch: Partial<AgentCheck>): AgentCheck {
       subject: 'individual',
       level: 'person_id_verified',
       provider: 'stripe_identity',
+      publicName: 'Tobias K.',
     },
     scopes: { actions: ['read'], order: null, fileMaxBytes: null },
     issuedAt: '2026-10-08T11:50:00.000Z',
@@ -30,7 +31,7 @@ function check(patch: Partial<AgentCheck>): AgentCheck {
     pinnedKeyId: 'ed25519:test',
     assertionKeyId: 'ed25519:test',
     keyMatchesPin: true,
-    summary: 'verified individual, on behalf of individual, may: read',
+    summary: 'verified individual, on behalf of Tobias K., may: read',
     httpStatus: 200,
     ...patch,
   }
@@ -46,10 +47,16 @@ describe('individual trust display', () => {
     expect(isVerifiedIndividual(individual)).toBe(true)
     const english = formatLocalSummary(individual, en.check)
     const german = formatLocalSummary(individual, de.check)
-    expect(english.startsWith('verified individual')).toBe(true)
-    expect(german.startsWith('geprüfte Privatperson')).toBe(true)
+    expect(english).toBe('verified individual, on behalf of Tobias K., may: read')
+    expect(german).toBe('geprüfte Privatperson, im Auftrag von Tobias K., darf: read')
+    expect(english.includes('on behalf of individual')).toBe(false)
+    expect(german.includes('im Auftrag von individual')).toBe(false)
+    expect(english.includes('Kub')).toBe(false)
+    expect(german.includes('Kub')).toBe(false)
     expect(english.includes('coppen')).toBe(false)
     expect(german.includes('GmbH')).toBe(false)
+    const unnamed = formatLocalSummary(check({ owner: { ...individual.owner!, publicName: null } }), en.check)
+    expect(unnamed).toBe('verified individual, may: read')
     expect(isVerifiedIndividual(check({ org: { name: 'coppen', domain: 'coppen.de', verified: true, level: 'domain', registryStatus: 'none' }, subject: 'organization' }))).toBe(false)
   })
 })

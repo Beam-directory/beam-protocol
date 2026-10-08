@@ -59,6 +59,17 @@ export interface PublicOwner {
   subject: 'individual' | null
   level: 'person_id_verified' | 'none' | null
   provider: 'stripe_identity' | null
+  /** Privacy-friendly label. Null when the assertion has no usable public name. */
+  publicName: string | null
+}
+
+const OWNER_TYPE_TOKENS = new Set(['individual', 'privatperson', 'organization', 'organisation', 'company', 'person', 'none'])
+
+/** Name to show for a private person. Never the role or the type string. */
+export function individualOwnerLabel(owner: Pick<PublicOwner, 'publicName'> | null): string | null {
+  const name = owner?.publicName?.trim() ?? ''
+  if (!name || OWNER_TYPE_TOKENS.has(name.toLowerCase())) return null
+  return name
 }
 
 export interface PublicScopes {
@@ -200,7 +211,8 @@ function parseOwner(value: unknown): PublicOwner | null {
   const subject = value['subject'] === 'individual' ? 'individual' as const : null
   const level = value['level'] === 'person_id_verified' || value['level'] === 'none' ? value['level'] : null
   const provider = value['provider'] === 'stripe_identity' ? 'stripe_identity' as const : null
-  return { role, ref, kycStatus, subject, level, provider }
+  const publicName = individualOwnerLabel({ publicName: cleanText(value['publicName'], 90) })
+  return { role, ref, kycStatus, subject, level, provider, publicName }
 }
 
 function isVerifiedIndividual(org: PublicOrg | null, owner: PublicOwner | null): boolean {
@@ -250,7 +262,8 @@ export function summaryLine(input: {
   if (input.status === 'rate_limited') return 'rate limited — check not completed'
   if (input.status === 'api_error') return 'directory error — check not completed'
   if (input.status === 'verified' && input.subject === 'individual' && !input.org) {
-    const ownerPart = input.owner ? `, on behalf of ${input.owner.role}` : ''
+    const label = individualOwnerLabel(input.owner)
+    const ownerPart = label ? `, on behalf of ${label}` : ''
     const scopePart = input.scopes ? `, may: ${input.scopes.actions.join(', ')}` : ''
     return `verified individual${ownerPart}${scopePart}`.slice(0, 400)
   }

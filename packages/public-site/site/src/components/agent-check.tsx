@@ -8,7 +8,7 @@ import { useI18n } from '@/i18n/context'
 import { SITE_ORIGIN, intlLocale } from '@/i18n/locale'
 import { checkAgentInBrowser, parseBeamAddress } from '@/lib/verify-trust.ts'
 import { formatLocalSummary, isVerifiedIndividual } from '@/lib/verify-display.ts'
-import type { AgentCheck as TrustCheck, PublicOrg, PublicOwner, PublicScopes, VerificationLevel } from 'beam-protocol-sdk/trust-assertion'
+import { individualOwnerLabel, type AgentCheck as TrustCheck, type PublicOrg, type PublicOwner, type PublicScopes, type VerificationLevel } from 'beam-protocol-sdk/trust-assertion'
 
 export const EXAMPLE_AGENTS = [
   'jarvis@coppen.beam.directory',
@@ -393,11 +393,13 @@ function OrgBody({ org, copy }: { org: PublicOrg; copy: ReturnType<typeof useI18
 }
 
 function OwnerBody({ owner, copy }: { owner: PublicOwner; copy: ReturnType<typeof useI18n>['t']['check'] }) {
+  const individual = owner.subject === 'individual'
+  const label = individual ? individualOwnerLabel(owner) : owner.role
   return (
     <div className="flex flex-col gap-1 text-foreground">
-      <p className="font-medium">{owner.role}</p>
+      {label ? <p className="font-medium" data-testid="agent-check-owner">{label}</p> : null}
       <p className="font-mono text-xs">{copy.ref(owner.ref.slice(0, 8))}</p>
-      <p>{copy.personNote}</p>
+      <p>{individual ? copy.personPublicName : copy.personNote}</p>
     </div>
   )
 }

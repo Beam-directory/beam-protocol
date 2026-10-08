@@ -2,10 +2,20 @@ import assert from 'node:assert/strict'
 import { generateKeyPairSync } from 'node:crypto'
 import test from 'node:test'
 import Stripe from 'stripe'
+import { publicIndividualName } from './trust/assertion.js'
 import { signPayload, verifyPayload } from './crypto.js'
 import { createDatabase, markOrgVerified } from './db.js'
 import { createApp } from './server.js'
 import { setStripeIdentitySessionCreatorForTests } from './trust/stripe-identity.js'
+
+test('a public individual name is a first name and last initial, or the Beam address', () => {
+  assert.equal(publicIndividualName({ givenName: 'Tobias', familyName: 'Kub', beamHandle: 'tobias' }), 'Tobias K.')
+  assert.equal(publicIndividualName({ givenName: 'tobias', familyName: 'özdemir', beamHandle: 'tobias' }), 'tobias Ö.')
+  assert.equal(publicIndividualName({ givenName: 'Tobias', familyName: 'Kub', beamHandle: 'tobias' })?.includes('Kub'), false)
+  assert.equal(publicIndividualName({ givenName: 'Tobias', familyName: null, beamHandle: 'tobias' }), 'tobias@beam.directory')
+  assert.equal(publicIndividualName({ givenName: null, familyName: null, beamHandle: 'tobias' }), 'tobias@beam.directory')
+  assert.equal(publicIndividualName({ givenName: 'individual', familyName: null, beamHandle: null }), null)
+})
 
 const WEBHOOK_SECRET = 'whsec_test_mock_secret'
 const SENTINELS = [
@@ -424,7 +434,7 @@ test('three sessions in an hour stop a fourth, and a verified individual asserti
     assert.equal(owned.status, 200)
     const assertion = await owned.json() as {
       org: null
-      person: { subject: string; level: string; provider: string; role: string; kycStatus: string }
+      person: { subject: string; level: string; provider: string; role: string; kycStatus: string; publicName: string }
       mandate: { jti: string } | null
       signature: string
       publicKey: string
@@ -434,9 +444,10 @@ test('three sessions in an hour stop a fourth, and a verified individual asserti
     assert.equal(assertion.person.level, 'person_id_verified')
     assert.equal(assertion.person.provider, 'stripe_identity')
     assert.equal(assertion.person.role, 'individual')
+    assert.equal(assertion.person.publicName, 'Tobias K.')
     assert.equal(assertion.mandate?.jti, 'mandate-within')
     const encoded = JSON.stringify(assertion)
-    assert.equal(encoded.includes('Tobias'), false)
+    assert.equal(encoded.includes('Tobias K.'), true)
     assert.equal(encoded.includes('Kub'), false)
     assert.equal(encoded.includes('coppen'), false)
     const { signature, publicKey, ...unsigned } = assertion

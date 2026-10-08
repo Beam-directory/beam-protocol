@@ -184,7 +184,7 @@ POST /people/individual/agents
 POST /webhooks/stripe/identity
 ```
 
-`POST /people/individual` reserves the address and returns a `beam_person_` API key once. Creating a Stripe session requires that key, is rate-limited, and allows one open session per person. The webhook verifies the Stripe signature on the raw body and is idempotent by event id. On `identity.verification_session.verified` the directory stores the session id, status, verified first and last name, issuing country, verified-at time, and provider `stripe_identity`. It does not store document images, ID numbers, date of birth, or the selfie. A mandate for an individual agent signs `org: null`. The trust assertion then has `person.level` `person_id_verified` and `person.provider` `stripe_identity`, with `org: null`.
+`POST /people/individual` reserves the address and returns a `beam_person_` API key once. Creating a Stripe session requires that key, is rate-limited, and allows one open session per person. The webhook verifies the Stripe signature on the raw body and is idempotent by event id. On `identity.verification_session.verified` the directory stores the session id, status, verified first and last name, issuing country, verified-at time, and provider `stripe_identity`. It does not store document images, ID numbers, date of birth, or the selfie. A mandate for an individual agent signs `org: null`. The trust assertion then has `person.level` `person_id_verified`, `person.provider` `stripe_identity`, and `org: null`. `person.publicName` is the given name plus the family initial. The full verified name stays on the person row and is not copied into the assertion.
 
 ### Organization agents
 

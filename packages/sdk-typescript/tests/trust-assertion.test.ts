@@ -159,6 +159,7 @@ describe('trust assertion verification', () => {
         subject: 'individual',
         level: 'person_id_verified',
         provider: 'stripe_identity',
+        publicName: 'Tobias K.',
       },
       mandate: { jti: 'm-person', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
     }), issuer.privateKey, issuer.publicKey)
@@ -171,8 +172,10 @@ describe('trust assertion verification', () => {
     expect(result.verified).toBe(true)
     expect(result.org).toBeNull()
     expect(result.subject).toBe('individual')
-    expect(result.owner).toMatchObject({ level: 'person_id_verified', provider: 'stripe_identity' })
-    expect(result.summary).toBe('verified individual, on behalf of individual, may: read')
+    expect(result.owner).toMatchObject({ level: 'person_id_verified', provider: 'stripe_identity', publicName: 'Tobias K.', role: 'individual' })
+    expect(result.summary).toBe('verified individual, on behalf of Tobias K., may: read')
+    expect(result.summary.includes('on behalf of individual')).toBe(false)
+    expect(result.summary.includes('Kub')).toBe(false)
     expect(result.summary.includes('coppen')).toBe(false)
 
     const unfinished = signedAssertion(baseUnsigned({
@@ -189,6 +192,31 @@ describe('trust assertion verification', () => {
     expect(plain.verified).toBe(false)
     expect(plain.detail).toBe('no_org')
     expect(plain.summary).toBe('NOT verified — treat as untrusted')
+
+    const nameless = signedAssertion(baseUnsigned({
+      beamId: 'grok@beam.directory',
+      org: null,
+      person: {
+        ref: 'b'.repeat(64),
+        role: 'individual',
+        kycStatus: 'verified',
+        subject: 'individual',
+        level: 'person_id_verified',
+        provider: 'stripe_identity',
+        publicName: 'individual',
+      },
+      mandate: { jti: 'm-person', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
+    }), issuer.privateKey, issuer.publicKey)
+    const hiddenType = await verifyAgent('grok@beam.directory', {
+      directoryUrl: 'https://directory.test',
+      pinnedPublicKey: issuer.publicKey,
+      now: new Date(NOW),
+      fetchImpl: async () => jsonResponse(200, nameless),
+    })
+    expect(hiddenType.verified).toBe(true)
+    expect(hiddenType.owner?.publicName).toBeNull()
+    expect(hiddenType.summary).toBe('verified individual, may: read')
+    expect(hiddenType.summary.includes('on behalf of')).toBe(false)
   })
 
   it('keeps a company assertion on the organisation even if the person also says individual', async () => {

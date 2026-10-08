@@ -95,6 +95,7 @@ test('beam_verify_agent reports a verified individual without a company', async 
       subject: 'individual',
       level: 'person_id_verified',
       provider: 'stripe_identity',
+      publicName: 'Tobias K.',
     },
     mandate: { jti: 'm1', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
     suspended: false,
@@ -111,8 +112,11 @@ test('beam_verify_agent reports a verified individual without a company', async 
   assert.equal(result['verified'], true)
   assert.equal(result['subject'], 'individual')
   assert.equal(result['org'], null)
-  assert.equal(result['summary'], 'verified individual, on behalf of individual, may: read')
+  assert.equal(result['summary'], 'verified individual, on behalf of Tobias K., may: read')
+  assert.equal((result['owner'] as { publicName: string }).publicName, 'Tobias K.')
+  assert.equal(JSON.stringify(result).includes('on behalf of individual'), false)
   assert.equal(JSON.stringify(result).includes('coppen'), false)
+  assert.equal(JSON.stringify(result).includes('Kub'), false)
 
   const tamperedBody = { ...unsigned, signature: flipSignatureByte(signature), publicKey: issuer.publicKey, org: { name: 'Fake GmbH' } }
   const tampered = await checkBeamAgent('grok@beam.directory', (address) => verifyAgent(address, {
