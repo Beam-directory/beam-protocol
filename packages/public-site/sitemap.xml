@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9" xmlns:xhtml="http://www.w3.org/1999/xhtml">
+  <url>
+    <loc>https://beam.directory/</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/" />
+  </url>
+  <url>
+    <loc>https://beam.directory/de</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/" />
+  </url>
+  <url>
+    <loc>https://beam.directory/start</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/start" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de/start" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/start" />
+  </url>
+  <url>
+    <loc>https://beam.directory/de/start</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/start" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de/start" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/start" />
+  </url>
+  <url><loc>https://beam.directory/verzeichnis</loc></url>
+  <url><loc>https://beam.directory/pruefrichtlinien</loc></url>
+  <url><loc>https://beam.directory/siegel-beantragen</loc></url>
+  <url><loc>https://beam.directory/impressum</loc></url>
+</urlset>

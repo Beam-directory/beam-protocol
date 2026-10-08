@@ -76,7 +76,8 @@ export function AgentPage() {
   }
 
   useEffect(() => {
-    void verify()
+    // Deferred so the effect body sets no state synchronously.
+    queueMicrotask(() => void verify())
     // beamId is the only input that should reload the public record.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [beamId])
