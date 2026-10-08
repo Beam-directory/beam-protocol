@@ -23,7 +23,7 @@
 
 ### Trust layer: mandates and recipient acceptance
 - record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified
-- reject a replay of a revoked mandate or delegation; offboarding, a rights cut, and a change of responsible person revoke mandates and delegations that no longer hold
+- reject a replay of a revoked mandate or delegation; offboarding, a rights cut, a key change, and a change of responsible person revoke mandates and delegations that no longer hold
 - let the person, their active supervisor, or the organization key revoke one mandate
 - publish a trust assertion signed by the stable directory issuer for public agents, the agent, accepted contacts, or the organization key; person ids in it are SHA-256 refs and the assertion includes `suspended`
 - let a recipient store acceptance rules for organizations, scopes, agents, and known contacts, bound to a monotonic version, nonce, and timestamp

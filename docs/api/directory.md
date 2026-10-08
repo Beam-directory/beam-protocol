@@ -157,7 +157,7 @@ PATCH /orgs/coppen/people/:id
 { "publicKey": "<ed25519-spki>", "rights": { "actions": ["read"] } }
 ```
 
-The organization API key can replace the public key or the rights of an active person. A different public key returns KYC to `pending` and clears the previous provider reference. Offboarded people return `409 PERSON_OFFBOARDED`.
+The organization API key can replace the public key or the rights of an active person. A different public key returns KYC to `pending`, clears the previous provider reference, and revokes that person's active mandates. Offboarded people return `409 PERSON_OFFBOARDED`.
 
 ```http
 POST /orgs/coppen/people/:id/offboard

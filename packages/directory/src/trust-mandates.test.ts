@@ -618,3 +618,89 @@ test('offboarding and a new responsible person revoke mandates and delegations',
     db.close()
   }
 })
+
+test('replacing a verified person key drops KYC and revokes their mandates', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    const app = createApp(db)
+    const apiKey = await createVerifiedOrg(app, db)
+    const personKey = keypair()
+    const created = await app.request(new Request('http://localhost/orgs/coppen/people', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({
+        email: 'clara@coppen.de',
+        displayName: 'Clara',
+        role: 'Einkauf',
+        publicKey: personKey.publicKey,
+        rights: { actions: ['order'], order: { maxAmount: '100.00', currency: 'EUR' } },
+      }),
+    }))
+    assert.equal(created.status, 201)
+    const personId = (await created.json() as { person: { id: string } }).person.id
+    db.prepare(`UPDATE persons SET kyc_status = 'verified' WHERE id = ?`).run(personId)
+    const agentKey = keypair()
+    const agent = await app.request(new Request('http://localhost/orgs/coppen/agents', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey, 'x-forwarded-for': '203.0.113.64' },
+      body: JSON.stringify({ agentName: 'buyer', publicKey: agentKey.publicKey, responsiblePersonId: personId }),
+    }))
+    assert.equal(agent.status, 201)
+    const beamId = (await agent.json() as { beamId: string }).beamId
+    const mandate = {
+      type: 'mandate' as const,
+      jti: 'mandate-before-key-change',
+      version: 1 as const,
+      personId,
+      agentBeamId: beamId,
+      org: 'coppen',
+      scopes: { actions: ['order'], order: { maxAmount: '40.00', currency: 'EUR' } },
+      expiresAt: '2027-04-01T00:00:00.000Z',
+      escalationPersonId: null,
+    }
+    const posted = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/mandates`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jti: mandate.jti,
+        scopes: mandate.scopes,
+        expiresAt: mandate.expiresAt,
+        escalationPersonId: null,
+        signature: signPayload(mandate, personKey.privateKey),
+      }),
+    }))
+    assert.equal(posted.status, 201)
+
+    const replacement = keypair()
+    const swapped = await app.request(new Request(`http://localhost/orgs/coppen/people/${personId}`, {
+      method: 'PATCH',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey },
+      body: JSON.stringify({ publicKey: replacement.publicKey }),
+    }))
+    assert.equal(swapped.status, 200)
+    const swappedPerson = (await swapped.json() as { person: { kycStatus: string; publicKey: string } }).person
+    assert.equal(swappedPerson.publicKey, replacement.publicKey)
+    assert.equal(swappedPerson.kycStatus, 'pending')
+    assert.equal((db.prepare(`SELECT status FROM mandates WHERE jti = 'mandate-before-key-change'`).get() as { status: string }).status, 'revoked')
+
+    const next = {
+      ...mandate,
+      jti: 'mandate-after-key-change',
+    }
+    const resigned = await app.request(new Request(`http://localhost/agents/${encodeURIComponent(beamId)}/mandates`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        jti: next.jti,
+        scopes: next.scopes,
+        expiresAt: next.expiresAt,
+        escalationPersonId: null,
+        signature: signPayload(next, replacement.privateKey),
+      }),
+    }))
+    assert.equal(resigned.status, 400)
+    assert.equal((await resigned.json() as { errorCode: string }).errorCode, 'KYC_REQUIRED')
+  } finally {
+    db.close()
+  }
+})
