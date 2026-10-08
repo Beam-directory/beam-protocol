@@ -17,6 +17,7 @@ import { loadBeamMcpHttpConfig, type BeamMcpHttpConfig } from './http-config.js'
 import { createBeamNetworkGateway, type BeamNetworkGateway } from './network-client.js'
 import { IntrospectionTokenVerifier, loadOAuthAuthorizationServerMetadata } from './oauth.js'
 import { createBeamMcpServer, type BeamMcpAuditEvent } from './server.js'
+import { verifyAgentWithDirectory, type BeamAgentVerifier } from './verify-agent.js'
 import type { BeamGateway } from './tools.js'
 
 const MAX_MCP_REQUEST_BYTES = 1024 * 1024
@@ -128,6 +129,7 @@ export function createBeamMcpHttpHandler(options: {
   requireVerifiedTarget: boolean
   minimumVerificationTier: VerificationTier
   minimumTrustScore: number
+  verifyAgent?: BeamAgentVerifier
   auditSink?: (record: BeamMcpRemoteAuditRecord) => void
 }): McpHttpHandler {
   const requiredScopes = ['beam:read']
@@ -157,6 +159,7 @@ export function createBeamMcpHttpHandler(options: {
     authorizationScopes: new Set(context.authInfo?.scopes ?? []),
     enableSend: options.config.enableSend,
     sendLimitPerHour: options.config.sendLimitPerHour,
+    verifyAgent: options.verifyAgent,
     audit: (event) => {
       const record = createAuditRecord(context.authInfo, event)
       if (options.auditSink) options.auditSink(record)
@@ -234,6 +237,7 @@ export async function startBeamMcpHttpServer(): Promise<{ server: HttpServer; cl
     requireVerifiedTarget: beamConfig.requireVerifiedTarget,
     minimumVerificationTier: beamConfig.minimumVerificationTier,
     minimumTrustScore: beamConfig.minimumTrustScore,
+    verifyAgent: verifyAgentWithDirectory(beamConfig.directoryUrl),
   })
   const nodeHandler = toNodeHandler(handler, {
     onerror: (error) => process.stderr.write(`[beam-mcp-http] adapter error: ${error.message}\n`),

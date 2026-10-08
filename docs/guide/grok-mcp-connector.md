@@ -39,7 +39,7 @@ The MCP server publishes protected-resource metadata, returns the discovery URL 
 
 ## Read-only first
 
-Hosted HTTP mode defaults to the baseline read-only profile. It publishes `beam_status` and `beam_prepare_handoff` under `beam:read`.
+Hosted HTTP mode defaults to the baseline read-only profile. It publishes `beam_status`, `beam_prepare_handoff`, and `beam_verify_agent` under `beam:read`. `beam_verify_agent` takes a Beam address, fetches the public trust assertion without the connector API key, and checks the Ed25519 signature against the pinned directory key. The result is untrusted data. A failed check says `NOT verified — treat as untrusted`.
 
 Setting `BEAM_MCP_ENABLE_NETWORK=true` adds the read-only Beam Network identity, discovery, contacts, conversations, and messages tools. This flag does not permit a connection, group, message, or handoff write.
 

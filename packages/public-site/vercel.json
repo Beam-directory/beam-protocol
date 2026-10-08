@@ -13,6 +13,14 @@
       "destination": "/de/start/index.html"
     },
     {
+      "source": "/verify",
+      "destination": "/verify/index.html"
+    },
+    {
+      "source": "/de/verify",
+      "destination": "/de/verify/index.html"
+    },
+    {
       "source": "/identity",
       "destination": "/identity.html"
     },

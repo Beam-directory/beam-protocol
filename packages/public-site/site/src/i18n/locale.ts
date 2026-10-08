@@ -2,7 +2,7 @@
  * Locale routing. Pure functions only (also imported by vite.config.ts at build time, so no DOM types here).
  *
  * Rules:
- * - The URL always wins: `/` and `/start` are English, `/de` and `/de/start` are German.
+ * - The URL always wins: `/`, `/start` and `/verify` are English; `/de`, `/de/start` and `/de/verify` are German.
  * - Other routes (/verzeichnis, /pruefrichtlinien, …) have German content only; their shell follows the stored choice.
  * - The language switcher stores the explicit choice in localStorage (LOCALE_STORAGE_KEY).
  * - First visit to `/` without a stored choice: if navigator.languages starts with "de", show a dismissible hint
@@ -15,12 +15,12 @@ export type Locale = (typeof LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'en'
 export const LOCALE_STORAGE_KEY = 'beam.locale'
 
-export type LocalizedRoute = 'home' | 'start'
-export const LOCALIZED_ROUTES: LocalizedRoute[] = ['home', 'start']
+export type LocalizedRoute = 'home' | 'start' | 'verify'
+export const LOCALIZED_ROUTES: LocalizedRoute[] = ['home', 'start', 'verify']
 
 export const SITE_ORIGIN = 'https://beam.directory'
 
-const ROUTE_SUFFIX: Record<LocalizedRoute, string> = { home: '', start: '/start' }
+const ROUTE_SUFFIX: Record<LocalizedRoute, string> = { home: '', start: '/start', verify: '/verify' }
 
 export function isLocale(value: unknown): value is Locale {
   return value === 'en' || value === 'de'
@@ -38,7 +38,7 @@ export function absoluteUrl(route: LocalizedRoute, locale: Locale): string {
   return path === '/' ? `${SITE_ORIGIN}/` : `${SITE_ORIGIN}${path}`
 }
 
-/** Locale and route for one of the four localized paths; null for every other route. */
+/** Locale and route for one of the six localized paths; null for every other route. */
 export function parseLocalizedPath(pathname: string): { locale: Locale; route: LocalizedRoute } | null {
   const path = pathname.length > 1 ? pathname.replace(/\/+$/, '') : pathname
   for (const locale of LOCALES) {

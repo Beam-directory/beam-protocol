@@ -36,12 +36,14 @@ describe('dictionaries', () => {
 })
 
 describe('locale routing', () => {
-  it('maps the four localized paths', () => {
+  it('maps the six localized paths', () => {
     expect(parseLocalizedPath('/')).toEqual({ locale: 'en', route: 'home' })
     expect(parseLocalizedPath('/start')).toEqual({ locale: 'en', route: 'start' })
+    expect(parseLocalizedPath('/verify')).toEqual({ locale: 'en', route: 'verify' })
     expect(parseLocalizedPath('/de')).toEqual({ locale: 'de', route: 'home' })
     expect(parseLocalizedPath('/de/')).toEqual({ locale: 'de', route: 'home' })
     expect(parseLocalizedPath('/de/start')).toEqual({ locale: 'de', route: 'start' })
+    expect(parseLocalizedPath('/de/verify')).toEqual({ locale: 'de', route: 'verify' })
     expect(parseLocalizedPath('/verzeichnis')).toBeNull()
     expect(parseLocalizedPath('/agents/a%40b.beam.directory')).toBeNull()
   })
@@ -49,7 +51,9 @@ describe('locale routing', () => {
   it('builds paths and switcher targets', () => {
     expect(pathFor('home', 'en')).toBe('/')
     expect(pathFor('start', 'de')).toBe('/de/start')
+    expect(pathFor('verify', 'de')).toBe('/de/verify')
     expect(switchPath('/start', 'de')).toBe('/de/start')
+    expect(switchPath('/verify', 'de')).toBe('/de/verify')
     expect(switchPath('/de', 'en')).toBe('/')
     expect(switchPath('/verzeichnis', 'en')).toBe('/verzeichnis')
   })
@@ -105,7 +109,17 @@ describe('per-language head', () => {
 
   it('escapes HTML and lists one output file per locale and route', () => {
     expect(renderHeadTags(headData('en', 'home'))).not.toMatch(/content="[^"]*<[^"]*"/)
-    expect(HTML_VARIANTS.map((variant) => variant.file).sort()).toEqual(['de/index.html', 'de/start/index.html', 'index.html', 'start/index.html'])
+    expect(HTML_VARIANTS.map((variant) => variant.file).sort()).toEqual([
+      'de/index.html',
+      'de/start/index.html',
+      'de/verify/index.html',
+      'index.html',
+      'start/index.html',
+      'verify/index.html',
+    ])
+    expect(headData('en', 'verify').canonical).toBe('https://beam.directory/verify')
+    expect(headData('de', 'verify').title).toBe('Ist dieser Agent echt? – Beam')
+    expect(renderHeadTags(headData('de', 'verify'))).toContain('content="https://beam.directory/de/verify"')
   })
 
   it('fails loudly without markers', () => {

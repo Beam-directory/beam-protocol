@@ -9,6 +9,7 @@ The server offers:
 
 - `beam_status`: read public directory and trust metadata;
 - `beam_prepare_handoff`: validate the target and preview a handoff without sending it;
+- `beam_verify_agent`: fetch one public trust assertion and verify its Ed25519 signature against the pinned directory key; available in the read-only profile with Network and send off;
 - `beam_network_identity`, `beam_network_discover`, and `beam_network_connections`: inspect the connected identity, find identities, and list contacts or pending requests;
 - `beam_network_conversations` and `beam_network_messages`: read the direct/group inbox and a selected conversation;
 - `beam_send`: deliver only when the deployment enables send, OAuth grants `beam:send`, the target passes operator policy, and the exact call has `confirmed=true` after human approval;

@@ -4,6 +4,7 @@ import { SiteShell } from '@/components/site-shell'
 import { I18nProvider } from '@/i18n/context'
 import { LandingPage } from '@/pages/landing-page'
 import { StartPage } from '@/pages/start-page'
+import { VerifyPage } from '@/pages/verify-page'
 
 // Landing and onboarding (the localized routes) ship in the main bundle, so they render without a layout shift.
 // The German-only pages load on demand.
@@ -29,6 +30,8 @@ export default function App() {
               <Route path="/de" element={<LandingPage />} />
               <Route path="/start" element={<StartPage />} />
               <Route path="/de/start" element={<StartPage />} />
+              <Route path="/verify" element={<VerifyPage />} />
+              <Route path="/de/verify" element={<VerifyPage />} />
               {/* German-only pages, unchanged. */}
               <Route path="/siegel-beantragen" element={<ApplyPage />} />
               <Route path="/verzeichnis" element={<DirectoryPage />} />

@@ -51,3 +51,29 @@ export type {
   Proof,
 } from './did.js'
 export * from './key-management.js'
+export { verifyAgent, spkiKeyId, verifyEd25519Spki } from './verify-agent.js'
+export type { VerifyAgentOptions } from './verify-agent.js'
+export {
+  DIRECTORY_SIGNING_PUBLIC_KEY,
+  DEFAULT_DIRECTORY_URL,
+  BEAM_ADDRESS_PATTERN,
+  assertionSigningText,
+  canonicalizeJson,
+  decodeBase64,
+  encodeBase64,
+  evaluateTrustCheck,
+  flipSignatureByte,
+  keyIdFromSha256Hex,
+  parseBeamAddress,
+  summaryLine,
+} from './trust-assertion.js'
+export type {
+  AgentCheck,
+  CheckDetail,
+  CheckStatus,
+  PublicOrg,
+  PublicOwner,
+  PublicScopes,
+  SignatureStatus,
+  VerificationLevel,
+} from './trust-assertion.js'

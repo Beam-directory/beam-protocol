@@ -18,6 +18,16 @@ A Beam ID is an address and signing identity. It is not by itself proof of a
 human identity, employment relationship, company authority, or permission to
 take an external action.
 
+Anyone can check a public address without an account. `GET /agents/:beamId/trust-assertion`
+returns a directory-signed document. `verifyAgent(address)` in `beam-protocol-sdk`,
+the page at `/verify`, and the MCP tool `beam_verify_agent` all verify that
+Ed25519 signature against the pinned directory key. A valid signature and
+`org.verified: true` is a domain check of the organisation named in the
+assertion. It is not a registry approval unless `registryStatus` is `approved`,
+and it is not permission to act. An unlisted address and an address with no
+organisation record both fail the check. Live examples that are unlisted return
+404, the same response as an unknown address.
+
 ## Assurance ladder
 
 | Level | Evidence | Suitable use |

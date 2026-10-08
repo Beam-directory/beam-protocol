@@ -1,10 +1,10 @@
 /**
  * Per-language <head> for the localized routes. Pure (no DOM): used at build time by vite.config.ts to write
- * static HTML for crawlers (/, /start, /de, /de/start) and at runtime by document-head.ts.
+ * static HTML for crawlers (/, /start, /verify, /de, /de/start, /de/verify) and at runtime by document-head.ts.
  */
 import { de } from './de.ts'
 import { en, type Messages } from './en.ts'
-import { LOCALES, SITE_ORIGIN, absoluteUrl, pathFor, type Locale, type LocalizedRoute } from './locale.ts'
+import { LOCALES, LOCALIZED_ROUTES, SITE_ORIGIN, absoluteUrl, pathFor, type Locale, type LocalizedRoute } from './locale.ts'
 
 export const DICTIONARIES: Record<Locale, Messages> = { en, de }
 
@@ -30,15 +30,26 @@ export interface HeadData {
   ogImageAlt: string
 }
 
+function pageCopy(locale: Locale, route: LocalizedRoute): { title: string; description: string; ogImageAlt: string } {
+  const t = DICTIONARIES[locale]
+  if (route === 'start') {
+    return { title: t.meta.start.title, description: t.meta.start.description, ogImageAlt: t.meta.home.ogImageAlt }
+  }
+  if (route === 'verify') {
+    return { title: t.meta.verify.title, description: t.meta.verify.description, ogImageAlt: t.meta.verify.ogImageAlt }
+  }
+  return { title: t.meta.home.title, description: t.meta.home.description, ogImageAlt: t.meta.home.ogImageAlt }
+}
+
 export function headData(locale: Locale, route: LocalizedRoute): HeadData {
   const t = DICTIONARIES[locale]
   const other: Locale = locale === 'en' ? 'de' : 'en'
-  const page = route === 'home' ? t.meta.home : t.meta.start
+  const page = pageCopy(locale, route)
   return {
     locale,
     route,
     title: page.title,
-    description: route === 'home' ? t.meta.home.description : t.meta.start.description,
+    description: page.description,
     canonical: absoluteUrl(route, locale),
     alternates: [
       ...LOCALES.map((code) => ({ hreflang: code, href: absoluteUrl(route, code) })),
@@ -47,7 +58,7 @@ export function headData(locale: Locale, route: LocalizedRoute): HeadData {
     ogLocale: t.meta.ogLocale,
     ogLocaleAlternate: DICTIONARIES[other].meta.ogLocale,
     ogImage: OG_IMAGE[locale],
-    ogImageAlt: t.meta.home.ogImageAlt,
+    ogImageAlt: page.ogImageAlt,
   }
 }
 
@@ -102,7 +113,7 @@ export function applyHeadToHtml(html: string, locale: Locale, route: LocalizedRo
 
 /** Output files for the static per-language entries, relative to the build directory. */
 export const HTML_VARIANTS: { file: string; locale: Locale; route: LocalizedRoute }[] = LOCALES.flatMap((locale) =>
-  (['home', 'start'] as LocalizedRoute[]).map((route) => {
+  LOCALIZED_ROUTES.map((route) => {
     const path = pathFor(route, locale)
     return { file: path === '/' ? 'index.html' : `${path.slice(1)}/index.html`, locale, route }
   }),

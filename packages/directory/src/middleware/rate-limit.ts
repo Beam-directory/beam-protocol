@@ -74,7 +74,9 @@ function isTrusted(policy: PublicEndpointShieldPolicy, ip: string, beamId?: stri
 
 function createLookupBucket(path: string, ip: string, policy: PublicEndpointShieldPolicy): BucketSpec | null {
   const reserved = new Set(['search', 'browse', 'stats', 'verify', 'verify-email'])
-  const match = /^\/agents\/([^/]+)$/.exec(path) ?? /^\/agents\/([^/]+)\/seal\.svg$/.exec(path)
+  const match = /^\/agents\/([^/]+)$/.exec(path)
+    ?? /^\/agents\/([^/]+)\/seal\.svg$/.exec(path)
+    ?? /^\/agents\/([^/]+)\/trust-assertion$/.exec(path)
   if (!match || reserved.has(match[1] ?? '')) {
     return null
   }

@@ -258,7 +258,7 @@ try {
   connected = { client, transport }
 
   const tools = await client.listTools()
-  assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), ['beam_prepare_handoff', 'beam_status'])
+  assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), ['beam_prepare_handoff', 'beam_status', 'beam_verify_agent'])
   const status = await client.callTool({ name: 'beam_status', arguments: { target: targetBeamId } })
   assert.equal(status.isError, undefined)
   const target = status.structuredContent.target

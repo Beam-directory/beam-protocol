@@ -35,7 +35,7 @@ function completeEvidence() {
       healthStatus: 200,
       protectedResourceMetadataStatus: 200,
       unauthenticatedMcpStatus: 401,
-      toolNames: ['beam_status', 'beam_prepare_handoff'],
+      toolNames: ['beam_prepare_handoff', 'beam_status', 'beam_verify_agent'],
       beamSendAdvertised: false,
       messageSent: false,
       targetLookupSucceeded: true,
@@ -64,7 +64,7 @@ test('MCP pilot evidence passes only for a fresh external read-only Grok connect
   const result = evaluateMcpPilotEvidence(completeEvidence(), config(), now)
   assert.equal(result.ok, true)
   assert.deepEqual(result.failures, [])
-  assert.equal(result.counts.tools, 2)
+  assert.equal(result.counts.tools, 3)
   assert.equal(result.counts.hashedArtifacts, 6)
 })
 

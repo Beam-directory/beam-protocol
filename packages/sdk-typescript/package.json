@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./trust-assertion": {
+      "types": "./dist/trust-assertion.d.ts",
+      "import": "./dist/trust-assertion.js"
     }
   },
   "scripts": {
