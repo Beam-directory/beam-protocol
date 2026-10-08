@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { CheckIcon, CopyIcon } from 'lucide-react'
 import { Tabs as TabsPrimitive } from 'radix-ui'
+import { useI18n } from '@/i18n/context'
 
 export type Snippet = { id: string; label: string; code: string }
 
@@ -18,6 +19,7 @@ function CodeLines({ code }: { code: string }) {
 }
 
 export function CodeWindow({ snippets, label }: { snippets: Snippet[]; label: string }) {
+  const { t } = useI18n()
   const [active, setActive] = useState(snippets[0]?.id ?? '')
   const [copied, setCopied] = useState(false)
 
@@ -62,17 +64,17 @@ export function CodeWindow({ snippets, label }: { snippets: Snippet[]; label: st
         <button
           type="button"
           onClick={() => void copy()}
-          aria-label="Code kopieren"
+          aria-label={t.common.copyCode}
           className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
         >
           {copied ? <CheckIcon aria-hidden="true" className="size-3.5 text-success" /> : <CopyIcon aria-hidden="true" className="size-3.5" />}
-          <span aria-hidden="true" className="hidden sm:inline">{copied ? 'Kopiert' : 'Kopieren'}</span>
+          <span aria-hidden="true" className="hidden sm:inline">{copied ? t.common.copied : t.common.copy}</span>
         </button>
-        <span className="sr-only" aria-live="polite">{copied ? 'In die Zwischenablage kopiert' : ''}</span>
+        <span className="sr-only" aria-live="polite">{copied ? t.common.copiedToClipboard : ''}</span>
       </div>
       {snippets.map((snippet) => (
         <TabsPrimitive.Content key={snippet.id} value={snippet.id} className="outline-none">
-          <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-6 sm:p-5" tabIndex={0} aria-label={`Code: ${snippet.label}`}>
+          <pre className="overflow-x-auto p-4 font-mono text-[12.5px] leading-6 sm:p-5" tabIndex={0} aria-label={t.common.codeLabel(snippet.label)}>
             <code>
               <CodeLines code={snippet.code} />
             </code>

@@ -87,8 +87,8 @@ describe('mandate draft', () => {
 
   it('marks the preview as not issued', () => {
     const preview = mandatePreview({ ...EMPTY_MANDATE, order: true, orderLimitEur: '500', escalateTo: 'Leitung' }, 'a@firma.beam.directory')
-    expect(preview.status).toBe('Entwurf, nicht ausgestellt')
-    expect(preview.scopes).toContainEqual({ scope: 'bestellen', maxBetragEur: 500 })
+    expect(preview.status).toBe('draft-not-issued')
+    expect(preview.scopes).toContainEqual({ scope: 'order', maxAmountEur: 500 })
   })
 })
 

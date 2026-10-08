@@ -2,6 +2,7 @@ import { useId, useState, type ReactNode } from 'react'
 import { AlertTriangleIcon, CheckIcon, CircleDashedIcon, CopyIcon, InfoIcon, LoaderCircleIcon } from 'lucide-react'
 import { cn } from 'cn'
 import { Input } from '@/components/ui/input'
+import { useI18n } from '@/i18n/context'
 
 export function Panel({ title, badge, children, className, id }: { title: string; badge?: ReactNode; children: ReactNode; className?: string; id?: string }) {
   const headingId = useId()
@@ -16,20 +17,22 @@ export function Panel({ title, badge, children, className, id }: { title: string
   )
 }
 
-export function LiveBadge({ children = 'Verfügbar' }: { children?: ReactNode }) {
+export function LiveBadge({ children }: { children?: ReactNode }) {
+  const { t } = useI18n()
   return (
     <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
       <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-      {children}
+      {children ?? t.common.available}
     </span>
   )
 }
 
 export function SoonBadge() {
+  const { t } = useI18n()
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-xs font-medium text-muted-foreground">
+    <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-2 py-0.5 text-xs font-medium whitespace-nowrap text-muted-foreground">
       <CircleDashedIcon aria-hidden="true" className="size-3" />
-      Bald verfügbar
+      {t.common.comingSoon}
     </span>
   )
 }
@@ -116,6 +119,7 @@ export function TextField({
 }
 
 export function CopyField({ label, value, secret = false }: { label: string; value: string; secret?: boolean }) {
+  const { t } = useI18n()
   const [copied, setCopied] = useState(false)
   const [revealed, setRevealed] = useState(!secret)
 
@@ -138,20 +142,20 @@ export function CopyField({ label, value, secret = false }: { label: string; val
         </code>
         {secret ? (
           <button type="button" onClick={() => setRevealed((open) => !open)} className="shrink-0 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">
-            {revealed ? 'Verbergen' : 'Anzeigen'}
+            {revealed ? t.common.hide : t.common.show}
           </button>
         ) : null}
         <button
           type="button"
           onClick={() => void copy()}
-          aria-label={`${label} kopieren`}
+          aria-label={t.common.copyLabel(label)}
           className="inline-flex shrink-0 items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           {copied ? <CheckIcon aria-hidden="true" className="size-3.5 text-success" /> : <CopyIcon aria-hidden="true" className="size-3.5" />}
-          <span className="hidden sm:inline">{copied ? 'Kopiert' : 'Kopieren'}</span>
+          <span aria-hidden="true" className="hidden sm:inline">{copied ? t.common.copied : t.common.copy}</span>
         </button>
       </div>
-      <span className="sr-only" aria-live="polite">{copied ? `${label} kopiert` : ''}</span>
+      <span className="sr-only" aria-live="polite">{copied ? t.common.copiedLabel(label) : ''}</span>
     </div>
   )
 }

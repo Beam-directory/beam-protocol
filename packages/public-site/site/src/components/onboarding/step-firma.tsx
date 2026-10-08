@@ -4,6 +4,8 @@ import { Button } from '@/components/ui/button'
 import { ComingSoonCard } from '@/components/onboarding/coming-soon'
 import { CopyField, LiveBadge, Notice, Panel, Spinner, StatusBadge, TextField, downloadJson } from '@/components/onboarding/primitives'
 import type { StepProps } from '@/components/onboarding/types'
+import { useI18n } from '@/i18n/context'
+import { intlLocale } from '@/i18n/locale'
 import { checkDomainVerification, classifyOrgConflict, createOrg, describeError, getOrg, type OrgRecord } from '@/lib/onboarding-api'
 import {
   deriveOrgName,
@@ -13,18 +15,15 @@ import {
   validateDomain,
   validateRegistration,
   type RegistryCountry,
+  type ValidationKey,
 } from '@/lib/onboarding-steps'
 
-function formatDateTime(value: string | null): string | null {
-  if (!value) return null
-  const date = new Date(value)
-  return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' }).format(date)
-}
-
 export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) {
+  const { t, locale } = useI18n()
+  const copy = t.onboarding.firma
   const [pending, setPending] = useState<'claim' | 'check' | 'resume' | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [fieldErrors, setFieldErrors] = useState<{ displayName?: string | null; domain?: string | null }>({})
+  const [fieldErrors, setFieldErrors] = useState<{ displayName?: ValidationKey | null; domain?: ValidationKey | null }>({})
   const [dnsResult, setDnsResult] = useState<{ records: string[] } | null>(null)
   const [resumeMode, setResumeMode] = useState(false)
   const [resumeName, setResumeName] = useState(progress.orgName)
@@ -35,6 +34,12 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
   const orgName = deriveOrgName(progress.domain)
   const claimed = Boolean(progress.orgName && secrets.orgApiKey)
   const needsResume = Boolean(progress.orgName && !secrets.orgApiKey)
+
+  function formatDateTime(value: string | null): string | null {
+    if (!value) return null
+    const date = new Date(value)
+    return Number.isNaN(date.getTime()) ? null : new Intl.DateTimeFormat(intlLocale(locale), { dateStyle: 'medium', timeStyle: 'short' }).format(date)
+  }
 
   function applyOrg(org: OrgRecord) {
     update({
@@ -65,7 +70,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         return
       }
       setSuggestion(conflict === 'name' && !isSuggestion ? suggestDisambiguatedOrgName(progress.domain) : null)
-      setError(describeError(claimError))
+      setError(describeError(claimError, t.errors))
     } finally {
       setPending(null)
     }
@@ -83,7 +88,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
   async function onResume(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!resumeName.trim() || !resumeKey.trim()) {
-      setError('Bitte Namensraum und Org-Schlüssel angeben.')
+      setError(copy.enterBoth)
       return
     }
     setPending('resume')
@@ -95,7 +100,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
       setResumeMode(false)
       setResumeKey('')
     } catch (resumeError) {
-      setError(describeError(resumeError))
+      setError(describeError(resumeError, t.errors))
     } finally {
       setPending(null)
     }
@@ -114,7 +119,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         setDnsResult({ records: result.records })
       }
     } catch (checkError) {
-      setError(describeError(checkError))
+      setError(describeError(checkError, t.errors))
     } finally {
       setPending(null)
     }
@@ -128,7 +133,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
       org: progress.orgName,
       domain: progress.domain,
       apiKey: secrets.orgApiKey,
-      notice: 'Org-Schlüssel. Vertraulich behandeln. Beam zeigt ihn nur einmal an und speichert ihn nicht im Klartext.',
+      notice: copy.orgKeyFileNotice,
     })
     setSecrets({ orgKeySaved: true })
   }
@@ -136,37 +141,35 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
   const registryError = progress.registrationNumber || progress.legalName
     ? validateRegistration(progress.registryCountry, progress.registrationNumber, progress.legalName)
     : null
+  const expires = formatDateTime(progress.claimExpiresAt)
 
   return (
     <div className="flex flex-col gap-5">
-      <Panel title="Domain bestätigen" badge={progress.orgVerified ? <StatusBadge tone="success">Domain verifiziert</StatusBadge> : <LiveBadge />}>
+      <Panel title={copy.domainPanel} badge={progress.orgVerified ? <StatusBadge tone="success">{copy.domainVerified}</StatusBadge> : <LiveBadge />}>
         {!claimed && !resumeMode ? (
           needsResume ? (
-            <Notice tone="warning" title="Sitzung fortsetzen">
-              Der Org-Schlüssel für <span className="font-mono text-foreground">{progress.orgName}</span> wird aus Sicherheitsgründen nicht gespeichert.
-              Gib ihn erneut ein, um weiterzumachen.
+            <Notice tone="warning" title={copy.resumeTitle}>
+              {copy.resumeBefore} <span className="font-mono text-foreground">{progress.orgName}</span> {copy.resumeAfter}
               <div className="mt-2">
-                <Button type="button" variant="outline" className="h-8 rounded-full px-3" onClick={() => setResumeMode(true)}>Org-Schlüssel eingeben</Button>
+                <Button type="button" variant="outline" className="h-8 rounded-full px-3" onClick={() => setResumeMode(true)}>{copy.enterOrgKey}</Button>
               </div>
             </Notice>
           ) : (
             <form onSubmit={onClaim} className="flex flex-col gap-4" noValidate>
-              <p className="text-sm leading-6 text-muted-foreground">
-                Beam legt einen Namensraum für deine Firma an und gibt dir einen DNS-TXT-Eintrag. Sobald er gefunden wird, gilt die Domain als bestätigt.
-              </p>
+              <p className="text-sm leading-6 text-muted-foreground">{copy.claimIntro}</p>
               <div className="grid gap-4 sm:grid-cols-2">
                 <TextField
                   id="org-display-name"
-                  label="Firmenname"
+                  label={copy.companyName}
                   value={progress.displayName}
                   onChange={(value) => update({ displayName: value })}
                   autoComplete="organization"
-                  placeholder="Firma GmbH"
-                  error={fieldErrors.displayName}
+                  placeholder={copy.companyPlaceholder}
+                  error={fieldErrors.displayName ? t.validation[fieldErrors.displayName] : null}
                 />
                 <TextField
                   id="org-domain"
-                  label="Domain"
+                  label={copy.domain}
                   value={progress.domain}
                   onChange={(value) => {
                     update({ domain: value })
@@ -175,34 +178,33 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                   }}
                   inputMode="url"
                   autoComplete="url"
-                  placeholder="firma.de"
-                  error={fieldErrors.domain}
-                  description={orgName ? <>Namensraum: <span className="font-mono text-foreground">{orgName}</span>, Agenten heißen dann name@{orgName}.beam.directory</> : 'Die Domain, für die du DNS-Einträge setzen kannst.'}
+                  placeholder={copy.domainPlaceholder}
+                  error={fieldErrors.domain ? t.validation[fieldErrors.domain] : null}
+                  description={orgName ? <>{copy.namespaceLabel} <span className="font-mono text-foreground">{orgName}</span>{copy.agentsNamed(orgName)}</> : copy.domainHelp}
                 />
               </div>
               {error ? <Notice tone="error">{error}</Notice> : null}
               {suggestion && !suffixUnsupported ? (
                 <div className="flex flex-col items-start gap-2 rounded-xl border p-3.5 text-sm">
                   <p className="text-muted-foreground">
-                    Vorschlag für einen eigenen Namensraum: <span className="font-mono text-foreground">{suggestion}</span>, Agenten heißen dann
-                    name@{suggestion}.beam.directory.
+                    {copy.suggestionLead} <span className="font-mono text-foreground">{suggestion}</span>{copy.agentsNamed(suggestion)}.
                   </p>
                   <Button type="button" variant="outline" className="h-9 rounded-full px-4" disabled={pending !== null} onClick={() => void claimWith(suggestion, true)}>
-                    {pending === 'claim' ? <Spinner label="Wird angelegt" /> : <>Als {suggestion} anlegen</>}
+                    {pending === 'claim' ? <Spinner label={copy.creating} /> : copy.createAs(suggestion)}
                   </Button>
                 </div>
               ) : null}
               {suffixUnsupported && suggestion ? (
-                <ComingSoonCard capability="suffixedOrgName" title={`Namensraum ${suggestion}`} company={progress.displayName}>
-                  Namen mit Länderendung unterstützt Beam nach dem nächsten Update. Es wurde nichts angelegt. Melde dich, dann reservieren wir ihn.
+                <ComingSoonCard capability="suffixedOrgName" title={copy.suffixTitle(suggestion)} company={progress.displayName}>
+                  {copy.suffixText}
                 </ComingSoonCard>
               ) : null}
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="submit" className="h-10 rounded-full px-5" disabled={pending !== null}>
-                  {pending === 'claim' ? <Spinner label="Wird angelegt" /> : <><GlobeIcon aria-hidden="true" /> Domain beanspruchen</>}
+                  {pending === 'claim' ? <Spinner label={copy.creating} /> : <><GlobeIcon aria-hidden="true" /> {copy.claim}</>}
                 </Button>
-                <button type="button" onClick={() => { setResumeMode(true); setError(null) }} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-                  Ich habe schon einen Org-Schlüssel
+                <button type="button" onClick={() => { setResumeMode(true); setError(null) }} className="rounded-md text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                  {copy.haveKey}
                 </button>
               </div>
             </form>
@@ -212,17 +214,17 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         {resumeMode ? (
           <form onSubmit={onResume} className="flex flex-col gap-4" noValidate>
             <div className="grid gap-4 sm:grid-cols-2">
-              <TextField id="resume-name" label="Namensraum" value={resumeName} onChange={setResumeName} placeholder="firma" autoComplete="off" />
-              <TextField id="resume-key" label="Org-Schlüssel" type="password" value={resumeKey} onChange={setResumeKey} placeholder="beam_org_…" autoComplete="off" />
+              <TextField id="resume-name" label={copy.namespace} value={resumeName} onChange={setResumeName} placeholder="company" autoComplete="off" />
+              <TextField id="resume-key" label={copy.orgKey} type="password" value={resumeKey} onChange={setResumeKey} placeholder="beam_org_…" autoComplete="off" />
             </div>
-            <p className="text-xs leading-5 text-muted-foreground">Der Schlüssel bleibt nur in diesem Tab im Arbeitsspeicher und wird nirgends gespeichert.</p>
+            <p className="text-xs leading-5 text-muted-foreground">{copy.keyMemoryNote}</p>
             {error ? <Notice tone="error">{error}</Notice> : null}
             <div className="flex flex-wrap items-center gap-3">
               <Button type="submit" className="h-10 rounded-full px-5" disabled={pending !== null}>
-                {pending === 'resume' ? <Spinner label="Wird geprüft" /> : 'Fortsetzen'}
+                {pending === 'resume' ? <Spinner label={copy.checking} /> : copy.resume}
               </Button>
-              <button type="button" onClick={() => { setResumeMode(false); setError(null) }} className="text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-                Abbrechen
+              <button type="button" onClick={() => { setResumeMode(false); setError(null) }} className="rounded-md text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                {copy.cancel}
               </button>
             </div>
           </form>
@@ -232,17 +234,14 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
           <div className="flex flex-col gap-5">
             <div className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
               <p className="flex items-center gap-2 text-sm font-medium">
-                <KeyRoundIcon aria-hidden="true" className="size-4 text-amber-500" />
-                Org-Schlüssel für {progress.orgName}
+                <KeyRoundIcon aria-hidden="true" className="size-4 text-amber-600 dark:text-amber-400" />
+                {copy.orgKeyFor(progress.orgName)}
               </p>
-              <p className="text-xs leading-5 text-muted-foreground">
-                Mit diesem Schlüssel legst du Agenten für deine Firma an. Beam zeigt ihn nur jetzt. Er bleibt nur in diesem Tab im Arbeitsspeicher;
-                nach dem Neuladen musst du ihn erneut eingeben.
-              </p>
-              {secrets.orgApiKey ? <CopyField label="Org-Schlüssel" value={secrets.orgApiKey} secret /> : null}
+              <p className="text-xs leading-5 text-muted-foreground">{copy.orgKeyText}</p>
+              {secrets.orgApiKey ? <CopyField label={copy.orgKey} value={secrets.orgApiKey} secret /> : null}
               <div className="flex flex-wrap items-center gap-3">
                 <Button type="button" variant="outline" className="h-9 rounded-full px-4" onClick={saveOrgKey}>
-                  <DownloadIcon aria-hidden="true" /> Als Datei sichern
+                  <DownloadIcon aria-hidden="true" /> {copy.saveAsFile}
                 </Button>
                 <label className="flex items-center gap-2 text-sm">
                   <input
@@ -251,35 +250,35 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                     checked={secrets.orgKeySaved}
                     onChange={(event) => setSecrets({ orgKeySaved: event.target.checked })}
                   />
-                  Ich habe den Schlüssel sicher abgelegt.
+                  {copy.keySaved}
                 </label>
               </div>
             </div>
 
             {progress.orgVerified ? (
-              <Notice tone="success" title="Domain verifiziert">
-                <span className="font-mono text-foreground">{progress.domain}</span> gehört zum Namensraum <span className="font-mono text-foreground">{progress.orgName}</span>.
+              <Notice tone="success" title={copy.domainVerified}>
+                <span className="font-mono text-foreground">{progress.domain}</span> {copy.verifiedBelongs} <span className="font-mono text-foreground">{progress.orgName}</span>.
               </Notice>
             ) : (
               <div className="flex flex-col gap-3">
                 <p className="text-sm leading-6 text-muted-foreground">
-                  Lege diesen TXT-Eintrag bei deinem DNS-Anbieter an und prüfe ihn dann hier.
-                  {formatDateTime(progress.claimExpiresAt) ? <> Die Anmeldung läuft am {formatDateTime(progress.claimExpiresAt)} ab, wenn die Domain bis dahin nicht bestätigt ist.</> : null}
+                  {copy.txtIntro}
+                  {expires ? copy.claimExpires(expires) : null}
                 </p>
                 <div className="grid gap-3">
-                  <CopyField label="Name (Host)" value={progress.txtName} />
-                  <CopyField label="Wert" value={progress.txtValue} />
+                  <CopyField label={copy.txtHost} value={progress.txtName} />
+                  <CopyField label={copy.txtValue} value={progress.txtValue} />
                 </div>
                 {dnsResult ? (
-                  <Notice tone="warning" title="Noch nicht gefunden">
-                    DNS-Änderungen brauchen manchmal etwas Zeit.
-                    {dnsResult.records.length > 0 ? <> Gefunden: <span className="font-mono break-all text-foreground">{dnsResult.records.join(', ')}</span></> : ' Unter diesem Namen gibt es noch keinen TXT-Eintrag.'}
+                  <Notice tone="warning" title={copy.notFoundTitle}>
+                    {copy.notFoundText}
+                    {dnsResult.records.length > 0 ? <> {copy.found} <span className="font-mono break-all text-foreground">{dnsResult.records.join(', ')}</span></> : copy.noRecord}
                   </Notice>
                 ) : null}
                 {error ? <Notice tone="error">{error}</Notice> : null}
                 <div>
                   <Button type="button" className="h-10 rounded-full px-5" onClick={() => void onCheckDns()} disabled={pending !== null}>
-                    {pending === 'check' ? <Spinner label="Wird geprüft" /> : <><RefreshCwIcon aria-hidden="true" /> DNS prüfen</>}
+                    {pending === 'check' ? <Spinner label={copy.checking} /> : <><RefreshCwIcon aria-hidden="true" /> {copy.checkDns}</>}
                   </Button>
                 </div>
               </div>
@@ -288,17 +287,13 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         ) : null}
       </Panel>
 
-      <Panel title="Handelsregister" badge={<LiveBadge>Prüfung durch Beam</LiveBadge>}>
-        <p className="text-sm leading-6 text-muted-foreground">
-          Deutschland: Beam prüft das Format der Registernummer, der Abgleich mit dem Register erfolgt manuell.
-          Vereinigtes Königreich: Abgleich mit Companies House, danach Prüfung durch Beam.
-          Eingereicht wird in Schritt 3, weil die Registerprüfung heute an die Beam-ID eines Agenten gebunden ist.
-        </p>
+      <Panel title={copy.registryPanel} badge={<LiveBadge>{copy.registryBadge}</LiveBadge>}>
+        <p className="text-sm leading-6 text-muted-foreground">{copy.registryText}</p>
         <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1.5 text-sm font-medium">Land des Registers</legend>
-          <div className="flex gap-2">
+          <legend className="mb-1.5 text-sm font-medium">{copy.registryCountry}</legend>
+          <div className="flex flex-wrap gap-2">
             {(['DE', 'UK'] as RegistryCountry[]).map((country) => (
-              <label key={country} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-beam has-[:checked]:bg-beam/5">
+              <label key={country} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-beam has-[:checked]:bg-beam/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
                 <input
                   type="radio"
                   name="registry-country"
@@ -307,7 +302,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                   checked={progress.registryCountry === country}
                   onChange={() => update({ registryCountry: country })}
                 />
-                {country === 'DE' ? 'Deutschland' : 'Vereinigtes Königreich'}
+                {copy.countries[country]}
               </label>
             ))}
           </div>
@@ -315,7 +310,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         <div className="grid gap-4 sm:grid-cols-2">
           <TextField
             id="registry-number"
-            label={progress.registryCountry === 'DE' ? 'Registernummer' : 'Company Number'}
+            label={progress.registryCountry === 'DE' ? copy.registerNumber : copy.companyNumber}
             value={progress.registrationNumber}
             onChange={(value) => update({ registrationNumber: value })}
             placeholder={progress.registryCountry === 'DE' ? 'HRB 123456' : '01234567'}
@@ -323,25 +318,25 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
           />
           <TextField
             id="registry-legal-name"
-            label="Rechtlicher Name laut Register"
+            label={copy.legalName}
             value={progress.legalName}
             onChange={(value) => update({ legalName: value })}
-            placeholder="Firma GmbH"
+            placeholder={copy.legalPlaceholder}
             autoComplete="organization"
           />
         </div>
-        {registryError ? <p className="text-xs text-destructive">{registryError}</p> : null}
+        {registryError ? <p className="text-xs text-destructive">{t.validation[registryError]}</p> : null}
       </Panel>
 
       <div className="grid gap-4 md:grid-cols-3">
-        <ComingSoonCard capability="verifyDomainByWellKnownFile" title="Datei unter /.well-known/" company={progress.displayName}>
-          Alternative zum DNS-Eintrag: eine Prüfdatei auf deinem Webserver. Bis dahin bestätigt nur der TXT-Eintrag die Domain.
+        <ComingSoonCard capability="verifyDomainByWellKnownFile" title={copy.wellKnownTitle} company={progress.displayName}>
+          {copy.wellKnownText}
         </ComingSoonCard>
-        <ComingSoonCard capability="lookupLei" title="LEI" company={progress.displayName}>
-          Firmenidentität über den Legal Entity Identifier statt über das Handelsregister.
+        <ComingSoonCard capability="lookupLei" title={copy.leiTitle} company={progress.displayName}>
+          {copy.leiText}
         </ComingSoonCard>
-        <ComingSoonCard capability="checkPowerOfRepresentation" title="Vertretungsberechtigung" company={progress.displayName}>
-          Automatische Prüfung, ob du die Firma vertreten darfst. Heute gibt es dafür keine Prüfung.
+        <ComingSoonCard capability="checkPowerOfRepresentation" title={copy.porTitle} company={progress.displayName}>
+          {copy.porText}
         </ComingSoonCard>
       </div>
     </div>

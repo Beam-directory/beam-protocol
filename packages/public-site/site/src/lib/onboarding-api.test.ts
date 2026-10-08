@@ -23,6 +23,8 @@ import {
   verifyDomainByWellKnownFile,
 } from './onboarding-api'
 import { suggestDisambiguatedOrgName } from './onboarding-steps'
+import { de } from '../i18n/de.ts'
+import { en } from '../i18n/en.ts'
 
 const BASE = 'https://directory.test'
 
@@ -63,7 +65,8 @@ describe('createOrg', () => {
     const error = await createOrg({ name: 'x', displayName: 'X', domain: 'firma.de' }, { baseUrl: BASE, fetchImpl }).catch((err: unknown) => err)
     expect(error).toBeInstanceOf(OnboardingApiError)
     expect((error as OnboardingApiError).status).toBe(403)
-    expect(describeError(error)).toContain('Namensraum muss zum Namen der Domain passen')
+    expect(describeError(error, de.errors)).toContain('Namensraum muss zum Namen der Domain passen')
+    expect(describeError(error, en.errors)).toContain('namespace has to match the domain name')
   })
 
   it('on 409 name taken suggests label-suffix, and reports the 403 mismatch of the current backend honestly', async () => {
@@ -84,7 +87,7 @@ describe('createOrg', () => {
     const fetchImpl = mockFetch(409, { error: 'Domain coppen.at is already claimed', errorCode: 'DOMAIN_EXISTS' })
     const error = await createOrg({ name: 'coppen', displayName: 'COPPEN', domain: 'coppen.at' }, { baseUrl: BASE, fetchImpl }).catch((err: unknown) => err)
     expect(classifyOrgConflict(error)).toBe('domain')
-    expect(describeError(error)).toContain('bereits einer verifizierten Firma zugeordnet')
+    expect(describeError(error, de.errors)).toContain('bereits einer verifizierten Firma zugeordnet')
   })
 
   it('reports network failures as NETWORK_ERROR', async () => {

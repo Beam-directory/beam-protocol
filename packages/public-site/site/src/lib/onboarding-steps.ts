@@ -3,6 +3,7 @@
  * Persistence writes only an allow-listed set of non-secret fields to sessionStorage.
  * Org API keys, agent API keys and private keys are never written by this module.
  */
+import type { Messages } from '../i18n/en.ts'
 
 export const STEP_IDS = ['firma', 'person', 'agent', 'verbinden'] as const
 export type StepId = (typeof STEP_IDS)[number]
@@ -60,18 +61,21 @@ export function suggestDisambiguatedOrgName(domain: string): string | null {
   return `${slugOrgPart(label)}-${slugOrgPart(suffix.join('.'))}`
 }
 
-export function validateDomain(domain: string): string | null {
+/** Validators return a key of the validation dictionary (src/i18n); the UI renders it in the active language. */
+export type ValidationKey = keyof Messages['validation']
+
+export function validateDomain(domain: string): ValidationKey | null {
   const normalized = normalizeDomain(domain)
-  if (!normalized) return 'Bitte die Domain der Firma angeben.'
-  if (!DOMAIN_RE.test(normalized)) return 'Bitte eine gültige Domain angeben, zum Beispiel firma.de.'
-  if (!/^[a-z0-9_-]+$/.test(deriveOrgName(normalized))) return 'Aus dieser Domain lässt sich kein Namensraum ableiten.'
+  if (!normalized) return 'domainRequired'
+  if (!DOMAIN_RE.test(normalized)) return 'domainInvalid'
+  if (!/^[a-z0-9_-]+$/.test(deriveOrgName(normalized))) return 'domainNoNamespace'
   return null
 }
 
-export function validateDisplayName(name: string): string | null {
+export function validateDisplayName(name: string): ValidationKey | null {
   const trimmed = name.trim()
-  if (trimmed.length < 2) return 'Bitte den Namen angeben.'
-  if (trimmed.length > 120) return 'Der Name ist zu lang.'
+  if (trimmed.length < 2) return 'nameRequired'
+  if (trimmed.length > 120) return 'nameTooLong'
   return null
 }
 
@@ -79,12 +83,10 @@ export function normalizeAgentName(value: string): string {
   return value.trim().toLowerCase()
 }
 
-export function validateAgentName(value: string): string | null {
+export function validateAgentName(value: string): ValidationKey | null {
   const name = normalizeAgentName(value)
-  if (!name) return 'Bitte einen Namen für die Adresse angeben.'
-  if (!AGENT_NAME_RE.test(name)) {
-    return '2 bis 63 Zeichen: Kleinbuchstaben, Ziffern, Bindestrich oder Unterstrich, beginnend mit Buchstabe oder Ziffer.'
-  }
+  if (!name) return 'agentNameRequired'
+  if (!AGENT_NAME_RE.test(name)) return 'agentNameInvalid'
   return null
 }
 
@@ -92,29 +94,29 @@ export function buildBeamId(agentName: string, orgName: string): string {
   return `${normalizeAgentName(agentName)}@${orgName}.beam.directory`
 }
 
-export function validateRecipientBeamId(value: string, ownBeamId?: string): string | null {
+export function validateRecipientBeamId(value: string, ownBeamId?: string): ValidationKey | null {
   const beamId = value.trim().toLowerCase()
-  if (!NETWORK_BEAM_ID_RE.test(beamId)) return 'Bitte eine gültige Beam-ID angeben, zum Beispiel lakis@partner.beam.directory.'
-  if (ownBeamId && beamId === ownBeamId) return 'Das ist die Beam-ID deines eigenen Agenten.'
+  if (!NETWORK_BEAM_ID_RE.test(beamId)) return 'recipientInvalid'
+  if (ownBeamId && beamId === ownBeamId) return 'recipientSelf'
   return null
 }
 
-export function validateContactMessage(value: string): string | null {
-  return value.trim().length > 280 ? 'Die Nachricht darf höchstens 280 Zeichen haben.' : null
+export function validateContactMessage(value: string): ValidationKey | null {
+  return value.trim().length > 280 ? 'messageTooLong' : null
 }
 
 export type RegistryCountry = 'DE' | 'UK'
 
-export function validateRegistration(country: RegistryCountry, registrationNumber: string, legalName: string): string | null {
-  if (legalName.trim().length < 2) return 'Bitte den rechtlichen Namen laut Register angeben.'
+export function validateRegistration(country: RegistryCountry, registrationNumber: string, legalName: string): ValidationKey | null {
+  if (legalName.trim().length < 2) return 'legalNameRequired'
   const number = registrationNumber.trim().toUpperCase()
-  if (country === 'DE' && !DE_REGISTRATION_RE.test(number)) return 'Deutsche Registernummer: HRB oder HRA mit Ziffern, zum Beispiel HRB 123456.'
-  if (country === 'UK' && !UK_REGISTRATION_RE.test(number.replace(/\s+/g, ''))) return 'UK Company Number: 2 bis 8 Buchstaben oder Ziffern.'
+  if (country === 'DE' && !DE_REGISTRATION_RE.test(number)) return 'registryDeInvalid'
+  if (country === 'UK' && !UK_REGISTRATION_RE.test(number.replace(/\s+/g, ''))) return 'registryUkInvalid'
   return null
 }
 
-export function validateEmail(value: string): string | null {
-  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? null : 'Bitte eine gültige E-Mail-Adresse angeben.'
+export function validateEmail(value: string): ValidationKey | null {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim()) ? null : 'emailInvalid'
 }
 
 /* ------------------------------------------------------------- Vollmacht (Entwurf) ---------------------------------------------------------- */
@@ -139,28 +141,31 @@ export const EMPTY_MANDATE: MandateDraft = {
   escalateTo: '',
 }
 
-export function validateMandate(draft: MandateDraft): string | null {
-  if (!draft.read && !draft.acceptAppointments && !draft.sendFiles && !draft.order) return 'Bitte mindestens eine Befugnis wählen.'
+export function validateMandate(draft: MandateDraft): ValidationKey | null {
+  if (!draft.read && !draft.acceptAppointments && !draft.sendFiles && !draft.order) return 'scopeRequired'
   if (draft.order) {
     const amount = Number(draft.orderLimitEur.replace(',', '.'))
-    if (!Number.isFinite(amount) || amount <= 0) return 'Bitte einen Höchstbetrag für Bestellungen angeben.'
+    if (!Number.isFinite(amount) || amount <= 0) return 'orderLimitRequired'
   }
-  if (draft.escalate && draft.escalateTo.trim().length < 2) return 'Bitte angeben, an wen eskaliert wird.'
+  if (draft.escalate && draft.escalateTo.trim().length < 2) return 'escalateToRequired'
   return null
 }
 
-/** Readable preview of what a future signed mandate would contain. It is not issued anywhere. */
+/**
+ * Preview of what a future signed mandate would contain. Technical, language-neutral identifiers.
+ * It is not issued anywhere.
+ */
 export function mandatePreview(draft: MandateDraft, beamId: string): Record<string, unknown> {
   const scopes: Record<string, unknown>[] = []
-  if (draft.read) scopes.push({ scope: 'lesen' })
-  if (draft.acceptAppointments) scopes.push({ scope: 'termine.zusagen' })
-  if (draft.sendFiles) scopes.push({ scope: 'dateien.senden' })
-  if (draft.order) scopes.push({ scope: 'bestellen', maxBetragEur: Number(draft.orderLimitEur.replace(',', '.')) || 0 })
+  if (draft.read) scopes.push({ scope: 'read' })
+  if (draft.acceptAppointments) scopes.push({ scope: 'appointments.accept' })
+  if (draft.sendFiles) scopes.push({ scope: 'files.send' })
+  if (draft.order) scopes.push({ scope: 'order', maxAmountEur: Number(draft.orderLimitEur.replace(',', '.')) || 0 })
   return {
-    agent: beamId || 'agent@firma.beam.directory',
+    agent: beamId || 'agent@company.beam.directory',
     scopes,
-    eskalation: draft.escalate ? draft.escalateTo.trim() || 'Vorgesetzte Person' : null,
-    status: 'Entwurf, nicht ausgestellt',
+    escalateTo: draft.escalate ? draft.escalateTo.trim() || null : null,
+    status: 'draft-not-issued',
   }
 }
 
@@ -275,12 +280,12 @@ export interface GateState {
 }
 
 /** Whether the user may move on from a step. Steps 2 and 4 are informational or optional and never block. */
-export function canAdvance(step: StepId, state: GateState): { ok: boolean; reason?: string } {
+export function canAdvance(step: StepId, state: GateState): { ok: boolean; reason?: 'firma' | 'agent' } {
   if (step === 'firma' && !state.orgVerified) {
-    return { ok: false, reason: 'Weiter geht es, sobald die Domain der Firma verifiziert ist.' }
+    return { ok: false, reason: 'firma' }
   }
   if (step === 'agent' && !state.agentRegistered) {
-    return { ok: false, reason: 'Weiter geht es, sobald der Agent registriert ist.' }
+    return { ok: false, reason: 'agent' }
   }
   return { ok: true }
 }

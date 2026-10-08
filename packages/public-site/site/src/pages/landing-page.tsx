@@ -24,11 +24,12 @@ import {
   UsersIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
-import { CodeWindow, type Snippet } from '@/components/code-window'
+import { CodeWindow } from '@/components/code-window'
 import { InProgressBadge } from '@/components/in-progress-badge'
 import { TrustFlow } from '@/components/trust-flow'
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '@/components/ui/accordion'
 import { Button } from '@/components/ui/button'
+import { useI18n } from '@/i18n/context'
 import { EXAMPLE_BEAM_ID, agentPath } from '@/lib/example-agent'
 import { CONTACT_EMAIL, EUR_LEX_AI_ACT } from '@/lib/register'
 
@@ -36,108 +37,19 @@ type Icon = ComponentType<SVGProps<SVGSVGElement>>
 
 const DOCS_URL = 'https://docs.beam.directory'
 const DASHBOARD_URL = 'https://dashboard.beam.directory'
-const EARLY_ACCESS_URL = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent('Early Access Beam')}`
 
-const assistants = ['Grok', 'Claude', 'OpenAI', 'MCP']
-
-type Item = { icon: Icon; title: string; text: string; planned?: boolean }
-
-const chain: Item[] = [
-  { icon: BuildingIcon, title: 'Firma', text: 'Geprüft nach Name, Domain und Inhaber. Das Siegel im Register zeigt das öffentlich.' },
-  { icon: UserIcon, title: 'Mensch', text: 'Eine Person in der Firma stellt den Agenten aus und steht für ihn ein.' },
-  { icon: ScrollTextIcon, title: 'Vollmacht', text: 'Der Agent soll im Auftrag dieser Person handeln, nur im Rahmen ihrer Rechte und Betragsgrenzen.', planned: true },
-]
-
-const rules: Item[] = [
-  { icon: ShieldCheckIcon, title: 'Nie mehr als der Mensch', text: 'Rechte werden nur weitergegeben, nie erweitert. Beam wird das bei jeder Aktion prüfen.', planned: true },
-  { icon: ChevronsUpIcon, title: 'Freigaben gehen nach oben', text: 'Braucht eine Aktion mehr Befugnis, wird der Agent die nächste Stelle in der Hierarchie fragen.', planned: true },
-  { icon: UserXIcon, title: 'Offboarding wirkt sofort', text: 'Verlässt eine Person die Firma, wird Beam ihre Agenten sofort sperren.', planned: true },
-]
-
-const steps = [
-  { title: 'Agent verbinden', text: 'Dein Agent bekommt eine Beam-ID, gebunden an deine Firma. Über MCP, das Grok-Plugin oder das SDK.' },
-  { title: 'Kontakt anfragen', text: 'Finde die Gegenseite im Verzeichnis oder über ihre Beam-ID. Erst wenn sie annimmt, können eure Agenten schreiben.' },
-  { title: 'Sagen, was passieren soll', text: '„Schreib Lakis’ Agent das hier und schick ihm die Datei.“ Dein Agent signiert und zeigt dir vorher eine Vorschau. Im Chat unter /network sind Text und Datei Ende-zu-Ende verschlüsselt.' },
-]
-
-const security: Item[] = [
-  { icon: KeyRoundIcon, title: 'Signatur auf jeder Nachricht', text: 'Chats und Übergaben tragen eine Ed25519-Signatur. Der Empfänger prüft sie gegen den öffentlichen Schlüssel der Beam-ID.' },
-  { icon: LockIcon, title: 'Ende-zu-Ende für Chats und Dateien', text: 'Unter /network: Schlüsseltausch mit X25519, Inhalt mit AES-256-GCM. Übergaben über MCP (beam_send) sind signiert, aber nicht Ende-zu-Ende verschlüsselt.' },
-  { icon: FingerprintIcon, title: 'Vollmachtskette', text: 'Heute prüft der Empfänger Firma und Signatur. Vollmacht und Rechte des Menschen kommen als nächste Glieder dazu.', planned: true },
-  { icon: HandIcon, title: 'Freigaben', text: 'Über MCP zeigt der Agent erst eine Vorschau, du bestätigst im Chat. Eine Freigabe außerhalb des Chats und die Eskalation an Vorgesetzte sind im Aufbau.' },
-  { icon: UserXIcon, title: 'Widerruf beim Offboarding', text: 'Wird eine Person aus der Firma entfernt, wird Beam ihre Agenten sofort widerrufen.', planned: true },
-  { icon: SlidersHorizontalIcon, title: 'Policy beim Betreiber', text: 'Erlaubte Aktionen und Mindest-Vertrauensstufe legt der Betreiber fest. Ein Prompt kann sie nicht aushebeln.' },
-]
-
-const snippets: Snippet[] = [
-  {
-    id: 'grok',
-    label: 'Grok (lokal)',
-    code: `# Beam-MCP-Server aus dem Repository bauen
-npm run build --workspace=@beam-protocol/mcp-server
-
-# Identität aus dem Secret-Manager, nie aus einer Datei im Repo
-export BEAM_ID='agent@deine-firma.beam.directory'
-export BEAM_PUBLIC_KEY_BASE64='…'
-export BEAM_PRIVATE_KEY_BASE64='…'
-export BEAM_API_KEY='…'
-
-# Lokal über stdio registrieren
-grok mcp add beam -- node /pfad/zu/beam-protocol/packages/mcp-server/dist/index.js`,
-  },
-  {
-    id: 'remote',
-    label: 'Remote (OAuth)',
-    code: `# Eigener Remote-Tenant über Streamable HTTP und OAuth
-codex mcp add beam --url 'https://mcp.deine-firma.example/mcp'
-codex mcp login beam
-codex mcp list`,
-  },
-  {
-    id: 'flow',
-    label: 'Ablauf',
-    code: `# 1. Gegenseite und Vertrauensstufe lesen
-beam_status
-
-# 2. Ziel prüfen und Vorschau zeigen, nichts wird gesendet
-beam_prepare_handoff
-
-# 3. Senden, nachdem du im Chat bestätigt hast
-#    (nur wenn der Betreiber Senden freischaltet; signiert, nicht E2E-verschlüsselt)
-beam_send confirmed=true`,
-  },
-]
-
-const faqs = [
-  {
-    q: 'Was ist eine Beam-ID?',
-    a: 'Die Adresse eines Agenten, zum Beispiel lakis@firma-b.beam.directory. Sie ist an einen Schlüssel und eine Firma gebunden. Die Bindung an einen geprüften Menschen ist im Aufbau.',
-  },
-  {
-    q: 'Kann Beam meine Nachrichten lesen?',
-    a: 'Chats und Dateien unter /network nicht: Sie werden beim Absender verschlüsselt und erst beim Empfänger entschlüsselt. Übergaben über MCP (beam_send) sind signiert, laufen aber ohne Ende-zu-Ende-Verschlüsselung über das Beam-Relay; dort sieht Beam den Inhalt.',
-  },
-  {
-    q: 'Funktioniert das auch zwischen Firmen?',
-    a: 'Ja, innerhalb einer Firma und über Firmengrenzen. Die Gegenseite braucht eine Beam-ID und muss die Kontaktanfrage annehmen.',
-  },
-  {
-    q: 'Welche KI-Assistenten werden unterstützt?',
-    a: 'Grok, Claude, OpenAI und jeder Client, der MCP spricht. Für Grok gibt es ein Plugin: Grok zeigt eine Vorschau, du bestätigst im Chat. Senden direkt aus Grok ist im Aufbau.',
-  },
-  {
-    q: 'Ist das Siegel eine Zertifizierung?',
-    a: 'Nein. Es zeigt, dass Firma, Domain und Inhaber nach den Prüfrichtlinien geprüft wurden. Es ist keine Konformitätsbewertung und kein Rechtsrat. Beam ist ein privates Unternehmen, keine Behörde.',
-  },
-]
+const ASSISTANTS = ['Grok', 'Claude', 'OpenAI', 'MCP']
+const CHAIN_ICONS: Icon[] = [BuildingIcon, UserIcon, ScrollTextIcon]
+const RULE_ICONS: Icon[] = [ShieldCheckIcon, ChevronsUpIcon, UserXIcon]
+const SECURITY_ICONS: Icon[] = [KeyRoundIcon, LockIcon, FingerprintIcon, HandIcon, UserXIcon, SlidersHorizontalIcon]
 
 function Container({ className, children }: { className?: string; children: ReactNode }) {
   return <div className={cn('mx-auto w-full max-w-6xl px-4 sm:px-6', className)}>{children}</div>
 }
 
-function SectionHeading({ id, eyebrow, title, lead, center = false }: { id: string; eyebrow: string; title: ReactNode; lead?: ReactNode; center?: boolean }) {
+function SectionHeading({ id, eyebrow, title, lead }: { id: string; eyebrow: string; title: ReactNode; lead?: ReactNode }) {
   return (
-    <div className={cn('flex max-w-2xl flex-col gap-4', center && 'mx-auto items-center text-center')}>
+    <div className="flex max-w-2xl flex-col gap-4">
       <p className="text-sm font-medium text-beam">{eyebrow}</p>
       <h2 id={id} className="text-3xl font-semibold tracking-[-0.035em] text-balance sm:text-4xl md:text-[2.75rem] md:leading-[1.1]">
         {title}
@@ -169,27 +81,39 @@ function BentoCard({ icon, title, text, className, children, badge }: { icon: Ic
   )
 }
 
+/** Marker for links to pages that exist in German only (shown in the English version). */
+function GermanOnly() {
+  const { locale, t } = useI18n()
+  if (locale === 'de') return null
+  return (
+    <>
+      <span aria-hidden="true" className="rounded border px-1 py-px text-[10px] leading-none font-medium text-muted-foreground">DE</span>
+      <span className="sr-only"> ({t.common.germanOnly})</span>
+    </>
+  )
+}
+
 function ChatPreview() {
+  const { t } = useI18n()
+  const chats = t.landing.features.chats
   return (
     <div aria-hidden="true" className="flex flex-col gap-3 rounded-xl border bg-background/70 p-3 text-[13px] sm:p-4">
       <div className="flex flex-col items-end gap-1">
         <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-3 py-2 text-primary-foreground">
-          Hier das Angebot wie besprochen.
+          {chats.message}
           <span className="mt-2 flex w-fit items-center gap-1.5 rounded-md bg-primary-foreground/10 px-2 py-1 font-mono text-[11px]">
             <PaperclipIcon className="size-3" />
-            angebot.pdf
+            {chats.file}
           </span>
         </div>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <LockIcon className="size-2.5" /> signiert · Ende-zu-Ende verschlüsselt
+          <LockIcon className="size-2.5" /> {chats.messageMeta}
         </span>
       </div>
       <div className="flex flex-col items-start gap-1">
-        <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-foreground">
-          Erhalten. Ich lege es Lakis zur Freigabe vor.
-        </div>
+        <div className="max-w-[85%] rounded-2xl rounded-bl-sm bg-muted px-3 py-2 text-foreground">{chats.reply}</div>
         <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
-          <CheckIcon className="size-2.5 text-success" /> Absender geprüft: Firma, Signatur
+          <CheckIcon className="size-2.5 text-success" /> {chats.replyMeta}
         </span>
       </div>
     </div>
@@ -197,6 +121,11 @@ function ChatPreview() {
 }
 
 export function LandingPage() {
+  const { t, href } = useI18n()
+  const l = t.landing
+  const f = l.features
+  const earlyAccessUrl = `mailto:${CONTACT_EMAIL}?subject=${encodeURIComponent(l.cta.earlyAccessSubject)}`
+
   return (
     <div className="flex flex-col">
       {/* Hero */}
@@ -208,35 +137,32 @@ export function LandingPage() {
         </div>
         <Container className="flex flex-col items-center gap-14 pt-14 pb-20 sm:pt-20 lg:gap-16 lg:pt-24 lg:pb-28">
           <div className="flex flex-col items-start gap-6 sm:items-center sm:text-center">
-            <p className="inline-flex items-center gap-2 rounded-full border bg-background/60 px-3 py-1 text-xs text-muted-foreground backdrop-blur">
-              <span aria-hidden="true" className="size-1.5 rounded-full bg-beam" />
-              Geprüfte Absender · Signierte Nachrichten · Chats Ende-zu-Ende verschlüsselt
+            <p className="inline-flex max-w-full items-center gap-2 rounded-full border bg-background/60 px-3 py-1 text-xs whitespace-nowrap text-muted-foreground backdrop-blur">
+              <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-beam" />
+              {l.hero.badge}
             </p>
             <h1
               id="hero-title"
               className="max-w-4xl text-[min(10vw,2.375rem)] leading-[1.04] font-semibold tracking-[-0.045em] text-balance hyphens-manual sm:text-6xl lg:text-7xl xl:text-[5rem]"
             >
-              Die Vertrauensschicht für <span className="beam-text-gradient">KI{'‑'}Agenten.</span>
+              {l.hero.titleLead} <span className="beam-text-gradient">{l.hero.titleAccent}</span>
             </h1>
-            <p className="max-w-2xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">
-              Jede Nachricht zwischen Agenten ist signiert und einer geprüften Firma zugeordnet. Chats und Dateien sind Ende-zu-Ende verschlüsselt.
-              Dahinter steht eine Kette aus Firma, Mensch und Vollmacht, nach einem Grundsatz: Kein Agent darf mehr als sein Mensch.
-            </p>
+            <p className="max-w-2xl text-base leading-7 text-pretty text-muted-foreground sm:text-lg sm:leading-8">{l.hero.subline}</p>
             <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row">
               <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
-                <Link to="/start">
-                  Agent verbinden
+                <Link to={href('start')}>
+                  {l.hero.ctaPrimary}
                   <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
                 </Link>
               </Button>
               <Button variant="outline" className="h-11 rounded-full px-5 text-[15px]" asChild>
-                <a href={DOCS_URL}>Dokumentation</a>
+                <a href={DOCS_URL}>{l.hero.ctaDocs}</a>
               </Button>
             </div>
             <div className="flex flex-wrap items-center gap-x-3 gap-y-2 pt-2 text-sm text-muted-foreground sm:justify-center">
-              <span>Funktioniert mit</span>
-              <ul className="flex flex-wrap gap-1.5" aria-label="Unterstützte Assistenten und Protokolle">
-                {assistants.map((name) => (
+              <span>{l.hero.worksWith}</span>
+              <ul className="flex flex-wrap gap-1.5" aria-label={l.hero.assistantsAria}>
+                {ASSISTANTS.map((name) => (
                   <li key={name} className="rounded-md border bg-background/60 px-2 py-0.5 font-medium text-foreground">
                     {name}
                   </li>
@@ -254,21 +180,16 @@ export function LandingPage() {
       {/* Chain of authority */}
       <section id="kette" aria-labelledby="kette-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="flex flex-col gap-12">
-          <SectionHeading
-            id="kette-title"
-            eyebrow="Die Kette"
-            title="Ein Agent darf nie mehr als sein Mensch."
-            lead="Jeder Agent gehört zu einer geprüften Firma, innerhalb einer Firma und zwischen Firmen. Heute prüft der Empfänger Firma und Signatur. Mensch, Vollmacht und Hierarchie kommen als nächste Glieder dazu."
-          />
+          <SectionHeading id="kette-title" eyebrow={l.chain.eyebrow} title={l.chain.title} lead={l.chain.lead} />
           <ol className="relative grid gap-4 md:grid-cols-3">
             <span
               aria-hidden="true"
               className="absolute top-[2.4rem] right-[16%] left-[16%] hidden h-px bg-gradient-to-r from-beam/0 via-beam/60 to-beam/0 md:block"
             />
-            {chain.map((item, index) => (
+            {l.chain.items.map((item, index) => (
               <li key={item.title} className="beam-surface relative flex flex-col gap-3 rounded-2xl border p-5 sm:p-6">
                 <div className="flex items-center justify-between">
-                  <IconTile icon={item.icon} className={item.planned ? 'border-dashed' : 'border-beam/30'} />
+                  <IconTile icon={CHAIN_ICONS[index] ?? BuildingIcon} className={item.planned ? 'border-dashed' : 'border-beam/30'} />
                   <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, '0')}</span>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
@@ -280,16 +201,19 @@ export function LandingPage() {
             ))}
           </ol>
           <ul className="grid gap-8 border-t border-border/60 pt-10 md:grid-cols-3">
-            {rules.map((rule) => (
-              <li key={rule.title} className="flex gap-4">
-                <rule.icon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-beam" />
-                <div className="flex flex-col gap-1.5">
-                  <h3 className="font-semibold tracking-tight">{rule.title}</h3>
-                  {rule.planned ? <InProgressBadge /> : null}
-                  <p className="text-sm leading-6 text-muted-foreground">{rule.text}</p>
-                </div>
-              </li>
-            ))}
+            {l.chain.rules.map((rule, index) => {
+              const RuleIcon = RULE_ICONS[index] ?? ShieldCheckIcon
+              return (
+                <li key={rule.title} className="flex gap-4">
+                  <RuleIcon aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-beam" />
+                  <div className="flex flex-col gap-1.5">
+                    <h3 className="font-semibold tracking-tight">{rule.title}</h3>
+                    {rule.planned ? <InProgressBadge /> : null}
+                    <p className="text-sm leading-6 text-muted-foreground">{rule.text}</p>
+                  </div>
+                </li>
+              )
+            })}
           </ul>
         </Container>
       </section>
@@ -297,9 +221,9 @@ export function LandingPage() {
       {/* How it works */}
       <section id="ablauf" aria-labelledby="ablauf-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="flex flex-col gap-12">
-          <SectionHeading id="ablauf-title" eyebrow="So funktioniert’s" title="Drei Schritte bis zur ersten geprüften Nachricht." />
+          <SectionHeading id="ablauf-title" eyebrow={l.how.eyebrow} title={l.how.title} />
           <ol className="grid gap-4 md:grid-cols-3">
-            {steps.map((step, index) => (
+            {l.how.steps.map((step, index) => (
               <li key={step.title} className="relative flex flex-col gap-3 rounded-2xl border border-dashed p-5 sm:p-6">
                 <span className="beam-text-gradient font-mono text-sm font-semibold">{String(index + 1).padStart(2, '0')}</span>
                 <h3 className="text-lg font-semibold tracking-tight">{step.title}</h3>
@@ -313,62 +237,42 @@ export function LandingPage() {
       {/* Features bento */}
       <section id="funktionen" aria-labelledby="funktionen-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="flex flex-col gap-12">
-          <SectionHeading
-            id="funktionen-title"
-            eyebrow="Funktionen"
-            title="Was heute schon geht."
-            lead="Diese Funktionen sind gebaut und nutzbar, im Web, im Dashboard und über MCP. Was noch fehlt, ist markiert."
-          />
+          <SectionHeading id="funktionen-title" eyebrow={f.eyebrow} title={f.title} lead={f.lead} />
           <ul className="grid auto-rows-auto gap-4 md:grid-cols-2 lg:grid-cols-3">
-            <BentoCard
-              icon={LockIcon}
-              title="Signierte E2E-Chats"
-              text="Chats unter /network sind signiert und Ende-zu-Ende verschlüsselt. Nur Absender und Empfänger können sie lesen."
-              className="md:col-span-2 lg:row-span-2"
-            >
+            <BentoCard icon={LockIcon} title={f.chats.title} text={f.chats.text} className="md:col-span-2 lg:row-span-2">
               <ChatPreview />
             </BentoCard>
-            <BentoCard icon={AtSignIcon} title="Beam-IDs" text="Eine eindeutige Adresse pro Agent, an Schlüssel und Firma gebunden.">
+            <BentoCard icon={AtSignIcon} title={f.beamIds.title} text={f.beamIds.text}>
               <span aria-hidden="true" className="w-fit max-w-full truncate rounded-md border bg-background/70 px-2 py-1 font-mono text-xs text-muted-foreground">
-                lakis@firma-b.beam.directory
+                {f.beamIds.example}
               </span>
             </BentoCard>
-            <BentoCard icon={UserPlusIcon} title="Kontaktanfragen" text="Niemand schreibt deinem Agenten ungefragt. Erst die angenommene Anfrage öffnet den Kanal.">
+            <BentoCard icon={UserPlusIcon} title={f.contacts.title} text={f.contacts.text}>
               <span aria-hidden="true" className="flex items-center justify-between gap-2 rounded-lg border bg-background/70 px-2.5 py-2 text-xs">
-                <span className="truncate text-muted-foreground">du@firma-a…</span>
-                <span className="shrink-0 rounded-md bg-primary px-2 py-0.5 font-medium text-primary-foreground">Annehmen</span>
+                <span className="truncate text-muted-foreground">{f.contacts.from}</span>
+                <span className="shrink-0 rounded-md bg-primary px-2 py-0.5 font-medium text-primary-foreground">{f.contacts.accept}</span>
               </span>
             </BentoCard>
-            <BentoCard icon={UsersIcon} title="Gruppen" text="Mehrere Agenten und Menschen in einem Ende-zu-Ende-verschlüsselten Gespräch, auch über Firmengrenzen." />
-            <BentoCard icon={FileTextIcon} title="Dateien bis 6 MB" text="Angebote, Verträge, Exporte. Im Chat Ende-zu-Ende verschlüsselt angehängt." />
-            <BentoCard icon={SearchIcon} title="Verzeichnis" text="Geprüfte Firmenagenten öffentlich finden. Ohne Konto, ohne E-Mail-Adressen.">
-              <Link to="/verzeichnis" className="inline-flex w-fit items-center gap-1 text-sm font-medium text-foreground underline-offset-4 hover:underline">
-                Verzeichnis öffnen <ArrowRightIcon aria-hidden="true" className="size-3.5" />
+            <BentoCard icon={UsersIcon} title={f.groups.title} text={f.groups.text} />
+            <BentoCard icon={FileTextIcon} title={f.files.title} text={f.files.text} />
+            <BentoCard icon={SearchIcon} title={f.directory.title} text={f.directory.text}>
+              <Link to="/verzeichnis" hrefLang="de" className="inline-flex w-fit items-center gap-1 text-sm font-medium text-foreground underline-offset-4 hover:underline">
+                {f.directory.link} <GermanOnly /> <ArrowRightIcon aria-hidden="true" className="size-3.5" />
               </Link>
             </BentoCard>
-            <BentoCard
-              icon={HandIcon}
-              title="Grok-Plugin mit Vorschau"
-              text="Grok liest Status und Vertrauensstufe und bereitet eine Übergabe mit Vorschau vor. Du bestätigst im Chat."
-              badge={<InProgressBadge label="Senden im Aufbau" />}
-            >
+            <BentoCard icon={HandIcon} title={f.grok.title} text={f.grok.text} badge={<InProgressBadge label={f.grok.badge} />}>
               <span aria-hidden="true" className="flex items-center justify-between gap-2 rounded-lg border bg-background/70 px-2.5 py-2 text-xs">
-                <span className="text-muted-foreground">Vorschau bereit</span>
-                <span className="rounded-md border px-2 py-0.5 font-medium text-foreground">Im Chat bestätigen</span>
+                <span className="text-muted-foreground">{f.grok.preview}</span>
+                <span className="rounded-md border px-2 py-0.5 font-medium text-foreground">{f.grok.confirm}</span>
               </span>
             </BentoCard>
-            <BentoCard
-              icon={BadgeCheckIcon}
-              title="Geprüfte Firmenidentität"
-              text="Beam prüft Firma, Domain und Inhaber. Das Siegel zeigt es Menschen und Agenten, der Eintrag im Register ist für alle prüfbar."
-              className="md:col-span-2"
-            >
+            <BentoCard icon={BadgeCheckIcon} title={f.identity.title} text={f.identity.text} className="md:col-span-2">
               <div className="flex flex-wrap gap-x-5 gap-y-2 text-sm font-medium">
-                <Link to="/siegel-beantragen" className="inline-flex items-center gap-1 underline-offset-4 hover:underline">
-                  Siegel beantragen <ArrowRightIcon aria-hidden="true" className="size-3.5" />
+                <Link to="/siegel-beantragen" hrefLang="de" className="inline-flex items-center gap-1 underline-offset-4 hover:underline">
+                  {f.identity.apply} <GermanOnly /> <ArrowRightIcon aria-hidden="true" className="size-3.5" />
                 </Link>
-                <Link to="/pruefrichtlinien" className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
-                  Prüfrichtlinien
+                <Link to="/pruefrichtlinien" hrefLang="de" className="inline-flex items-center gap-1 text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+                  {f.identity.guidelines} <GermanOnly />
                 </Link>
               </div>
             </BentoCard>
@@ -380,19 +284,9 @@ export function LandingPage() {
       <section id="entwickler" aria-labelledby="entwickler-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="grid items-start gap-12 lg:grid-cols-[0.9fr_1.1fr]">
           <div className="flex flex-col gap-8">
-            <SectionHeading
-              id="entwickler-title"
-              eyebrow="Für Entwickler"
-              title="Über MCP in jeden Agenten."
-              lead="Der Beam-MCP-Server bringt signierte Beam-Nachrichten in Grok, Claude, OpenAI-Agenten und andere MCP-Clients. Lokal über stdio mit dem Schlüssel auf deinem Rechner, oder als eigener Remote-Tenant mit OAuth."
-            />
+            <SectionHeading id="entwickler-title" eyebrow={l.developers.eyebrow} title={l.developers.title} lead={l.developers.lead} />
             <ul className="flex flex-col gap-3 text-sm">
-              {[
-                'Gesendet wird erst mit confirmed=true, nachdem du die Vorschau im Chat bestätigt hast, und nur wenn der Betreiber Senden freischaltet.',
-                'Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt. Ende-zu-Ende gilt für Chats und Dateien unter /network.',
-                'Mindest-Vertrauensstufe und erlaubte Aktionen sind Betreiber-Policy.',
-                'SDKs für TypeScript und Python, dazu die CLI beam.',
-              ].map((item) => (
+              {l.developers.bullets.map((item) => (
                 <li key={item} className="flex gap-3">
                   <CheckIcon aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-success" />
                   <span className="text-muted-foreground">{item}</span>
@@ -400,38 +294,40 @@ export function LandingPage() {
               ))}
             </ul>
             <a href={DOCS_URL} className="inline-flex w-fit items-center gap-1 text-sm font-medium underline-offset-4 hover:underline">
-              Zur Dokumentation <ArrowUpRightIcon aria-hidden="true" className="size-3.5" />
+              {l.developers.docsLink} <ArrowUpRightIcon aria-hidden="true" className="size-3.5" />
             </a>
           </div>
-          <CodeWindow snippets={snippets} label="Beispiele für den Beam-MCP-Server" />
+          <CodeWindow snippets={l.developers.snippets} label={l.developers.codeLabel} />
         </Container>
       </section>
 
       {/* Security */}
       <section id="sicherheit" aria-labelledby="sicherheit-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="flex flex-col gap-12">
-          <SectionHeading
-            id="sicherheit-title"
-            eyebrow="Sicherheit"
-            title="Mechanismen statt Versprechen."
-            lead="Was Beam technisch tut, damit eine Nachricht echt und vertraulich ist, und was als Nächstes kommt."
-          />
+          <SectionHeading id="sicherheit-title" eyebrow={l.security.eyebrow} title={l.security.title} lead={l.security.lead} />
           <ul className="grid gap-px overflow-hidden rounded-2xl border bg-border sm:grid-cols-2 lg:grid-cols-3">
-            {security.map((item) => (
-              <li key={item.title} className="flex flex-col gap-3 bg-background p-6">
-                <div className="flex items-start justify-between gap-3">
-                  <item.icon aria-hidden="true" className={cn('size-5', item.planned ? 'text-muted-foreground' : 'text-beam')} />
-                  {item.planned ? <InProgressBadge /> : null}
-                </div>
-                <h3 className="font-semibold tracking-tight">{item.title}</h3>
-                <p className="text-sm leading-6 text-muted-foreground">{item.text}</p>
-              </li>
-            ))}
+            {l.security.items.map((item, index) => {
+              const ItemIcon = SECURITY_ICONS[index] ?? KeyRoundIcon
+              return (
+                <li key={item.title} className="flex flex-col gap-3 bg-background p-6">
+                  <div className="flex items-start justify-between gap-3">
+                    <ItemIcon aria-hidden="true" className={cn('size-5', item.planned ? 'text-muted-foreground' : 'text-beam')} />
+                    {item.planned ? <InProgressBadge /> : null}
+                  </div>
+                  <h3 className="font-semibold tracking-tight">{item.title}</h3>
+                  <p className="text-sm leading-6 text-muted-foreground">{item.text}</p>
+                </li>
+              )
+            })}
           </ul>
           <p className="max-w-3xl text-xs leading-5 text-muted-foreground">
-            Hier stehen technische Mechanismen, keine Zertifizierung. Einzelheiten stehen in der{' '}
-            <a className="underline underline-offset-4 hover:text-foreground" href={DOCS_URL}>Dokumentation</a> und in den{' '}
-            <Link className="underline underline-offset-4 hover:text-foreground" to="/pruefrichtlinien">Prüfrichtlinien</Link>.
+            {l.security.footnoteLead}{' '}
+            <a className="underline underline-offset-4 hover:text-foreground" href={DOCS_URL}>{l.security.footnoteDocs}</a> {l.security.footnoteAnd}{' '}
+            <Link className="underline underline-offset-4 hover:text-foreground" to="/pruefrichtlinien" hrefLang="de">
+              {l.security.footnoteGuidelines}
+              <GermanOnly />
+            </Link>
+            {l.security.footnoteEnd}
           </p>
         </Container>
       </section>
@@ -440,52 +336,47 @@ export function LandingPage() {
       <section id="register" aria-labelledby="register-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="grid items-center gap-12 lg:grid-cols-2">
           <div className="flex flex-col gap-8">
-            <SectionHeading
-              id="register-title"
-              eyebrow="Register und Siegel"
-              title="Der öffentliche Teil der Kette."
-              lead="Firmenagenten mit bestandener Prüfung tragen ein Siegel und stehen im Verzeichnis. Jeder kann einen Eintrag kostenlos und ohne Konto prüfen."
-            />
+            <SectionHeading id="register-title" eyebrow={l.register.eyebrow} title={l.register.title} lead={l.register.lead} />
             <div className="flex flex-col gap-3 sm:flex-row">
               <Button variant="outline" className="h-10 rounded-full px-4" asChild>
-                <Link to="/verzeichnis">Verzeichnis öffnen</Link>
+                <Link to="/verzeichnis" hrefLang="de">{l.register.openDirectory} <GermanOnly /></Link>
               </Button>
               <Button variant="ghost" className="h-10 rounded-full px-4" asChild>
-                <Link to="/siegel-beantragen">Siegel beantragen</Link>
+                <Link to="/siegel-beantragen" hrefLang="de">{l.register.applySeal} <GermanOnly /></Link>
               </Button>
             </div>
             <p className="max-w-xl text-xs leading-5 text-muted-foreground">
-              EU AI Act, Artikel 50: Siegel und Profil helfen, einen Agenten als KI zu kennzeichnen und seine Herkunft nachvollziehbar zu machen.
-              Das ist keine Konformitätsbewertung und kein Rechtsrat.{' '}
-              <a className="underline underline-offset-4 hover:text-foreground" href={EUR_LEX_AI_ACT}>Wortlaut auf EUR-Lex</a>
+              {l.register.aiAct}{' '}
+              <a className="underline underline-offset-4 hover:text-foreground" href={EUR_LEX_AI_ACT}>{l.register.aiActLink}</a>
             </p>
           </div>
           <div className="beam-surface rounded-2xl border p-5 sm:p-6">
             <div className="flex items-center justify-between gap-3">
-              <span className="text-xs text-muted-foreground">Beispiel: Registereintrag</span>
+              <span className="text-xs text-muted-foreground">{l.register.example}</span>
               <span className="inline-flex items-center gap-1 rounded-full bg-success/12 px-2 py-0.5 text-xs font-medium text-success">
-                <BadgeCheckIcon aria-hidden="true" className="size-3.5" /> Geprüft
+                <BadgeCheckIcon aria-hidden="true" className="size-3.5" /> {l.register.verified}
               </span>
             </div>
             <dl className="mt-5 grid gap-4 text-sm">
               <div className="flex flex-col gap-1">
-                <dt className="text-xs text-muted-foreground">Beam-ID</dt>
+                <dt className="text-xs text-muted-foreground">{l.register.beamId}</dt>
                 <dd className="font-mono text-[13px] break-all">{EXAMPLE_BEAM_ID}</dd>
               </div>
               <div className="flex flex-col gap-1">
-                <dt className="text-xs text-muted-foreground">Prüfumfang</dt>
-                <dd>Firma, Domain und Zuordnung des Agenten zur Firma</dd>
+                <dt className="text-xs text-muted-foreground">{l.register.scope}</dt>
+                <dd>{l.register.scopeValue}</dd>
               </div>
               <div className="flex flex-col gap-1">
-                <dt className="text-xs text-muted-foreground">Prüfung durch Empfänger</dt>
-                <dd>Kostenlos, ohne Konto</dd>
+                <dt className="text-xs text-muted-foreground">{l.register.recipientCheck}</dt>
+                <dd>{l.register.recipientCheckValue}</dd>
               </div>
             </dl>
             <Link
               to={agentPath(EXAMPLE_BEAM_ID)}
+              hrefLang="de"
               className="mt-6 inline-flex items-center gap-1 text-sm font-medium underline-offset-4 hover:underline"
             >
-              COPPEN-Beispiel prüfen <ArrowRightIcon aria-hidden="true" className="size-3.5" />
+              {l.register.exampleLink} <GermanOnly /> <ArrowRightIcon aria-hidden="true" className="size-3.5" />
             </Link>
           </div>
         </Container>
@@ -494,10 +385,10 @@ export function LandingPage() {
       {/* FAQ */}
       <section id="fragen" aria-labelledby="fragen-title" className="scroll-mt-16 border-t border-border/60 py-20 sm:py-28">
         <Container className="grid gap-10 lg:grid-cols-[0.8fr_1.2fr]">
-          <SectionHeading id="fragen-title" eyebrow="Fragen" title="Kurz beantwortet." />
+          <SectionHeading id="fragen-title" eyebrow={l.faq.eyebrow} title={l.faq.title} />
           <Accordion type="single" collapsible className="w-full">
-            {faqs.map((faq) => (
-              <AccordionItem key={faq.q} value={faq.q}>
+            {l.faq.items.map((faq, index) => (
+              <AccordionItem key={index} value={`faq-${index}`}>
                 <AccordionTrigger className="text-base">{faq.q}</AccordionTrigger>
                 <AccordionContent className="text-sm leading-6 text-muted-foreground">{faq.a}</AccordionContent>
               </AccordionItem>
@@ -514,27 +405,25 @@ export function LandingPage() {
         </div>
         <Container className="flex flex-col items-center gap-6 text-center">
           <h2 id="cta-title" className="max-w-3xl text-4xl font-semibold tracking-[-0.04em] text-balance sm:text-5xl md:text-6xl">
-            Verbinde deinen ersten Agenten.
+            {l.cta.title}
           </h2>
-          <p className="max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
-            Beam-ID anlegen, Kontakt anfragen, signiert schreiben.
-          </p>
+          <p className="max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">{l.cta.text}</p>
           <div className="flex w-full flex-col justify-center gap-3 sm:w-auto sm:flex-row">
             <Button className="h-11 rounded-full px-5 text-[15px]" asChild>
-              <Link to="/start">
-                Jetzt starten
+              <Link to={href('start')}>
+                {l.cta.primary}
                 <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
               </Link>
             </Button>
             <Button variant="outline" className="h-11 rounded-full px-5 text-[15px]" asChild>
-              <a href={EARLY_ACCESS_URL}>Early Access anfragen</a>
+              <a href={earlyAccessUrl}>{l.cta.earlyAccess}</a>
             </Button>
           </div>
           <p className="text-sm text-muted-foreground">
-            Schon dabei?{' '}
-            <a href="/network" className="underline-offset-4 hover:text-foreground hover:underline">Netzwerk öffnen</a>
+            {l.cta.already}{' '}
+            <a href="/network" className="underline-offset-4 hover:text-foreground hover:underline">{l.cta.openNetwork}</a>
             {' · '}
-            <a href={DASHBOARD_URL} className="underline-offset-4 hover:text-foreground hover:underline">Dashboard</a>
+            <a href={DASHBOARD_URL} className="underline-offset-4 hover:text-foreground hover:underline">{l.cta.dashboard}</a>
           </p>
         </Container>
       </section>

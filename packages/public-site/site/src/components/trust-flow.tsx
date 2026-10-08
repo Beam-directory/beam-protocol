@@ -1,12 +1,10 @@
 import type { CSSProperties } from 'react'
 import { BotIcon, BuildingIcon, CheckIcon, FileTextIcon, KeyRoundIcon, LockIcon, ScrollTextIcon, UserIcon } from 'lucide-react'
 import { cn } from 'cn'
+import { useI18n } from '@/i18n/context'
 
-const chain = [
-  { icon: BuildingIcon, label: 'Firma', detail: 'Firma A GmbH', delay: '4.4s' },
-  { icon: UserIcon, label: 'Mensch', detail: 'Leitung Vertrieb', delay: '4.9s' },
-  { icon: ScrollTextIcon, label: 'Vollmacht', detail: 'Angebote senden', delay: '5.4s' },
-]
+const CHAIN_ICONS = [BuildingIcon, UserIcon, ScrollTextIcon]
+const CHAIN_DELAYS = ['4.4s', '4.9s', '5.4s']
 
 function delay(value: string): CSSProperties {
   return { '--beam-delay': value } as CSSProperties
@@ -26,25 +24,21 @@ function AgentNode({ name, beamId, className }: { name: string; beamId: string; 
 }
 
 /**
- * Animated example: an instruction becomes a signed, encrypted message from one agent
- * to another, and the receiving agent checks the chain Firma, Mensch, Vollmacht.
+ * Animated example: an instruction becomes a signed, encrypted chat message from one agent
+ * to another, and the receiving agent checks the chain company, person, mandate.
  * Motion is CSS only and stops under prefers-reduced-motion (see index.css).
  */
 export function TrustFlow({ className }: { className?: string }) {
+  const { t } = useI18n()
+  const copy = t.trustFlow
   return (
     <figure className={cn('beam-demo beam-surface relative overflow-hidden rounded-2xl border p-4 sm:p-6', className)}>
-      <figcaption className="sr-only">
-        Zielbild des Ablaufs: Ein Mensch sagt seinem Agenten, er solle Lakis' Agent eine Nachricht und eine Datei schicken. Der Agent
-        signiert die Nachricht und sendet sie als Chat über das Beam-Netzwerk, Ende-zu-Ende verschlüsselt. Lakis' Agent prüft die Kette
-        Firma, Mensch und Vollmacht, prüft die Signatur und nimmt Nachricht und Datei an. Signatur, Firmenprüfung und die
-        Verschlüsselung von Chats gibt es heute; Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt. Die Prüfung
-        von Mensch und Vollmacht ist im Aufbau.
-      </figcaption>
+      <figcaption className="sr-only">{copy.caption}</figcaption>
       <div aria-hidden="true" className="flex flex-col gap-5">
         <div className="flex items-center justify-between text-[11px] text-muted-foreground">
           <span className="inline-flex items-center gap-1.5">
             <span className="size-1.5 rounded-full bg-beam" />
-            Zielbild
+            {copy.label}
           </span>
           <span className="font-mono">beam://handoff</span>
         </div>
@@ -54,59 +48,63 @@ export function TrustFlow({ className }: { className?: string }) {
             <UserIcon className="size-3.5 text-muted-foreground" />
           </span>
           <div className="flex min-w-0 flex-col gap-2 rounded-2xl rounded-tl-sm bg-muted px-3.5 py-2.5 text-[13px] leading-5 text-foreground">
-            <p>„Sag meinem Agenten: Schreib Lakis&apos; Agent das hier und schick ihm die Datei.“</p>
+            <p>{copy.instruction}</p>
             <span className="inline-flex w-fit items-center gap-1.5 rounded-md border bg-background px-2 py-1 font-mono text-[11px] text-muted-foreground">
               <FileTextIcon className="size-3" />
-              angebot.pdf
+              {copy.file}
             </span>
           </div>
         </div>
 
         <div className="flex items-start">
           <div className="flex flex-col items-center gap-2">
-            <AgentNode name="Dein Agent" beamId="du@firma-a.beam.directory" />
+            <AgentNode name={copy.yourAgent} beamId={copy.yourBeamId} />
             <span className="beam-sign inline-flex items-center gap-1 rounded-full border border-beam/30 bg-beam/10 px-2 py-0.5 text-[10px] font-medium text-foreground">
               <KeyRoundIcon className="size-3 text-beam" />
-              Signiert
+              {copy.signed}
             </span>
           </div>
 
           <div className="beam-track relative mt-[1.375rem] h-px flex-1 bg-border">
             <span className="beam-track-fill absolute inset-0 bg-gradient-to-r from-beam to-beam-2" />
-            <span className="beam-packet absolute -top-3 left-0 inline-flex h-6 items-center gap-1 rounded-full border border-beam/40 bg-background px-2 text-[10px] font-medium text-foreground shadow-[0_0_24px_-4px_var(--beam)]">
+            <span className="beam-packet absolute -top-3 left-0 inline-flex h-6 items-center gap-1 rounded-full border border-beam/40 bg-background px-2 text-[10px] font-medium whitespace-nowrap text-foreground shadow-[0_0_24px_-4px_var(--beam)]">
               <LockIcon className="size-3 text-beam" />
-              E2E-Chat
+              {copy.packet}
             </span>
           </div>
 
-          <AgentNode name="Lakis' Agent" beamId="lakis@firma-b.beam.directory" />
+          <AgentNode name={copy.otherAgent} beamId={copy.otherBeamId} />
         </div>
 
         <div className="rounded-xl border bg-background/60 p-3 sm:p-4">
           <p className="mb-3 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
-            <span>Lakis&apos; Agent prüft die Kette</span>
+            <span>{copy.checksTitle}</span>
             <span className="inline-flex items-center gap-1 rounded-full border border-dashed border-muted-foreground/40 px-1.5 py-px text-[10px]">
-              Vollmacht-Prüfung im Aufbau
+              {copy.mandateNote}
             </span>
           </p>
           <ol className="grid grid-cols-3 gap-2">
-            {chain.map((step) => (
-              <li key={step.label} className="beam-step flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 sm:p-2.5" style={delay(step.delay)}>
-                <span className="flex items-center justify-between gap-1">
-                  <step.icon className="size-3.5 text-muted-foreground" />
-                  <span className="beam-step-icon flex size-4 items-center justify-center rounded-full bg-success/15" style={delay(step.delay)}>
-                    <CheckIcon className="size-2.5 text-success" strokeWidth={3} />
+            {copy.chain.map((step, index) => {
+              const Icon = CHAIN_ICONS[index] ?? BuildingIcon
+              const stepDelay = CHAIN_DELAYS[index] ?? '4.4s'
+              return (
+                <li key={step.label} className="beam-step flex min-w-0 flex-col gap-1.5 rounded-lg border bg-card p-2 sm:p-2.5" style={delay(stepDelay)}>
+                  <span className="flex items-center justify-between gap-1">
+                    <Icon className="size-3.5 text-muted-foreground" />
+                    <span className="beam-step-icon flex size-4 items-center justify-center rounded-full bg-success/15" style={delay(stepDelay)}>
+                      <CheckIcon className="size-2.5 text-success" strokeWidth={3} />
+                    </span>
                   </span>
-                </span>
-                <span className="text-xs font-medium text-foreground">{step.label}</span>
-                <span className="truncate text-[10px] text-muted-foreground">{step.detail}</span>
-              </li>
-            ))}
+                  <span className="text-xs font-medium text-foreground">{step.label}</span>
+                  <span className="truncate text-[10px] text-muted-foreground">{step.detail}</span>
+                </li>
+              )
+            })}
           </ol>
           <p className="beam-step mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-foreground" style={delay('6s')}>
-            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />Signatur gültig</span>
-            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />Entschlüsselt</span>
-            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />Datei angenommen</span>
+            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />{copy.status.signature}</span>
+            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />{copy.status.decrypted}</span>
+            <span className="inline-flex items-center gap-1"><CheckIcon className="size-3 text-success" />{copy.status.file}</span>
           </p>
         </div>
       </div>

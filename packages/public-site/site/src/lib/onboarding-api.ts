@@ -30,8 +30,9 @@
  * - suffixedOrgName                createOrg with a "label-suffix" name (e.g. coppen-at) is sent to POST /orgs, but the
  *                                  current backend still answers 403 ORG_NAMESPACE_DOMAIN_MISMATCH (accepted after #211)
  */
+import type { Messages } from '../i18n/en.ts'
 import { directoryApiBase } from './directory-client'
-import { signMutation } from './agent-keys'
+import { KeySupportError, signMutation } from './agent-keys'
 
 export type Capability =
   | 'createOrg'
@@ -105,43 +106,6 @@ export class OnboardingApiError extends Error {
   }
 }
 
-/** German messages for directory error codes the onboarding can hit. */
-const ERROR_MESSAGES: Record<string, string> = {
-  INVALID_ORG_NAME: 'Der Namensraum darf nur Kleinbuchstaben, Ziffern, Bindestriche und Unterstriche enthalten.',
-  INVALID_DOMAIN: 'Bitte eine gültige Domain angeben, zum Beispiel firma.de.',
-  ORG_NAMESPACE_DOMAIN_MISMATCH: 'Der Namensraum muss zum Namen der Domain passen (firma.de → firma).',
-  ORG_EXISTS: 'Dieser Namensraum ist bereits an eine verifizierte Firma vergeben.',
-  ORG_CLAIM_PENDING: 'Für diesen Namensraum läuft bereits eine Anmeldung. Mit dem Org-Schlüssel kannst du sie fortsetzen.',
-  DOMAIN_EXISTS: 'Diese Domain ist bereits einer verifizierten Firma zugeordnet. Melde dich bei uns, falls das nicht stimmt.',
-  DOMAIN_CLAIM_PENDING: 'Für diese Domain läuft bereits eine Anmeldung. Mit dem Org-Schlüssel kannst du sie fortsetzen.',
-  ORG_CLAIM_EXPIRED: 'Die Anmeldung ist abgelaufen. Bitte die Domain neu beanspruchen.',
-  TXT_NOT_FOUND: 'Der DNS-TXT-Eintrag wurde noch nicht gefunden. DNS-Änderungen brauchen manchmal etwas Zeit.',
-  DNS_LOOKUP_FAILED: 'Die DNS-Abfrage ist fehlgeschlagen. Bitte später erneut prüfen.',
-  UNAUTHORIZED: 'Der Schlüssel ist ungültig.',
-  NOT_FOUND: 'Nicht gefunden.',
-  ORG_VERIFICATION_REQUIRED: 'Die Domain der Firma muss zuerst verifiziert sein.',
-  ORG_OWNERSHIP_REQUIRED: 'Für diese Firma ist ein gültiger Org-Schlüssel nötig.',
-  ORG_REGISTRATION_REQUIRED: 'Die Firma muss zuerst angelegt werden.',
-  BEAM_ID_ALREADY_REGISTERED: 'Diese Beam-ID ist bereits vergeben.',
-  INVALID_BEAM_ID: 'Die Beam-ID hat ein ungültiges Format.',
-  INVALID_PUBLIC_KEY_FORMAT: 'Der öffentliche Schlüssel hat ein ungültiges Format.',
-  INVALID_REGISTRATION_NUMBER: 'Die Registernummer hat ein ungültiges Format (DE: HRB oder HRA mit Ziffern).',
-  INVALID_REQUEST: 'Land, Registernummer und rechtlicher Name sind nötig.',
-  COMPANIES_HOUSE_UNAVAILABLE: 'Die Abfrage bei Companies House ist gerade nicht eingerichtet.',
-  BUSINESS_VERIFICATION_FAILED: 'Die Registerangaben konnten nicht bestätigt werden.',
-  IDENTITY_NOT_ASSURED: 'Dein Agent muss zu einer verifizierten Firma gehören, bevor er Kontakte anfragen kann.',
-  INVALID_RECIPIENT: 'Bitte eine andere, gültige Beam-ID angeben.',
-  RECIPIENT_NOT_FOUND: 'Diese verifizierte Beam-ID wurde nicht gefunden.',
-  MESSAGE_TOO_LONG: 'Die Nachricht darf höchstens 280 Zeichen haben.',
-  CONNECTION_EXISTS: 'Zu dieser Beam-ID besteht bereits eine Verbindung oder Anfrage.',
-  CONNECTION_BLOCKED: 'Diese Verbindung ist blockiert.',
-  INVALID_SIGNATURE: 'Die Signatur konnte nicht geprüft werden.',
-  NONCE_REPLAY: 'Diese signierte Anfrage wurde bereits verwendet.',
-  INVALID_EMAIL: 'Bitte eine gültige E-Mail-Adresse angeben.',
-  RATE_LIMITED: 'Zu viele Anfragen. Bitte kurz warten.',
-  NETWORK_ERROR: 'Beam ist gerade nicht erreichbar. Bitte Verbindung prüfen und erneut versuchen.',
-}
-
 /**
  * Classifies a failed createOrg (routes/orgs.ts): 'name' = the namespace is taken or pending (409 ORG_EXISTS /
  * ORG_CLAIM_PENDING, a label-suffix name can help), 'domain' = the domain itself is claimed (no suggestion),
@@ -155,13 +119,15 @@ export function classifyOrgConflict(error: unknown): 'name' | 'domain' | 'suffix
   return null
 }
 
-export function describeError(error: unknown): string {
-  if (error instanceof NotAvailableYet) return 'Diese Funktion ist bald verfügbar.'
+/** User-facing message in the active language (src/i18n errors dictionary). */
+export function describeError(error: unknown, messages: Messages['errors']): string {
+  if (error instanceof NotAvailableYet) return messages.notAvailable
+  if (error instanceof KeySupportError) return messages.keySupport
   if (error instanceof OnboardingApiError) {
-    return ERROR_MESSAGES[error.code] ?? (error.message || 'Die Anfrage ist fehlgeschlagen.')
+    return messages.codes[error.code] ?? (error.message || messages.generic)
   }
   if (error instanceof Error && error.message) return error.message
-  return 'Die Anfrage ist fehlgeschlagen.'
+  return messages.generic
 }
 
 type FetchLike = typeof fetch
