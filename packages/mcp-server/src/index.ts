@@ -36,7 +36,13 @@ async function main(): Promise<void> {
     gateway: {
       getStats: () => client.getStats(),
       lookup: (beamId) => client.directory.lookup(beamId),
-      send: (to, intent, payload, timeoutMs) => client.send(to, intent, payload, timeoutMs),
+      send: async (to, intent, payload, timeoutMs) => {
+        const result = await client.send(to, intent, payload, timeoutMs)
+        if ('executed' in result) {
+          throw new Error(result.error ?? `Approval required (${result.approvalId})`)
+        }
+        return result
+      },
     },
     networkGateway: createBeamNetworkGateway(config),
     ownBeamId: config.beamId,
