@@ -163,7 +163,14 @@ The organization API key can replace the public key or the rights of an active p
 POST /orgs/coppen/people/:id/offboard
 ```
 
-Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change, every agent they own is suspended, and every active mandate they signed is revoked. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
+Offboarding is immediate and idempotent. New organization agents accept `responsiblePersonId`. The responsible person's signature can rotate that agent's signing key while the person is active. After offboarding, that signature no longer authorizes a key change, every agent they own is suspended, and every active mandate they signed is revoked. Delegations where those agents are grantor or grantee are revoked too. Shrinking `rights` revokes mandates that no longer fit inside them. A suspended agent, or an agent whose responsible person is not active, cannot open a network connection, accept a websocket, or send through a delegation.
+
+```http
+PUT /orgs/coppen/agents/buyer/responsible-person
+{ "responsiblePersonId": "<person id>" }
+```
+
+Replacing the responsible person revokes that agent's active mandates and its delegations.
 
 ### Organization agents
 
@@ -187,7 +194,7 @@ A mandate is signed by the agent's responsible person. The signed object is cano
 }
 ```
 
-`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead.
+`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead. The person must have `kycStatus: "verified"` and the organization domain must be verified. Otherwise the route returns `400 KYC_REQUIRED` or `400 ORG_VERIFICATION_REQUIRED`.
 
 ```http
 POST /agents/agent@coppen.beam.directory/mandates
@@ -201,6 +208,8 @@ POST /agents/agent@coppen.beam.directory/mandates/:jti/revoke
 { "signature": "<signature over {type:'mandate-revoke', jti, personId}>" }
 ```
 
+The same payload can be signed by the person or by their active supervisor. The organization API key can revoke without a signature. The audit actor records which of the three authorized it.
+
 Delegations keep the previous signed payload. A client may add `nonce` (8–128 url-safe characters) inside that signed object. After revoke, the same signed payload, or the same grantor, grantee, scope, and expiry, returns `409 DELEGATION_REPLAY`.
 
 ### Trust assertion and acceptance
@@ -209,7 +218,7 @@ Delegations keep the previous signed payload. A client may add `nonce` (8–128 
 GET /agents/agent@coppen.beam.directory/trust-assertion
 ```
 
-The directory signs `{v, beamId, org, person, mandate, issuedAt, expiresAt}` with the stable issuer key. The response adds `signature` and `publicKey`. The assertion expires after 15 minutes. Without `BEAM_DIRECTORY_SIGNING_PRIVATE_KEY` and `BEAM_DIRECTORY_SIGNING_PUBLIC_KEY` the route returns `503 ISSUER_KEY_REQUIRED`. Intent delivery still proceeds and carries `trustAssertion: null` beside the frame. A configured issuer adds the assertion beside the frame and on direct HTTP delivery; the signed intent frame itself is unchanged. A result signature is also stored on `intent_log.result_signature`.
+The directory signs `{v, beamId, org, person, mandate, suspended, issuedAt, expiresAt}` with the stable issuer key. `person.ref` and `mandate.escalationPersonRef` are SHA-256 hex of the person id, not the id itself. `suspended` is true when the agent is suspended or the responsible person is offboarded. The response adds `signature` and `publicKey`. The assertion expires after 15 minutes. A public agent can be read by anyone. An unlisted agent returns `404` without a credential, `403` for an authenticated non-contact, and `200` for the agent, an accepted contact, or the organization key. Without `BEAM_DIRECTORY_SIGNING_PRIVATE_KEY` and `BEAM_DIRECTORY_SIGNING_PUBLIC_KEY` the route returns `503 ISSUER_KEY_REQUIRED`. Intent delivery still proceeds and carries `trustAssertion: null` beside the frame. A configured issuer adds the assertion beside the frame and on direct HTTP delivery; the signed intent frame itself is unchanged. A result signature is also stored on `intent_log.result_signature`.
 
 ```http
 PUT /agents/agent@coppen.beam.directory/acceptance
@@ -219,11 +228,14 @@ x-api-key: beam_org_...
   "allowedOrgDomains": ["coppen.de"],
   "allowedScopes": ["read"],
   "allowedAgents": [],
-  "requireKnownContact": false
+  "requireKnownContact": false,
+  "version": 1,
+  "timestamp": "2026-10-08T12:00:00.000Z",
+  "nonce": "0123456789abcdef"
 }
 ```
 
-The organization API key or a signature of the agent's current key over `{type:'acceptance', beamId, allowedOrgDomains, allowedScopes, allowedAgents, requireKnownContact}` is required. An agent API key alone is not enough. No stored rule means the existing ACL still applies. An empty list does not filter that dimension. A stored rule that rejects the sender returns `403 ACCEPTANCE_DENIED`.
+The organization API key or a signature of the agent's current key is required. The signed object adds `version`, `timestamp`, and `nonce` to the rule fields. `version` must be exactly one higher than the stored version (`1` for the first rule). `timestamp` must be within five minutes and `nonce` is single-use. A repeated or older signed rule returns `409 ACCEPTANCE_STALE` or `409 NONCE_REPLAY`. An agent API key alone is not enough. No stored rule means the existing ACL still applies. An empty list does not filter that dimension. A stored rule that rejects the sender returns `403 ACCEPTANCE_DENIED`.
 
 The first contact request remains `POST /network/connections`.
 

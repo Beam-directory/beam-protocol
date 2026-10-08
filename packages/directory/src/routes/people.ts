@@ -382,12 +382,18 @@ export function peopleRouter(db: Database): Hono {
       action: 'org.person.offboarded',
       actor: `org:${owned.name}`,
       target: person.id,
-      details: { suspendedAgents: result.suspendedAgents, revokedMandates: result.revokedMandates, email: person.email },
+      details: {
+        suspendedAgents: result.suspendedAgents,
+        revokedMandates: result.revokedMandates,
+        revokedDelegations: result.revokedDelegations,
+        email: person.email,
+      },
     })
     return c.json({
       person: serializePerson(result.person),
       suspendedAgents: result.suspendedAgents,
       revokedMandates: result.revokedMandates,
+      revokedDelegations: result.revokedDelegations,
     })
   })
 

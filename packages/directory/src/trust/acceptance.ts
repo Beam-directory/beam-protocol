@@ -9,6 +9,7 @@ export type AcceptanceRule = {
   allowed_scopes: string[]
   allowed_agents: string[]
   require_known_contact: number
+  version: number
   updated_at: string
 }
 
@@ -18,6 +19,7 @@ type AcceptanceRow = {
   allowed_scopes: string
   allowed_agents: string
   require_known_contact: number
+  version: number
   updated_at: string
 }
 
@@ -33,6 +35,7 @@ function mapRule(row: AcceptanceRow): AcceptanceRule {
     allowed_scopes: parseList(row.allowed_scopes),
     allowed_agents: parseList(row.allowed_agents),
     require_known_contact: row.require_known_contact,
+    version: row.version,
     updated_at: row.updated_at,
   }
 }
@@ -50,18 +53,20 @@ export function saveAcceptanceRule(
     allowedScopes: string[]
     allowedAgents: string[]
     requireKnownContact: boolean
+    version: number
   },
 ): AcceptanceRule {
   const updatedAt = new Date().toISOString()
   db.prepare(`
     INSERT INTO acceptance_rules (
-      owner_beam_id, allowed_org_domains, allowed_scopes, allowed_agents, require_known_contact, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?)
+      owner_beam_id, allowed_org_domains, allowed_scopes, allowed_agents, require_known_contact, version, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(owner_beam_id) DO UPDATE SET
       allowed_org_domains = excluded.allowed_org_domains,
       allowed_scopes = excluded.allowed_scopes,
       allowed_agents = excluded.allowed_agents,
       require_known_contact = excluded.require_known_contact,
+      version = excluded.version,
       updated_at = excluded.updated_at
   `).run(
     input.ownerBeamId,
@@ -69,6 +74,7 @@ export function saveAcceptanceRule(
     JSON.stringify(input.allowedScopes),
     JSON.stringify(input.allowedAgents),
     input.requireKnownContact ? 1 : 0,
+    input.version,
     updatedAt,
   )
   return getAcceptanceRule(db, input.ownerBeamId) as AcceptanceRule
@@ -133,6 +139,7 @@ export function serializeAcceptanceRule(rule: AcceptanceRule): object {
     allowedScopes: rule.allowed_scopes,
     allowedAgents: rule.allowed_agents,
     requireKnownContact: rule.require_known_contact === 1,
+    version: rule.version,
     updatedAt: rule.updated_at,
   }
 }

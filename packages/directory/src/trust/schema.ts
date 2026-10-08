@@ -119,6 +119,7 @@ function ensureTrustPersonSchema(db: Database): void {
       allowed_scopes TEXT NOT NULL DEFAULT '[]',
       allowed_agents TEXT NOT NULL DEFAULT '[]',
       require_known_contact INTEGER NOT NULL DEFAULT 1,
+      version INTEGER NOT NULL DEFAULT 0,
       updated_at TEXT NOT NULL,
       FOREIGN KEY (owner_beam_id) REFERENCES agents(beam_id) ON DELETE CASCADE
     );
@@ -137,6 +138,7 @@ function ensureTrustPersonSchema(db: Database): void {
       FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE
     );
   `)
+  ensureColumn(db, 'acceptance_rules', 'version', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'delegations', 'payload_hash', 'TEXT')
   ensureColumn(db, 'intent_log', 'result_signature', 'TEXT')
   db.exec(`

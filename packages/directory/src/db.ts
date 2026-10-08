@@ -2708,6 +2708,32 @@ function renameOrg(db: DB, from: string, to: string): void {
       if (tableExists(db, 'person_invitations')) {
         db.prepare('UPDATE person_invitations SET org_name = ? WHERE org_name = ?').run(to, from)
       }
+      if (tableExists(db, 'mandates')) {
+        db.prepare(`
+          UPDATE mandates
+          SET org_name = ?, agent_beam_id = replace(agent_beam_id, ?, ?)
+          WHERE org_name = ?
+        `).run(to, previousSuffix, nextSuffix, from)
+      }
+      if (tableExists(db, 'acceptance_rules')) {
+        db.prepare(`
+          UPDATE acceptance_rules
+          SET owner_beam_id = replace(owner_beam_id, ?, ?)
+          WHERE substr(owner_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+      }
+      if (tableExists(db, 'delegations')) {
+        db.prepare(`
+          UPDATE delegations
+          SET grantor_beam_id = replace(grantor_beam_id, ?, ?)
+          WHERE substr(grantor_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+        db.prepare(`
+          UPDATE delegations
+          SET grantee_beam_id = replace(grantee_beam_id, ?, ?)
+          WHERE substr(grantee_beam_id, -length(?)) = ?
+        `).run(previousSuffix, nextSuffix, previousSuffix, previousSuffix)
+      }
     })
     apply()
   } finally {

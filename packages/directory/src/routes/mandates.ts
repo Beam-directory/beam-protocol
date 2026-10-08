@@ -4,10 +4,11 @@ import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { hashApiKey } from '../api-key.js'
 import { canonicalizeJson, verifyPayload } from '../crypto.js'
-import { getAgent, getOrg, logAuditEvent } from '../db.js'
+import { getAgent, getOrg, logAuditEvent, recordNonce } from '../db.js'
 import { IssuerKeyRequiredError } from '../issuer.js'
 import {
   getAcceptanceRule,
+  hasAcceptedConnection,
   saveAcceptanceRule,
   serializeAcceptanceRule,
 } from '../trust/acceptance.js'
@@ -24,6 +25,10 @@ import { registrableDomain } from '../trust/org-domain.js'
 import { getPerson } from '../trust/person-store.js'
 import { parseScopeGrant, scopeWithin, SCOPE_ACTIONS, type ScopeAction } from '../trust/scopes.js'
 import { BEAM_ID_RE } from '../validation.js'
+import { authenticateNetworkIdentity } from './network.js'
+
+const NONCE_RE = /^[A-Za-z0-9_-]{16,128}$/
+const SIGNATURE_WINDOW_MS = 5 * 60 * 1000
 
 const JTI_RE = /^[A-Za-z0-9_-]{8,80}$/
 const INTENT_SCOPE_RE = /^[a-z][a-z0-9._-]{0,63}$/
@@ -123,6 +128,13 @@ export function mandatesRouter(db: Database): Hono {
     if (person.status !== 'active' || person.org_name !== agent.org || agent.suspended_at) {
       return c.json({ error: 'An active responsible person is required', errorCode: 'RESPONSIBLE_PERSON_REQUIRED' }, 400)
     }
+    if (person.kyc_status !== 'verified') {
+      return c.json({ error: 'The responsible person must be KYC verified', errorCode: 'KYC_REQUIRED' }, 400)
+    }
+    const org = agent.org ? getOrg(db, agent.org) : null
+    if (!org || org.verified !== 1) {
+      return c.json({ error: 'The organization domain must be verified', errorCode: 'ORG_VERIFICATION_REQUIRED' }, 400)
+    }
     const rights = parseScopeGrant(JSON.parse(person.rights_json) as unknown)
     if (!rights) {
       return c.json({ error: 'jti, scopes, expiresAt, and signature are required', errorCode: 'INVALID_MANDATE' }, 400)
@@ -175,22 +187,39 @@ export function mandatesRouter(db: Database): Hono {
       return c.json({ error: 'Mandate not found', errorCode: 'NOT_FOUND' }, 404)
     }
     const person = getPerson(db, mandate.person_id)
-    if (!person?.public_key) {
-      return c.json({ error: 'Responsible person has no signing key', errorCode: 'INVALID_SIGNATURE' }, 400)
+    if (!person) {
+      return c.json({ error: 'Mandate not found', errorCode: 'NOT_FOUND' }, 404)
     }
     const raw = await readObject(c)
     if (raw instanceof Response) return raw
     const signature = typeof raw['signature'] === 'string' ? raw['signature'].trim() : ''
     const payload = { type: 'mandate-revoke' as const, jti, personId: person.id }
-    if (!signature || !verifyPayload(payload, signature, person.public_key)) {
-      return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
+    const personSigned = Boolean(person.public_key && signature && verifyPayload(payload, signature, person.public_key))
+    const supervisor = person.supervisor_person_id ? getPerson(db, person.supervisor_person_id) : null
+    const supervisorSigned = Boolean(
+      !personSigned
+      && supervisor
+      && supervisor.status === 'active'
+      && supervisor.org_name === person.org_name
+      && supervisor.public_key
+      && signature
+      && verifyPayload(payload, signature, supervisor.public_key),
+    )
+    const orgAuthorized = !personSigned && !supervisorSigned && orgKeyMatches(db, person.org_name, c.req.raw)
+    if (!personSigned && !supervisorSigned && !orgAuthorized) {
+      return c.json({ error: 'Person, supervisor, or organization authorization is required', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
     const revoked = revokeMandate(db, jti)
+    const actor = personSigned
+      ? `person:${person.id}`
+      : supervisorSigned
+        ? `person:${supervisor?.id}`
+        : `org:${person.org_name}`
     logAuditEvent(db, {
       action: 'mandate.revoked',
-      actor: `person:${person.id}`,
+      actor,
       target: beamId,
-      details: { jti },
+      details: { jti, via: personSigned ? 'person' : supervisorSigned ? 'supervisor' : 'org' },
     })
     return c.json({ mandate: revoked ? serializeMandate(revoked) : null })
   })
@@ -198,7 +227,17 @@ export function mandatesRouter(db: Database): Hono {
   router.get('/:beamId/trust-assertion', (c) => {
     const beamId = beamIdFrom(c)
     if (!beamId) return c.json({ error: 'Invalid beamId format', errorCode: 'INVALID_BEAM_ID' }, 400)
-    if (!getAgent(db, beamId)) return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    const agent = getAgent(db, beamId)
+    if (!agent) return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+    const caller = authenticateNetworkIdentity(db, c.req.raw)
+    const contact = Boolean(
+      caller
+      && (caller.agent.beam_id === beamId || hasAcceptedConnection(db, caller.agent.beam_id, beamId)),
+    )
+    if (agent.visibility !== 'public' && !contact && !orgKeyMatches(db, agent.org, c.req.raw)) {
+      if (!caller) return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
+      return c.json({ error: 'Trust assertions for unlisted agents are limited to contacts', errorCode: 'FORBIDDEN' }, 403)
+    }
     try {
       return c.json(buildTrustAssertion(db, beamId))
     } catch (error) {
@@ -231,6 +270,18 @@ export function mandatesRouter(db: Database): Hono {
       }, 400)
     }
 
+    const version = typeof raw['version'] === 'number' && Number.isInteger(raw['version']) ? raw['version'] : 0
+    const timestamp = typeof raw['timestamp'] === 'string' ? raw['timestamp'] : ''
+    const timestampMs = Date.parse(timestamp)
+    const nonce = typeof raw['nonce'] === 'string' && NONCE_RE.test(raw['nonce']) ? raw['nonce'] : ''
+    const current = getAcceptanceRule(db, beamId)
+    const nextVersion = (current?.version ?? 0) + 1
+    if (version !== nextVersion) {
+      return c.json({ error: 'version must be the next acceptance version', errorCode: 'ACCEPTANCE_STALE' }, 409)
+    }
+    if (!Number.isFinite(timestampMs) || Math.abs(Date.now() - timestampMs) > SIGNATURE_WINDOW_MS || !nonce) {
+      return c.json({ error: 'A fresh timestamp and nonce are required', errorCode: 'INVALID_PROOF' }, 400)
+    }
     const payload = {
       type: 'acceptance' as const,
       beamId,
@@ -238,12 +289,18 @@ export function mandatesRouter(db: Database): Hono {
       allowedScopes,
       allowedAgents,
       requireKnownContact: raw['requireKnownContact'],
+      version,
+      timestamp,
+      nonce,
     }
     const signature = typeof raw['signature'] === 'string' ? raw['signature'].trim() : ''
     const signed = signature.length > 0 && verifyPayload(payload, signature, agent.public_key)
     const orgAuthorized = orgKeyMatches(db, agent.org, c.req.raw)
     if (!signed && !orgAuthorized) {
       return c.json({ error: 'Organization API key or current agent signature is required', errorCode: 'INVALID_SIGNATURE' }, 400)
+    }
+    if (!recordNonce(db, nonce)) {
+      return c.json({ error: 'This signed request has already been used', errorCode: 'NONCE_REPLAY' }, 409)
     }
 
     const rule = saveAcceptanceRule(db, {
@@ -252,6 +309,7 @@ export function mandatesRouter(db: Database): Hono {
       allowedScopes,
       allowedAgents,
       requireKnownContact: raw['requireKnownContact'],
+      version,
     })
     logAuditEvent(db, {
       action: 'acceptance.updated',

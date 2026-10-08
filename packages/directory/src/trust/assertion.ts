@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
 import { canonicalizeJson, signPayload } from '../crypto.js'
 import { getAgent, getOrg } from '../db.js'
@@ -18,13 +19,14 @@ export type TrustAssertion = {
     verified: boolean
     registryStatus: 'none' | 'pending' | 'approved' | 'rejected'
   } | null
-  person: { id: string; role: string; kycStatus: string } | null
+  person: { ref: string; role: string; kycStatus: string } | null
   mandate: {
     jti: string
     scopes: ScopeGrant
     expiresAt: string
-    escalationPersonId: string | null
+    escalationPersonRef: string | null
   } | null
+  suspended: boolean
   issuedAt: string
   expiresAt: string
   signature: string
@@ -39,6 +41,10 @@ function registryStatus(db: Database, orgName: string): 'none' | 'pending' | 'ap
   return filings[0]?.status ?? 'none'
 }
 
+function personRef(id: string): string {
+  return createHash('sha256').update(id).digest('hex')
+}
+
 function mandateView(row: MandateRow | null): TrustAssertion['mandate'] {
   if (!row) return null
   const scopes = parseScopeGrant(JSON.parse(row.scopes_json) as unknown)
@@ -47,7 +53,7 @@ function mandateView(row: MandateRow | null): TrustAssertion['mandate'] {
     jti: row.jti,
     scopes,
     expiresAt: row.expires_at,
-    escalationPersonId: row.escalation_person_id,
+    escalationPersonRef: row.escalation_person_id ? personRef(row.escalation_person_id) : null,
   }
 }
 
@@ -75,9 +81,10 @@ export function buildTrustAssertion(db: Database, beamId: string, now = new Date
         }
       : null,
     person: person
-      ? { id: person.id, role: person.role, kycStatus: person.kyc_status }
+      ? { ref: personRef(person.id), role: person.role, kycStatus: person.kyc_status }
       : null,
     mandate: mandateView(mandate),
+    suspended: Boolean(agent.suspended_at) || person?.status === 'offboarded',
     issuedAt,
     expiresAt,
   }

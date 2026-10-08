@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from 'node:crypto'
 import type { Database } from 'better-sqlite3'
-import type { ScopeGrant } from './scopes.js'
+import { parseScopeGrant, scopeWithin, type ScopeGrant } from './scopes.js'
 
 export type MandateRow = {
   id: string
@@ -41,9 +41,18 @@ export function getMandateByHash(db: Database, payloadHash: string): MandateRow 
 
 export function getActiveMandate(db: Database, agentBeamId: string, at = new Date().toISOString()): MandateRow | null {
   const row = db.prepare(`
-    SELECT * FROM mandates
-    WHERE agent_beam_id = ? AND status = 'active' AND expires_at > ?
-    ORDER BY created_at DESC, id DESC
+    SELECT m.* FROM mandates m
+    JOIN agents a ON a.beam_id = m.agent_beam_id
+    JOIN persons p ON p.id = m.person_id
+    JOIN orgs o ON o.name = m.org_name
+    WHERE m.agent_beam_id = ?
+      AND m.status = 'active'
+      AND m.expires_at > ?
+      AND a.responsible_person_id = m.person_id
+      AND p.status = 'active'
+      AND p.kyc_status = 'verified'
+      AND o.verified = 1
+    ORDER BY m.created_at DESC, m.id DESC
     LIMIT 1
   `).get(agentBeamId, at) as MandateRow | undefined
   return row ?? null
@@ -110,6 +119,35 @@ export function revokeActiveMandatesForPerson(db: Database, personId: string, at
     WHERE person_id = ? AND status = 'active'
   `).run(at, personId)
   return result.changes
+}
+
+export function revokeActiveMandatesForAgent(db: Database, beamId: string, at: string): number {
+  const result = db.prepare(`
+    UPDATE mandates
+    SET status = 'revoked', revoked_at = ?
+    WHERE agent_beam_id = ? AND status = 'active'
+  `).run(at, beamId)
+  return result.changes
+}
+
+export function revokeMandatesOutsideRights(db: Database, personId: string, rights: ScopeGrant, at = new Date().toISOString()): number {
+  const rows = db.prepare(`
+    SELECT jti, scopes_json FROM mandates WHERE person_id = ? AND status = 'active'
+  `).all(personId) as Array<{ jti: string; scopes_json: string }>
+  let revoked = 0
+  for (const row of rows) {
+    let scopes: ScopeGrant | null = null
+    try {
+      scopes = parseScopeGrant(JSON.parse(row.scopes_json) as unknown)
+    } catch {
+      scopes = null
+    }
+    if (!scopes || !scopeWithin(scopes, rights)) {
+      revokeMandate(db, row.jti, at)
+      revoked += 1
+    }
+  }
+  return revoked
 }
 
 export function serializeMandate(row: MandateRow): object {
