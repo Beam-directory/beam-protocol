@@ -495,7 +495,7 @@ test('orders and payments share the mandate total for the UTC day', async () => 
     createAcl(db, { targetBeamId: vendorId, intentType: 'order.place', allowedFrom: '*' })
     createAcl(db, { targetBeamId: vendorId, intentType: 'payment.submit', allowedFrom: '*' })
 
-    async function sendMoney(intent: string, amount: string) {
+    async function sendMoney(intent: string, amount: string, to = vendorId) {
       const nonce = `money-${randomBytes(12).toString('hex')}`
       const timestamp = new Date().toISOString()
       const payload = { amount, currency: 'EUR' }
@@ -504,20 +504,28 @@ test('orders and payments share the mandate total for the UTC day', async () => 
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({
           from: buyerId,
-          to: vendorId,
+          to,
           intent,
           payload,
           nonce,
           timestamp,
-          signature: signIntent(buyerKey.privateKey, { from: buyerId, to: vendorId, intent, payload, timestamp, nonce }),
+          signature: signIntent(buyerKey.privateKey, { from: buyerId, to, intent, payload, timestamp, nonce }),
         }),
       }))
-      return { response, body: await response.json() as { errorCode?: string; approvalId?: string; reason?: string } }
+      return { response, body: await response.json() as { errorCode?: string; approvalId?: string; reason?: string; success?: boolean } }
     }
 
-    const first = await sendMoney('order.place', '60.00')
-    assert.notEqual(first.response.status, 202)
-    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM mandate_order_spend').get() as { count: number }).count, 1)
+    const offline = await sendMoney('order.place', '60.00')
+    assert.equal(offline.response.status, 503)
+    assert.equal((db.prepare('SELECT COUNT(*) AS count FROM mandate_order_spend').get() as { count: number }).count, 0)
+
+    const delivered = await sendMoney('order.place', '60.00', 'echo@beam.directory')
+    assert.equal(delivered.response.status, 200)
+    const spent = db.prepare('SELECT day, amount_cents FROM mandate_order_spend').all() as Array<{ day: string; amount_cents: number }>
+    assert.equal(spent.length, 1)
+    assert.equal(spent[0]?.day, new Date().toISOString().slice(0, 10))
+    assert.equal(spent[0]?.amount_cents, 6000)
+
     const second = await sendMoney('payment.submit', '50.00')
     assert.equal(second.response.status, 202)
     assert.equal(second.body.errorCode, 'APPROVAL_REQUIRED')

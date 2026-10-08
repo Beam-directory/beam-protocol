@@ -32,7 +32,7 @@ import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
 import { agentOperationBlock } from './trust/person-store.js'
 import { getAdminSessionFromRequest } from './admin-auth.js'
 import { acceptanceDenial } from './trust/acceptance.js'
-import { holdConsequentialIntent } from './trust/consequential.js'
+import { holdConsequentialIntent, releaseOrderSpend } from './trust/consequential.js'
 import { senderOrgSuspended } from './trust/suspension.js'
 import { untrustedIntentEnvelope } from './trust/untrusted.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
@@ -539,6 +539,9 @@ function finalizeFailedIntent(
   })
 
   finalizeIntentWithResult(db, frame, result, options.latencyMs)
+  if (options.errorCode !== 'TIMEOUT') {
+    releaseOrderSpend(db, frame.nonce)
+  }
   recordIntentStage(db, frame, 'failed', {
     transport: options.transport,
     latencyMs: options.latencyMs,
@@ -1779,7 +1782,12 @@ function enforceSecurityChecks(
     throw new RelayError('APPROVAL_REQUIRED', held.reason, held.approvalId)
   }
 
-  enforceReplayProtection(db, frame)
+  try {
+    enforceReplayProtection(db, frame)
+  } catch (error) {
+    if (held?.kind === 'reserved') releaseOrderSpend(db, frame.nonce)
+    throw error
+  }
 }
 
 function enforceReplayProtection(db: Database, frame: IntentFrame): void {

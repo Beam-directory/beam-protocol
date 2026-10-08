@@ -44,7 +44,7 @@ function limitReason(action: ScopeAction, scopes: ScopeGrant, payload: Record<st
 export function holdConsequentialIntent(
   db: Database,
   frame: IntentFrame,
-): { kind: 'approval'; approvalId: string; reason: string } | { kind: 'reject'; message: string } | null {
+): { kind: 'approval'; approvalId: string; reason: string } | { kind: 'reject'; message: string } | { kind: 'reserved' } | null {
   const action = scopeActionForIntent(frame.intent)
   if (!action) return null
   if (action === 'file.send') {
@@ -63,10 +63,13 @@ export function holdConsequentialIntent(
   const mandate = getActiveMandate(db, frame.from)
   const scopes = mandate ? parseScopeGrant(JSON.parse(mandate.scopes_json) as unknown) : null
   let reason = scopes ? limitReason(action, scopes, frame.payload) : 'outside mandate scope'
+  let reservedSpend = false
   if (!reason && action === 'order' && mandate && scopes?.order) {
-    reason = reserveOrderSpend(db, mandate.jti, frame, scopes.order)
+    const reservation = reserveOrderSpend(db, mandate.jti, frame, scopes.order)
+    reason = reservation.reason
+    reservedSpend = reservation.inserted
   }
-  if (!reason) return null
+  if (!reason) return reservedSpend ? { kind: 'reserved' } : null
 
   const escalationPersonId = mandate?.escalation_person_id
     ?? (agent?.responsible_person_id && getPerson(db, agent.responsible_person_id)?.status === 'active'
@@ -131,25 +134,29 @@ function reserveOrderSpend(
   mandateJti: string,
   frame: IntentFrame,
   limit: { maxAmount: string; currency: string },
-): string | null {
+): { reason: string | null; inserted: boolean } {
   const amount = typeof frame.payload['amount'] === 'string' ? frame.payload['amount'].trim() : ''
   const currency = typeof frame.payload['currency'] === 'string' ? frame.payload['currency'].trim().toUpperCase() : ''
-  if (!moneyWithinLimit(amount, currency, limit)) return 'order limit exceeded'
+  if (!moneyWithinLimit(amount, currency, limit)) return { reason: 'order limit exceeded', inserted: false }
   const cents = amountToCents(amount)
-  const day = new Date(frame.timestamp).toISOString().slice(0, 10)
+  const day = new Date().toISOString().slice(0, 10)
   const already = db.prepare('SELECT nonce FROM mandate_order_spend WHERE nonce = ?').get(frame.nonce)
-  if (already) return null
+  if (already) return { reason: null, inserted: false }
   const spent = db.prepare(`
     SELECT COALESCE(SUM(amount_cents), 0) AS total
     FROM mandate_order_spend
     WHERE mandate_jti = ? AND day = ?
   `).get(mandateJti, day) as { total: number }
   if (BigInt(spent.total) + cents > amountToCents(limit.maxAmount)) {
-    return 'daily order limit exceeded'
+    return { reason: 'daily order limit exceeded', inserted: false }
   }
   db.prepare(`
     INSERT INTO mandate_order_spend (nonce, mandate_jti, day, amount_cents, created_at)
     VALUES (?, ?, ?, ?, ?)
   `).run(frame.nonce, mandateJti, day, Number(cents), new Date().toISOString())
-  return null
+  return { reason: null, inserted: true }
+}
+
+export function releaseOrderSpend(db: Database, nonce: string): void {
+  db.prepare('DELETE FROM mandate_order_spend WHERE nonce = ?').run(nonce)
 }

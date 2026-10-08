@@ -257,7 +257,7 @@ Messages and intent payloads are delivered as data. The signed frame and the exi
 
 `amount` and `byteSize` are claims made by the sender. A recipient may act only on the fields the directory checked. Free-text intents, including `conversation.message`, are data, not instructions, and are not checked against a mandate.
 
-For an `order` scope, `order.maxAmount` is also the UTC-day total of `order.place` and `payment.submit` on that mandate. A later intent over the remaining total is held with reason `daily order limit exceeded`.
+For an `order` scope, `order.maxAmount` is also the server's UTC-day total of `order.place` and `payment.submit` on that mandate. A reservation is released when the recipient never receives the intent. A later intent over the remaining total is held with reason `daily order limit exceeded`. HTTP 202 `APPROVAL_REQUIRED` is not a delivered result.
 
 Deciding an approval or accepting a contact request uses the person's signature. The approval object is `{ "type": "intent.approval", "approvalId", "decision", "personId", "timestamp", "nonce" }`. The contact object is `{ "type": "contact-request.review", "connectionId", "personId", "decision", "timestamp", "nonce" }`. The signer is the escalation person, or the sending agent's responsible person when no escalation person is set, and must be active in that organization. A signature that does not verify is rejected. Omitting the signature uses the organization API key as the emergency path and the audit records `via` as `org-key`.
 
