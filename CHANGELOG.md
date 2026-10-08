@@ -15,6 +15,10 @@
 ### Breaking
 - workspace and organization clients must generate the Ed25519 key themselves and send `publicKey`; the directory no longer returns a private key
 - `bk_` alone can no longer rotate a signing key or replace `dhPublicKey` / `httpEndpoint`
+- Network, the MCP pilot scripts, and the OpenClaw scripts sign `PATCH /agents/:id/config`; the agent API key is still sent, so the same request works on directory 1.7.0
+- `scripts/production/claim-organization.mjs` stores the server-assigned name and writes the organization API key before any later check
+- `POST /agents/keypair/x25519` is removed
+- npm 10 or newer is required to install this repository
 - disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
 
 ### Verified agent registry

@@ -351,6 +351,9 @@ test('agent config changes to the encryption key require a signature, organizati
     }))
     assert.equal(byOrg.status, 200)
     assert.equal(getAgent(db, beamId)?.dh_public_key, replacement)
+
+    const removed = await app.request(new Request('http://localhost/agents/keypair/x25519', { method: 'POST' }))
+    assert.equal(removed.status, 404)
   } finally {
     db.close()
   }

@@ -6,6 +6,7 @@ import path from 'node:path'
 import process from 'node:process'
 import { fileURLToPath } from 'node:url'
 import { BeamClient, BeamIdentity } from '../../packages/sdk-typescript/dist/index.js'
+import { signedAgentConfigBody } from './agent-config.mjs'
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 
@@ -133,7 +134,7 @@ const encryptionRegistration = await fetch(`${directoryUrl}/agents/${encodeURICo
     Authorization: `Bearer ${registration.apiKey}`,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify({ dhPublicKey: dhPublicKeyBase64 }),
+  body: JSON.stringify(signedAgentConfigBody(exported.privateKeyBase64, beamId, { dhPublicKey: dhPublicKeyBase64 })),
 })
 if (!encryptionRegistration.ok) fail(`Directory encryption-key registration failed with ${encryptionRegistration.status}`)
 

@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import { generateKeyPairSync } from 'node:crypto'
+import { signedAgentConfigBody } from './agent-config.mjs'
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
@@ -51,12 +52,16 @@ const directoryUrl = (valueAfter('--directory-url') ?? 'https://api.beam.directo
 const flyApp = (valueAfter('--fly-app') ?? 'beam-mcp-pilot').trim()
 const secretDirectoryInput = valueAfter('--secret-dir')
 const apiKeyFileInput = valueAfter('--api-key-file')
+const signingKeyFileInput = valueAfter('--signing-key-file')
 
 if (!secretDirectoryInput || !path.isAbsolute(secretDirectoryInput)) {
   fail('--secret-dir with an absolute path outside the repository is required')
 }
 if (!apiKeyFileInput || !path.isAbsolute(apiKeyFileInput)) {
   fail('--api-key-file with an absolute path is required')
+}
+if (!signingKeyFileInput || !path.isAbsolute(signingKeyFileInput)) {
+  fail('--signing-key-file with an absolute path to the Ed25519 PKCS8 key is required')
 }
 if (upload && !apply) fail('--upload requires --apply')
 if (directoryUrl !== 'https://api.beam.directory') fail('the hosted pilot is pinned to https://api.beam.directory')
@@ -65,8 +70,10 @@ if (!/^[a-z0-9][a-z0-9-]*$/.test(flyApp)) fail('--fly-app is invalid')
 
 const secretDirectory = path.resolve(secretDirectoryInput)
 const apiKeyFile = path.resolve(apiKeyFileInput)
+const signingKeyFile = path.resolve(signingKeyFileInput)
 assertOutsideRepo(secretDirectory)
 assertPrivateFile(apiKeyFile, '--api-key-file')
+assertPrivateFile(signingKeyFile, '--signing-key-file')
 
 const plan = {
   apply,
@@ -86,7 +93,9 @@ if (!apply) {
 
 mkdirSync(secretDirectory, { recursive: true, mode: 0o700 })
 const apiKey = readFileSync(apiKeyFile, 'utf8').trim()
+const signingKey = readFileSync(signingKeyFile, 'utf8').trim()
 if (!apiKey.startsWith('bk_')) fail('--api-key-file does not contain a Beam agent API key')
+if (!signingKey) fail('--signing-key-file is empty')
 
 const encryption = generateKeyPairSync('x25519')
 const publicKey = encryption.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
@@ -100,7 +109,7 @@ const response = await fetch(`${directoryUrl}/agents/${encodeURIComponent(beamId
     Authorization: `Bearer ${apiKey}`,
     'Content-Type': 'application/json',
   },
-  body: JSON.stringify({ dhPublicKey: publicKey }),
+  body: JSON.stringify(signedAgentConfigBody(signingKey, beamId, { dhPublicKey: publicKey })),
 })
 if (!response.ok) fail(`Directory encryption-key registration failed with ${response.status}`)
 const registered = await response.json()

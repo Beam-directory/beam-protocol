@@ -1000,17 +1000,5 @@ export function agentsRouter(db: Database): Hono {
     })
   })
 
-  // S5: Generate X25519 keypair (utility endpoint for agents)
-  router.post('/keypair/x25519', async (c) => {
-    const { generateX25519KeyPair } = await import('../shield/encryption.js')
-    const pair = generateX25519KeyPair()
-    return c.json({
-      publicKey: pair.publicKey,
-      privateKey: pair.privateKey,
-      algorithm: 'x25519',
-      note: 'Store privateKey securely. Register publicKey as dhPublicKey on your agent.',
-    })
-  })
-
   return router
 }

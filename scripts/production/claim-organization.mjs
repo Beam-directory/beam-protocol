@@ -17,6 +17,39 @@ function fail(message) {
   process.exit(1)
 }
 
+export function persistOrganizationClaim({ payload, requestedName, domain, directoryUrl, write }) {
+  const apiKey = typeof payload?.apiKey === 'string' ? payload.apiKey : ''
+  if (!apiKey.startsWith('beam_org_')) {
+    return { ok: false, saved: false, error: 'Directory response did not contain an organization API key' }
+  }
+  const assignedName = typeof payload?.name === 'string' ? payload.name : ''
+  const echoedRequest = typeof payload?.requestedName === 'string' && payload.requestedName
+    ? payload.requestedName
+    : assignedName
+  const credential = {
+    format: 'beam-org-claim/v1',
+    name: assignedName,
+    requestedName: echoedRequest,
+    displayName: payload.displayName,
+    domain: payload.domain,
+    beamDomain: payload.beamDomain,
+    apiKey,
+    verification: payload.verification,
+    claimExpiresAt: payload.claimExpiresAt,
+    createdAt: payload.createdAt,
+    directoryUrl,
+  }
+  write(credential)
+  const nameMatches = echoedRequest === requestedName || assignedName === requestedName
+  if (!assignedName || !nameMatches || payload?.domain !== domain) {
+    return { ok: false, saved: true, error: 'Directory response does not match the requested organization' }
+  }
+  if (typeof payload?.verification?.txtName !== 'string' || typeof payload?.verification?.txtValue !== 'string') {
+    return { ok: false, saved: true, error: 'Directory response did not contain a DNS verification challenge' }
+  }
+  return { ok: true, saved: true, credential }
+}
+
 function requireValue(flag) {
   const value = valueAfter(flag)?.trim()
   if (!value) fail(`${flag} is required`)
@@ -30,6 +63,8 @@ function assertOutsideRepository(target) {
   }
 }
 
+const invokedDirectly = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)
+if (invokedDirectly) {
 const apply = process.argv.includes('--apply')
 const name = requireValue('--name').toLowerCase()
 const displayName = requireValue('--display-name')
@@ -91,39 +126,29 @@ try {
 if (!response.ok) {
   fail(`Directory claim failed with HTTP ${response.status}: ${payload?.errorCode ?? payload?.error ?? 'unknown error'}`)
 }
-if (typeof payload?.apiKey !== 'string' || !payload.apiKey.startsWith('beam_org_')) {
-  fail('Directory response did not contain an organization API key')
-}
-if (payload?.name !== name || payload?.domain !== domain) {
-  fail('Directory response does not match the requested organization')
-}
-if (typeof payload?.verification?.txtName !== 'string' || typeof payload?.verification?.txtValue !== 'string') {
-  fail('Directory response did not contain a DNS verification challenge')
-}
-
-const credential = {
-  format: 'beam-org-claim/v1',
-  name: payload.name,
-  displayName: payload.displayName,
-  domain: payload.domain,
-  beamDomain: payload.beamDomain,
-  apiKey: payload.apiKey,
-  verification: payload.verification,
-  claimExpiresAt: payload.claimExpiresAt,
-  createdAt: payload.createdAt,
-  directoryUrl,
-}
 
 const outputFile = path.join(secretDirectory, 'organization.json')
-writeFileSync(outputFile, `${JSON.stringify(credential, null, 2)}\n`, {
-  encoding: 'utf8',
-  mode: 0o600,
-  flag: 'wx',
+const saved = persistOrganizationClaim({
+  payload,
+  requestedName: name,
+  domain,
+  directoryUrl,
+  write(credential) {
+    writeFileSync(outputFile, `${JSON.stringify(credential, null, 2)}\n`, {
+      encoding: 'utf8',
+      mode: 0o600,
+      flag: 'wx',
+    })
+  },
 })
+if (!saved.ok) {
+  fail(saved.saved ? `${saved.error} The organization API key was kept in ${outputFile}` : saved.error)
+}
 
 console.log(JSON.stringify({
   ok: true,
-  name: payload.name,
+  name: saved.credential.name,
+  requestedName: saved.credential.requestedName,
   domain: payload.domain,
   beamDomain: payload.beamDomain,
   verified: payload.verified,
@@ -136,3 +161,4 @@ console.log(JSON.stringify({
   credentialFile: outputFile,
   credentialPrinted: false,
 }, null, 2))
+}
