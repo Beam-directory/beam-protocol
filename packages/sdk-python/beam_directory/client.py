@@ -440,6 +440,20 @@ class BeamClient:
                 headers=self._request_headers(),
                 timeout=timeout,
             )
+        if res.status_code == 202:
+            try:
+                held = res.json()
+            except Exception:
+                held = {}
+            if not isinstance(held, dict):
+                held = {}
+            return create_result_frame(
+                success=False,
+                nonce=frame.nonce,
+                error=str(held.get("error") or "Approval required"),
+                error_code=str(held.get("errorCode") or "APPROVAL_REQUIRED"),
+                identity=self._identity,
+            )
         if not res.is_success:
             try:
                 body = res.json()

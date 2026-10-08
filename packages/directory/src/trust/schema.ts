@@ -141,6 +141,52 @@ function ensureTrustPersonSchema(db: Database): void {
   ensureColumn(db, 'acceptance_rules', 'version', 'INTEGER NOT NULL DEFAULT 0')
   ensureColumn(db, 'delegations', 'payload_hash', 'TEXT')
   ensureColumn(db, 'intent_log', 'result_signature', 'TEXT')
+  ensureColumn(db, 'orgs', 'suspended_at', 'TEXT')
+  ensureColumn(db, 'beam_connections', 'held_for_person_id', 'TEXT')
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS intent_approvals (
+      id TEXT PRIMARY KEY,
+      nonce TEXT NOT NULL UNIQUE,
+      from_beam_id TEXT NOT NULL,
+      to_beam_id TEXT NOT NULL,
+      intent_type TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'approved', 'rejected')),
+      escalation_person_id TEXT,
+      created_at TEXT NOT NULL,
+      decided_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_intent_approvals_person
+      ON intent_approvals(escalation_person_id, status, created_at DESC);
+
+    CREATE TABLE IF NOT EXISTS mandate_order_spend (
+      nonce TEXT PRIMARY KEY,
+      mandate_jti TEXT NOT NULL,
+      day TEXT NOT NULL,
+      amount_cents INTEGER NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_mandate_order_spend_day
+      ON mandate_order_spend(mandate_jti, day);
+
+    CREATE TABLE IF NOT EXISTS abuse_reports (
+      id TEXT PRIMARY KEY,
+      reporter_beam_id TEXT NOT NULL,
+      target_beam_id TEXT NOT NULL,
+      message_id TEXT,
+      intent_nonce TEXT,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'blocked', 'dismissed')),
+      block_scope TEXT CHECK(block_scope IN ('agent', 'person', 'org')),
+      review_note TEXT,
+      reviewed_by TEXT,
+      created_at TEXT NOT NULL,
+      reviewed_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_abuse_reports_target
+      ON abuse_reports(target_beam_id, created_at DESC);
+  `)
   db.exec(`
     CREATE UNIQUE INDEX IF NOT EXISTS idx_delegations_payload_hash
       ON delegations(payload_hash)

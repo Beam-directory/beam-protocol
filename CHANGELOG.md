@@ -21,6 +21,18 @@
 - npm 10 or newer is required to install this repository
 - disambiguated namespaces use `--` between label and suffix, and the short label is granted only when domain verification succeeds and that label is free
 
+### Trust layer: untrusted content and mandate limits
+- deliver message and file bytes as labeled untrusted data, separate from sender assertion, scopes, and metadata
+- require catalog intents for orders, payments, schedule commits, and file sends, and hold anything outside the mandate for a person instead of delivering it
+- keep unknown senders as a contact request for the responsible person
+- record injection reports and let an operator suspend the agent, person, or organization
+- reject a suspended organization on intent and network send
+- match approvals to an organization by exact agent or person organization, and require the person's signature (the organization key is the audited emergency path)
+- count `order.place` and `payment.submit` toward the mandate's server UTC day, and release that reservation when the recipient never receives the intent
+- revoke mandates and delegations when an abuse review blocks an agent, and record an operator note when that suspension or an organization suspension is lifted
+- return HTTP 202 `APPROVAL_REQUIRED` from the TypeScript SDK as `{ executed: false }` instead of a delivered result; the CLI prints the hold and the MCP gateway does not report it as delivered
+- treat HTTP 202 `APPROVAL_REQUIRED` as a non-success in the Python SDK and as not retryable in the message bus
+
 ### Trust layer: mandates and recipient acceptance
 - record a person-signed mandate whose scopes cannot exceed that person's rights, and only when that person is KYC verified and the organization domain is verified
 - reject a replay of a revoked mandate or delegation; offboarding, a rights cut, a key change, and a change of responsible person revoke mandates and delegations that no longer hold

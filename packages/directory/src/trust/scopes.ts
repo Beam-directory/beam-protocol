@@ -61,6 +61,13 @@ export function parseScopeGrant(value: unknown): ScopeGrant | null {
   return { actions, ...(order ? { order } : {}), ...(file ? { file } : {}) }
 }
 
+export function moneyWithinLimit(amount: string, currency: string, limit: MoneyLimit): boolean {
+  if (!AMOUNT_RE.test(amount) || currency !== limit.currency) {
+    return false
+  }
+  return amountToCents(amount) <= amountToCents(limit.maxAmount)
+}
+
 export function amountToCents(value: string): bigint {
   const [whole, fraction = ''] = value.split('.')
   const cents = `${whole}${fraction.padEnd(2, '0')}`

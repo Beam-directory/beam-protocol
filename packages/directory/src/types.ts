@@ -651,6 +651,7 @@ export interface BeamConnectionRow {
   created_at: string
   updated_at: string
   responded_at: string | null
+  held_for_person_id: string | null
 }
 
 export interface OrgRow {
@@ -666,6 +667,7 @@ export interface OrgRow {
   verified_at: string | null
   domain_verified_via: 'dns' | 'well-known' | null
   requested_name: string | null
+  suspended_at: string | null
 }
 
 export interface OrgAgentRow {

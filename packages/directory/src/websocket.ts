@@ -32,7 +32,9 @@ import { agentApiKeyMatches, getSuppliedApiKey } from './api-key.js'
 import { agentOperationBlock } from './trust/person-store.js'
 import { getAdminSessionFromRequest } from './admin-auth.js'
 import { acceptanceDenial } from './trust/acceptance.js'
-import { loadTrustAssertion } from './trust/assertion.js'
+import { holdConsequentialIntent, releaseOrderSpend } from './trust/consequential.js'
+import { senderOrgSuspended } from './trust/suspension.js'
+import { untrustedIntentEnvelope } from './trust/untrusted.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 import { consumeWebSocketTicket } from './websocket-ticket.js'
@@ -123,11 +125,13 @@ setInterval(() => {
 }, 60_000).unref()
 
 export class RelayError extends Error {
-  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'ACCEPTANCE_DENIED' | 'IN_PROGRESS'
+  code: 'OFFLINE' | 'BAD_REQUEST' | 'DELIVERY_FAILED' | 'TIMEOUT' | 'RATE_LIMITED' | 'FORBIDDEN' | 'ACCEPTANCE_DENIED' | 'ORG_SUSPENDED' | 'APPROVAL_REQUIRED' | 'IN_PROGRESS'
+  approvalId?: string
 
-  constructor(code: RelayError['code'], message: string) {
+  constructor(code: RelayError['code'], message: string, approvalId?: string) {
     super(message)
     this.code = code
+    this.approvalId = approvalId
   }
 }
 
@@ -535,6 +539,9 @@ function finalizeFailedIntent(
   })
 
   finalizeIntentWithResult(db, frame, result, options.latencyMs)
+  if (options.errorCode !== 'TIMEOUT') {
+    releaseOrderSpend(db, frame.nonce)
+  }
   recordIntentStage(db, frame, 'failed', {
     transport: options.transport,
     latencyMs: options.latencyMs,
@@ -754,7 +761,7 @@ async function attemptDirectHttpDelivery(
         payload: frame.payload,
         nonce: frame.nonce,
         timestamp: frame.timestamp,
-        trustAssertion: loadTrustAssertion(db, frame.from),
+        ...untrustedIntentEnvelope(db, frame),
       }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -872,8 +879,9 @@ export function createWebSocketServer(db: Database): WebSocketServer {
       ws.close(1008, 'Valid WebSocket credential required')
       return
     }
-    if (agent && agentOperationBlock(db, agent)) {
-      ws.close(1008, 'Agent is suspended')
+    const blocked = agent ? agentOperationBlock(db, agent) : null
+    if (blocked) {
+      ws.close(1008, blocked.error)
       return
     }
 
@@ -1103,7 +1111,7 @@ export async function relayIntentFromHttp(
       type: 'intent',
       frame: prepared,
       senderPublicKey,
-      trustAssertion: loadTrustAssertion(db, prepared.from),
+      ...untrustedIntentEnvelope(db, prepared),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1419,7 +1427,7 @@ async function handleIntent(
       frame: prepared,
       senderPublicKey: senderAgent.public_key,
       actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
-      trustAssertion: loadTrustAssertion(db, prepared.from),
+      ...untrustedIntentEnvelope(db, prepared),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1702,7 +1710,7 @@ function resolveIntentSender(db: Database, connectedBeamId: string, frame: Inten
   }
   const connectedBlock = agentOperationBlock(db, senderAgent)
   if (connectedBlock) {
-    throw new RelayError('FORBIDDEN', connectedBlock.error)
+    throw new RelayError(connectedBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', connectedBlock.error)
   }
 
   if (!canActOnBehalf(db, connectedBeamId, frame.from, frame.intent)) {
@@ -1735,8 +1743,11 @@ function enforceSecurityChecks(
   if (actingAgent) {
     const actingBlock = agentOperationBlock(db, actingAgent)
     if (actingBlock) {
-      throw new RelayError('FORBIDDEN', actingBlock.error)
+      throw new RelayError(actingBlock.errorCode === 'ORG_SUSPENDED' ? 'ORG_SUSPENDED' : 'FORBIDDEN', actingBlock.error)
     }
+  }
+  if (senderOrgSuspended(db, frame.from)) {
+    throw new RelayError('ORG_SUSPENDED', `Organization of ${frame.from} is suspended`)
   }
 
   const localTarget = getAgent(db, frame.to)
@@ -1763,7 +1774,20 @@ function enforceSecurityChecks(
     throw new RelayError('ACCEPTANCE_DENIED', denied)
   }
 
-  enforceReplayProtection(db, frame)
+  const held = holdConsequentialIntent(db, frame)
+  if (held?.kind === 'reject') {
+    throw new RelayError('BAD_REQUEST', held.message)
+  }
+  if (held?.kind === 'approval') {
+    throw new RelayError('APPROVAL_REQUIRED', held.reason, held.approvalId)
+  }
+
+  try {
+    enforceReplayProtection(db, frame)
+  } catch (error) {
+    if (held?.kind === 'reserved') releaseOrderSpend(db, frame.nonce)
+    throw error
+  }
 }
 
 function enforceReplayProtection(db: Database, frame: IntentFrame): void {

@@ -3360,6 +3360,7 @@ export function listBeamConnections(
     SELECT *
     FROM beam_connections
     WHERE (requester_beam_id = ? OR recipient_beam_id = ?)
+      AND (held_for_person_id IS NULL OR recipient_beam_id <> ?)
       ${statusClause}
     ORDER BY
       CASE WHEN status = 'pending' AND recipient_beam_id = ? THEN 0
@@ -3367,7 +3368,7 @@ export function listBeamConnections(
            ELSE 2 END,
       updated_at DESC,
       connection_id ASC
-  `).all(beamId, beamId, ...normalizedStatuses, beamId) as BeamConnectionRow[]
+  `).all(beamId, beamId, beamId, ...normalizedStatuses, beamId) as BeamConnectionRow[]
 }
 
 export function createBeamConnectionRequest(
@@ -3377,6 +3378,7 @@ export function createBeamConnectionRequest(
     recipientBeamId: string
     message: string | null
     signature: string
+    heldForPersonId?: string | null
   },
 ): { connection: BeamConnectionRow; created: boolean } {
   const create = db.transaction(() => {
@@ -3404,9 +3406,10 @@ export function createBeamConnectionRequest(
         blocked_by_beam_id,
         created_at,
         updated_at,
-        responded_at
+        responded_at,
+        held_for_person_id
       )
-      VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?, NULL)
+      VALUES (?, ?, ?, ?, 'pending', ?, ?, NULL, NULL, ?, ?, NULL, ?)
     `).run(
       connectionId,
       beamConnectionPairKey(input.requesterBeamId, input.recipientBeamId),
@@ -3416,6 +3419,7 @@ export function createBeamConnectionRequest(
       input.signature,
       now,
       now,
+      input.heldForPersonId ?? null,
     )
 
     return {
