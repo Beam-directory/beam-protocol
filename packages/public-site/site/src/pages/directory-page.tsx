@@ -53,9 +53,8 @@ export function DirectoryPage() {
   }
 
   useEffect(() => {
-    void load(1, '', false)
-    // The register opens on the verified listing.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    // The register opens on the verified listing. Deferred so the effect body sets no state synchronously.
+    queueMicrotask(() => void load(1, '', false))
   }, [])
 
   return (
