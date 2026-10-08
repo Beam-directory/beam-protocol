@@ -1,21 +1,23 @@
 import { describe, expect, it } from 'vitest'
 import { buildRecoveryKit, generateAgentIdentity, recoveryKitFileName } from './agent-keys'
 import {
-  EMPTY_MANDATE,
+  EMPTY_SCOPE,
   INITIAL_PROGRESS,
   PROGRESS_STORAGE_KEY,
   buildBeamId,
   canAdvance,
   deriveOrgName,
+  isValidLei,
   loadProgress,
-  mandatePreview,
+  mandatePayload,
+  pendingClaimName,
   saveProgress,
-  suggestDisambiguatedOrgName,
+  scopeGrantFromDraft,
+  scopeWithin,
   validateAgentName,
   validateDomain,
-  validateMandate,
   validateRecipientBeamId,
-  validateRegistration,
+  validateRegistry,
 } from './onboarding-steps'
 
 function memoryStorage() {
@@ -29,21 +31,21 @@ function memoryStorage() {
 }
 
 describe('org namespace', () => {
-  it('derives the namespace from the registrable domain like the directory', () => {
+  it('derives the public label from the registrable domain', () => {
     expect(deriveOrgName('https://www.firma.de/kontakt')).toBe('firma')
     expect(deriveOrgName('team.firma.de')).toBe('firma')
     expect(deriveOrgName('shop.firma.co.uk')).toBe('firma')
     expect(deriveOrgName('mein-betrieb.com')).toBe('mein-betrieb')
   })
 
-  it('suggests a label-suffix namespace like the backend (#211)', () => {
-    expect(suggestDisambiguatedOrgName('coppen.at')).toBe('coppen-at')
-    expect(suggestDisambiguatedOrgName('coppen.co.uk')).toBe('coppen-co-uk')
-    expect(suggestDisambiguatedOrgName('www.coppen.de')).toBe('coppen-de')
-    expect(suggestDisambiguatedOrgName('https://Shop.Coppen.AT/kontakt')).toBe('coppen-at')
-    expect(suggestDisambiguatedOrgName('coppen')).toBeNull()
-    expect(suggestDisambiguatedOrgName('')).toBeNull()
-    expect(suggestDisambiguatedOrgName('not a domain')).toBeNull()
+  it('names the stored claim with a double hyphen until the domain is confirmed', () => {
+    expect(pendingClaimName('coppen.at')).toBe('coppen--at')
+    expect(pendingClaimName('coppen.co.uk')).toBe('coppen--co-uk')
+    expect(pendingClaimName('www.coppen.de')).toBe('coppen--de')
+    expect(pendingClaimName('https://Shop.Coppen.AT/kontakt')).toBe('coppen--at')
+    expect(pendingClaimName('coppen')).toBeNull()
+    expect(pendingClaimName('')).toBeNull()
+    expect(pendingClaimName('not a domain')).toBeNull()
   })
 
   it('validates domains', () => {
@@ -69,26 +71,51 @@ describe('agent address', () => {
   })
 })
 
-describe('registry data', () => {
-  it('mirrors the directory formats', () => {
-    expect(validateRegistration('DE', 'HRB 123456', 'Firma GmbH')).toBeNull()
-    expect(validateRegistration('DE', '123456', 'Firma GmbH')).not.toBeNull()
-    expect(validateRegistration('UK', '01234567', 'Firma Ltd')).toBeNull()
-    expect(validateRegistration('DE', 'HRB 1', '')).not.toBeNull()
+describe('registry filing', () => {
+  const base = {
+    kind: 'handelsregister' as const,
+    registrationNumber: 'HRB 123456',
+    legalName: 'Firma GmbH',
+    registerCourt: 'Amtsgericht Berlin',
+    applicantName: 'Ada Lovelace',
+    applicantRole: 'geschaeftsfuehrer',
+    leiCountry: 'DE',
+  }
+
+  it('accepts a German commercial-register filing and a checksum-valid LEI', () => {
+    expect(validateRegistry(base)).toBeNull()
+    expect(validateRegistry({ ...base, registrationNumber: '123456' })).toBe('registryDeInvalid')
+    expect(validateRegistry({ ...base, registerCourt: '' })).toBe('registerCourtRequired')
+    expect(validateRegistry({ ...base, applicantRole: '' })).toBe('applicantRoleRequired')
+    expect(isValidLei('5493001KJTIIGC8Y1R12')).toBe(true)
+    expect(validateRegistry({ ...base, kind: 'lei', registrationNumber: '5493001KJTIIGC8Y1R12', leiCountry: 'DE' })).toBeNull()
+    expect(validateRegistry({ ...base, kind: 'lei', registrationNumber: '5493001KJTIIGC8Y1R12', leiCountry: 'Germany' })).toBe('leiCountryInvalid')
+    expect(validateRegistry({ ...base, kind: 'lei', registrationNumber: 'not-an-lei', leiCountry: 'DE' })).toBe('leiInvalid')
   })
 })
 
-describe('mandate draft', () => {
-  it('requires an amount for orders and a target for escalation', () => {
-    expect(validateMandate({ ...EMPTY_MANDATE, escalateTo: 'Leitung Einkauf' })).toBeNull()
-    expect(validateMandate({ ...EMPTY_MANDATE, escalateTo: 'X Y', order: true, orderLimitEur: '' })).not.toBeNull()
-    expect(validateMandate({ ...EMPTY_MANDATE, escalate: false, read: false, sendFiles: false })).not.toBeNull()
+describe('mandate payload', () => {
+  it('builds the object the directory verifies, with no supervisor to escalate to', () => {
+    const grant = scopeGrantFromDraft({ ...EMPTY_SCOPE, order: true, orderLimitEur: '500,5' })
+    expect('grant' in grant).toBe(true)
+    if (!('grant' in grant)) return
+    expect(grant.grant.order).toEqual({ maxAmount: '500.50', currency: 'EUR' })
+    const payload = mandatePayload({
+      jti: 'mandate01',
+      personId: 'p1',
+      agentBeamId: 'a@firma.beam.directory',
+      org: 'firma',
+      scopes: grant.grant,
+      expiresAt: '2026-12-01T00:00:00.000Z',
+    })
+    expect(payload).toMatchObject({ type: 'mandate', version: 1, escalationPersonId: null, jti: 'mandate01' })
+    expect(scopeWithin(grant.grant, grant.grant)).toBe(true)
+    expect(scopeWithin({ actions: ['order'], order: { maxAmount: '600.00', currency: 'EUR' } }, grant.grant)).toBe(false)
   })
 
-  it('marks the preview as not issued', () => {
-    const preview = mandatePreview({ ...EMPTY_MANDATE, order: true, orderLimitEur: '500', escalateTo: 'Leitung' }, 'a@firma.beam.directory')
-    expect(preview.status).toBe('draft-not-issued')
-    expect(preview.scopes).toContainEqual({ scope: 'order', maxAmountEur: 500 })
+  it('rejects an empty scope and a zero amount', () => {
+    expect(scopeGrantFromDraft({ read: false, schedule: false, files: false, order: false, orderLimitEur: '' })).toEqual({ error: 'scopeRequired' })
+    expect(scopeGrantFromDraft({ ...EMPTY_SCOPE, order: true, orderLimitEur: '0' })).toEqual({ error: 'orderLimitRequired' })
   })
 })
 
@@ -114,11 +141,12 @@ describe('progress persistence', () => {
 })
 
 describe('step gating', () => {
-  it('blocks step 1 until the domain is verified and step 3 until the agent exists', () => {
-    expect(canAdvance('firma', { orgVerified: false, orgKeyInMemory: true, agentRegistered: false }).ok).toBe(false)
-    expect(canAdvance('firma', { orgVerified: true, orgKeyInMemory: true, agentRegistered: false }).ok).toBe(true)
-    expect(canAdvance('person', { orgVerified: true, orgKeyInMemory: false, agentRegistered: false }).ok).toBe(true)
-    expect(canAdvance('agent', { orgVerified: true, orgKeyInMemory: true, agentRegistered: false }).ok).toBe(false)
+  it('blocks the company step until the domain is confirmed, the person step until a record exists, and the agent step until registration', () => {
+    expect(canAdvance('firma', { orgVerified: false, orgKeyInMemory: true, personReady: false, agentRegistered: false }).ok).toBe(false)
+    expect(canAdvance('firma', { orgVerified: true, orgKeyInMemory: true, personReady: false, agentRegistered: false }).ok).toBe(true)
+    expect(canAdvance('person', { orgVerified: true, orgKeyInMemory: true, personReady: false, agentRegistered: false })).toEqual({ ok: false, reason: 'person' })
+    expect(canAdvance('person', { orgVerified: true, orgKeyInMemory: false, personReady: true, agentRegistered: false }).ok).toBe(true)
+    expect(canAdvance('agent', { orgVerified: true, orgKeyInMemory: true, personReady: true, agentRegistered: false }).ok).toBe(false)
   })
 })
 

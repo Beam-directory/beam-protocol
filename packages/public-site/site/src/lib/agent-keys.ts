@@ -91,6 +91,44 @@ export function createNonce(): string {
   return bytesToBase64(bytes).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '')
 }
 
+export interface SigningIdentity {
+  /** Ed25519 public key, base64 SPKI/DER. This is the only key material sent to Beam. */
+  publicKey: string
+  /** Ed25519 private key, base64 PKCS8. Never sent; only written into a file the user downloads. */
+  privateKey: string
+  /** Non-extractable copy of the private key for signing in this tab. */
+  signingKey: CryptoKey
+}
+
+/** Person keys sign mandates. They are not chat keys. */
+export async function generateSigningIdentity(): Promise<SigningIdentity> {
+  const subtle = subtleCrypto()
+  let signingPair: CryptoKeyPair
+  try {
+    signingPair = await subtle.generateKey({ name: 'Ed25519' }, true, ['sign', 'verify']) as CryptoKeyPair
+  } catch {
+    throw new KeySupportError('Dieser Browser unterstützt Ed25519 noch nicht. Bitte aktuelles Safari, Chrome, Edge oder Firefox verwenden.')
+  }
+  const [publicKey, privateKey] = await Promise.all([
+    subtle.exportKey('spki', signingPair.publicKey),
+    subtle.exportKey('pkcs8', signingPair.privateKey),
+  ])
+  const signingKey = await subtle.importKey('pkcs8', privateKey, { name: 'Ed25519' }, false, ['sign'])
+  return { publicKey: bytesToBase64(publicKey), privateKey: bytesToBase64(privateKey), signingKey }
+}
+
+/** Restores a person signing key from a file the user saved. The bytes stay in this tab. */
+export async function importSigningIdentity(publicKey: string, privateKey: string): Promise<SigningIdentity> {
+  const subtle = subtleCrypto()
+  let signingKey: CryptoKey
+  try {
+    signingKey = await subtle.importKey('pkcs8', base64ToBytes(privateKey), { name: 'Ed25519' }, false, ['sign'])
+  } catch {
+    throw new KeySupportError('Die Schlüsseldatei konnte nicht gelesen werden.')
+  }
+  return { publicKey, privateKey, signingKey }
+}
+
 export async function generateAgentIdentity(): Promise<AgentIdentity> {
   const subtle = subtleCrypto()
   let signingPair: CryptoKeyPair

@@ -2,38 +2,68 @@ import { useState, type FormEvent } from 'react'
 import { DownloadIcon, GlobeIcon, KeyRoundIcon, RefreshCwIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { ComingSoonCard } from '@/components/onboarding/coming-soon'
-import { CopyField, LiveBadge, Notice, Panel, Spinner, StatusBadge, TextField, downloadJson } from '@/components/onboarding/primitives'
+import { CopyField, LiveBadge, Notice, Panel, SelectField, Spinner, StatusBadge, TextField, downloadJson } from '@/components/onboarding/primitives'
 import type { StepProps } from '@/components/onboarding/types'
 import { useI18n } from '@/i18n/context'
 import { intlLocale } from '@/i18n/locale'
-import { checkDomainVerification, classifyOrgConflict, createOrg, describeError, getOrg, type OrgRecord } from '@/lib/onboarding-api'
 import {
+  checkDomainVerification,
+  createOrg,
+  describeError,
+  getOrg,
+  submitOrgRegistry,
+  type OrgRecord,
+  type RegistryFiling,
+} from '@/lib/onboarding-api'
+import {
+  APPLICANT_ROLES,
   deriveOrgName,
   normalizeDomain,
-  suggestDisambiguatedOrgName,
+  pendingClaimName,
   validateDisplayName,
   validateDomain,
-  validateRegistration,
-  type RegistryCountry,
+  validateRegistry,
+  type RegistryKind,
   type ValidationKey,
 } from '@/lib/onboarding-steps'
 
 export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) {
   const { t, locale } = useI18n()
   const copy = t.onboarding.firma
-  const [pending, setPending] = useState<'claim' | 'check' | 'resume' | null>(null)
+  const [pending, setPending] = useState<'claim' | 'dns' | 'file' | 'resume' | 'registry' | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [fieldErrors, setFieldErrors] = useState<{ displayName?: ValidationKey | null; domain?: ValidationKey | null }>({})
   const [dnsResult, setDnsResult] = useState<{ records: string[] } | null>(null)
+  const [fileResult, setFileResult] = useState<string | null>(null)
   const [resumeMode, setResumeMode] = useState(false)
   const [resumeName, setResumeName] = useState(progress.orgName)
   const [resumeKey, setResumeKey] = useState('')
-  const [suggestion, setSuggestion] = useState<string | null>(null)
-  const [suffixUnsupported, setSuffixUnsupported] = useState(false)
+  const [filing, setFiling] = useState<RegistryFiling | null>(progress.registryStatus ? {
+    id: 0,
+    kind: progress.registryKind,
+    country: progress.registryKind === 'lei' ? progress.leiCountry : 'DE',
+    registrationNumber: progress.registrationNumber,
+    registerCourt: progress.registerCourt || null,
+    legalName: progress.legalName,
+    applicantName: progress.applicantName,
+    applicantRole: progress.applicantRole,
+    status: progress.registryStatus,
+  } : null)
+  const [registryError, setRegistryError] = useState<string | null>(null)
 
-  const orgName = deriveOrgName(progress.domain)
+  const shortName = deriveOrgName(progress.domain)
+  const storedPreview = pendingClaimName(progress.domain)
   const claimed = Boolean(progress.orgName && secrets.orgApiKey)
   const needsResume = Boolean(progress.orgName && !secrets.orgApiKey)
+  const registryInvalid = validateRegistry({
+    kind: progress.registryKind,
+    registrationNumber: progress.registrationNumber,
+    legalName: progress.legalName,
+    registerCourt: progress.registerCourt,
+    applicantName: progress.applicantName,
+    applicantRole: progress.applicantRole,
+    leiCountry: progress.leiCountry,
+  })
 
   function formatDateTime(value: string | null): string | null {
     if (!value) return null
@@ -44,36 +74,17 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
   function applyOrg(org: OrgRecord) {
     update({
       orgName: org.name,
+      requestedOrgName: org.requestedName || shortName,
       displayName: org.displayName || progress.displayName,
       domain: org.domain || progress.domain,
       orgVerified: org.verified,
+      domainVerifiedVia: org.domainVerifiedVia,
       txtName: org.verification?.txtName ?? progress.txtName,
       txtValue: org.verification?.txtValue ?? progress.txtValue,
+      wellKnownUrl: org.verification?.wellKnownUrl ?? progress.wellKnownUrl,
+      wellKnownBody: org.verification?.wellKnownBody ?? progress.wellKnownBody,
       claimExpiresAt: org.claimExpiresAt,
     })
-  }
-
-  async function claimWith(name: string, isSuggestion: boolean) {
-    setPending('claim')
-    setError(null)
-    setSuffixUnsupported(false)
-    try {
-      const org = await createOrg({ name, displayName: progress.displayName.trim(), domain: normalizeDomain(progress.domain) })
-      setSecrets({ orgApiKey: org.apiKey, orgKeySaved: false })
-      setSuggestion(null)
-      applyOrg(org)
-    } catch (claimError) {
-      const conflict = classifyOrgConflict(claimError)
-      if (isSuggestion && conflict === 'suffix-not-supported') {
-        // The current backend only accepts the plain label; no claim was created.
-        setSuffixUnsupported(true)
-        return
-      }
-      setSuggestion(conflict === 'name' && !isSuggestion ? suggestDisambiguatedOrgName(progress.domain) : null)
-      setError(describeError(claimError, t.errors))
-    } finally {
-      setPending(null)
-    }
   }
 
   async function onClaim(event: FormEvent<HTMLFormElement>) {
@@ -81,8 +92,17 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
     const errors = { displayName: validateDisplayName(progress.displayName), domain: validateDomain(progress.domain) }
     setFieldErrors(errors)
     if (errors.displayName || errors.domain) return
-    setSuggestion(null)
-    await claimWith(orgName, false)
+    setPending('claim')
+    setError(null)
+    try {
+      const org = await createOrg({ name: shortName, displayName: progress.displayName.trim(), domain: normalizeDomain(progress.domain) })
+      setSecrets({ orgApiKey: org.apiKey, orgKeySaved: false })
+      applyOrg(org)
+    } catch (claimError) {
+      setError(describeError(claimError, t.errors))
+    } finally {
+      setPending(null)
+    }
   }
 
   async function onResume(event: FormEvent<HTMLFormElement>) {
@@ -106,17 +126,20 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
     }
   }
 
-  async function onCheckDns() {
+  async function onCheck(method: 'dns' | 'well-known') {
     if (!secrets.orgApiKey) return
-    setPending('check')
+    setPending(method === 'dns' ? 'dns' : 'file')
     setError(null)
     try {
-      const result = await checkDomainVerification(progress.orgName, secrets.orgApiKey)
+      const result = await checkDomainVerification(progress.orgName, secrets.orgApiKey, method)
       if (result.verified) {
         applyOrg(result.org)
         setDnsResult(null)
-      } else {
+        setFileResult(null)
+      } else if (method === 'dns') {
         setDnsResult({ records: result.records })
+      } else {
+        setFileResult(copy.fileMissing)
       }
     } catch (checkError) {
       setError(describeError(checkError, t.errors))
@@ -131,6 +154,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
       format: 'beam-org-credential',
       version: 1,
       org: progress.orgName,
+      requestedName: progress.requestedOrgName,
       domain: progress.domain,
       apiKey: secrets.orgApiKey,
       notice: copy.orgKeyFileNotice,
@@ -138,10 +162,41 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
     setSecrets({ orgKeySaved: true })
   }
 
-  const registryError = progress.registrationNumber || progress.legalName
-    ? validateRegistration(progress.registryCountry, progress.registrationNumber, progress.legalName)
-    : null
+  async function onSubmitRegistry(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!secrets.orgApiKey || registryInvalid) return
+    setPending('registry')
+    setRegistryError(null)
+    try {
+      const result = await submitOrgRegistry(progress.orgName, secrets.orgApiKey, progress.registryKind === 'lei'
+        ? {
+            kind: 'lei',
+            country: progress.leiCountry.trim().toUpperCase(),
+            registrationNumber: progress.registrationNumber.trim().toUpperCase(),
+            legalName: progress.legalName.trim(),
+            applicantName: progress.applicantName.trim(),
+            applicantRole: progress.applicantRole,
+          }
+        : {
+            kind: 'handelsregister',
+            country: 'DE',
+            registrationNumber: progress.registrationNumber.trim(),
+            registerCourt: progress.registerCourt.trim(),
+            legalName: progress.legalName.trim(),
+            applicantName: progress.applicantName.trim(),
+            applicantRole: progress.applicantRole,
+          })
+      setFiling(result)
+      update({ registryStatus: result.status, registrationNumber: result.registrationNumber })
+    } catch (submitError) {
+      setRegistryError(describeError(submitError, t.errors))
+    } finally {
+      setPending(null)
+    }
+  }
+
   const expires = formatDateTime(progress.claimExpiresAt)
+  const showRegistryErrors = Boolean(progress.registrationNumber || progress.legalName || progress.applicantName)
 
   return (
     <div className="flex flex-col gap-5">
@@ -171,36 +226,19 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                   id="org-domain"
                   label={copy.domain}
                   value={progress.domain}
-                  onChange={(value) => {
-                    update({ domain: value })
-                    setSuggestion(null)
-                    setSuffixUnsupported(false)
-                  }}
+                  onChange={(value) => update({ domain: value })}
                   inputMode="url"
                   autoComplete="url"
                   placeholder={copy.domainPlaceholder}
                   error={fieldErrors.domain ? t.validation[fieldErrors.domain] : null}
-                  description={orgName ? <>{copy.namespaceLabel} <span className="font-mono text-foreground">{orgName}</span>{copy.agentsNamed(orgName)}</> : copy.domainHelp}
+                  description={shortName && storedPreview
+                    ? <>{copy.namespaceAfter} <span className="font-mono text-foreground">{shortName}</span>{copy.agentsNamed(shortName)} {copy.pendingClaim(storedPreview)}</>
+                    : copy.domainHelp}
                 />
               </div>
               {error ? <Notice tone="error">{error}</Notice> : null}
-              {suggestion && !suffixUnsupported ? (
-                <div className="flex flex-col items-start gap-2 rounded-xl border p-3.5 text-sm">
-                  <p className="text-muted-foreground">
-                    {copy.suggestionLead} <span className="font-mono text-foreground">{suggestion}</span>{copy.agentsNamed(suggestion)}.
-                  </p>
-                  <Button type="button" variant="outline" className="h-9 rounded-full px-4" disabled={pending !== null} onClick={() => void claimWith(suggestion, true)}>
-                    {pending === 'claim' ? <Spinner label={copy.creating} /> : copy.createAs(suggestion)}
-                  </Button>
-                </div>
-              ) : null}
-              {suffixUnsupported && suggestion ? (
-                <ComingSoonCard capability="suffixedOrgName" title={copy.suffixTitle(suggestion)} company={progress.displayName}>
-                  {copy.suffixText}
-                </ComingSoonCard>
-              ) : null}
               <div className="flex flex-wrap items-center gap-3">
-                <Button type="submit" className="h-10 rounded-full px-5" disabled={pending !== null}>
+                <Button id="claim-domain" type="submit" className="h-10 rounded-full px-5" disabled={pending !== null}>
                   {pending === 'claim' ? <Spinner label={copy.creating} /> : <><GlobeIcon aria-hidden="true" /> {copy.claim}</>}
                 </Button>
                 <button type="button" onClick={() => { setResumeMode(true); setError(null) }} className="rounded-md text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
@@ -214,7 +252,7 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
         {resumeMode ? (
           <form onSubmit={onResume} className="flex flex-col gap-4" noValidate>
             <div className="grid gap-4 sm:grid-cols-2">
-              <TextField id="resume-name" label={copy.namespace} value={resumeName} onChange={setResumeName} placeholder="company" autoComplete="off" />
+              <TextField id="resume-name" label={copy.namespace} value={resumeName} onChange={setResumeName} placeholder="company--com" autoComplete="off" />
               <TextField id="resume-key" label={copy.orgKey} type="password" value={resumeKey} onChange={setResumeKey} placeholder="beam_org_…" autoComplete="off" />
             </div>
             <p className="text-xs leading-5 text-muted-foreground">{copy.keyMemoryNote}</p>
@@ -257,12 +295,17 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
 
             {progress.orgVerified ? (
               <Notice tone="success" title={copy.domainVerified}>
-                <span className="font-mono text-foreground">{progress.domain}</span> {copy.verifiedBelongs} <span className="font-mono text-foreground">{progress.orgName}</span>.
+                <span className="font-mono text-foreground">{progress.domain}</span> {copy.verifiedBelongs}{' '}
+                <span className="font-mono text-foreground">{progress.orgName}</span>
+                {progress.domainVerifiedVia ? <> ({progress.domainVerifiedVia === 'dns' ? copy.viaDns : copy.viaFile})</> : null}.
               </Notice>
             ) : (
-              <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-4">
                 <p className="text-sm leading-6 text-muted-foreground">
-                  {copy.txtIntro}
+                  {copy.storedAs} <span className="font-mono text-foreground">{progress.orgName}</span>.
+                  {progress.requestedOrgName && progress.requestedOrgName !== progress.orgName
+                    ? <> {copy.promotesTo} <span className="font-mono text-foreground">{progress.requestedOrgName}</span>.</>
+                    : null}
                   {expires ? copy.claimExpires(expires) : null}
                 </p>
                 <div className="grid gap-3">
@@ -275,70 +318,126 @@ export function StepFirma({ progress, update, secrets, setSecrets }: StepProps) 
                     {dnsResult.records.length > 0 ? <> {copy.found} <span className="font-mono break-all text-foreground">{dnsResult.records.join(', ')}</span></> : copy.noRecord}
                   </Notice>
                 ) : null}
-                {error ? <Notice tone="error">{error}</Notice> : null}
                 <div>
-                  <Button type="button" className="h-10 rounded-full px-5" onClick={() => void onCheckDns()} disabled={pending !== null}>
-                    {pending === 'check' ? <Spinner label={copy.checking} /> : <><RefreshCwIcon aria-hidden="true" /> {copy.checkDns}</>}
+                  <Button id="check-dns" type="button" className="h-10 rounded-full px-5" onClick={() => void onCheck('dns')} disabled={pending !== null}>
+                    {pending === 'dns' ? <Spinner label={copy.checking} /> : <><RefreshCwIcon aria-hidden="true" /> {copy.checkDns}</>}
                   </Button>
                 </div>
+                <div className="flex flex-col gap-3 border-t pt-4">
+                  <p className="text-sm font-medium">{copy.wellKnownTitle}</p>
+                  <p className="text-sm leading-6 text-muted-foreground">{copy.wellKnownText}</p>
+                  <CopyField label={copy.wellKnownUrl} value={progress.wellKnownUrl} />
+                  <CopyField label={copy.wellKnownBody} value={progress.wellKnownBody} />
+                  {fileResult ? <Notice tone="warning" title={copy.fileMissingTitle}>{fileResult}</Notice> : null}
+                  <div>
+                    <Button id="check-file" type="button" variant="outline" className="h-10 rounded-full px-5" onClick={() => void onCheck('well-known')} disabled={pending !== null}>
+                      {pending === 'file' ? <Spinner label={copy.checking} /> : copy.checkFile}
+                    </Button>
+                  </div>
+                </div>
+                {error ? <Notice tone="error">{error}</Notice> : null}
               </div>
             )}
           </div>
         ) : null}
       </Panel>
 
-      <Panel title={copy.registryPanel} badge={<LiveBadge>{copy.registryBadge}</LiveBadge>}>
+      <Panel
+        title={copy.registryPanel}
+        badge={filing
+          ? <StatusBadge tone="pending">{copy.reviewPending}</StatusBadge>
+          : <LiveBadge>{copy.registryBadge}</LiveBadge>}
+      >
         <p className="text-sm leading-6 text-muted-foreground">{copy.registryText}</p>
-        <fieldset className="flex flex-col gap-2">
-          <legend className="mb-1.5 text-sm font-medium">{copy.registryCountry}</legend>
-          <div className="flex flex-wrap gap-2">
-            {(['DE', 'UK'] as RegistryCountry[]).map((country) => (
-              <label key={country} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-beam has-[:checked]:bg-beam/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
-                <input
-                  type="radio"
-                  name="registry-country"
-                  value={country}
-                  className="accent-[var(--beam)]"
-                  checked={progress.registryCountry === country}
-                  onChange={() => update({ registryCountry: country })}
+        {filing ? (
+          <Notice tone="info" title={copy.submittedTitle}>
+            {copy.submittedText(filing.status === 'pending' ? copy.statusPending : filing.status)}
+          </Notice>
+        ) : (
+          <form onSubmit={onSubmitRegistry} className="flex flex-col gap-4" noValidate>
+            <fieldset className="flex flex-col gap-2">
+              <legend className="mb-1.5 text-sm font-medium">{copy.registryKind}</legend>
+              <div className="flex flex-wrap gap-2">
+                {(['handelsregister', 'lei'] as RegistryKind[]).map((kind) => (
+                  <label key={kind} className="flex cursor-pointer items-center gap-2 rounded-lg border px-3 py-2 text-sm has-[:checked]:border-beam has-[:checked]:bg-beam/5 has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring">
+                    <input
+                      type="radio"
+                      name="registry-kind"
+                      value={kind}
+                      className="accent-[var(--beam)]"
+                      checked={progress.registryKind === kind}
+                      onChange={() => update({ registryKind: kind })}
+                    />
+                    {copy.kinds[kind]}
+                  </label>
+                ))}
+              </div>
+            </fieldset>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <TextField
+                id="registry-number"
+                label={progress.registryKind === 'lei' ? copy.leiNumber : copy.registerNumber}
+                value={progress.registrationNumber}
+                onChange={(value) => update({ registrationNumber: value })}
+                placeholder={progress.registryKind === 'lei' ? '5493001KJTIIGC8Y1R12' : 'HRB 123456'}
+                autoComplete="off"
+              />
+              {progress.registryKind === 'lei' ? (
+                <TextField
+                  id="registry-country"
+                  label={copy.leiCountry}
+                  value={progress.leiCountry}
+                  onChange={(value) => update({ leiCountry: value.toUpperCase() })}
+                  placeholder="DE"
+                  maxLength={2}
+                  autoComplete="off"
                 />
-                {copy.countries[country]}
-              </label>
-            ))}
-          </div>
-        </fieldset>
-        <div className="grid gap-4 sm:grid-cols-2">
-          <TextField
-            id="registry-number"
-            label={progress.registryCountry === 'DE' ? copy.registerNumber : copy.companyNumber}
-            value={progress.registrationNumber}
-            onChange={(value) => update({ registrationNumber: value })}
-            placeholder={progress.registryCountry === 'DE' ? 'HRB 123456' : '01234567'}
-            autoComplete="off"
-          />
-          <TextField
-            id="registry-legal-name"
-            label={copy.legalName}
-            value={progress.legalName}
-            onChange={(value) => update({ legalName: value })}
-            placeholder={copy.legalPlaceholder}
-            autoComplete="organization"
-          />
-        </div>
-        {registryError ? <p className="text-xs text-destructive">{t.validation[registryError]}</p> : null}
+              ) : (
+                <TextField
+                  id="registry-court"
+                  label={copy.registerCourt}
+                  value={progress.registerCourt}
+                  onChange={(value) => update({ registerCourt: value })}
+                  placeholder={copy.registerCourtPlaceholder}
+                  autoComplete="off"
+                />
+              )}
+              <TextField
+                id="registry-legal-name"
+                label={copy.legalName}
+                value={progress.legalName}
+                onChange={(value) => update({ legalName: value })}
+                placeholder={copy.legalPlaceholder}
+                autoComplete="organization"
+              />
+              <TextField
+                id="registry-applicant"
+                label={copy.applicantName}
+                value={progress.applicantName}
+                onChange={(value) => update({ applicantName: value })}
+                autoComplete="name"
+              />
+            </div>
+            <SelectField id="registry-role" label={copy.applicantRole} value={progress.applicantRole} onChange={(value) => update({ applicantRole: value as typeof progress.applicantRole })}>
+              <option value="">{copy.rolePlaceholder}</option>
+              {APPLICANT_ROLES.map((role) => <option key={role} value={role}>{copy.roles[role]}</option>)}
+            </SelectField>
+            <p className="text-xs leading-5 text-muted-foreground">{copy.roleNote}</p>
+            {showRegistryErrors && registryInvalid ? <p className="text-xs text-destructive">{t.validation[registryInvalid]}</p> : null}
+            {!progress.orgVerified ? <p className="text-xs text-muted-foreground">{copy.registryNeedsDomain}</p> : null}
+            {registryError ? <Notice tone="error">{registryError}</Notice> : null}
+            <div>
+              <Button id="submit-registry" type="submit" variant="outline" className="h-9 rounded-full px-4" disabled={!progress.orgVerified || !secrets.orgApiKey || Boolean(registryInvalid) || pending !== null}>
+                {pending === 'registry' ? <Spinner label={copy.submitting} /> : copy.submitRegistry}
+              </Button>
+            </div>
+          </form>
+        )}
       </Panel>
 
-      <div className="grid gap-4 md:grid-cols-3">
-        <ComingSoonCard capability="verifyDomainByWellKnownFile" title={copy.wellKnownTitle} company={progress.displayName}>
-          {copy.wellKnownText}
-        </ComingSoonCard>
-        <ComingSoonCard capability="lookupLei" title={copy.leiTitle} company={progress.displayName}>
-          {copy.leiText}
-        </ComingSoonCard>
-        <ComingSoonCard capability="checkPowerOfRepresentation" title={copy.porTitle} company={progress.displayName}>
-          {copy.porText}
-        </ComingSoonCard>
-      </div>
+      <ComingSoonCard capability="checkPowerOfRepresentation" title={copy.porTitle} company={progress.displayName}>
+        {copy.porText}
+      </ComingSoonCard>
     </div>
   )
 }

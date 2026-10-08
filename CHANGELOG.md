@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Public site
+- point company onboarding at the live directory routes: domain proof (DNS or `/.well-known`), register filing, person, manual KYC request, invitation, agent public key, signed encryption key, and a person-signed mandate
+- keep third-party ID checks, Personio sync, automatic representation checks, and sending from Grok marked as not available
+- private keys stay in the browser; the directory only receives public keys and signatures
+
 ## v1.8.0 (2026-10-08)
 
 ### Trust layer: organization identity and key custody
