@@ -2702,6 +2702,12 @@ function renameOrg(db: DB, from: string, to: string): void {
       if (tableExists(db, 'org_registry_filings')) {
         db.prepare('UPDATE org_registry_filings SET org_name = ? WHERE org_name = ?').run(to, from)
       }
+      if (tableExists(db, 'persons')) {
+        db.prepare('UPDATE persons SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
+      if (tableExists(db, 'person_invitations')) {
+        db.prepare('UPDATE person_invitations SET org_name = ? WHERE org_name = ?').run(to, from)
+      }
     })
     apply()
   } finally {

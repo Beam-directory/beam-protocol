@@ -16,6 +16,7 @@ import {
 } from '../db.js'
 import { toBeamDID } from '../did.js'
 import type { AgentRow, BeamConnectionRow, BeamConnectionStatus } from '../types.js'
+import { agentOperationBlock } from '../trust/person-store.js'
 import { broadcastNetworkEvent, isAgentConnected } from '../websocket.js'
 
 const BEAM_ID_RE = /^[a-z0-9][a-z0-9_-]{1,62}@(?:[a-z0-9](?:[a-z0-9.-]{0,124}[a-z0-9])?\.)?beam\.directory$/
@@ -43,6 +44,14 @@ export function authenticateNetworkIdentity(db: Database, request: Request): Aut
   }
 
   return { agent: agent as AgentRow }
+}
+
+export function suspendedNetworkIdentity(db: Database, request: Request): { error: string; errorCode: string } | null {
+  const auth = authenticateNetworkIdentity(db, request)
+  if (!auth) {
+    return null
+  }
+  return agentOperationBlock(db, auth.agent)
 }
 
 export function isNetworkAssured(db: Database, agent: AgentRow): boolean {
@@ -190,6 +199,10 @@ export function networkRouter(db: Database): Hono {
   router.use('*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Pragma', 'no-cache')
+    const blocked = suspendedNetworkIdentity(db, c.req.raw)
+    if (blocked) {
+      return c.json({ error: blocked.error, errorCode: blocked.errorCode }, 403)
+    }
     await next()
   })
 

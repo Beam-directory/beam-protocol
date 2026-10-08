@@ -19,6 +19,7 @@ import {
 import { seedAclsFromCatalog } from '../acl.js'
 import { createAgentApiKey, hashApiKey as hashAgentApiKey } from '../api-key.js'
 import { isEd25519Spki } from '../key-validation.js'
+import { getPerson, setAgentResponsiblePerson } from '../trust/person-store.js'
 import { namespaceForDomain, namespaceMatchesDomain, registrableDomain } from '../trust/org-domain.js'
 import { parseRegistryClaim } from '../trust/registry-format.js'
 import {
@@ -355,6 +356,15 @@ export function orgsRouter(db: Database): Hono {
       }, 400)
     }
 
+    const responsiblePersonId = typeof raw['responsiblePersonId'] === 'string' ? raw['responsiblePersonId'].trim() : ''
+    const responsible = responsiblePersonId ? getPerson(db, responsiblePersonId) : null
+    if (responsiblePersonId && (!responsible || responsible.org_name !== name || responsible.status !== 'active')) {
+      return c.json({
+        error: 'responsiblePersonId must be an active person in this organization',
+        errorCode: 'RESPONSIBLE_PERSON_REQUIRED',
+      }, 400)
+    }
+
     const beamId = `${agentName}@${org.beam_domain}`
     const apiKey = createAgentApiKey(beamId)
 
@@ -369,6 +379,9 @@ export function orgsRouter(db: Database): Hono {
 
     try {
       const agent = registerAgent(db, request)
+      if (responsible) {
+        setAgentResponsiblePerson(db, beamId, responsible.id)
+      }
       seedAclsFromCatalog(db)
       logAuditEvent(db, {
         action: 'org.agent.created',
@@ -386,6 +399,7 @@ export function orgsRouter(db: Database): Hono {
         publicKey: publicKeyBase64,
         publicKeyBase64,
         apiKey,
+        responsiblePersonId: responsible?.id ?? null,
         trustScore: agent.trust_score,
         verified: agent.verified === 1,
         createdAt: agent.created_at,

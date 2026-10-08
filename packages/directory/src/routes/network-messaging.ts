@@ -8,6 +8,7 @@ import type { AgentRow } from '../types.js'
 import {
   authenticateNetworkIdentity,
   isNetworkAssured,
+  suspendedNetworkIdentity,
   readNetworkObjectBody,
   safeNetworkProfile,
   verifyNetworkSignedMutation,
@@ -342,6 +343,10 @@ export function networkMessagingRouter(db: Database): Hono {
   router.use('*', async (c, next) => {
     c.header('Cache-Control', 'no-store')
     c.header('Pragma', 'no-cache')
+    const blocked = suspendedNetworkIdentity(db, c.req.raw)
+    if (blocked) {
+      return c.json({ error: blocked.error, errorCode: blocked.errorCode }, 403)
+    }
     await next()
   })
 

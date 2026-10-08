@@ -51,13 +51,59 @@ export function ensureTrustOrgSchema(db: Database): void {
       ON orgs(domain)
       WHERE domain IS NOT NULL AND domain != ''
     `)
-    return
+  } else {
+    const domains = duplicates.map((row) => row.domain).join(', ')
+    console.error(`[trust] SKIPPED unique index idx_orgs_domain_unique because these domains are duplicated: ${domains}`)
+    db.prepare(`
+      INSERT INTO audit_log (action, actor, target, timestamp, details)
+      VALUES ('org.domain_index.skipped', 'system', 'idx_orgs_domain_unique', ?, ?)
+    `).run(new Date().toISOString(), JSON.stringify({ domains: duplicates.map((row) => row.domain) }))
   }
+  ensureTrustPersonSchema(db)
+}
 
-  const domains = duplicates.map((row) => row.domain).join(', ')
-  console.error(`[trust] SKIPPED unique index idx_orgs_domain_unique because these domains are duplicated: ${domains}`)
-  db.prepare(`
-    INSERT INTO audit_log (action, actor, target, timestamp, details)
-    VALUES ('org.domain_index.skipped', 'system', 'idx_orgs_domain_unique', ?, ?)
-  `).run(new Date().toISOString(), JSON.stringify({ domains: duplicates.map((row) => row.domain) }))
+function ensureTrustPersonSchema(db: Database): void {
+  ensureColumn(db, 'agents', 'responsible_person_id', 'TEXT')
+  ensureColumn(db, 'agents', 'suspended_at', 'TEXT')
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS persons (
+      id TEXT PRIMARY KEY,
+      org_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      display_name TEXT NOT NULL,
+      role TEXT NOT NULL,
+      supervisor_person_id TEXT,
+      status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active', 'offboarded')),
+      kyc_status TEXT NOT NULL DEFAULT 'unverified' CHECK(kyc_status IN ('unverified', 'pending', 'verified', 'rejected')),
+      kyc_provider TEXT,
+      kyc_reference TEXT,
+      public_key TEXT,
+      rights_json TEXT NOT NULL DEFAULT '{"actions":[]}',
+      external_source TEXT,
+      external_id TEXT,
+      offboarded_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE,
+      FOREIGN KEY (supervisor_person_id) REFERENCES persons(id)
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_org_email ON persons(org_name, email);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_persons_external
+      ON persons(org_name, external_source, external_id)
+      WHERE external_source IS NOT NULL AND external_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_persons_supervisor ON persons(supervisor_person_id);
+
+    CREATE TABLE IF NOT EXISTS person_invitations (
+      id TEXT PRIMARY KEY,
+      org_name TEXT NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL,
+      supervisor_person_id TEXT,
+      token_hash TEXT NOT NULL UNIQUE,
+      rights_json TEXT NOT NULL,
+      expires_at TEXT NOT NULL,
+      accepted_at TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY (org_name) REFERENCES orgs(name) ON DELETE CASCADE
+    );
+  `)
 }

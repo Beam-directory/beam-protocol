@@ -703,6 +703,8 @@ export interface AgentRow {
   http_endpoint: string | null
   dh_public_key: string | null
   plan: 'free' | 'pro' | 'business' | 'enterprise'
+  responsible_person_id: string | null
+  suspended_at: string | null
   created_at: string
   last_seen: string
 }
