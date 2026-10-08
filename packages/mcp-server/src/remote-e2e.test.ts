@@ -7,7 +7,8 @@ import { toNodeHandler } from '@modelcontextprotocol/node'
 import type { AgentProfile, AgentRecord, BeamIdString, ResultFrame } from 'beam-protocol-sdk'
 import { createBeamMcpHttpHandler, hardenBeamMcpHttpServer, type BeamMcpRemoteAuditRecord } from './http.js'
 import type { BeamMcpHttpConfig } from './http-config.js'
-import { UNTRUSTED_REMOTE_CONTENT_NOTICE, type BeamNetworkGateway } from './network-client.js'
+import type { BeamNetworkGateway } from './network-client.js'
+import { UNTRUSTED_REMOTE_CONTENT_NOTICE } from './untrusted-content.js'
 import { IntrospectionTokenVerifier, loadOAuthAuthorizationServerMetadata } from './oauth.js'
 import type { BeamGateway } from './tools.js'
 
@@ -201,7 +202,7 @@ async function startAuthorizationServer(input: {
   }
 }
 
-async function startRemoteMcp(input: { enableNetwork?: boolean; enableSend: boolean; scopes: string[] }) {
+async function startRemoteMcp(input: { enableNetwork?: boolean; enableSend: boolean; scopes: string[]; sendLimitPerHour?: number }) {
   let publicUrl = ''
   const authorizationServer = await startAuthorizationServer({
     scopes: input.scopes,
@@ -235,6 +236,7 @@ async function startRemoteMcp(input: { enableNetwork?: boolean; enableSend: bool
     allowedOriginHostnames: ['127.0.0.1'],
     enableNetwork: input.enableNetwork ?? true,
     enableSend: input.enableSend,
+    sendLimitPerHour: input.sendLimitPerHour ?? 30,
     oauth: {
       issuer: authorizationServer.issuer,
       metadataUrl: authorizationServer.metadataUrl,
@@ -311,6 +313,8 @@ test('official MCP client proves a read-only OAuth-protected remote connector ov
     assert.equal((structured['connector'] as Record<string, unknown>)['networkWrite'], false)
     const target = structured['target'] as Record<string, unknown>
     assert.equal((target['assurance'] as Record<string, unknown>)['tier'], 'business')
+    assert.equal(target['contentTrust'], 'untrusted')
+    assert.equal(target['contentNotice'], UNTRUSTED_REMOTE_CONTENT_NOTICE)
     assert.ok(remote.introspections.length >= 2)
     assert.ok(remote.introspections.every((token) => token === accessToken))
     assert.ok(remote.audits.some((record) => record.tool === 'beam_status' && record.outcome === 'success'))
@@ -347,7 +351,33 @@ test('official MCP client preserves send scope, confirmation, signed result, and
   try {
     connected = await connectClient(remote.mcpUrl)
     const tools = await connected.client.listTools()
-    assert.ok(tools.tools.some((tool) => tool.name === 'beam_send'))
+    assert.deepEqual(tools.tools.map((tool) => tool.name).sort(), [
+      'beam_network_connections',
+      'beam_network_conversations',
+      'beam_network_create_group',
+      'beam_network_discover',
+      'beam_network_identity',
+      'beam_network_messages',
+      'beam_network_open_direct',
+      'beam_network_request_connection',
+      'beam_network_respond_connection',
+      'beam_network_send_message',
+      'beam_prepare_handoff',
+      'beam_prepare_network_action',
+      'beam_send',
+      'beam_status',
+    ])
+    for (const name of [
+      'beam_send',
+      'beam_network_send_message',
+      'beam_network_request_connection',
+      'beam_network_respond_connection',
+      'beam_network_open_direct',
+      'beam_network_create_group',
+    ]) {
+      assert.equal(tools.tools.find((tool) => tool.name === name)?.annotations?.destructiveHint, true)
+    }
+    assert.equal(tools.tools.find((tool) => tool.name === 'beam_prepare_network_action')?.annotations?.destructiveHint, false)
 
     const preview = await connected.client.callTool({
       name: 'beam_prepare_handoff',
@@ -356,32 +386,56 @@ test('official MCP client preserves send scope, confirmation, signed result, and
     assert.equal(preview.isError, undefined)
     assert.equal(JSON.stringify(preview).includes(message), false)
 
+    const previewBody = preview.structuredContent as Record<string, unknown>
+    const confirmationToken = previewBody['confirmationToken']
+    assert.equal(typeof confirmationToken, 'string')
+
     const blocked = await connected.client.callTool({
       name: 'beam_send',
-      arguments: { to: targetBeamId, message, confirmed: false },
+      arguments: { to: targetBeamId, message, confirmed: true, confirmationToken },
     })
     assert.equal(blocked.isError, true)
     assert.equal(remote.sends.length, 0)
 
+    const missingToken = await connected.client.callTool({
+      name: 'beam_prepare_handoff',
+      arguments: { to: targetBeamId, message, context: { ticket: 'SUP-42' } },
+    })
+    const approvedToken = (missingToken.structuredContent as Record<string, unknown>)['confirmationToken']
+    const modelConfirmed = await connected.client.callTool({
+      name: 'beam_send',
+      arguments: { to: targetBeamId, message, confirmed: true, confirmationToken: 'a'.repeat(43) },
+    })
+    assert.equal(modelConfirmed.isError, true)
+    assert.equal(remote.sends.length, 0)
+
     const delivered = await connected.client.callTool({
       name: 'beam_send',
-      arguments: { to: targetBeamId, message, confirmed: true },
+      arguments: { to: targetBeamId, message, context: { ticket: 'SUP-42' }, confirmed: true, confirmationToken: approvedToken },
     })
     assert.equal(delivered.isError, undefined)
     assert.equal(remote.sends.length, 1)
     const structured = delivered.structuredContent as Record<string, unknown>
-    assert.equal((structured['result'] as Record<string, unknown>)['signed'], true)
+    const deliveredResult = structured['result'] as Record<string, unknown>
+    assert.equal(deliveredResult['signed'], true)
+    assert.equal(deliveredResult['contentTrust'], 'untrusted')
+    assert.equal((deliveredResult['payload'] as Record<string, unknown>)['contentTrust'], 'untrusted')
 
+    const networkPrepared = await connected.client.callTool({
+      name: 'beam_prepare_network_action',
+      arguments: { action: 'send_message', conversationId: 'conversation-123', body: message },
+    })
+    const networkToken = (networkPrepared.structuredContent as Record<string, unknown>)['confirmationToken']
     const networkBlocked = await connected.client.callTool({
       name: 'beam_network_send_message',
-      arguments: { conversationId: 'conversation-123', body: message, confirmed: false },
+      arguments: { conversationId: 'conversation-123', body: message, confirmed: true, confirmationToken: 'b'.repeat(43) },
     })
     assert.equal(networkBlocked.isError, true)
     assert.equal(remote.networkCalls.length, 0)
 
     const networkDelivered = await connected.client.callTool({
       name: 'beam_network_send_message',
-      arguments: { conversationId: 'conversation-123', body: message, confirmed: true },
+      arguments: { conversationId: 'conversation-123', body: message, confirmed: true, confirmationToken: networkToken },
     })
     assert.equal(networkDelivered.isError, undefined)
     assert.equal(remote.networkCalls.length, 1)
@@ -395,6 +449,31 @@ test('official MCP client preserves send scope, confirmation, signed result, and
     assert.ok(remote.audits.some((record) => record.tool === 'beam_network_send_message' && record.outcome === 'rejected'))
     assert.ok(remote.audits.some((record) => record.tool === 'beam_network_send_message' && record.outcome === 'success'))
     assert.ok(remote.audits.every((record) => record.principal.clientId === 'grok-remote-client'))
+  } finally {
+    if (connected) {
+      await connected.transport.terminateSession().catch(() => undefined)
+      await connected.client.close()
+    }
+    await remote.close()
+  }
+})
+
+test('a beam:read token keeps read tools when send is enabled', async () => {
+  const remote = await startRemoteMcp({ enableSend: true, scopes: ['beam:read'] })
+  let connected: Awaited<ReturnType<typeof connectClient>> | undefined
+  try {
+    connected = await connectClient(remote.mcpUrl)
+    const status = await connected.client.callTool({ name: 'beam_status', arguments: {} })
+    assert.equal(status.isError, undefined)
+    const identity = await connected.client.callTool({ name: 'beam_network_identity', arguments: {} })
+    assert.equal(identity.isError, undefined)
+    const denied = await connected.client.callTool({
+      name: 'beam_send',
+      arguments: { to: targetBeamId, message: 'Must not leave this process', confirmed: true, confirmationToken: 'c'.repeat(43) },
+    })
+    assert.equal(denied.isError, true)
+    assert.match(JSON.stringify(denied.content), /OAuth scope beam:send is required/)
+    assert.equal(remote.sends.length, 0)
   } finally {
     if (connected) {
       await connected.transport.terminateSession().catch(() => undefined)

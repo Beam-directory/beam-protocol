@@ -14,6 +14,7 @@ const config: BeamMcpHttpConfig = {
   allowedOriginHostnames: ['mcp.example.com'],
   enableNetwork: false,
   enableSend: true,
+  sendLimitPerHour: 30,
   oauth: {
     issuer: new URL('https://identity.example.com'),
     metadataUrl: new URL('https://identity.example.com/.well-known/oauth-authorization-server'),
@@ -97,7 +98,8 @@ test('remote MCP challenges unauthenticated requests and rejects untrusted hosts
     assert.equal(unauthorized.status, 401)
     const challenge = unauthorized.headers.get('www-authenticate') ?? ''
     assert.match(challenge, /resource_metadata=/)
-    assert.match(challenge, /scope="beam:read beam:send"/)
+    assert.match(challenge, /scope="beam:read"/)
+    assert.doesNotMatch(challenge, /beam:send/)
 
     const badHost = await handler.fetch(new Request('https://evil.example/mcp', {
       headers: { host: 'evil.example' },

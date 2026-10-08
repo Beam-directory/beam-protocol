@@ -1,3 +1,6 @@
+# One-week COPPEN send profile. Deploy this file only after Keycloak has the
+# optional beam:send scope. Do not copy these flags into mcp.fly.toml.
+# Rollback: fly deploy --config ops/mcp-pilot/fly/mcp.fly.toml --app beam-mcp-pilot
 app = "beam-mcp-pilot"
 primary_region = "fra"
 kill_signal = "SIGTERM"
@@ -31,10 +34,9 @@ kill_timeout = 20
   BEAM_MCP_REQUIRE_VERIFIED_TARGET = "true"
   BEAM_MCP_MIN_VERIFICATION_TIER = "business"
   BEAM_MCP_MIN_TRUST_SCORE = "0.5"
-  # Network and send stay off here. A redeploy of this file must not arm them.
-  # The one-week partner test uses mcp.send.fly.toml instead.
-  BEAM_MCP_ENABLE_NETWORK = "false"
-  BEAM_MCP_ENABLE_SEND = "false"
+  BEAM_MCP_ENABLE_NETWORK = "true"
+  BEAM_MCP_ENABLE_SEND = "true"
+  BEAM_MCP_SEND_LIMIT_PER_HOUR = "30"
 
 [[files]]
   guest_path = "/run/secrets/oauth_client_secret"

@@ -19,18 +19,25 @@ function dryRun(scriptName, args) {
   return JSON.parse(result.stdout)
 }
 
-test('hosted MCP pilot enables network and send without raising request limits', () => {
+test('hosted MCP pilot keeps the default profile off and isolates send', () => {
   const fly = readRepoFile('../../ops/mcp-pilot/fly/mcp.fly.toml')
+  const send = readRepoFile('../../ops/mcp-pilot/fly/mcp.send.fly.toml')
   const tenant = readRepoFile('../../ops/mcp-tenant/compose.yaml')
   const httpServer = readRepoFile('../../packages/mcp-server/src/http.ts')
   const networkClient = readRepoFile('../../packages/mcp-server/src/network-client.ts')
 
-  assert.match(fly, /BEAM_MCP_ENABLE_NETWORK = "true"/)
-  assert.match(fly, /BEAM_MCP_ENABLE_SEND = "true"/)
-  assert.match(fly, /BEAM_ID = "grok@coppen\.beam\.directory"/)
+  assert.match(fly, /BEAM_MCP_ENABLE_NETWORK = "false"/)
+  assert.match(fly, /BEAM_MCP_ENABLE_SEND = "false"/)
+  assert.doesNotMatch(fly, /BEAM_MCP_ENABLE_NETWORK = "true"/)
+  assert.doesNotMatch(fly, /BEAM_MCP_ENABLE_SEND = "true"/)
+  assert.match(send, /BEAM_MCP_ENABLE_NETWORK = "true"/)
+  assert.match(send, /BEAM_MCP_ENABLE_SEND = "true"/)
+  assert.match(send, /BEAM_MCP_SEND_LIMIT_PER_HOUR = "30"/)
+  assert.match(send, /BEAM_ID = "grok@coppen\.beam\.directory"/)
   assert.match(tenant, /BEAM_MCP_ENABLE_NETWORK: "false"/)
   assert.match(tenant, /BEAM_MCP_ENABLE_SEND: "false"/)
   assert.match(httpServer, /const MAX_MCP_REQUEST_BYTES = 1024 \* 1024/)
+  assert.match(httpServer, /const requiredScopes = \['beam:read'\]/)
   assert.match(networkClient, /const MAX_NETWORK_RESPONSE_BYTES = 2 \* 1024 \* 1024/)
 })
 

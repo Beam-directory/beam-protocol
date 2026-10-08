@@ -8,6 +8,7 @@ export type BeamMcpHttpConfig = {
   allowedOriginHostnames: string[]
   enableNetwork: boolean
   enableSend: boolean
+  sendLimitPerHour: number
   oauth: {
     issuer: URL
     metadataUrl: URL
@@ -54,6 +55,15 @@ function parseHostnameList(value: string | undefined): string[] {
     .filter((entry) => !entry.includes('/') && !entry.includes(':'))
 }
 
+function parseSendLimit(value: string | undefined): number {
+  if (value === undefined || value.trim() === '') return 30
+  const parsed = Number(value)
+  if (!Number.isInteger(parsed) || parsed < 1 || parsed > 1_000) {
+    throw new Error('BEAM_MCP_SEND_LIMIT_PER_HOUR must be an integer from 1 to 1000')
+  }
+  return parsed
+}
+
 function parseBooleanFlag(value: string | undefined, name: string, defaultValue: boolean): boolean {
   if (value === undefined || value.trim() === '') return defaultValue
   const normalized = value.trim().toLowerCase()
@@ -96,6 +106,7 @@ export function loadBeamMcpHttpConfig(env: NodeJS.ProcessEnv = process.env): Bea
     allowedOriginHostnames,
     enableNetwork: parseBooleanFlag(env['BEAM_MCP_ENABLE_NETWORK'], 'BEAM_MCP_ENABLE_NETWORK', false),
     enableSend: parseBooleanFlag(env['BEAM_MCP_ENABLE_SEND'], 'BEAM_MCP_ENABLE_SEND', false),
+    sendLimitPerHour: parseSendLimit(env['BEAM_MCP_SEND_LIMIT_PER_HOUR']),
     oauth: {
       issuer,
       metadataUrl,

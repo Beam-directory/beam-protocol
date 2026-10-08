@@ -4,7 +4,8 @@ import test from 'node:test'
 import { BeamIdentity, canonicalizeFrame, type BeamIdString } from 'beam-protocol-sdk'
 import type { BeamMcpConfig } from './config.js'
 import { encryptNetworkPayload } from './network-crypto.js'
-import { BeamNetworkClient, presentUntrustedNetworkRead, UNTRUSTED_REMOTE_CONTENT_NOTICE } from './network-client.js'
+import { BeamNetworkClient } from './network-client.js'
+import { presentUntrustedNetworkRead, presentUntrustedSendResult, UNTRUSTED_REMOTE_CONTENT_NOTICE } from './untrusted-content.js'
 
 function config(): BeamMcpConfig {
   const identity = BeamIdentity.generate({ agentName: 'codex', orgName: 'acme' }).export()
@@ -124,31 +125,46 @@ test('network reads label remote message text as untrusted and ignore a forged t
   })
 
   const messages = await client.messages('conversation-123', 20)
-  const message = (messages['messages'] as Array<Record<string, unknown>>)[0]
+  const rawMessage = (messages['messages'] as Array<Record<string, unknown>>)[0]
+  assert.equal(messages['contentTrust'], undefined)
+  assert.equal(rawMessage?.['body'], hostile)
+  assert.equal(rawMessage?.['contentTrust'], 'trusted')
+  const labeledMessages = presentUntrustedNetworkRead(messages)
+  const message = (labeledMessages['messages'] as Array<Record<string, unknown>>)[0]
   const attachment = message?.['attachment'] as Record<string, unknown>
-  assert.equal(messages['contentTrust'], 'untrusted')
-  assert.equal(messages['contentNotice'], UNTRUSTED_REMOTE_CONTENT_NOTICE)
-  assert.equal(message?.['body'], hostile)
+  assert.equal(labeledMessages['contentTrust'], 'untrusted')
+  assert.equal(labeledMessages['contentNotice'], UNTRUSTED_REMOTE_CONTENT_NOTICE)
   assert.equal(message?.['contentTrust'], 'untrusted')
   assert.equal(attachment?.['name'], 'run-this.txt')
   assert.equal(attachment?.['contentTrust'], 'untrusted')
 
-  const conversations = await client.conversations()
-  const lastMessage = ((conversations['conversations'] as Array<Record<string, unknown>>)[0]?.['lastMessage']) as Record<string, unknown>
-  assert.equal(conversations['contentTrust'], 'untrusted')
+  const labeledConversations = presentUntrustedNetworkRead(await client.conversations())
+  const lastMessage = ((labeledConversations['conversations'] as Array<Record<string, unknown>>)[0]?.['lastMessage']) as Record<string, unknown>
+  assert.equal(labeledConversations['contentTrust'], 'untrusted')
   assert.equal(lastMessage?.['body'], hostile)
   assert.equal(lastMessage?.['contentTrust'], 'untrusted')
 
-  const connections = await client.connections()
-  const connection = (connections['connections'] as Array<Record<string, unknown>>)[0]
+  const labeledConnections = presentUntrustedNetworkRead(await client.connections())
+  const connection = (labeledConnections['connections'] as Array<Record<string, unknown>>)[0]
   assert.equal(connection?.['message'], hostile)
   assert.equal(connection?.['messageTrust'], 'untrusted')
   assert.equal(connection?.['messageNotice'], UNTRUSTED_REMOTE_CONTENT_NOTICE)
 
-  const stamped = presentUntrustedNetworkRead({
-    messages: [{ body: hostile, contentTrust: 'trusted' }],
+  const discovered = presentUntrustedNetworkRead({
+    results: [{ identity: { displayName: hostile, contentTrust: 'trusted' }, connection: { message: hostile, messageTrust: 'trusted' } }],
   })
-  assert.equal((stamped['messages'] as Array<Record<string, unknown>>)[0]?.['contentTrust'], 'untrusted')
+  const identity = ((discovered['results'] as Array<Record<string, unknown>>)[0]?.['identity']) as Record<string, unknown>
+  assert.equal(identity?.['displayName'], hostile)
+  assert.equal(identity?.['contentTrust'], 'untrusted')
+
+  const sent = presentUntrustedSendResult({
+    delivered: true,
+    result: { payload: { instruction: hostile, contentTrust: 'trusted' }, error: hostile },
+  })
+  const sentResult = sent['result'] as Record<string, unknown>
+  assert.equal(sentResult['contentTrust'], 'untrusted')
+  assert.equal((sentResult['payload'] as Record<string, unknown>)['contentTrust'], 'untrusted')
+  assert.equal((sentResult['payload'] as Record<string, unknown>)['instruction'], hostile)
 })
 
 test('network errors preserve the public error code without returning credentials', async () => {

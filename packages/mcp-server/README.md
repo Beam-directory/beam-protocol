@@ -162,15 +162,16 @@ This does not enable any write. To expose Network write tools and `beam_send` in
 export BEAM_MCP_ENABLE_SEND='true'
 ```
 
-The protected endpoint then requires both `beam:read` and `beam:send`. This is in addition to the target-verification policy and `confirmed=true`; it does not replace human approval.
+The protected endpoint still requires only `beam:read`, so existing read tokens keep working. Write tools additionally require `beam:send`, `destructiveHint: true`, and a single-use confirmation token from `beam_prepare_handoff` or `beam_prepare_network_action` for that exact action. `confirmed=true` alone is rejected. External sends are limited per Beam ID, 30 per hour unless `BEAM_MCP_SEND_LIMIT_PER_HOUR` sets another integer from 1 to 1000. This is in addition to the target-verification policy; it does not replace human approval.
 
 Network send also requires a dedicated X25519 keypair mounted as
 `BEAM_DH_PUBLIC_KEY_BASE64_FILE` and `BEAM_DH_PRIVATE_KEY_BASE64_FILE`, with the
 public half registered on the connector's Beam identity. The connector
 decrypts inbox content and encrypts outgoing Network messages locally; the
 Directory receives only the signed opaque envelope. Inbox text, attachment
-names, and connection-request notes are labeled untrusted. The connector does
-not treat that text as an instruction.
+names, connection-request notes, discovery display names, foreign status
+fields, and `beam_send` result payloads are labeled untrusted once, at the MCP
+boundary. The connector does not treat that text as an instruction.
 
 ### Connect Grok
 
@@ -192,7 +193,7 @@ For Grok Business or Enterprise, an administrator provisions a Custom connector 
 - The Network X25519 private key stays in the same tenant secret store and is never sent to the Directory or MCP client.
 - Message size is capped at 4 KiB, structured context at 16 KiB, and HTTP MCP requests at 1 MiB.
 - Destination Beam IDs must exist, the intent allowlist is enforced, and target verification/trust policy cannot be changed by a prompt.
-- The send tool is non-read-only, non-idempotent, open-world, and requires exact human confirmation.
+- Write tools are non-read-only, destructive, and open-world. Each one requires a server-issued confirmation token for the exact action. `confirmed=true` alone is rejected.
 - Host and Origin validation are fail-closed.
 - Remote tool audit records contain timestamp, OAuth client/subject/tenant, tool, outcome, target, and intent. They contain no access token, private key, message, or context.
 

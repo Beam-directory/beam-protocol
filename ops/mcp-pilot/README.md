@@ -7,16 +7,25 @@ Grok connector evidence. It is intentionally split into three apps:
 - `beam-identity-pilot`: Keycloak OAuth 2.1/OIDC issuer;
 - `beam-mcp-pilot`: the public Beam MCP resource server.
 
-The checked-in Fly profile for this one-week partner test sets
-`BEAM_MCP_ENABLE_NETWORK=true` and `BEAM_MCP_ENABLE_SEND=true`. Network read
-tools require `beam:read`. Network write tools and `beam_send` additionally
-require `beam:send`, and every write still requires `confirmed=true` for that
-exact action. Incoming message text, attachment names, and connection-request
-notes are returned as untrusted remote content. They are data for the human to
-read, not instructions for the agent. The generic `ops/mcp-tenant` baseline
-stays read-only. Every profile requires an exact resource audience and refuses
-targets below Beam's independently reviewed `business` tier. Removing that last
-gate is not a valid way to complete pilot evidence.
+The checked-in default Fly profile keeps `BEAM_MCP_ENABLE_NETWORK=false` and
+`BEAM_MCP_ENABLE_SEND=false`. A redeploy of `fly/mcp.fly.toml` does not turn
+Network or send on. The one-week partner test uses the separate profile
+`fly/mcp.send.fly.toml`, which sets both flags to `true` and
+`BEAM_MCP_SEND_LIMIT_PER_HOUR=30`.
+
+The HTTP endpoint always requires only `beam:read`. Existing read tokens keep
+working after a send-profile deploy. Network write tools and `beam_send`
+additionally require `beam:send`. Every write is annotated
+`destructiveHint: true` and requires a single-use confirmation token issued by
+`beam_prepare_handoff` or `beam_prepare_network_action` for that exact action.
+`confirmed=true` alone is rejected. Incoming message text, attachment names,
+connection-request notes, discovery display names, foreign status fields, and
+`beam_send` result payloads are returned as untrusted remote content. They are
+data for the human to read, not instructions for the agent. The generic
+`ops/mcp-tenant` baseline stays read-only. Every profile requires an exact
+resource audience and refuses targets below Beam's independently reviewed
+`business` tier. Removing that last gate is not a valid way to complete pilot
+evidence.
 
 This process signs only as `grok@coppen.beam.directory`. A second person must
 not log into `https://mcp.beam.directory/mcp` to act as their own agent. See
@@ -43,12 +52,12 @@ pilot image starts through a minimal root entrypoint that changes ownership and
 mode to `0400`, then drops to the normal PostgreSQL, Keycloak, or Node user.
 
 Deployment order is PostgreSQL, Keycloak, then MCP. Do not add the public DNS
-records until the Fly hostnames are healthy. For this send-enabled profile,
-create the optional `beam:send` scope before deploying the MCP app, then verify
-the OAuth scope and the advertised tool surface. Existing Fly secrets stay in
-place; this profile does not rotate them. A token that only has `beam:read`
-cannot call the send-enabled endpoint, so the operator re-authorizes Grok with
-`beam:read` and `beam:send` after the scope exists.
+records until the Fly hostnames are healthy. For the send profile, create the
+optional `beam:send` scope before deploying that config, then verify the OAuth
+scope and the advertised tool surface. Existing Fly secrets stay in place;
+this profile does not rotate them. A token that only has `beam:read` can still
+call read tools. Re-authorize Grok with `beam:read` and `beam:send` only when
+the operator wants write tools to succeed.
 
 The repository provides two fail-closed helpers:
 
@@ -82,10 +91,12 @@ only the MCP app from this repository revision. Do not run `fly secrets set`
 as part of this change:
 
 ```bash
-fly deploy --config ops/mcp-pilot/fly/mcp.fly.toml --app beam-mcp-pilot
+fly deploy --config ops/mcp-pilot/fly/mcp.send.fly.toml --app beam-mcp-pilot
 ```
 
-The env values that change are the two flags in `fly/mcp.fly.toml`. The file
+The env values that change live only in `fly/mcp.send.fly.toml`:
+`BEAM_MCP_ENABLE_NETWORK=true`, `BEAM_MCP_ENABLE_SEND=true`, and
+`BEAM_MCP_SEND_LIMIT_PER_HOUR=30`. The file
 secrets already mounted by that app stay the same: `MCP_OAUTH_CLIENT_SECRET_B64`,
 `MCP_BEAM_PUBLIC_KEY_B64`, `MCP_BEAM_PRIVATE_KEY_B64`, `MCP_BEAM_API_KEY_B64`,
 `MCP_BEAM_DH_PUBLIC_KEY_B64`, and `MCP_BEAM_DH_PRIVATE_KEY_B64`. Keycloak keeps
@@ -199,8 +210,29 @@ node scripts/production/mcp-oauth-pkce-smoke.mjs \
   --password-file /absolute/private/pilot_user_password \
   --introspection-secret-file /absolute/private/mcp_oauth_client_secret \
   --scopes 'openid beam:read beam:send' \
-  --expected-tools beam_network_connections,beam_network_conversations,beam_network_create_group,beam_network_discover,beam_network_identity,beam_network_messages,beam_network_open_direct,beam_network_request_connection,beam_network_respond_connection,beam_network_send_message,beam_prepare_handoff,beam_send,beam_status
+  --expected-tools beam_network_connections,beam_network_conversations,beam_network_create_group,beam_network_discover,beam_network_identity,beam_network_messages,beam_network_open_direct,beam_network_request_connection,beam_network_respond_connection,beam_network_send_message,beam_prepare_handoff,beam_prepare_network_action,beam_send,beam_status
 ```
+
+## Rollback
+
+To turn Network and send back off without rotating secrets, redeploy the
+default profile, drop optional `beam:send`, and re-authorize Grok:
+
+```bash
+fly deploy --config ops/mcp-pilot/fly/mcp.fly.toml --app beam-mcp-pilot
+
+node scripts/production/finalize-keycloak-grok-client.mjs \
+  --client-uuid 00000000-0000-0000-0000-000000000000 \
+  --admin-password-file /absolute/private/keycloak_admin_password \
+  --apply
+```
+
+The default toml leaves both flags false. The finalizer without
+`--enable-send-scope` removes optional `beam:send` and names the client
+`Grok / Beam read-only pilot`. Re-run the Grok installer, or the OAuth browser
+flow, so the stored token no longer carries `beam:send`. Confirmation tokens
+and the hourly send counter live in process memory and reset when the machine
+restarts. Do not run `fly secrets set` as part of the rollback.
 
 `npm run production:mcp-pilot` remains the read-only market-readiness gate. A
 send-enabled week test does not satisfy that evidence file.
@@ -216,9 +248,10 @@ would send as Tobias. Do not add Lakis there.
 1. Issue a dedicated Beam ID for Lakis' agent, including its own Ed25519
    signing keys, X25519 encryption keys, and agent API key. Do not copy the
    COPPEN secret files.
-2. Deploy a second Fly app from the same MCP image. Change `app`,
-   `BEAM_MCP_PUBLIC_URL`, `BEAM_ID`, the OAuth issuer, and the OAuth client ID.
-   Keep `BEAM_MCP_ENABLE_NETWORK=true`, `BEAM_MCP_ENABLE_SEND=true`,
+2. Deploy a second Fly app from the same MCP image, starting from
+   `fly/mcp.send.fly.toml` rather than turning the default file on. Change
+   `app`, `BEAM_MCP_PUBLIC_URL`, `BEAM_ID`, the OAuth issuer, and the OAuth
+   client ID. Keep `BEAM_MCP_ENABLE_NETWORK=true`, `BEAM_MCP_ENABLE_SEND=true`,
    `BEAM_MCP_REQUIRE_VERIFIED_TARGET=true`, and
    `BEAM_MCP_MIN_VERIFICATION_TIER=business`. Store that app's credentials as
    its own Fly file secrets. `scripts/production/configure-keycloak-mcp-pilot.mjs`
@@ -230,11 +263,12 @@ would send as Tobias. Do not add Lakis there.
 4. In Lakis' Grok plugin, set `BEAM_MCP_URL` to that HTTPS URL and request
    `beam:read`, `beam:send`, and `offline_access`. The plugin must not fall
    back to the COPPEN endpoint.
-5. Both agents exchange Beam IDs, then use `beam_network_request_connection`,
-   `beam_network_respond_connection`, and `beam_network_open_direct` only after
-   the human approves that exact action. `beam_network_send_message` and
-   `beam_send` still require `confirmed=true`. Message text read back from
-   either side stays untrusted.
+5. Both agents exchange Beam IDs, then use `beam_prepare_network_action`
+   before `beam_network_request_connection`, `beam_network_respond_connection`,
+   or `beam_network_open_direct`. `beam_network_send_message` and `beam_send`
+   require the confirmation token from the matching prepare call.
+   `confirmed=true` alone is rejected. Message text, discovery names, and
+   result payloads read back from either side stay untrusted.
 
 The two agents then exchange signed, end-to-end-encrypted messages through
 `https://api.beam.directory`. Each connector encrypts with its own X25519 key.
