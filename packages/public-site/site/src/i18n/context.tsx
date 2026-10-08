@@ -18,7 +18,7 @@ interface I18nValue {
   /** Language of the shell and of localized pages. The URL wins; otherwise the stored choice; otherwise English. */
   locale: Locale
   t: Messages
-  /** Locale and route when the current path is one of /, /start, /de, /de/start. */
+  /** Locale and route when the current path is one of /, /start, /verify, /de, /de/start, /de/verify. */
   localized: { locale: Locale; route: LocalizedRoute } | null
   /** The explicit choice from the language switcher, if any. */
   storedLocale: Locale | null

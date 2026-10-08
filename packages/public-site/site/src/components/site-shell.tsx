@@ -70,7 +70,7 @@ function ThemeToggle() {
 /** EN/DE switcher. Stores the explicit choice; localized routes jump to their counterpart, others stay. */
 function LanguageSwitcher({ className, full = false, onNavigate }: { className?: string; full?: boolean; onNavigate?: () => void }) {
   const { locale, chooseLocale, t } = useI18n()
-  const { pathname } = useLocation()
+  const { pathname, search } = useLocation()
   return (
     <div role="group" aria-label={t.common.language} className={cn('flex items-center rounded-full border p-0.5', className)}>
       {LOCALES.map((code) => {
@@ -78,7 +78,7 @@ function LanguageSwitcher({ className, full = false, onNavigate }: { className?:
         return (
           <Link
             key={code}
-            to={switchPath(pathname, code)}
+            to={`${switchPath(pathname, code)}${search}`}
             hrefLang={code}
             lang={code}
             aria-current={active ? 'true' : undefined}
@@ -147,6 +147,7 @@ export function SiteShell({ children }: { children: ReactNode }) {
     {
       title: t.shell.footer.columns.product,
       items: [
+        { label: links.checkAgent, to: href('verify') },
         { label: links.connectAgent, to: href('start') },
         { label: links.openNetwork, href: '/network' },
         { label: links.dashboard, href: DASHBOARD_URL, external: true },

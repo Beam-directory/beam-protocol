@@ -8,8 +8,12 @@ Grok connector evidence. It is intentionally split into three apps:
 - `beam-mcp-pilot`: the public Beam MCP resource server.
 
 The checked-in default Fly profile keeps `BEAM_MCP_ENABLE_NETWORK=false` and
-`BEAM_MCP_ENABLE_SEND=false`. A redeploy of `fly/mcp.fly.toml` does not turn
-Network or send on. The one-week partner test uses the separate profile
+`BEAM_MCP_ENABLE_SEND=false`. That read-only profile advertises `beam_status`,
+`beam_prepare_handoff`, and `beam_verify_agent`. `beam_verify_agent` reads one
+public trust assertion and checks the directory signature. It does not use the
+connector API key. A redeploy of `fly/mcp.fly.toml` does not turn
+Network or send on. The tool is absent from a pilot that has not been redeployed
+with this revision. The one-week partner test uses the separate profile
 `fly/mcp.send.fly.toml`, which sets both flags to `true` and
 `BEAM_MCP_SEND_LIMIT_PER_HOUR=30`.
 
@@ -210,7 +214,7 @@ node scripts/production/mcp-oauth-pkce-smoke.mjs \
   --password-file /absolute/private/pilot_user_password \
   --introspection-secret-file /absolute/private/mcp_oauth_client_secret \
   --scopes 'openid beam:read beam:send' \
-  --expected-tools beam_network_connections,beam_network_conversations,beam_network_create_group,beam_network_discover,beam_network_identity,beam_network_messages,beam_network_open_direct,beam_network_request_connection,beam_network_respond_connection,beam_network_send_message,beam_prepare_handoff,beam_prepare_network_action,beam_send,beam_status
+  --expected-tools beam_network_connections,beam_network_conversations,beam_network_create_group,beam_network_discover,beam_network_identity,beam_network_messages,beam_network_open_direct,beam_network_request_connection,beam_network_respond_connection,beam_network_send_message,beam_prepare_handoff,beam_prepare_network_action,beam_send,beam_status,beam_verify_agent
 ```
 
 ## Rollback

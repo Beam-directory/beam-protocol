@@ -24,6 +24,7 @@ import {
   UsersIcon,
 } from 'lucide-react'
 import { cn } from 'cn'
+import { AgentCheck } from '@/components/agent-check'
 import { CodeWindow } from '@/components/code-window'
 import { InProgressBadge } from '@/components/in-progress-badge'
 import { TrustFlow } from '@/components/trust-flow'
@@ -169,6 +170,9 @@ export function LandingPage() {
                 ))}
               </ul>
             </div>
+          </div>
+          <div className="w-full max-w-3xl">
+            <AgentCheck variant="embed" />
           </div>
           <div className="relative w-full max-w-3xl">
             <div aria-hidden="true" className="beam-glow absolute -inset-10 -z-10 opacity-70" />

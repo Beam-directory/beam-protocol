@@ -5,6 +5,7 @@ import { createBeamClient, loadBeamMcpConfig } from './config.js'
 import { createBeamNetworkGateway } from './network-client.js'
 import { createBeamMcpServer } from './server.js'
 import { startBeamMcpHttpServer } from './http.js'
+import { verifyAgentWithDirectory } from './verify-agent.js'
 
 async function main(): Promise<void> {
   const transport = (process.env['BEAM_MCP_TRANSPORT'] ?? 'stdio').trim().toLowerCase()
@@ -50,6 +51,7 @@ async function main(): Promise<void> {
     requireVerifiedTarget: config.requireVerifiedTarget,
     minimumVerificationTier: config.minimumVerificationTier,
     minimumTrustScore: config.minimumTrustScore,
+    verifyAgent: verifyAgentWithDirectory(config.directoryUrl),
   })
   await server.connect(new StdioServerTransport())
 }

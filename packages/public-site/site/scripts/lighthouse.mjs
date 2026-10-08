@@ -15,7 +15,7 @@ const siteRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..'
 const outDir = path.join(siteRoot, '.lighthouse')
 mkdirSync(outDir, { recursive: true })
 const base = process.argv[2] ?? 'http://localhost:4317'
-const pages = [['home-en', '/'], ['start-en', '/start'], ['home-de', '/de'], ['start-de', '/de/start']]
+const pages = [['home-en', '/'], ['verify-en', '/verify'], ['start-en', '/start'], ['home-de', '/de'], ['verify-de', '/de/verify'], ['start-de', '/de/start']]
 const presets = ['mobile', 'desktop']
 const categories = ['performance', 'accessibility', 'best-practices', 'seo']
 

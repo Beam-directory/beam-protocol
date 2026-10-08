@@ -12,7 +12,7 @@ const siteRoot = resolve(import.meta.dirname)
  * Static HTML per language for crawlers and link previews (they don't run JS):
  * - fills the beam:head block of index.html with the English head (dev and build),
  * - preloads the Latin Geist woff2 in the build,
- * - after the build writes start/index.html, de/index.html and de/start/index.html with their own head.
+ * - after the build writes start, verify, de, de/start and de/verify index.html files with their own head.
  */
 function localizedHtml(): Plugin {
   let outDir = resolve(siteRoot, "dist")

@@ -24,8 +24,9 @@
     "protectedResourceMetadataStatus": 200,
     "unauthenticatedMcpStatus": 401,
     "toolNames": [
+      "beam_prepare_handoff",
       "beam_status",
-      "beam_prepare_handoff"
+      "beam_verify_agent"
     ],
     "beamSendAdvertised": false,
     "messageSent": false,

@@ -22,7 +22,7 @@ The plugin does not hard-code a tenant URL. This prevents a public installation 
 
 ## Network tools
 
-The baseline read-only profile exposes `beam_status` and `beam_prepare_handoff`. After the operator explicitly enables the read-only Network profile with `BEAM_MCP_ENABLE_NETWORK=true`, it additionally exposes:
+The baseline read-only profile exposes `beam_status`, `beam_prepare_handoff`, and `beam_verify_agent`. `beam_verify_agent` checks one public trust assertion and does not send anything. After the operator explicitly enables the read-only Network profile with `BEAM_MCP_ENABLE_NETWORK=true`, it additionally exposes:
 
 - `beam_network_identity` and `beam_network_discover`;
 - `beam_network_connections` for accepted contacts and pending requests;

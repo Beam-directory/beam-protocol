@@ -12,7 +12,7 @@ await mkdir(packageRoot, { recursive: true })
 await cp(path.join(dist, 'index.html'), path.join(packageRoot, 'index.html'))
 
 // Static per-language entries written by the beam-localized-html Vite plugin (see vite.config.ts).
-for (const entry of ['start/index.html', 'de/index.html', 'de/start/index.html']) {
+for (const entry of ['start/index.html', 'verify/index.html', 'de/index.html', 'de/start/index.html', 'de/verify/index.html']) {
   await mkdir(path.dirname(path.join(packageRoot, entry)), { recursive: true })
   await cp(path.join(dist, entry), path.join(packageRoot, entry))
 }

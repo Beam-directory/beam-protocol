@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Check a public Beam address on the website. The page loads the trust assertion and verifies the Ed25519 signature in the browser against the pinned directory key.
+- Add read-only MCP tool `beam_verify_agent`. It verifies the same assertion on the server and stays available when Network and send are off.
+- Export `verifyAgent(address)` from `beam-protocol-sdk` for the same check without MCP.
+- Count `GET /agents/:beamId/trust-assertion` in the existing public lookup rate limit.
+
 ## v1.8.0 (2026-10-08)
 
 ### Trust layer: organization identity and key custody

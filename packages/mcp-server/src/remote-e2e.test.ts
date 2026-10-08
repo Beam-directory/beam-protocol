@@ -302,6 +302,7 @@ test('official MCP client proves a read-only OAuth-protected remote connector ov
       'beam_network_messages',
       'beam_prepare_handoff',
       'beam_status',
+      'beam_verify_agent',
     ])
     const identity = await connected.client.callTool({ name: 'beam_network_identity', arguments: {} })
     assert.equal((identity.structuredContent as Record<string, unknown>)['identity'] !== undefined, true)
@@ -366,6 +367,7 @@ test('official MCP client preserves send scope, confirmation, signed result, and
       'beam_prepare_network_action',
       'beam_send',
       'beam_status',
+      'beam_verify_agent',
     ])
     for (const name of [
       'beam_send',

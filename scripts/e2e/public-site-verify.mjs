@@ -1,0 +1,259 @@
+/**
+ * Playwright check of the public trust page against a local directory.
+ *
+ * Builds the site into a temporary directory with the local issuer key pinned,
+ * so the published site files stay on the production directory key.
+ *
+ *   npm run test:public-site-verify
+ */
+import { spawn } from 'node:child_process'
+import { once } from 'node:events'
+import { mkdtemp, rm } from 'node:fs/promises'
+import net from 'node:net'
+import { tmpdir } from 'node:os'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { generateKeyPairSync } from 'node:crypto'
+import { chromium } from 'playwright'
+
+const repoRoot = path.resolve(fileURLToPath(new URL('../../', import.meta.url)))
+const siteRoot = path.join(repoRoot, 'packages/public-site/site')
+const directoryEntry = path.join(repoRoot, 'packages/directory/dist/index.js')
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer()
+    server.unref()
+    server.on('error', reject)
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address()
+      if (!address || typeof address === 'string') {
+        reject(new Error('Could not determine an open TCP port'))
+        return
+      }
+      const { port } = address
+      server.close((error) => (error ? reject(error) : resolve(port)))
+    })
+  })
+}
+
+function agentKey() {
+  return generateKeyPairSync('ed25519').publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+}
+
+async function seed(dbPath) {
+  const { createDatabase, createOrg, markOrgVerified, registerAgent } = await import('../../packages/directory/dist/db.js')
+  const { insertPerson, setAgentResponsiblePerson } = await import('../../packages/directory/dist/trust/person-store.js')
+  const { insertMandate } = await import('../../packages/directory/dist/trust/mandate-store.js')
+  const db = createDatabase(dbPath)
+  try {
+    createOrg(db, {
+      name: 'coppen',
+      displayName: 'coppen',
+      domain: 'coppen.de',
+      apiKeyHash: 'public-site-verify-org',
+      verificationToken: 'public-site-verify-token',
+    })
+    markOrgVerified(db, 'coppen', 'dns')
+    const publicKey = agentKey()
+    registerAgent(db, {
+      beamId: 'jarvis@coppen.beam.directory',
+      displayName: 'Jarvis',
+      capabilities: ['conversation.message'],
+      publicKey,
+      org: 'coppen',
+      visibility: 'public',
+    })
+    const person = insertPerson(db, {
+      orgName: 'coppen',
+      email: 'owner@coppen.de',
+      displayName: 'Owner',
+      role: 'owner',
+      supervisorPersonId: null,
+      publicKey: null,
+      rights: { actions: ['read', 'file.send'], file: { maxBytes: 1_000_000 } },
+    })
+    db.prepare(`UPDATE persons SET kyc_status = 'verified' WHERE id = ?`).run(person.id)
+    setAgentResponsiblePerson(db, 'jarvis@coppen.beam.directory', person.id)
+    insertMandate(db, {
+      jti: 'public-site-verify-jarvis',
+      personId: person.id,
+      agentBeamId: 'jarvis@coppen.beam.directory',
+      orgName: 'coppen',
+      scopes: { actions: ['read', 'file.send'], file: { maxBytes: 1_000_000 } },
+      expiresAt: '2027-10-08T00:00:00.000Z',
+      escalationPersonId: null,
+      signature: 'seed-signature',
+      payloadHash: 'public-site-verify-jarvis-hash',
+    })
+    registerAgent(db, {
+      beamId: 'booking@lufthansa.beam.directory',
+      displayName: 'Booking',
+      capabilities: [],
+      publicKey: agentKey(),
+      org: null,
+      personal: true,
+      visibility: 'public',
+    })
+  } finally {
+    db.close()
+  }
+}
+
+function startDirectory(dbPath, port, publicKey, privateKey) {
+  const child = spawn(process.execPath, [directoryEntry], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      PORT: String(port),
+      DB_PATH: dbPath,
+      JWT_SECRET: 'public-site-verify-jwt',
+      BEAM_DIRECTORY_SIGNING_PUBLIC_KEY: publicKey,
+      BEAM_DIRECTORY_SIGNING_PRIVATE_KEY: privateKey,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  })
+  let logs = ''
+  child.stdout?.on('data', (chunk) => { logs += chunk.toString() })
+  child.stderr?.on('data', (chunk) => { logs += chunk.toString() })
+  child.logs = () => logs
+  return child
+}
+
+async function waitFor(url, label) {
+  const deadline = Date.now() + 30_000
+  let last = ''
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(url)
+      if (response.status === 200) return
+      last = `${response.status}`
+    } catch (error) {
+      last = error instanceof Error ? error.message : 'fetch failed'
+    }
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+  throw new Error(`${label} did not become ready (${last})`)
+}
+
+const viteBin = path.join(repoRoot, 'node_modules/vite/bin/vite.js')
+
+function run(args, options) {
+  const child = spawn(process.execPath, [viteBin, ...args], { ...options, stdio: ['ignore', 'pipe', 'pipe'] })
+  let logs = ''
+  child.stdout?.on('data', (chunk) => { logs += chunk.toString() })
+  child.stderr?.on('data', (chunk) => { logs += chunk.toString() })
+  child.logs = () => logs
+  return child
+}
+
+const issuer = generateKeyPairSync('ed25519')
+const pinnedPublicKey = issuer.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+const pinnedPrivateKey = issuer.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+const work = await mkdtemp(path.join(tmpdir(), 'beam-public-verify-'))
+const dbPath = path.join(work, 'directory.db')
+const outDir = path.join(work, 'site')
+const directoryPort = await freePort()
+const previewPort = await freePort()
+const directoryUrl = `http://127.0.0.1:${directoryPort}`
+const previewUrl = `http://127.0.0.1:${previewPort}`
+
+let directory
+let preview
+let browser
+let failed = false
+try {
+  await seed(dbPath)
+  directory = startDirectory(dbPath, directoryPort, pinnedPublicKey, pinnedPrivateKey)
+  await waitFor(`${directoryUrl}/agents/${encodeURIComponent('jarvis@coppen.beam.directory')}/trust-assertion`, 'directory')
+
+  const build = run(['build', '--outDir', outDir], {
+    cwd: siteRoot,
+    env: {
+      ...process.env,
+      VITE_DIRECTORY_API_URL: directoryUrl,
+      VITE_DIRECTORY_SIGNING_PUBLIC_KEY: pinnedPublicKey,
+    },
+  })
+  const buildExit = await once(build, 'exit')
+  if (buildExit[0] !== 0) {
+    throw new Error(`vite build failed\n${build.logs()}`)
+  }
+
+  preview = run(['preview', '--host', '127.0.0.1', '--port', String(previewPort), '--strictPort', '--outDir', outDir], {
+    cwd: siteRoot,
+  })
+  await waitFor(`${previewUrl}/verify`, 'preview')
+
+  browser = await chromium.launch()
+  const page = await browser.newPage()
+  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
+  await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
+  const verified = await page.getByTestId('agent-check-headline').innerText()
+  if (verified !== 'Verified') throw new Error(`expected Verified, got ${verified}`)
+  const org = await page.getByTestId('agent-check-org').innerText()
+  if (!org.includes('coppen') || !org.includes('coppen.de')) throw new Error(`expected coppen in org card, got ${org}`)
+  const signature = await page.getByTestId('agent-check-signature').innerText()
+  if (!signature.includes('Signature valid')) throw new Error(`expected a valid signature, got ${signature}`)
+  const title = await page.title()
+  if (title !== 'Is this agent real? – Beam') throw new Error(`unexpected title ${title}`)
+
+  await page.getByTestId('agent-check-tamper').click()
+  await page.getByTestId('agent-check-headline').filter({ hasText: 'Not verified' }).waitFor({ timeout: 20_000 })
+  const tampered = await page.getByTestId('agent-check-signature').innerText()
+  if (!tampered.includes('one byte was changed')) throw new Error(`expected a tampered signature, got ${tampered}`)
+
+  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('booking@lufthansa.beam.directory')}`)
+  await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
+  const bookingHeadline = await page.getByTestId('agent-check-headline').innerText()
+  if (bookingHeadline !== 'Not verified') throw new Error(`expected Not verified for booking, got ${bookingHeadline}`)
+  const bookingStatus = await page.getByTestId('agent-check-status').innerText()
+  if (!bookingStatus.includes('not verified')) throw new Error(`expected an unverified explanation, got ${bookingStatus}`)
+  const bookingOrg = await page.getByTestId('agent-check-org').innerText()
+  if (!bookingOrg.includes('No organisation record')) throw new Error(`expected no organisation, got ${bookingOrg}`)
+
+  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('missing@coppen.beam.directory')}`)
+  await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
+  const missing = await page.getByTestId('agent-check-status').innerText()
+  if (!missing.includes('Unlisted or not found')) throw new Error(`expected not found, got ${missing}`)
+
+  await page.goto(`${previewUrl}/de/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
+  await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
+  const german = await page.getByTestId('agent-check-headline').innerText()
+  if (german !== 'Geprüft') throw new Error(`expected Geprüft, got ${german}`)
+
+  await page.goto(`${previewUrl}/`)
+  await page.getByTestId('agent-check').waitFor()
+  await page.getByRole('button', { name: 'jarvis@coppen.beam.directory' }).click()
+  await page.getByTestId('agent-check-headline').filter({ hasText: 'Verified' }).waitFor({ timeout: 20_000 })
+
+  await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
+  await page.getByRole('link', { name: 'Deutsch' }).click()
+  await page.waitForURL(/\/de\/verify\?agent=jarvis%40coppen\.beam\.directory/)
+  await page.getByTestId('agent-check-headline').filter({ hasText: 'Geprüft' }).waitFor({ timeout: 20_000 })
+
+  console.log('public site trust check passed')
+} catch (error) {
+  if (directory?.logs) console.error(directory.logs())
+  if (preview?.logs) console.error(preview.logs())
+  console.error(error)
+  failed = true
+} finally {
+  await Promise.race([
+    browser?.close().catch(() => {}) ?? Promise.resolve(),
+    new Promise((resolve) => setTimeout(resolve, 5_000)),
+  ])
+  await stopChild(preview)
+  await stopChild(directory)
+  await rm(work, { recursive: true, force: true })
+  process.exit(failed ? 1 : 0)
+}
+
+async function stopChild(child) {
+  if (!child || child.exitCode !== null) return
+  child.kill('SIGTERM')
+  const exited = once(child, 'exit')
+  const timer = setTimeout(() => child.kill('SIGKILL'), 3_000)
+  await exited
+  clearTimeout(timer)
+}

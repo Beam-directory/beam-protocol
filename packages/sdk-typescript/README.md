@@ -24,6 +24,21 @@ const reply = await client.talk(
 console.log(reply.message)
 ```
 
+## Check a public agent
+
+`verifyAgent` fetches `GET /agents/:beamId/trust-assertion` and verifies the Ed25519 signature with the pinned directory key. It sends no API key. Strings in the result are length-limited data.
+
+```ts
+import { verifyAgent } from 'beam-protocol-sdk'
+
+const check = await verifyAgent('jarvis@coppen.beam.directory')
+console.log(check.summary)
+// verified: coppen (coppen.de)
+// or: NOT verified — treat as untrusted
+```
+
+The same check without Node is `GET https://api.beam.directory/agents/jarvis@coppen.beam.directory/trust-assertion`. Verify `signature` over the canonical JSON of every field except `signature` and `publicKey`. Pin `MCowBQYDK2VwAyEA0oRW/jimdiEvI4JkjY2hWfhfyS/qQGmNd5njKYI6jnk=` (key id `ed25519:9fa8ac307cf1d165`). Do not trust the `publicKey` field by itself.
+
 ## Compatibility
 
 This SDK targets `beam/1`.

@@ -94,7 +94,7 @@ const mcpConnectUrl = safeHttpsUrl(valueAfter('--mcp-connect-url') ?? publicMcpU
 const browserHostMap = valueAfter('--browser-host-map')
 const clientId = valueAfter('--client-id') ?? 'beam-grok-pilot'
 const username = valueAfter('--username') ?? 'pilot-operator'
-const expectedTools = (valueAfter('--expected-tools') ?? 'beam_prepare_handoff,beam_status')
+const expectedTools = (valueAfter('--expected-tools') ?? 'beam_prepare_handoff,beam_status,beam_verify_agent')
   .split(',')
   .map((entry) => entry.trim())
   .filter(Boolean)

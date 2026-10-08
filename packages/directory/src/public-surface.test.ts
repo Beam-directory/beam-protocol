@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createAdminSession } from './admin-auth.js'
 import { createApp } from './server.js'
-import { appendIntentTraceEvent, assignDirectoryRole, createDatabase, finalizeIntentLog, logIntentStart, registerAgent, setIntentLifecycleStatus, upsertOperatorNotification } from './db.js'
+import { appendIntentTraceEvent, assignDirectoryRole, createDatabase, finalizeIntentLog, logIntentStart, registerAgent, setIntentLifecycleStatus, updatePublicEndpointShieldPolicy, upsertOperatorNotification } from './db.js'
 import { getLocalDirectoryUrl } from './federation.js'
 
 function createAdminHeaders(
@@ -48,6 +48,26 @@ test('cors allows production public-site and loopback dashboard origins', async 
       headers: { Origin: 'https://evil.example' },
     }))
     assert.equal(unknownOriginResponse.headers.get('access-control-allow-origin'), null)
+  } finally {
+    db.close()
+  }
+})
+
+test('public trust-assertion reads share the agent lookup rate limit', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    updatePublicEndpointShieldPolicy(db, { lookupPerMinute: 1 })
+    const app = createApp(db)
+    const first = await app.request(new Request('http://localhost/agents/booking%40lufthansa.beam.directory/trust-assertion', {
+      headers: { 'x-forwarded-for': '203.0.113.44' },
+    }))
+    assert.equal(first.status, 404)
+    const second = await app.request(new Request('http://localhost/agents/booking%40lufthansa.beam.directory/trust-assertion', {
+      headers: { 'x-forwarded-for': '203.0.113.44' },
+    }))
+    assert.equal(second.status, 429)
+    assert.equal((await second.json() as { errorCode: string }).errorCode, 'RATE_LIMITED')
+    assert.equal(second.headers.get('retry-after'), '60')
   } finally {
     db.close()
   }

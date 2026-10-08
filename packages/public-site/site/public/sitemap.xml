@@ -19,6 +19,18 @@
     <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/start" />
   </url>
   <url>
+    <loc>https://beam.directory/verify</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/verify" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de/verify" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/verify" />
+  </url>
+  <url>
+    <loc>https://beam.directory/de/verify</loc>
+    <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/verify" />
+    <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de/verify" />
+    <xhtml:link rel="alternate" hreflang="x-default" href="https://beam.directory/verify" />
+  </url>
+  <url>
     <loc>https://beam.directory/de/start</loc>
     <xhtml:link rel="alternate" hreflang="en" href="https://beam.directory/start" />
     <xhtml:link rel="alternate" hreflang="de" href="https://beam.directory/de/start" />

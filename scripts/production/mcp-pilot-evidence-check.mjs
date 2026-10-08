@@ -5,7 +5,7 @@ import { pathToFileURL } from 'node:url'
 import { formatDate, formatDateTime, optionalFlag, repoRoot, toJsonBlock, writeMarkdownReport } from './shared.mjs'
 
 const defaultEvidencePath = path.join(repoRoot, 'reports/1.7.0-mcp-pilot-evidence.json')
-const REQUIRED_TOOLS = ['beam_prepare_handoff', 'beam_status']
+const REQUIRED_TOOLS = ['beam_prepare_handoff', 'beam_status', 'beam_verify_agent']
 const REQUIRED_ARTIFACTS = [
   'container-e2e',
   'container-sbom',

@@ -47,6 +47,14 @@ jobs:
       - name: Test workspaces
         run: npm test
 
+      - name: Install Playwright Chromium
+        if: matrix.node == 22
+        run: npx playwright install --with-deps chromium
+
+      - name: Public site trust check
+        if: matrix.node == 22
+        run: npm run test:public-site-verify
+
       - name: Check production gate scripts
         run: |
           node --check scripts/production/dashboard-domain-preflight.mjs
