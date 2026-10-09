@@ -480,11 +480,13 @@ test('people routes check the org key before verification and never answer 404 f
       }),
     }))
 
-    for (const path of ['coppen', 'coppen--de']) {
-      const unverified = await person(claim.apiKey, path)
-      assert.equal(unverified.status, 403, path)
-      assert.equal((await unverified.json() as { errorCode: string }).errorCode, 'ORG_VERIFICATION_REQUIRED')
-    }
+    const unverified = await person(claim.apiKey)
+    assert.equal(unverified.status, 201)
+    const listedByStoredName = await app.request(new Request('http://localhost/orgs/coppen--de/people', {
+      headers: { 'x-api-key': claim.apiKey },
+    }))
+    assert.equal(listedByStoredName.status, 200)
+    assert.equal((await listedByStoredName.json() as { total: number }).total, 1)
 
     const missing = await person(undefined)
     assert.equal(missing.status, 401)
@@ -496,14 +498,23 @@ test('people routes check the org key before verification and never answer 404 f
     assert.equal(foreign.status, 403)
     assert.equal((await foreign.json() as { errorCode: string }).errorCode, 'FORBIDDEN')
 
+    db.prepare('UPDATE orgs SET claim_expires_at = ? WHERE name = ?').run('2000-01-01T00:00:00.000Z', 'example--org')
+    const expired = await app.request(new Request('http://localhost/orgs/example/people', {
+      headers: { 'x-api-key': otherKey },
+    }))
+    assert.equal(expired.status, 410)
+    assert.equal((await expired.json() as { errorCode: string }).errorCode, 'ORG_CLAIM_EXPIRED')
+
     assert.equal(markOrgVerified(db, claim.name)?.name, 'coppen')
-    const created = await person(claim.apiKey)
-    assert.equal(created.status, 201)
     const listed = await app.request(new Request('http://localhost/orgs/coppen/people', {
       headers: { 'x-api-key': claim.apiKey },
     }))
     assert.equal(listed.status, 200)
-    assert.equal((await listed.json() as { total: number }).total, 1)
+    const listedBody = await listed.json() as { total: number; people: Array<{ email: string }> }
+    assert.equal(listedBody.total, 1)
+    assert.equal(listedBody.people[0]?.email, 'clara@coppen.de')
+    const staleName = await person(claim.apiKey, 'coppen--de')
+    assert.equal(staleName.status, 403)
     const foreignAfterVerify = await person(otherKey)
     assert.equal(foreignAfterVerify.status, 403)
   } finally {
