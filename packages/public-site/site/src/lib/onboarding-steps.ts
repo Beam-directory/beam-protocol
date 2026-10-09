@@ -59,23 +59,6 @@ export function deriveOrgName(domain: string): string {
   return registrable.split('.')[0] ?? ''
 }
 
-function slugOrgPart(value: string): string {
-  return value.toLowerCase().replaceAll('_', '-').replaceAll('.', '-')
-}
-
-/**
- * Name the directory stores until the domain is verified (trust/org-domain.ts):
- * label + "--" + public suffix, both slugged. "coppen.at" -> "coppen--at",
- * "coppen.co.uk" -> "coppen--co-uk". The "--" keeps coppen.co.uk from colliding with coppen-co.uk.
- */
-export function pendingClaimName(domain: string): string | null {
-  if (validateDomain(domain)) return null
-  const [label, ...suffix] = registrableDomain(domain).split('.')
-  if (!label || suffix.length === 0) return null
-  const name = `${slugOrgPart(label)}--${slugOrgPart(suffix.join('.'))}`
-  return name === slugOrgPart(label) ? null : name
-}
-
 /** Validators return a key of the validation dictionary (src/i18n); the UI renders it in the active language. */
 export type ValidationKey = keyof Messages['validation']
 

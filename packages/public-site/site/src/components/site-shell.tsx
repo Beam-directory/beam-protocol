@@ -136,9 +136,8 @@ export function SiteShell({ children }: { children: ReactNode }) {
   const closeMenu = () => setMenuOpen(false)
 
   const primaryNav: NavItem[] = [
+    { label: t.shell.nav.checkAgent, to: href('verify') },
     { label: t.shell.nav.directory, to: '/verzeichnis', germanOnly: true },
-    { label: t.shell.nav.seal, to: '/siegel-beantragen', germanOnly: true },
-    { label: t.shell.nav.guidelines, to: '/pruefrichtlinien', germanOnly: true },
     { label: t.shell.nav.docs, href: DOCS_URL, external: true },
   ]
 
