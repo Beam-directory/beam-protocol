@@ -198,11 +198,6 @@ export const de: Messages = {
     storageNote: 'Beam bekommt deine privaten Schlüssel nie. Dein Fortschritt bleibt nur in diesem Tab.',
     advanced: 'Erweitert',
     notYet: 'Noch nicht verfügbar',
-    gate: {
-      firma: 'Weiter geht es, sobald deine Website bestätigt ist.',
-      person: 'Weiter geht es, sobald deine Angaben gespeichert sind.',
-      agent: 'Weiter geht es, sobald dein Agent angelegt ist.',
-    },
     scopes: {
       read: 'Lesen',
       schedule: 'Einen Termin zusagen',

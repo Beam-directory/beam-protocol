@@ -172,16 +172,25 @@ async function runFlow(page, locale) {
   })
 
   const progress = () => page.evaluate(() => JSON.parse(sessionStorage.getItem('beam.onboarding.progress.v1') ?? '{}'))
+  const navCheck = async (where, nextCount, backCount) => {
+    const next = await page.getByRole('button', { name: de ? /^Weiter/ : /^(Next|Continue)/ }).filter({ visible: true }).count()
+    const back = await page.getByRole('button', { name: de ? 'Zurück' : 'Back' }).filter({ visible: true }).count()
+    if (next !== nextCount || back !== backCount) {
+      throw new Error(`${locale} ${where}: expected ${nextCount} next / ${backCount} back, got ${next} next / ${back} back`)
+    }
+  }
   const open = async (selector) => {
     const details = page.locator(selector)
     if (!(await details.evaluate((element) => element.open))) await details.locator('summary').first().click()
   }
 
+  await navCheck('company form', 1, 0)
   await page.locator('#org-display-name').fill(company)
   await page.locator('#org-domain').fill(domain)
   await page.locator('#claim-domain').click()
   await page.locator('#check-dns').waitFor()
   await page.getByText(de ? 'Firmenschlüssel sichern' : 'Save your company key').waitFor()
+  await navCheck('company claimed', 0, 0)
   const record = await progress()
   if (!record.txtValue || !record.txtName) throw new Error(`No DNS challenge on the page: ${JSON.stringify(record)}`)
   if (!String(record.orgName).includes('--')) throw new Error(`Expected a stored claim name, got ${record.orgName}`)
@@ -197,6 +206,7 @@ async function runFlow(page, locale) {
   await page.waitForFunction(() => JSON.parse(sessionStorage.getItem('beam.onboarding.progress.v1') ?? '{}').orgVerified === true)
   const promoted = (await progress()).orgName
   if (promoted !== label) throw new Error(`Expected promotion to ${label}, got ${promoted}`)
+  await navCheck('company verified', 1, 0)
 
   await open('#registry')
   await page.locator('#registry-number').fill('HRB 123456')
@@ -209,7 +219,9 @@ async function runFlow(page, locale) {
   await page.getByText(de ? 'Vertretungsberechtigung' : 'Power of representation').waitFor({ state: 'attached' })
   await shoot(page, locale, 'firma')
 
-  await page.getByRole('button', { name: de ? 'Weiter' : 'Next', exact: true }).click()
+  await page.locator('#next-step').click()
+  await page.locator('#person-name').waitFor()
+  await navCheck('person form', 0, 1)
   await page.locator('#person-name').fill(personName)
   await page.locator('#person-email').fill(`ada@${domain}`)
   await open('#person-advanced')
@@ -236,8 +248,11 @@ async function runFlow(page, locale) {
   await markKycVerified(person.personId)
   await page.locator('#refresh-kyc').click()
   await page.getByText(de ? 'Geprüft' : 'Checked', { exact: true }).first().waitFor()
+  await navCheck('person saved', 1, 1)
 
-  await page.getByRole('button', { name: de ? 'Weiter' : 'Next', exact: true }).click()
+  await page.locator('#next-step').click()
+  await page.locator('#agent-name').waitFor()
+  await navCheck('agent form', 0, 1)
   await page.locator('#agent-name').fill('buyer')
   await open('#agent-advanced')
   await page.locator('#agent-display-name').fill(de ? 'Einkauf' : 'Purchasing')
@@ -250,11 +265,13 @@ async function runFlow(page, locale) {
   await page.getByText(de ? 'Bestätigt. Dein Agent darf: lesen, Dateien senden' : 'Confirmed. Your agent may: read, send files').first().waitFor({ timeout: 20_000 })
   await open('#agent-advanced')
   await page.getByTestId('trust-assertion').waitFor()
+  await navCheck('agent created', 1, 1)
   await shoot(page, locale, 'agent')
 
-  await page.getByRole('button', { name: de ? 'Weiter' : 'Next', exact: true }).click()
+  await page.locator('#next-step').click()
   const checkLink = page.locator('#check-own-agent')
   await checkLink.waitFor()
+  await navCheck('done', 0, 1)
   const checkHref = await checkLink.getAttribute('href')
   if (!checkHref?.includes(encodeURIComponent(agent.registeredBeamId))) throw new Error(`Unexpected check link ${checkHref}`)
   await open('#connect-assistant')

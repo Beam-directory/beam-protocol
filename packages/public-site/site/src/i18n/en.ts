@@ -201,11 +201,6 @@ export const en = {
     storageNote: 'Beam never receives your private keys. Your progress is kept only in this tab.',
     advanced: 'Advanced',
     notYet: 'Not available yet',
-    gate: {
-      firma: 'You can continue once your website is confirmed.',
-      person: 'You can continue once your details are saved.',
-      agent: 'You can continue once your agent is created.',
-    },
     scopes: {
       read: 'Read',
       schedule: 'Commit an appointment',

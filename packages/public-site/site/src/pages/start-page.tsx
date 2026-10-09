@@ -89,6 +89,10 @@ export function StartPage() {
     setMaxReached(0)
   }
 
+  // The step's own button (claim, save, create) is the primary action until it is done; only then does "Next" appear.
+  const isLast = step === STEPS.length - 1
+  const showBack = step > 0
+  const showNext = !isLast && gate.ok
   const completed = [progress.orgVerified, Boolean(progress.personId), Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
 
   return (
@@ -120,23 +124,24 @@ export function StartPage() {
           {stepId === 'verbinden' ? <StepVerbinden progress={progress} secrets={secrets} /> : null}
         </section>
 
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t border-border/60 bg-background/85 px-4 py-3 backdrop-blur-xl sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
-          {gate.reason ? <p className="text-xs text-muted-foreground" role="status">{copy.gate[gate.reason]}</p> : null}
-          <div className="flex items-center justify-between gap-3">
-            <Button type="button" variant="ghost" className="h-10 rounded-full px-4" onClick={() => goTo(step - 1)} disabled={step === 0}>
-              <ArrowLeftIcon aria-hidden="true" /> {copy.back}
-            </Button>
-            {step < STEPS.length - 1 ? (
-              <Button type="button" className="h-10 rounded-full px-5" onClick={() => goTo(step + 1)} disabled={!gate.ok}>
+        {showBack || showNext || isLast ? (
+          <div className="sticky bottom-0 z-10 -mx-4 flex items-center justify-between gap-3 border-t border-border/60 bg-background/85 px-4 py-3 backdrop-blur-xl sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+            {showBack ? (
+              <Button type="button" variant="ghost" className="h-10 rounded-full px-4" onClick={() => goTo(step - 1)}>
+                <ArrowLeftIcon aria-hidden="true" /> {copy.back}
+              </Button>
+            ) : <span />}
+            {showNext ? (
+              <Button id="next-step" type="button" className="h-10 rounded-full px-5" onClick={() => goTo(step + 1)}>
                 {copy.next} <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
               </Button>
-            ) : (
+            ) : isLast ? (
               <Button type="button" variant="outline" className="h-10 rounded-full px-4" onClick={restart}>
                 {copy.restart}
               </Button>
-            )}
+            ) : null}
           </div>
-        </div>
+        ) : null}
 
         <p className="text-xs leading-5 text-muted-foreground">{copy.storageNote}</p>
       </div>
