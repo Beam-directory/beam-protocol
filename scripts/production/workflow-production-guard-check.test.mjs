@@ -28,6 +28,43 @@ MCP pilot release must be a safe semantic version
 EVIDENCE="reports/\${VERSION}-mcp-pilot-evidence.json"
 npm run production:mcp-pilot
 needs: [monorepo, e2e, docs, quickstart, mcp-container, mcp-pilot-evidence]
+run: node scripts/production/mcp-pilot-evidence-scope.mjs
+MCP_PILOT_EVIDENCE_SCOPE: \${{ vars.MCP_PILOT_EVIDENCE_SCOPE }}
+if: steps.scope.outputs.required != 'false'
+`
+
+const publishNpmWorkflow = `
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: Stop after npm publish --dry-run
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+npm publish only runs from Beam-directory/beam-protocol main
+The npm-publish environment has no required reviewer.
+persist-credentials: false
+git merge-base --is-ancestor "$SHA" origin/main
+does not match requested version $VERSION
+is already on npm
+Publish the SDK first.
+npm test --workspace=packages/sdk-typescript
+npm publish --dry-run "$TARBALL" --access public
+  publish:
+    if: inputs.dry_run == false
+    environment: npm-publish
+    permissions:
+      id-token: write
+does not match the verified tarball
+NODE_AUTH_TOKEN: \${{ secrets.NPM_TOKEN }}
+npm publish "$TARBALL" --access public --provenance
 `
 
 const dashboardWorkflow = `
@@ -78,6 +115,7 @@ node ../../scripts/production/extract-vercel-deployment-url.mjs "$DEPLOY_OUTPUT"
 function fakeReader(overrides = {}) {
   const files = {
     [path.join(workflowRoot, 'ci.yml')]: ciWorkflow,
+    [path.join(workflowRoot, 'publish-npm.yml')]: publishNpmWorkflow,
     [path.join(workflowRoot, 'dashboard.yml')]: dashboardWorkflow,
     [path.join(workflowRoot, 'public-site.yml')]: publicSiteWorkflow,
     [path.join(workflowRoot, 'operator-candidate.yml')]: operatorCandidateWorkflow,
@@ -91,7 +129,71 @@ test('workflow production guards pass when release and Vercel workflows are fail
 
   assert.equal(result.ok, true)
   assert.deepEqual(result.failures, [])
-  assert.equal(result.workflows.length, 4)
+  assert.equal(result.workflows.length, 5)
+})
+
+test('workflow production guards check the real repository workflows', async () => {
+  const result = await evaluateWorkflowProductionGuards()
+
+  assert.deepEqual(result.failures, [])
+  assert.equal(result.ok, true)
+})
+
+test('workflow production guards reject a fail-open or ignored MCP pilot evidence gate', async () => {
+  const result = await evaluateWorkflowProductionGuards({
+    readFileImpl: fakeReader({
+      [path.join(workflowRoot, 'ci.yml')]: ciWorkflow
+        .replace("if: steps.scope.outputs.required != 'false'", "if: steps.scope.outputs.required == 'true'\ncontinue-on-error: true"),
+    }),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.failures.some((failure) => failure.includes('ci: missing fail-closed pilot evidence skip')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('ci: forbidden fail-open pilot evidence skip')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('ci: forbidden ignored job failures')), true)
+})
+
+test('workflow production guards reject an npm publish without approval, dry run, or provenance', async () => {
+  const result = await evaluateWorkflowProductionGuards({
+    readFileImpl: fakeReader({
+      [path.join(workflowRoot, 'publish-npm.yml')]: publishNpmWorkflow
+        .replace('    environment: npm-publish\n', '')
+        .replace('default: true', 'default: false')
+        .replace(' --provenance', '')
+        .replace('on:\n  workflow_dispatch:\n', 'on:\n  push:\n  workflow_dispatch:\n'),
+    }),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: missing protected npm-publish environment')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: missing dry run by default')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: forbidden dry run off by default')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: missing npm provenance')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: forbidden push trigger')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: one protected environment expected 1')), true)
+})
+
+test('workflow production guards reject NPM_TOKEN outside the approved publish step', async () => {
+  const result = await evaluateWorkflowProductionGuards({
+    readFileImpl: fakeReader({
+      [path.join(workflowRoot, 'publish-npm.yml')]: `${publishNpmWorkflow}\nNPM_TOKEN: \${{ secrets.NPM_TOKEN }}\n`,
+    }),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: NPM_TOKEN only in the publish step expected 1')), true)
+})
+
+test('workflow production guards fail when the npm publish workflow is missing', async () => {
+  const result = await evaluateWorkflowProductionGuards({
+    readFileImpl: async (file) => {
+      if (file === path.join(workflowRoot, 'publish-npm.yml')) throw new Error('ENOENT')
+      return fakeReader()(file)
+    },
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: could not read')), true)
 })
 
 test('workflow production guards reject a floating or weakened MCP release gate', async () => {
