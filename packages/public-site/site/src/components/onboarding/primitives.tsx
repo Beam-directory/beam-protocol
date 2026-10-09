@@ -1,6 +1,7 @@
 import { useId, useState, type ReactNode } from 'react'
-import { AlertTriangleIcon, CheckIcon, CircleDashedIcon, CopyIcon, InfoIcon, LoaderCircleIcon } from 'lucide-react'
+import { AlertTriangleIcon, CheckIcon, ChevronDownIcon, CircleDashedIcon, CopyIcon, DownloadIcon, InfoIcon, KeyRoundIcon, LoaderCircleIcon } from 'lucide-react'
 import { cn } from 'cn'
+import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { useI18n } from '@/i18n/context'
 
@@ -17,13 +18,53 @@ export function Panel({ title, badge, children, className, id }: { title: string
   )
 }
 
-export function LiveBadge({ children }: { children?: ReactNode }) {
-  const { t } = useI18n()
+/** Collapsed section for optional or technical parts of a step. Native <details>, so it works without JavaScript state. */
+export function Collapsible({ title, children, id, className }: { title: ReactNode; children: ReactNode; id?: string; className?: string }) {
   return (
-    <span className="inline-flex items-center gap-1 rounded-full border border-success/30 bg-success/10 px-2 py-0.5 text-xs font-medium text-success">
-      <span aria-hidden="true" className="size-1.5 rounded-full bg-success" />
-      {children ?? t.common.available}
-    </span>
+    <details id={id} className={cn('group rounded-xl border bg-background/50', className)}>
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-2 rounded-xl px-4 py-2.5 text-sm font-medium text-muted-foreground hover:text-foreground [&::-webkit-details-marker]:hidden">
+        {title}
+        <ChevronDownIcon aria-hidden="true" className="size-4 shrink-0 transition-transform group-open:rotate-180" />
+      </summary>
+      <div className="flex flex-col gap-4 border-t px-4 py-4 text-sm">{children}</div>
+    </details>
+  )
+}
+
+/** A one-time file the user has to keep (company key, personal key, agent file). */
+export function SaveFileBox({
+  title, text, buttonLabel, onSave, saved, onSavedChange, savedLabel, buttonId,
+}: {
+  title: string
+  text: string
+  buttonLabel: string
+  onSave: () => void
+  saved: boolean
+  onSavedChange?: (saved: boolean) => void
+  savedLabel: string
+  buttonId?: string
+}) {
+  return (
+    <div className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
+      <p className="flex items-center gap-2 text-sm font-medium">
+        <KeyRoundIcon aria-hidden="true" className="size-4 text-amber-600 dark:text-amber-400" />
+        {title}
+      </p>
+      <p className="text-sm leading-6 text-muted-foreground">{text}</p>
+      <div className="flex flex-wrap items-center gap-3">
+        <Button id={buttonId} type="button" variant={saved ? 'outline' : 'default'} className="h-9 rounded-full px-4" onClick={onSave}>
+          <DownloadIcon aria-hidden="true" /> {buttonLabel}
+        </Button>
+        {onSavedChange ? (
+          <label className="flex items-center gap-2 text-sm">
+            <input type="checkbox" className="size-4 accent-[var(--beam)]" checked={saved} onChange={(event) => onSavedChange(event.target.checked)} />
+            {savedLabel}
+          </label>
+        ) : saved ? (
+          <StatusBadge tone="success">{savedLabel}</StatusBadge>
+        ) : null}
+      </div>
+    </div>
   )
 }
 

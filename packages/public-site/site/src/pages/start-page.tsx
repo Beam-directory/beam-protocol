@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftIcon, ArrowRightIcon, BuildingIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react'
+import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Stepper, type StepMeta } from '@/components/onboarding/stepper'
 import { StepAgent } from '@/components/onboarding/step-agent'
@@ -99,29 +99,15 @@ export function StartPage() {
       </div>
 
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
-        <header className="flex flex-col gap-5">
-          <p className="text-sm font-medium text-beam">{copy.eyebrow}</p>
+        <header className="flex flex-col gap-3">
           <h1 className="text-[2rem] leading-[1.08] font-semibold tracking-[-0.04em] text-balance sm:text-5xl">{copy.title}</h1>
-          <div className="beam-surface flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
-            <div aria-hidden="true" className="flex shrink-0 items-center gap-1.5">
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><BuildingIcon className="size-4" /></span>
-              <span className="h-px w-4 bg-gradient-to-r from-beam to-beam-2" />
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><ShieldCheckIcon className="size-4 text-beam" /></span>
-              <span className="h-px w-4 bg-gradient-to-r from-beam to-beam-2" />
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><SparklesIcon className="size-4" /></span>
-            </div>
-            <p className="text-[15px] leading-7 text-pretty">
-              <strong className="font-semibold">{copy.principleStrong}</strong>{' '}
-              <span className="text-muted-foreground">{copy.principleRest}</span>
-            </p>
-          </div>
+          <p className="max-w-2xl text-base leading-7 text-muted-foreground">{copy.lead}</p>
         </header>
 
         <Stepper steps={STEPS} current={step} maxReached={maxReached} completed={completed} onSelect={goTo} />
 
         <section aria-labelledby="step-title" className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
-            <p className="hidden font-mono text-xs text-muted-foreground sm:block">{copy.stepOf(step + 1, STEPS.length)}</p>
             <h2 id="step-title" ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-[-0.03em] outline-none sm:text-3xl">
               {meta.title}
             </h2>

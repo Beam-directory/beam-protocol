@@ -10,7 +10,6 @@ import {
   isValidLei,
   loadProgress,
   mandatePayload,
-  pendingClaimName,
   saveProgress,
   scopeGrantFromDraft,
   scopeWithin,
@@ -36,16 +35,6 @@ describe('org namespace', () => {
     expect(deriveOrgName('team.firma.de')).toBe('firma')
     expect(deriveOrgName('shop.firma.co.uk')).toBe('firma')
     expect(deriveOrgName('mein-betrieb.com')).toBe('mein-betrieb')
-  })
-
-  it('names the stored claim with a double hyphen until the domain is confirmed', () => {
-    expect(pendingClaimName('coppen.at')).toBe('coppen--at')
-    expect(pendingClaimName('coppen.co.uk')).toBe('coppen--co-uk')
-    expect(pendingClaimName('www.coppen.de')).toBe('coppen--de')
-    expect(pendingClaimName('https://Shop.Coppen.AT/kontakt')).toBe('coppen--at')
-    expect(pendingClaimName('coppen')).toBeNull()
-    expect(pendingClaimName('')).toBeNull()
-    expect(pendingClaimName('not a domain')).toBeNull()
   })
 
   it('validates domains', () => {
