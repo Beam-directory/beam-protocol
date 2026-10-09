@@ -125,7 +125,7 @@ function suggest(agent, org, assessment, orgAgents, directoryUrl) {
         `--note ${shellQuote(note)}`,
       ].filter(Boolean).join(' '),
       affectedAgents: orgAgents,
-      note: `Suspends org ${org.name}. Every agent in it is treated as suspended (${orgAgents.length} agent${orgAgents.length === 1 ? '' : 's'}). Undo: POST /admin/orgs/${org.name}/unsuspend with a note.`,
+      note: `Suspends org ${org.name} (${orgAgents.length} agent${orgAgents.length === 1 ? '' : 's'}). Its agents can no longer send over WebSocket or the network routes, and trust assertions show them as suspended. Agent records stay and remain listed. Undo: POST /admin/orgs/${org.name}/unsuspend with a note.`,
       deleteInfo,
     }
   }
