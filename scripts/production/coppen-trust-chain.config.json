@@ -4,10 +4,10 @@
   "person": {
     "email": "tobias@coppen.de",
     "displayName": "Tobias Kub",
-    "role": "Geschäftsführer"
+    "role": "Prokurist"
   },
   "kyc": {
-    "note": "Manual KYC per docs/runbooks/manual-kyc.md: identity of Tobias Kub and his authority to represent COPPEN GmbH checked against the commercial register extract. No external provider."
+    "note": "Manual KYC per docs/runbooks/manual-kyc.md: identity of Tobias Kub and his Einzelprokura for COPPEN GmbH checked against the commercial register extract. No external provider."
   },
   "validityDays": 90,
   "defaultScopes": {

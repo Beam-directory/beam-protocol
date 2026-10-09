@@ -19,7 +19,7 @@ One question: does this person exist, and may they act for this organization? If
 Check all of these. Look at them; do not upload or store copies in Beam.
 
 1. **Company.** A current commercial register extract (Handelsregister, Companies House, or equal). Legal name, register number and seat match the organization.
-2. **Authority.** The person is listed there as managing director, board member or holder of Prokura. Otherwise, a signed authorization from someone who is listed.
+2. **Authority.** The person is listed there as a legal representative of the company or as holder of Prokura. Otherwise, a signed authorization from someone who is listed.
 3. **Identity.** Name on the extract matches the person record. If you do not know the person, confirm by a video call with a photo ID held to the camera, or in person.
 4. **Contact.** The person's email is on the verified domain (for COPPEN: `@coppen.de`). Send a mail to it and get a reply.
 5. **Key.** The person tells you the key fingerprint on a second channel (call or in person). It must equal the fingerprint of `publicKey` in the person record. The script prints it as `ed25519:…`.
@@ -41,7 +41,7 @@ Key fingerprint <ed25519:…> confirmed by <channel>. Reviewer: <your name>.
 Example:
 
 ```
-Manual KYC. Register: HRB 68658, extract dated 2026-10-08, lists Tobias Kub as Geschäftsführer.
+Manual KYC. Register: HRB 68658, extract dated 2026-10-08, lists Tobias Kub as Prokurist (Einzelprokura).
 Identity: known in person. Email reply from tobias@coppen.de on 2026-10-09.
 Key fingerprint ed25519:0123456789abcdef confirmed by phone. Reviewer: Jane Doe. Self-review, no second operator yet.
 ```

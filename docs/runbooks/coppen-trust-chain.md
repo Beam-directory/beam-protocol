@@ -9,7 +9,7 @@ Only Tobias runs the write step (`--apply`). Tobias's private key is made on his
 | | Value |
 | --- | --- |
 | Organization | `coppen` (domain `coppen.de`, already verified) |
-| Responsible person | Tobias Kub, `tobias@coppen.de`, role `Geschäftsführer` |
+| Responsible person | Tobias Kub, `tobias@coppen.de`, role `Prokurist` (Gesellschafter with Einzelprokura) |
 | Agents | `jarvis@`, `clara@`, `fischer@coppen.beam.directory` |
 | Each agent may | `read`, `schedule.commit` (confirm appointments), `file.send` (send files) |
 | Each agent may not | `order`. That is the scope for placing orders and submitting payments. The script refuses it. |
@@ -127,7 +127,7 @@ It ends with `DONE: every agent has person and mandate in a verified assertion.`
 
 ### 9. Check in public
 
-- `https://beam.directory/verify?agent=jarvis@coppen.beam.directory` (and `clara`, `fischer`): "Yes, this agent belongs to coppen (coppen.de) and may: read, confirm appointments, send files", plus "On behalf of: Geschäftsführer".
+- `https://beam.directory/verify?agent=jarvis@coppen.beam.directory` (and `clara`, `fischer`): "Yes, this agent belongs to coppen (coppen.de) and may: read, confirm appointments, send files", plus "On behalf of: Prokurist".
 - The new "May not: order or pay." line and the person check text appear once the public site from this PR is deployed.
 
 ### 10. Clean up

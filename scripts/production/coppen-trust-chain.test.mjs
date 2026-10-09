@@ -109,6 +109,9 @@ test('the shipped config maps the owner decision to existing scope names and nev
   assert.equal(config.org, 'coppen')
   assert.equal(config.validityDays, 90)
   assert.equal(config.person.displayName, 'Tobias Kub')
+  assert.equal(config.person.email, 'tobias@coppen.de')
+  assert.equal(config.person.role, 'Prokurist')
+  assert.doesNotMatch(JSON.stringify(shippedConfig), /Geschäftsführer|Geschaeftsfuehrer|CEO|managing director/iu)
   assert.deepEqual(config.agents.map((agent) => agent.beamId), [
     'jarvis@coppen.beam.directory',
     'clara@coppen.beam.directory',
@@ -190,6 +193,8 @@ test('dry run sends no write call and prints no secret', async (t) => {
   assert.equal(result.results.every((entry) => entry.person === null && entry.mandate === null), true)
   const text = out.text()
   assert.match(text, /DRY RUN finished\. No write call was sent\./u)
+  assert.match(text, /person: +Tobias Kub <tobias@coppen\.de>, role "Prokurist"/u)
+  assert.match(text, /"role": "Prokurist"/u)
   assert.match(text, /WOULD POST http:\/\/localhost\/agents\/jarvis%40coppen\.beam\.directory\/mandates/u)
   const privateKey = JSON.parse(local.keyFile).privateKey
   assert.equal(text.includes(privateKey), false)
@@ -209,6 +214,7 @@ test('apply wires person and mandate for every agent, the assertion verifies, an
     assert.equal(entry.signatureValid, true)
     assert.equal(entry.person.ref, ref)
     assert.equal(entry.person.kycStatus, 'verified')
+    assert.equal(entry.person.role, 'Prokurist')
     assert.deepEqual(entry.mandate.scopes, { actions: ['read', 'schedule.commit', 'file.send'] })
     assert.equal(entry.mandate.scopes.actions.includes('order'), false)
   }

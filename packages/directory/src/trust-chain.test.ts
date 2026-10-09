@@ -64,7 +64,7 @@ test('a fully wired agent carries person and mandate in its signed trust asserti
       body: json({
         email: 'tobias@coppen.de',
         displayName: 'Tobias Kub',
-        role: 'Geschäftsführer',
+        role: 'Prokurist',
         publicKey: personKey.publicKey,
         rights: { actions: ['read', 'schedule.commit', 'file.send'] },
       }),
@@ -118,7 +118,7 @@ test('a fully wired agent carries person and mandate in its signed trust asserti
     assert.equal(assertion.v, 1)
     assert.deepEqual(assertion.person, {
       ref: createHash('sha256').update(personId).digest('hex'),
-      role: 'Geschäftsführer',
+      role: 'Prokurist',
       kycStatus: 'verified',
     })
     assert.deepEqual(assertion.mandate, { jti: payload.jti, scopes, expiresAt, escalationPersonRef: null })
