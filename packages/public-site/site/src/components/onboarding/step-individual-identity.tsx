@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { Button } from '@/components/ui/button'
 import { ComingSoonCard } from '@/components/onboarding/coming-soon'
-import { Notice, Panel, Spinner, StatusBadge } from '@/components/onboarding/primitives'
+import { Collapsible, Notice, Panel, Spinner, StatusBadge } from '@/components/onboarding/primitives'
 import type { StepProps } from '@/components/onboarding/types'
 import { useI18n } from '@/i18n/context'
 import { describeError, getIdentityProviderStatus, getIndividualProfile, startIndividualVerification } from '@/lib/onboarding-api'
@@ -16,7 +16,6 @@ export function StepIndividualIdentity({ progress, update, secrets }: StepProps)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sessionUrl, setSessionUrl] = useState<string | null>(null)
-  const [sessionStatus, setSessionStatus] = useState<string | null>(null)
   const [refreshing, setRefreshing] = useState(false)
   const [pendingNote, setPendingNote] = useState(false)
   const verified = progress.personKycStatus === 'verified' && progress.personKycProvider === 'stripe_identity'
@@ -71,7 +70,6 @@ export function StepIndividualIdentity({ progress, update, secrets }: StepProps)
     try {
       const session = await startIndividualVerification(secrets.personApiKey)
       setSessionUrl(session.url)
-      setSessionStatus(session.status)
       update({ personKycStatus: 'pending', personKycProvider: 'stripe_identity' })
     } catch (startError) {
       setError(describeError(startError, t.errors))
@@ -80,11 +78,16 @@ export function StepIndividualIdentity({ progress, update, secrets }: StepProps)
     }
   }
 
+  const stored = (
+    <Collapsible id="identity-advanced" title={t.onboarding.advanced}>
+      <p className="leading-6 text-muted-foreground">{copy.identityStored}</p>
+      <p className="leading-6 text-muted-foreground">{copy.identityNotStored}</p>
+    </Collapsible>
+  )
+
   return (
     <div data-testid="step-individual-identity" className="flex flex-col gap-4">
-      {verified ? (
-        <Notice tone="success" title={copy.verifiedTitle}>{copy.verifiedBody}</Notice>
-      ) : null}
+      {verified ? <Notice tone="success" title={copy.verifiedTitle}>{copy.verifiedBody}</Notice> : null}
       {preview ? (
         <div data-testid="step-individual-identity-stripe">
           <Panel title={copy.previewTitle}>
@@ -94,38 +97,41 @@ export function StepIndividualIdentity({ progress, update, secrets }: StepProps)
         </div>
       ) : null}
       {!preview && !verified && enabled === false ? (
-        <div data-testid="step-individual-identity-soon">
+        <div data-testid="step-individual-identity-soon" className="flex flex-col gap-4">
           <ComingSoonCard capability="stripeIdentity" title={copy.comingSoonTitle}>
             <p>{copy.comingSoonBody}</p>
-            <p>{copy.identityNotStored}</p>
           </ComingSoonCard>
+          {stored}
         </div>
       ) : null}
       {!preview && !verified && enabled === true ? (
-        <Panel title={copy.identityPanel}>
-          <p className="text-sm leading-6 text-muted-foreground">{copy.identityBody}</p>
-          <p className="text-sm leading-6 text-muted-foreground">{copy.identityNotStored}</p>
-          {sessionStatus ? <p className="text-sm">{copy.sessionOpen}</p> : null}
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" className="h-10 rounded-full" onClick={() => void onStart()} disabled={pending || !secrets.personApiKey}>
-              {pending ? <Spinner label={copy.starting} /> : copy.startCheck}
-            </Button>
-            {sessionUrl ? (
-              <a href={sessionUrl} className="inline-flex h-10 items-center rounded-full border px-4 text-sm" rel="noreferrer">
-                {copy.continueStripe}
-              </a>
-            ) : null}
-            {sessionUrl ? (
-              <Button type="button" variant="outline" className="h-10 rounded-full" onClick={() => void refreshStatus()} disabled={refreshing}>
-                {refreshing ? <Spinner label={copy.refreshing} /> : copy.refreshStatus}
+        <div className="beam-surface flex flex-col gap-4 rounded-2xl border p-5 sm:p-6">
+          {sessionUrl ? (
+            <>
+              <p className="text-sm leading-6 text-muted-foreground">{copy.sessionOpen}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button className="h-10 rounded-full px-5" asChild>
+                  <a href={sessionUrl} rel="noreferrer">{copy.continueStripe}</a>
+                </Button>
+                <Button type="button" variant="outline" className="h-10 rounded-full px-5" onClick={() => void refreshStatus()} disabled={refreshing}>
+                  {refreshing ? <Spinner label={copy.refreshing} /> : copy.refreshStatus}
+                </Button>
+              </div>
+            </>
+          ) : (
+            <div>
+              <Button id="start-identity-check" type="button" className="h-10 rounded-full px-5" onClick={() => void onStart()} disabled={pending || !secrets.personApiKey}>
+                {pending ? <Spinner label={copy.starting} /> : copy.startCheck}
               </Button>
-            ) : null}
-          </div>
-          {pendingNote && !verified ? <p className="text-sm text-muted-foreground">{copy.stillPending}</p> : null}
-        </Panel>
+            </div>
+          )}
+          {pendingNote ? <p className="text-sm text-muted-foreground">{copy.stillPending}</p> : null}
+          {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+          {stored}
+        </div>
       ) : null}
       {!preview && !verified && enabled === null ? <p className="text-sm text-muted-foreground">{copy.starting}</p> : null}
-      {error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null}
+      {preview || verified || enabled !== true ? (error ? <p className="text-sm text-destructive" role="alert">{error}</p> : null) : null}
     </div>
   )
 }

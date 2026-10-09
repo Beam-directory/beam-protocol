@@ -27,11 +27,18 @@ describe('dictionaries', () => {
   })
 
   it('keep the facts aligned: E2E only for /network chats and files, MCP handoffs not E2E', () => {
-    expect(en.landing.faq.items[1].a).toContain('without end-to-end encryption')
-    expect(de.landing.faq.items[1].a).toContain('ohne Ende-zu-Ende-Verschlüsselung')
-    expect(en.landing.hero.badge).toBe('Verified · Signed · Encrypted chats')
-    expect(de.landing.hero.badge).toBe('Geprüft · Signiert · Chats verschlüsselt')
-    expect(en.landing.features.grok.badge).toBe('Sending in progress')
+    expect(en.landing.developers.bullets[3]).toContain('MCP handoffs are signed, not end-to-end encrypted')
+    expect(de.landing.developers.bullets[3]).toContain('Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt')
+    expect(en.landing.developers.bullets[2]).toContain('Sending from Grok is off.')
+    expect(de.landing.developers.bullets[2]).toContain('Senden aus Grok ist aus.')
+    expect(en.onboarding.connect.grokText).toContain('Sending from Grok is off.')
+  })
+
+  it('keep technical words out of the main homepage copy', () => {
+    for (const dict of [en, de]) {
+      const main = JSON.stringify([dict.landing.hero, dict.landing.how, dict.meta.home.title, dict.meta.home.description])
+      expect(main).not.toMatch(/Ed25519|Scope|MCP|E2E|Keycloak|Mandat|mandate|Vertrauensaussage|trust assertion/i)
+    }
   })
 })
 
@@ -88,14 +95,14 @@ describe('per-language head', () => {
   it('renders German meta, canonical, hreflang and the German og-image for /de', () => {
     const html = applyHeadToHtml(template, 'de', 'home')
     expect(html).toContain('<html lang="de"')
-    expect(html).toContain('<title>Beam – Die Vertrauensschicht für KI-Agenten</title>')
+    expect(html).toContain('<title>Beam – Prüfen, wer hinter einem KI-Agenten steht</title>')
     expect(html).toContain('<link rel="canonical" href="https://beam.directory/de" />')
     expect(html).toContain('<link rel="alternate" hreflang="en" href="https://beam.directory/" />')
     expect(html).toContain('<link rel="alternate" hreflang="de" href="https://beam.directory/de" />')
     expect(html).toContain('<link rel="alternate" hreflang="x-default" href="https://beam.directory/" />')
     expect(html).toContain('content="https://beam.directory/og-image-de.png"')
     expect(html).toContain('<meta property="og:locale" content="de_DE" />')
-    expect(html).toContain('Grundsatz: Kein Agent darf mehr als sein Mensch.')
+    expect(html).toContain('Beam zeigt, ob ein KI-Agent wirklich zu einer Firma oder Person gehört.')
     expect(html).not.toContain('<title>x</title>')
   })
 
@@ -104,7 +111,7 @@ describe('per-language head', () => {
     const start = headData('de', 'start')
     expect(start.canonical).toBe('https://beam.directory/de/start')
     expect(start.alternates).toContainEqual({ hreflang: 'en', href: 'https://beam.directory/start' })
-    expect(renderHeadTags(headData('en', 'start'))).toContain('<title>Connect an agent – Beam</title>')
+    expect(renderHeadTags(headData('en', 'start'))).toContain('<title>Connect your agent – Beam</title>')
   })
 
   it('escapes HTML and lists one output file per locale and route', () => {

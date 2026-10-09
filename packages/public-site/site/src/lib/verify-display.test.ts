@@ -55,6 +55,8 @@ describe('individual trust display', () => {
     expect(german.includes('Kub')).toBe(false)
     expect(english.includes('coppen')).toBe(false)
     expect(german.includes('GmbH')).toBe(false)
+    expect(de.check.yesIndividual('Tobias K.', 'lesen')).toBe('Ja, dieser Agent gehört zu Tobias K. (geprüfte Privatperson) und darf: lesen')
+    expect(en.check.yesIndividual('Tobias K.', 'read')).toBe('Yes, this agent belongs to Tobias K. (verified individual) and may: read')
     const unnamed = formatLocalSummary(check({ owner: { ...individual.owner!, publicName: null } }), en.check)
     expect(unnamed).toBe('verified individual, may: read')
     expect(isVerifiedIndividual(check({ org: { name: 'coppen', domain: 'coppen.de', verified: true, level: 'domain', registryStatus: 'none' }, subject: 'organization' }))).toBe(false)

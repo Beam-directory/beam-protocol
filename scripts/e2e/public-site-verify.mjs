@@ -178,10 +178,21 @@ try {
 
   browser = await chromium.launch()
   const page = await browser.newPage()
+  const yesEn = 'Yes, this agent belongs to coppen (coppen.de) and may: read, send files'
+  const noEn = 'No, this agent is not verified – be careful.'
+  const openDetails = async () => {
+    const details = page.getByTestId('agent-check-details')
+    if (!(await details.evaluate((element) => element.open))) await details.locator('summary').click()
+  }
+
   await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
   const verified = await page.getByTestId('agent-check-headline').innerText()
-  if (verified !== 'Verified') throw new Error(`expected Verified, got ${verified}`)
+  if (verified !== yesEn) throw new Error(`expected "${yesEn}", got ${verified}`)
+  const plain = await page.getByTestId('agent-check-status').innerText()
+  if (!plain.includes('On behalf of: owner')) throw new Error(`expected the person line, got ${plain}`)
+  if (plain.includes('Signature valid')) throw new Error('technical details should start collapsed')
+  await openDetails()
   const org = await page.getByTestId('agent-check-org').innerText()
   if (!org.includes('coppen') || !org.includes('coppen.de')) throw new Error(`expected coppen in org card, got ${org}`)
   const signature = await page.getByTestId('agent-check-signature').innerText()
@@ -190,38 +201,41 @@ try {
   if (title !== 'Is this agent real? – Beam') throw new Error(`unexpected title ${title}`)
 
   await page.getByTestId('agent-check-tamper').click()
-  await page.getByTestId('agent-check-headline').filter({ hasText: 'Not verified' }).waitFor({ timeout: 20_000 })
+  await page.getByTestId('agent-check-headline').filter({ hasText: noEn }).waitFor({ timeout: 20_000 })
   const tampered = await page.getByTestId('agent-check-signature').innerText()
   if (!tampered.includes('one byte was changed')) throw new Error(`expected a tampered signature, got ${tampered}`)
 
   await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('fake-support@beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
   const exampleHeadline = await page.getByTestId('agent-check-headline').innerText()
-  if (exampleHeadline !== 'Not verified') throw new Error(`expected Not verified for the example, got ${exampleHeadline}`)
+  if (exampleHeadline !== noEn) throw new Error(`expected "${noEn}" for the example, got ${exampleHeadline}`)
   const exampleStatus = await page.getByTestId('agent-check-status').innerText()
-  if (!exampleStatus.includes('Unlisted or not found')) throw new Error(`expected not found for the example, got ${exampleStatus}`)
-  if (!exampleStatus.includes('NOT verified')) throw new Error(`expected the untrusted line, got ${exampleStatus}`)
+  if (!exampleStatus.includes('Beam has no entry for this address.')) throw new Error(`expected not found for the example, got ${exampleStatus}`)
+  await openDetails()
+  const exampleDetails = await page.getByTestId('agent-check-details').innerText()
+  if (!exampleDetails.includes('NOT verified')) throw new Error(`expected the untrusted line, got ${exampleDetails}`)
 
   await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('missing@coppen.beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
   const missing = await page.getByTestId('agent-check-status').innerText()
-  if (!missing.includes('Unlisted or not found')) throw new Error(`expected not found, got ${missing}`)
+  if (!missing.includes('Beam has no entry for this address.')) throw new Error(`expected not found, got ${missing}`)
 
+  const yesDe = 'Ja, dieser Agent gehört zu coppen (coppen.de) und darf: lesen, Dateien senden'
   await page.goto(`${previewUrl}/de/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
   await page.getByTestId('agent-check-headline').waitFor({ timeout: 20_000 })
   const german = await page.getByTestId('agent-check-headline').innerText()
-  if (german !== 'Geprüft') throw new Error(`expected Geprüft, got ${german}`)
+  if (german !== yesDe) throw new Error(`expected "${yesDe}", got ${german}`)
 
   await page.goto(`${previewUrl}/`)
   await page.getByTestId('agent-check').waitFor()
   await page.getByRole('button', { name: 'fake-support@beam.directory' }).waitFor()
   await page.getByRole('button', { name: 'jarvis@coppen.beam.directory' }).click()
-  await page.getByTestId('agent-check-headline').filter({ hasText: 'Verified' }).waitFor({ timeout: 20_000 })
+  await page.getByTestId('agent-check-headline').filter({ hasText: yesEn }).waitFor({ timeout: 20_000 })
 
   await page.goto(`${previewUrl}/verify?agent=${encodeURIComponent('jarvis@coppen.beam.directory')}`)
   await page.getByRole('link', { name: 'Deutsch' }).click()
   await page.waitForURL(/\/de\/verify\?agent=jarvis%40coppen\.beam\.directory/)
-  await page.getByTestId('agent-check-headline').filter({ hasText: 'Geprüft' }).waitFor({ timeout: 20_000 })
+  await page.getByTestId('agent-check-headline').filter({ hasText: yesDe }).waitFor({ timeout: 20_000 })
 
   console.log('public site trust check passed')
 } catch (error) {

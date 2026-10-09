@@ -119,7 +119,7 @@ A trust assertion for that agent has `org: null` and a person block of:
 }
 ```
 
-`person_id_verified` is set only when Stripe Identity reports the session verified. The assertion does not name a company. `role` stays the type `individual` and is not a display name. `publicName` is the given name plus the family initial. The full family name stays in the directory and is not signed into the assertion. When Stripe has not returned both names, `publicName` is the person’s Beam address, for example `tobias@beam.directory`. The live check, `beam_verify_agent`, and `verifyAgent` show “Verified individual” / “Geprüfte Privatperson” and the public name, never the type string.
+`person_id_verified` is set only when Stripe Identity reports the session verified. The assertion does not name a company. `role` stays the type `individual` and is not a display name. `publicName` is the given name plus the family initial. The full family name stays in the directory and is not signed into the assertion. When Stripe has not returned both names, `publicName` is the person’s Beam address, for example `tobias@beam.directory`. The live check leads with a plain sentence, for example “Yes, this agent belongs to Tobias K. (verified individual) and may: read” or “Ja, dieser Agent gehört zu Tobias K. (geprüfte Privatperson) und darf: lesen”. Technical details stay collapsed. `beam_verify_agent` and `verifyAgent` keep the English summary with that public name. None of them show the type string as the owner.
 
 ### What Beam stores
 

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { ArrowLeftIcon, ArrowRightIcon, BuildingIcon, ShieldCheckIcon, SparklesIcon } from 'lucide-react'
+import { ArrowLeftIcon, ArrowRightIcon } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Stepper, type StepMeta } from '@/components/onboarding/stepper'
 import { StepAgent } from '@/components/onboarding/step-agent'
@@ -114,6 +114,10 @@ export function StartPage() {
     setMaxReached(0)
   }
 
+  // The step's own button is the primary action until it is done; only then does "Next" appear.
+  const isLast = step === STEPS.length - 1
+  const showBack = step > 0
+  const showNext = !isLast && gate.ok
   const completed = individual
     ? [Boolean(progress.personId), progress.personKycStatus === 'verified', Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
     : [progress.orgVerified, Boolean(progress.personId), Boolean(progress.registeredBeamId), Boolean(progress.mandateJti)]
@@ -123,9 +127,8 @@ export function StartPage() {
       <div className="relative isolate" data-testid="onboarding-root" data-path="choose" data-step="choose">
         <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
           <header className="flex flex-col gap-3">
-            <p className="text-sm font-medium text-beam">{copy.eyebrow}</p>
             <h1 className="text-[2rem] leading-[1.08] font-semibold tracking-[-0.04em] text-balance sm:text-5xl">{copy.path.title}</h1>
-            <p className="max-w-2xl text-sm leading-6 text-muted-foreground sm:text-base">{copy.path.lead}</p>
+            <p className="max-w-2xl text-base leading-7 text-muted-foreground">{copy.path.lead}</p>
           </header>
           <StepPath onChoose={(path) => {
             update({ path, step: 0 })
@@ -144,29 +147,15 @@ export function StartPage() {
       </div>
 
       <div className="mx-auto flex w-full max-w-4xl flex-col gap-8 px-4 pt-10 pb-20 sm:px-6 sm:pt-14">
-        <header className="flex flex-col gap-5">
-          <p className="text-sm font-medium text-beam">{copy.eyebrow}</p>
+        <header className="flex flex-col gap-3">
           <h1 className="text-[2rem] leading-[1.08] font-semibold tracking-[-0.04em] text-balance sm:text-5xl">{copy.title}</h1>
-          <div className="beam-surface flex flex-col gap-4 rounded-2xl border p-4 sm:flex-row sm:items-center sm:gap-5 sm:p-5">
-            <div aria-hidden="true" className="flex shrink-0 items-center gap-1.5">
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><BuildingIcon className="size-4" /></span>
-              <span className="h-px w-4 bg-gradient-to-r from-beam to-beam-2" />
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><ShieldCheckIcon className="size-4 text-beam" /></span>
-              <span className="h-px w-4 bg-gradient-to-r from-beam to-beam-2" />
-              <span className="flex size-9 items-center justify-center rounded-lg border bg-background"><SparklesIcon className="size-4" /></span>
-            </div>
-            <p className="text-[15px] leading-7 text-pretty">
-              <strong className="font-semibold">{individual ? copy.individualPrincipleStrong : copy.principleStrong}</strong>{' '}
-              <span className="text-muted-foreground">{individual ? copy.individualPrincipleRest : copy.principleRest}</span>
-            </p>
-          </div>
+          <p className="max-w-2xl text-base leading-7 text-muted-foreground">{individual ? copy.individualLead : copy.lead}</p>
         </header>
 
         <Stepper steps={STEPS} current={step} maxReached={maxReached} completed={completed} onSelect={goTo} />
 
         <section aria-labelledby="step-title" className="flex flex-col gap-6">
           <div className="flex flex-col gap-2">
-            <p className="hidden font-mono text-xs text-muted-foreground sm:block">{copy.stepOf(step + 1, STEPS.length)}</p>
             <h2 id="step-title" ref={headingRef} tabIndex={-1} className="text-2xl font-semibold tracking-[-0.03em] outline-none sm:text-3xl">
               {meta.title}
             </h2>
@@ -182,23 +171,24 @@ export function StartPage() {
           {stepId === 'verbinden' ? <StepVerbinden progress={progress} secrets={secrets} /> : null}
         </section>
 
-        <div className="sticky bottom-0 z-10 -mx-4 flex flex-col gap-2 border-t border-border/60 bg-background/85 px-4 py-3 backdrop-blur-xl sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
-          {gate.reason ? <p className="text-xs text-muted-foreground" role="status">{copy.gate[gate.reason]}</p> : null}
-          <div className="flex items-center justify-between gap-3">
-            <Button type="button" variant="ghost" className="h-10 rounded-full px-4" onClick={() => goTo(step - 1)} disabled={step === 0}>
-              <ArrowLeftIcon aria-hidden="true" /> {copy.back}
-            </Button>
-            {step < STEPS.length - 1 ? (
-              <Button type="button" className="h-10 rounded-full px-5" onClick={() => goTo(step + 1)} disabled={!gate.ok}>
+        {showBack || showNext || isLast ? (
+          <div className="sticky bottom-0 z-10 -mx-4 flex items-center justify-between gap-3 border-t border-border/60 bg-background/85 px-4 py-3 backdrop-blur-xl sm:static sm:mx-0 sm:border-0 sm:bg-transparent sm:px-0 sm:py-0 sm:backdrop-blur-none">
+            {showBack ? (
+              <Button type="button" variant="ghost" className="h-10 rounded-full px-4" onClick={() => goTo(step - 1)}>
+                <ArrowLeftIcon aria-hidden="true" /> {copy.back}
+              </Button>
+            ) : <span />}
+            {showNext ? (
+              <Button id="next-step" type="button" className="h-10 rounded-full px-5" onClick={() => goTo(step + 1)}>
                 {copy.next} <ArrowRightIcon aria-hidden="true" data-icon="inline-end" />
               </Button>
-            ) : (
+            ) : isLast ? (
               <Button type="button" variant="outline" className="h-10 rounded-full px-4" onClick={restart}>
                 {copy.restart}
               </Button>
-            )}
+            ) : null}
           </div>
-        </div>
+        ) : null}
 
         <p className="text-xs leading-5 text-muted-foreground">{copy.storageNote}</p>
       </div>

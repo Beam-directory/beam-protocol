@@ -220,71 +220,6 @@
   }
 }
 
-/*
- * Hero animation: Agent A signs, the encrypted packet travels to Agent B,
- * Agent B checks the chain Firma -> Mensch -> Vollmacht. One 8 s cycle;
- * staggered steps share the cycle through animation-delay.
- */
-.beam-demo {
-  --beam-cycle: 8s;
-}
-.beam-track {
-  container-type: inline-size;
-}
-.beam-packet {
-  animation: beam-packet var(--beam-cycle) cubic-bezier(0.65, 0, 0.35, 1) infinite both;
-}
-.beam-track-fill {
-  transform-origin: left;
-  animation: beam-track var(--beam-cycle) cubic-bezier(0.65, 0, 0.35, 1) infinite both;
-}
-.beam-sign {
-  animation: beam-sign var(--beam-cycle) ease-out infinite both;
-}
-.beam-step {
-  animation: beam-step var(--beam-cycle) ease-out infinite both;
-  animation-delay: var(--beam-delay, 0s);
-}
-.beam-step-icon {
-  animation: beam-step-icon var(--beam-cycle) cubic-bezier(0.34, 1.56, 0.64, 1) infinite both;
-  animation-delay: var(--beam-delay, 0s);
-}
-.beam-pulse {
-  animation: beam-pulse 2.4s ease-in-out infinite;
-}
-
-@keyframes beam-sign {
-  0%, 3% { opacity: 0; transform: translateY(4px) scale(0.96); }
-  9%, 90% { opacity: 1; transform: none; }
-  97%, 100% { opacity: 0; transform: none; }
-}
-@keyframes beam-packet {
-  0%, 12% { transform: translateX(0); opacity: 0; }
-  16% { transform: translateX(0); opacity: 1; }
-  50% { transform: translateX(calc(100cqw - 100%)); opacity: 1; }
-  56%, 100% { transform: translateX(calc(100cqw - 100%)); opacity: 0; }
-}
-@keyframes beam-track {
-  0%, 14% { transform: scaleX(0); opacity: 1; }
-  50%, 90% { transform: scaleX(1); opacity: 1; }
-  97%, 100% { transform: scaleX(1); opacity: 0; }
-}
-/* Steps start with their delay and switch off again before the next cycle reaches them. */
-@keyframes beam-step {
-  0% { opacity: 0.45; }
-  3%, 38% { opacity: 1; }
-  44%, 100% { opacity: 0.45; }
-}
-@keyframes beam-step-icon {
-  0% { opacity: 0; transform: scale(0.4); }
-  4%, 38% { opacity: 1; transform: scale(1); }
-  44%, 100% { opacity: 0; transform: scale(0.4); }
-}
-@keyframes beam-pulse {
-  0%, 100% { opacity: 0.55; }
-  50% { opacity: 1; }
-}
-
 @keyframes beam-check-in {
   from { opacity: 0; transform: translateY(20px); }
   to { opacity: 1; transform: none; }
@@ -298,22 +233,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .beam-packet,
-  .beam-track-fill,
-  .beam-sign,
-  .beam-step,
-  .beam-step-icon,
-  .beam-pulse,
   .beam-check-in {
     animation: none !important;
-  }
-  .beam-packet {
-    transform: translateX(calc(50cqw - 50%));
-  }
-  .beam-sign,
-  .beam-step,
-  .beam-step-icon {
-    opacity: 1;
-    transform: none;
   }
 }
