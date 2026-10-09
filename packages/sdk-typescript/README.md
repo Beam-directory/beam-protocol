@@ -39,6 +39,12 @@ console.log(check.summary)
 
 The same check without Node is `GET https://api.beam.directory/agents/jarvis@coppen.beam.directory/trust-assertion`. Verify `signature` over the canonical JSON of every field except `signature` and `publicKey`. Pin `MCowBQYDK2VwAyEA0oRW/jimdiEvI4JkjY2hWfhfyS/qQGmNd5njKYI6jnk=` (key id `ed25519:9fa8ac307cf1d165`). Do not trust the `publicKey` field by itself.
 
+## Versions
+
+- Use the SDK with the directory of the same version. `verifyAgent()` needs directory 1.8.0. `connect()` needs directory 1.7.0 or newer for WebSocket tickets.
+- From 1.6.0, `send()` can return `{ executed: false, errorCode: 'APPROVAL_REQUIRED' }` instead of a result frame, `connect()` needs the agent API key, and `CredentialVerifier.verify()` needs the directory issuer key.
+- See [CHANGELOG.md](./CHANGELOG.md) for every change since 1.6.0.
+
 ## Compatibility
 
 This SDK targets `beam/1`.
