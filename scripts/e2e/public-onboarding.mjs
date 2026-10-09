@@ -184,6 +184,8 @@ async function runFlow(page, locale) {
     if (!(await details.evaluate((element) => element.open))) await details.locator('summary').first().click()
   }
 
+  await page.getByTestId('path-company').click()
+  await page.locator('#org-display-name').waitFor()
   await navCheck('company form', 1, 0)
   await page.locator('#org-display-name').fill(company)
   await page.locator('#org-domain').fill(domain)

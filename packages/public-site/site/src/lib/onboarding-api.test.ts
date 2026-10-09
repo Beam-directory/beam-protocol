@@ -9,6 +9,7 @@ import {
   classifyOrgConflict,
   createOrg,
   describeError,
+  getIndividualProfile,
   getKycStatus,
   getOrg,
   inviteEmployee,
@@ -269,5 +270,21 @@ describe('what is still not real', () => {
     expect(CAPABILITIES.issueMandate).toBe('live')
     expect(CAPABILITIES.verifyDomainByWellKnownFile).toBe('live')
     expect(CAPABILITIES.requestManualKyc).toBe('live')
+    expect(CAPABILITIES.stripeIdentity).toBe('live')
+  })
+})
+
+describe('getIndividualProfile', () => {
+  it('reads the person status with the person key and does not send a body', async () => {
+    const fetchImpl = mockFetch(200, {
+      person: { id: 'per_1', kycStatus: 'verified', kycProvider: 'stripe_identity' },
+    })
+    const profile = await getIndividualProfile('beam_person_test', { baseUrl: BASE, fetchImpl })
+    const sent = call(fetchImpl)
+    expect(sent.url).toBe(`${BASE}/people/individual/me`)
+    expect(sent.init.method).toBe('GET')
+    expect(sent.headers.authorization).toBe('Bearer beam_person_test')
+    expect(sent.body).toBeUndefined()
+    expect(profile).toEqual({ personId: 'per_1', kycStatus: 'verified', kycProvider: 'stripe_identity' })
   })
 })

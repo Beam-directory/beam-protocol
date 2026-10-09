@@ -145,6 +145,100 @@ describe('trust assertion verification', () => {
     expect(result.org).toBeNull()
     expect(result.detail).toBe('no_org')
     expect(result.summary).toBe('NOT verified — treat as untrusted')
+    expect(result.subject).toBeNull()
+  })
+
+  it('verifies a private person without naming a company', async () => {
+    const assertion = signedAssertion(baseUnsigned({
+      beamId: 'grok@beam.directory',
+      org: null,
+      person: {
+        ref: 'b'.repeat(64),
+        role: 'individual',
+        kycStatus: 'verified',
+        subject: 'individual',
+        level: 'person_id_verified',
+        provider: 'stripe_identity',
+        publicName: 'Tobias K.',
+      },
+      mandate: { jti: 'm-person', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
+    }), issuer.privateKey, issuer.publicKey)
+    const result = await verifyAgent('grok@beam.directory', {
+      directoryUrl: 'https://directory.test',
+      pinnedPublicKey: issuer.publicKey,
+      now: new Date(NOW),
+      fetchImpl: async () => jsonResponse(200, assertion),
+    })
+    expect(result.verified).toBe(true)
+    expect(result.org).toBeNull()
+    expect(result.subject).toBe('individual')
+    expect(result.owner).toMatchObject({ level: 'person_id_verified', provider: 'stripe_identity', publicName: 'Tobias K.', role: 'individual' })
+    expect(result.summary).toBe('verified individual, on behalf of Tobias K., may: read')
+    expect(result.summary.includes('on behalf of individual')).toBe(false)
+    expect(result.summary.includes('Kub')).toBe(false)
+    expect(result.summary.includes('coppen')).toBe(false)
+
+    const unfinished = signedAssertion(baseUnsigned({
+      beamId: 'grok@beam.directory',
+      org: null,
+      person: { ref: 'b'.repeat(64), role: 'individual', kycStatus: 'verified' },
+    }), issuer.privateKey, issuer.publicKey)
+    const plain = await verifyAgent('grok@beam.directory', {
+      directoryUrl: 'https://directory.test',
+      pinnedPublicKey: issuer.publicKey,
+      now: new Date(NOW),
+      fetchImpl: async () => jsonResponse(200, unfinished),
+    })
+    expect(plain.verified).toBe(false)
+    expect(plain.detail).toBe('no_org')
+    expect(plain.summary).toBe('NOT verified — treat as untrusted')
+
+    const nameless = signedAssertion(baseUnsigned({
+      beamId: 'grok@beam.directory',
+      org: null,
+      person: {
+        ref: 'b'.repeat(64),
+        role: 'individual',
+        kycStatus: 'verified',
+        subject: 'individual',
+        level: 'person_id_verified',
+        provider: 'stripe_identity',
+        publicName: 'individual',
+      },
+      mandate: { jti: 'm-person', scopes: { actions: ['read'] }, expiresAt: '2027-01-01T00:00:00.000Z', escalationPersonRef: null },
+    }), issuer.privateKey, issuer.publicKey)
+    const hiddenType = await verifyAgent('grok@beam.directory', {
+      directoryUrl: 'https://directory.test',
+      pinnedPublicKey: issuer.publicKey,
+      now: new Date(NOW),
+      fetchImpl: async () => jsonResponse(200, nameless),
+    })
+    expect(hiddenType.verified).toBe(true)
+    expect(hiddenType.owner?.publicName).toBeNull()
+    expect(hiddenType.summary).toBe('verified individual, may: read')
+    expect(hiddenType.summary.includes('on behalf of')).toBe(false)
+  })
+
+  it('keeps a company assertion on the organisation even if the person also says individual', async () => {
+    const assertion = signedAssertion(baseUnsigned({
+      person: {
+        ref: 'a'.repeat(64),
+        role: 'owner',
+        kycStatus: 'verified',
+        subject: 'individual',
+        level: 'person_id_verified',
+        provider: 'stripe_identity',
+      },
+    }), issuer.privateKey, issuer.publicKey)
+    const result = await verifyAgent('jarvis@coppen.beam.directory', {
+      directoryUrl: 'https://directory.test',
+      pinnedPublicKey: issuer.publicKey,
+      now: new Date(NOW),
+      fetchImpl: async () => jsonResponse(200, assertion),
+    })
+    expect(result.verified).toBe(true)
+    expect(result.subject).toBe('organization')
+    expect(result.summary.startsWith('verified: coppen (coppen.de)')).toBe(true)
   })
 
   it('maps not found, rate limit, and transport failure', async () => {

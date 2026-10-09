@@ -134,7 +134,7 @@ POST /orgs/coppen/people/:id/kyc
 { "provider": "manual" }
 ```
 
-The only adapter is `manual`. It records `pending` and a reference. It does not contact a vendor and it does not mark anyone verified. An operator sets the status:
+`manual` records `pending` and a reference. It does not contact a vendor and it does not mark anyone verified. `stripe_identity` is the second adapter. It opens a Stripe Identity document session with `require_matching_selfie` and returns `client_secret` or a hosted URL. It does not mark the person verified. Only the signed webhook does that. If `STRIPE_SECRET_KEY` or `STRIPE_IDENTITY_WEBHOOK_SECRET` is missing, the Stripe adapter is off and the route returns `503 IDENTITY_PROVIDER_DISABLED`. An operator still sets manual reviews:
 
 ```http
 POST /admin/people/:id/kyc
@@ -172,6 +172,20 @@ PUT /orgs/coppen/agents/buyer/responsible-person
 
 Replacing the responsible person revokes that agent's active mandates and its delegations.
 
+### Private individuals
+
+A private person has no organisation. The address is the existing un-namespaced form, `handle@beam.directory`.
+
+```http
+GET /people/individual/provider
+POST /people/individual
+POST /people/individual/verification-sessions
+POST /people/individual/agents
+POST /webhooks/stripe/identity
+```
+
+`POST /people/individual` reserves the address and returns a `beam_person_` API key once. Creating a Stripe session requires that key, is rate-limited, and allows one open session per person. The webhook verifies the Stripe signature on the raw body and is idempotent by event id. On `identity.verification_session.verified` the directory stores the session id, status, verified first and last name, issuing country, verified-at time, and provider `stripe_identity`. It does not store document images, ID numbers, date of birth, or the selfie. A mandate for an individual agent signs `org: null`. The trust assertion then has `person.level` `person_id_verified`, `person.provider` `stripe_identity`, and `org: null`. `person.publicName` is the given name plus the family initial. The full verified name stays on the person row and is not copied into the assertion.
+
 ### Organization agents
 
 `POST /orgs/:name/agents` requires `publicKey`, a client-generated Ed25519 SPKI key, and may set `responsiblePersonId`. The directory does not generate or return a private key. Omitting the public key returns `400 PUBLIC_KEY_REQUIRED`.
@@ -194,7 +208,7 @@ A mandate is signed by the agent's responsible person. The signed object is cano
 }
 ```
 
-`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead. The person must have `kycStatus: "verified"` and the organization domain must be verified. Otherwise the route returns `400 KYC_REQUIRED` or `400 ORG_VERIFICATION_REQUIRED`.
+`scopes` must be within the person's `rights`. `escalationPersonId` must be that person's supervisor, or `null` when they have none. `expiresAt` is at most 366 days ahead. For a company, the person must have `kycStatus: "verified"` and the organization domain must be verified. Otherwise the route returns `400 KYC_REQUIRED` or `400 ORG_VERIFICATION_REQUIRED`. For a private person the signed `org` is `null`, the person must be verified by `stripe_identity`, and the stored organisation name is empty. Otherwise the route returns `403 INDIVIDUAL_KYC_REQUIRED`.
 
 ```http
 POST /agents/agent@coppen.beam.directory/mandates

@@ -100,6 +100,52 @@ organization through an approved identity provider and retain only the minimum
 verification result required by policy. Beam should not store raw identity
 documents in its message or directory databases.
 
+## Private individuals
+
+A person with no company uses the existing un-namespaced address, for example `tobias@beam.directory`. The same grammar already covers `name@beam.directory` for personal identities. There is no extra address format.
+
+The person verifies once with Stripe Identity: an ID document and a matching selfie. Stripe performs that check. Beam does not review the document. After the check, the person can attach their own agents, such as `grok@beam.directory`. An agent still cannot do more than the person who owns it.
+
+A trust assertion for that agent has `org: null` and a person block of:
+
+```json
+{
+  "subject": "individual",
+  "level": "person_id_verified",
+  "provider": "stripe_identity",
+  "kycStatus": "verified",
+  "role": "individual",
+  "publicName": "Tobias K."
+}
+```
+
+`person_id_verified` is set only when Stripe Identity reports the session verified. The assertion does not name a company. `role` stays the type `individual` and is not a display name. `publicName` is the given name plus the family initial. The full family name stays in the directory and is not signed into the assertion. When Stripe has not returned both names, `publicName` is the person’s Beam address, for example `tobias@beam.directory`. The live check leads with a plain sentence, for example “Yes, this agent belongs to Tobias K. (verified individual) and may: read” or “Ja, dieser Agent gehört zu Tobias K. (geprüfte Privatperson) und darf: lesen”. Technical details stay collapsed. `beam_verify_agent` and `verifyAgent` keep the English summary with that public name. None of them show the type string as the owner.
+
+### What Beam stores
+
+From Stripe, Beam stores only:
+
+- the VerificationSession id
+- the session status
+- the verified first and last name, as returned in `verified_outputs`
+- the issuing country
+- the time the session was verified
+- the provider `stripe_identity`
+
+Beam does not store the document image, the ID number, the date of birth, the address, or the selfie.
+
+### Configuration
+
+The directory reads `STRIPE_SECRET_KEY` and `STRIPE_IDENTITY_WEBHOOK_SECRET`. If either is missing, Stripe Identity is off. `POST /people/individual/verification-sessions` then returns `503 IDENTITY_PROVIDER_DISABLED`. Company onboarding and manual KYC keep working as they do today.
+
+To turn the check on:
+
+1. Use a Stripe account with Identity enabled.
+2. Point a webhook at `https://api.beam.directory/webhooks/stripe/identity` for `identity.verification_session.verified`, `identity.verification_session.requires_input`, and `identity.verification_session.canceled`.
+3. Set the two secrets on the directory. Do not commit them.
+4. Deploy the directory.
+5. Merge the website so `/start` can offer the individual path. Until the directory is deployed with the secrets, the identity step says the check is coming soon.
+
 ## Recommended profile data before verifying
 
 Publish these fields before starting verification:

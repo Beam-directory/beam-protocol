@@ -3,6 +3,7 @@ import type { AgentRow, OpenClawHostRow } from './types.js'
 
 const AGENT_API_KEY_PREFIX = 'bk_'
 const HOST_API_KEY_PREFIX = 'bh_'
+const PERSON_API_KEY_PREFIX = 'beam_person_'
 
 type HeaderSource = Headers | Record<string, string | string[] | undefined>
 
@@ -20,6 +21,14 @@ function readHeader(headers: HeaderSource, name: string): string {
 
 export function createAgentApiKey(beamId: string): string {
   return `${AGENT_API_KEY_PREFIX}${Buffer.from(beamId, 'utf8').toString('base64url')}.${randomBytes(24).toString('base64url')}`
+}
+
+export function createPersonApiKey(): string {
+  return `${PERSON_API_KEY_PREFIX}${randomBytes(32).toString('base64url')}`
+}
+
+export function isPersonApiKey(apiKey: string): boolean {
+  return apiKey.startsWith(PERSON_API_KEY_PREFIX) && apiKey.length > PERSON_API_KEY_PREFIX.length + 20
 }
 
 export function hashApiKey(apiKey: string): string {

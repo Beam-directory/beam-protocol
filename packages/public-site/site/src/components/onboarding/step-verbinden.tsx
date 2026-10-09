@@ -103,7 +103,7 @@ export function StepVerbinden({ progress, secrets }: Pick<StepProps, 'progress' 
   if (!beamId) return <Notice tone="warning">{copy.createFirst}</Notice>
 
   return (
-    <div className="flex flex-col gap-5">
+    <div className="flex flex-col gap-5" data-testid="step-verbinden">
       <div className="beam-surface flex flex-col gap-4 rounded-2xl border p-5 sm:p-6">
         <CopyField label={copy.addressTitle} value={beamId} />
         <div className="flex flex-wrap gap-3">

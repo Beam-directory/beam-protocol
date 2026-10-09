@@ -8,6 +8,13 @@ import type { Messages } from '../i18n/en.ts'
 export const STEP_IDS = ['firma', 'person', 'agent', 'verbinden'] as const
 export type StepId = (typeof STEP_IDS)[number]
 
+export const INDIVIDUAL_STEP_IDS = ['address', 'identity', 'agent', 'verbinden'] as const
+export type IndividualStepId = (typeof INDIVIDUAL_STEP_IDS)[number]
+export type OnboardingPath = '' | 'organization' | 'individual'
+
+/** Same local part as POST /people/individual and POST /identity-claims. Address is `{handle}@beam.directory`. */
+const PERSONAL_HANDLE_RE = /^[a-z0-9][a-z0-9_-]{1,30}[a-z0-9]$/
+
 export const DOMAIN_RE = /^(?=.{1,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,}$/i
 /** Local part accepted by POST /orgs/:name/agents and /network (routes/network.ts BEAM_ID_RE). */
 const AGENT_NAME_RE = /^[a-z0-9][a-z0-9_-]{1,62}$/
@@ -90,6 +97,17 @@ export function validateAgentName(value: string): ValidationKey | null {
 
 export function buildBeamId(agentName: string, orgName: string): string {
   return `${normalizeAgentName(agentName)}@${orgName}.beam.directory`
+}
+
+export function validatePersonalHandle(value: string): ValidationKey | null {
+  const handle = value.trim().toLowerCase()
+  if (!handle) return 'handleRequired'
+  if (!PERSONAL_HANDLE_RE.test(handle)) return 'handleInvalid'
+  return null
+}
+
+export function personalBeamId(handle: string): string {
+  return `${handle.trim().toLowerCase()}@beam.directory`
 }
 
 export function validateRecipientBeamId(value: string, ownBeamId?: string): ValidationKey | null {
@@ -222,7 +240,7 @@ export interface MandatePayload {
   version: 1
   personId: string
   agentBeamId: string
-  org: string
+  org: string | null
   scopes: ScopeGrant
   expiresAt: string
   escalationPersonId: null
@@ -233,7 +251,7 @@ export function mandatePayload(input: {
   jti: string
   personId: string
   agentBeamId: string
-  org: string
+  org: string | null
   scopes: ScopeGrant
   expiresAt: string
 }): MandatePayload {
@@ -255,6 +273,8 @@ export function mandatePayload(input: {
 /** Non-secret progress only. Adding a field here is a deliberate decision: never add keys, API keys or invitation tokens. */
 export interface OnboardingProgress {
   step: number
+  path: OnboardingPath
+  personalHandle: string
   displayName: string
   domain: string
   orgName: string
@@ -291,6 +311,8 @@ export interface OnboardingProgress {
 
 export const INITIAL_PROGRESS: OnboardingProgress = {
   step: 0,
+  path: '',
+  personalHandle: '',
   displayName: '',
   domain: '',
   orgName: '',
@@ -359,8 +381,13 @@ export function sanitizeProgress(value: unknown): OnboardingProgress {
   const step = typeof raw.step === 'number' && Number.isInteger(raw.step) ? Math.min(Math.max(raw.step, 0), STEP_IDS.length - 1) : 0
   const kyc = raw.personKycStatus
   const role = raw.applicantRole
+  const path: OnboardingPath = raw.path === 'individual' || raw.path === 'organization' || raw.path === ''
+    ? raw.path
+    : 'organization'
   return {
     step,
+    path,
+    personalHandle: text('personalHandle', 32).toLowerCase(),
     displayName: text('displayName', 120),
     domain: text('domain'),
     orgName: text('orgName', 80),
@@ -436,6 +463,16 @@ export interface GateState {
 export function canAdvance(step: StepId, state: GateState): { ok: boolean; reason?: 'firma' | 'person' | 'agent' } {
   if (step === 'firma' && !state.orgVerified) return { ok: false, reason: 'firma' }
   if (step === 'person' && !state.personReady) return { ok: false, reason: 'person' }
+  if (step === 'agent' && !state.agentRegistered) return { ok: false, reason: 'agent' }
+  return { ok: true }
+}
+
+export function canAdvanceIndividual(
+  step: IndividualStepId,
+  state: { addressReady: boolean; identityVerified: boolean; agentRegistered: boolean },
+): { ok: boolean; reason?: 'address' | 'identity' | 'agent' } {
+  if (step === 'address' && !state.addressReady) return { ok: false, reason: 'address' }
+  if (step === 'identity' && !state.identityVerified) return { ok: false, reason: 'identity' }
   if (step === 'agent' && !state.agentRegistered) return { ok: false, reason: 'agent' }
   return { ok: true }
 }

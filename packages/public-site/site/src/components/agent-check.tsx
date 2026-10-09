@@ -8,7 +8,8 @@ import { useI18n } from '@/i18n/context'
 import { SITE_ORIGIN, intlLocale } from '@/i18n/locale'
 import { describeActions } from '@/lib/plain-actions'
 import { checkAgentInBrowser, parseBeamAddress } from '@/lib/verify-trust.ts'
-import type { AgentCheck as TrustCheck, PublicOrg, PublicOwner, PublicScopes, VerificationLevel } from 'beam-protocol-sdk/trust-assertion'
+import { formatLocalSummary, isVerifiedIndividual } from '@/lib/verify-display.ts'
+import { individualOwnerLabel, type AgentCheck as TrustCheck, type PublicOrg, type PublicOwner, type PublicScopes, type VerificationLevel } from 'beam-protocol-sdk/trust-assertion'
 
 /** One example that passes and one that does not. */
 export const EXAMPLE_AGENTS = [
@@ -26,23 +27,6 @@ function formatWhen(value: string | null, locale: string): string {
   return new Intl.DateTimeFormat(locale, { dateStyle: 'medium', timeStyle: 'short' }).format(parsed)
 }
 
-function localSummary(
-  result: TrustCheck,
-  copy: {
-    verifiedPrefix: string
-    notVerifiedLine: string
-    onBehalfOf: (role: string) => string
-    may: (scopes: string) => string
-  },
-): string {
-  if (result.status === 'rate_limited' || result.status === 'api_error') return result.summary
-  if (!result.verified || !result.org) return copy.notVerifiedLine
-  const org = result.org.domain ? `${result.org.name} (${result.org.domain})` : result.org.name
-  const owner = result.owner ? `, ${copy.onBehalfOf(result.owner.role)}` : ''
-  const scopes = result.scopes ? `, ${copy.may(result.scopes.actions.join(', '))}` : ''
-  return `${copy.verifiedPrefix} ${org}${owner}${scopes}`
-}
-
 function orgLabel(org: PublicOrg): string {
   return org.domain ? `${org.name} (${org.domain})` : org.name
 }
@@ -51,12 +35,21 @@ function orgLabel(org: PublicOrg): string {
 function verdict(result: TrustCheck, copy: CheckCopy): { tone: 'yes' | 'no' | 'unknown'; headline: string; lines: string[] } {
   if (result.status === 'rate_limited') return { tone: 'unknown', headline: copy.rateLimited, lines: [] }
   if (result.status === 'api_error') return { tone: 'unknown', headline: copy.apiError, lines: [] }
+  if (isVerifiedIndividual(result)) {
+    const name = individualOwnerLabel(result.owner)
+    if (!name) return { tone: 'no', headline: copy.no, lines: [copy.reasonIndividual] }
+    const may = result.scopes ? describeActions(result.scopes.actions, result.scopes.order, copy.actions) : null
+    return { tone: 'yes', headline: copy.yesIndividual(name, may), lines: result.scopes ? [] : [copy.noScopes] }
+  }
   if (result.verified && result.org) {
     const may = result.scopes ? describeActions(result.scopes.actions, result.scopes.order, copy.actions) : null
     const lines: string[] = []
     if (result.owner) lines.push(copy.actingFor(result.owner.role))
     if (!result.scopes) lines.push(copy.noScopes)
     return { tone: 'yes', headline: copy.yes(orgLabel(result.org), may), lines }
+  }
+  if (result.subject === 'individual' && result.org === null && result.claimsAuthenticated) {
+    return { tone: 'no', headline: copy.no, lines: [copy.reasonIndividual] }
   }
   return { tone: 'no', headline: copy.no, lines: [reasonText(result, copy)] }
 }
@@ -172,7 +165,8 @@ export function AgentCheck({ variant }: { variant: Variant }) {
     void run(result.address, next)
   }
 
-  const summary = result ? localSummary(result, copy) : ''
+  const summary = result ? formatLocalSummary(result, copy) : ''
+  const individual = result ? isVerifiedIndividual(result) : false
   const shareUrl = result && parseBeamAddress(result.address)
     ? `${SITE_ORIGIN}${href('verify')}?agent=${encodeURIComponent(result.address)}`
     : `${SITE_ORIGIN}${href('verify')}`
@@ -297,10 +291,12 @@ export function AgentCheck({ variant }: { variant: Variant }) {
                     <ol key={result.address} className="grid gap-3 sm:grid-cols-3">
                       <ChainStep
                         delay="0s"
-                        icon={BuildingIcon}
-                        title={copy.org}
-                        testId="agent-check-org"
-                        body={result.org ? <OrgBody org={result.org} copy={copy} /> : <p>{copy.noOrg}</p>}
+                        icon={individual ? UserIcon : BuildingIcon}
+                        title={individual ? copy.individual : copy.org}
+                        testId={individual ? 'agent-check-individual' : 'agent-check-org'}
+                        body={individual
+                          ? <IndividualBody name={individualOwnerLabel(result.owner)} copy={copy} />
+                          : result.org ? <OrgBody org={result.org} copy={copy} /> : <p>{copy.noOrg}</p>}
                       />
                       <ChainStep
                         delay="0.3s"
@@ -414,6 +410,18 @@ function ChainStep({
   )
 }
 
+function IndividualBody({ name, copy }: { name: string | null; copy: CheckCopy }) {
+  return (
+    <div className="flex flex-col gap-1 text-foreground" data-testid="agent-check-individual-body">
+      {name ? <p className="font-medium">{name}</p> : null}
+      <p>{copy.verifiedIndividual}</p>
+      <p>{copy.noCompany}</p>
+      <p>{copy.identityProvider}: {copy.providerStripe}</p>
+      <p>{copy.level}: {copy.levelPersonId}</p>
+    </div>
+  )
+}
+
 function OrgBody({ org, copy }: { org: PublicOrg; copy: CheckCopy }) {
   return (
     <div className="flex flex-col gap-1 text-foreground">
@@ -427,11 +435,13 @@ function OrgBody({ org, copy }: { org: PublicOrg; copy: CheckCopy }) {
 }
 
 function OwnerBody({ owner, copy }: { owner: PublicOwner; copy: CheckCopy }) {
+  const individual = owner.subject === 'individual'
+  const label = individual ? individualOwnerLabel(owner) : owner.role
   return (
     <div className="flex flex-col gap-1 text-foreground">
-      <p className="font-medium">{owner.role}</p>
+      {label ? <p className="font-medium" data-testid="agent-check-owner">{label}</p> : null}
       <p className="font-mono text-xs">{copy.ref(owner.ref.slice(0, 8))}</p>
-      <p>{copy.personNote}</p>
+      <p>{individual ? copy.personPublicName : copy.personNote}</p>
     </div>
   )
 }

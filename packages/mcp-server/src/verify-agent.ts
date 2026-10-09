@@ -17,6 +17,7 @@ export async function checkBeamAgent(address: string, verify: BeamAgentVerifier)
     detail: result.detail,
     address: result.address,
     org: authenticated ? result.org : null,
+    subject: authenticated ? result.subject : null,
     owner: authenticated ? result.owner : null,
     scopes: authenticated ? result.scopes : null,
     issuedAt: authenticated ? result.issuedAt : null,

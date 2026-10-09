@@ -33,7 +33,7 @@ export function Collapsible({ title, children, id, className }: { title: ReactNo
 
 /** A one-time file the user has to keep (company key, personal key, agent file). */
 export function SaveFileBox({
-  title, text, buttonLabel, onSave, saved, onSavedChange, savedLabel, buttonId,
+  title, text, buttonLabel, onSave, saved, onSavedChange, savedLabel, buttonId, emphasis = 'primary',
 }: {
   title: string
   text: string
@@ -43,6 +43,8 @@ export function SaveFileBox({
   onSavedChange?: (saved: boolean) => void
   savedLabel: string
   buttonId?: string
+  /** `outline` keeps the step's footer Next as the only filled button. */
+  emphasis?: 'primary' | 'outline'
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-amber-500/30 bg-amber-500/5 p-4">
@@ -52,7 +54,7 @@ export function SaveFileBox({
       </p>
       <p className="text-sm leading-6 text-muted-foreground">{text}</p>
       <div className="flex flex-wrap items-center gap-3">
-        <Button id={buttonId} type="button" variant={saved ? 'outline' : 'default'} className="h-9 rounded-full px-4" onClick={onSave}>
+        <Button id={buttonId} type="button" variant={emphasis === 'outline' || saved ? 'outline' : 'default'} className="h-9 rounded-full px-4" onClick={onSave}>
           <DownloadIcon aria-hidden="true" /> {buttonLabel}
         </Button>
         {onSavedChange ? (

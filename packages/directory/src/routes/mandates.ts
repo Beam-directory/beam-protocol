@@ -2,7 +2,7 @@ import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
-import { hashApiKey } from '../api-key.js'
+import { hashApiKey, isPersonApiKey } from '../api-key.js'
 import { canonicalizeJson, verifyPayload } from '../crypto.js'
 import { getAgent, getOrg, logAuditEvent, recordNonce } from '../db.js'
 import { IssuerKeyRequiredError } from '../issuer.js'
@@ -22,7 +22,7 @@ import {
   serializeMandate,
 } from '../trust/mandate-store.js'
 import { registrableDomain } from '../trust/org-domain.js'
-import { getPerson } from '../trust/person-store.js'
+import { getPerson, getPersonByApiKeyHash } from '../trust/person-store.js'
 import { parseScopeGrant, scopeWithin, SCOPE_ACTIONS, type ScopeAction } from '../trust/scopes.js'
 import { BEAM_ID_RE } from '../validation.js'
 import { authenticateNetworkIdentity } from './network.js'
@@ -34,17 +34,29 @@ const JTI_RE = /^[A-Za-z0-9_-]{8,80}$/
 const INTENT_SCOPE_RE = /^[a-z][a-z0-9._-]{0,63}$/
 const MAX_MANDATE_MS = 366 * 24 * 60 * 60 * 1000
 
-function orgKeyMatches(db: Database, orgName: string | null, request: Request): boolean {
-  if (!orgName) return false
-  const org = getOrg(db, orgName)
-  const supplied = request.headers.get('x-api-key')?.trim()
+function suppliedKey(request: Request): string {
+  return request.headers.get('x-api-key')?.trim()
     ?? (request.headers.get('authorization')?.toLowerCase().startsWith('bearer ')
       ? request.headers.get('authorization')!.slice(7).trim()
       : '')
+}
+
+function orgKeyMatches(db: Database, orgName: string | null, request: Request): boolean {
+  if (!orgName) return false
+  const org = getOrg(db, orgName)
+  const supplied = suppliedKey(request)
   if (!org || !supplied.startsWith('beam_org_')) return false
   const left = Buffer.from(hashApiKey(supplied))
   const right = Buffer.from(org.api_key_hash)
   return left.length === right.length && timingSafeEqual(left, right)
+}
+
+function personKeyMatches(db: Database, personId: string | null, request: Request): boolean {
+  if (!personId) return false
+  const supplied = suppliedKey(request)
+  if (!isPersonApiKey(supplied)) return false
+  const person = getPersonByApiKeyHash(db, hashApiKey(supplied))
+  return Boolean(person && person.id === personId && person.status === 'active' && person.subject_kind === 'individual')
 }
 
 function beamIdFrom(c: Context): string | null {
@@ -125,15 +137,34 @@ export function mandatesRouter(db: Database): Hono {
     if (!person.public_key || !verifyPayload(payload, signature, person.public_key)) {
       return c.json({ error: 'signature is invalid', errorCode: 'INVALID_SIGNATURE' }, 400)
     }
-    if (person.status !== 'active' || person.org_name !== agent.org || agent.suspended_at) {
-      return c.json({ error: 'An active responsible person is required', errorCode: 'RESPONSIBLE_PERSON_REQUIRED' }, 400)
-    }
-    if (person.kyc_status !== 'verified') {
-      return c.json({ error: 'The responsible person must be KYC verified', errorCode: 'KYC_REQUIRED' }, 400)
-    }
-    const org = agent.org ? getOrg(db, agent.org) : null
-    if (!org || org.verified !== 1) {
-      return c.json({ error: 'The organization domain must be verified', errorCode: 'ORG_VERIFICATION_REQUIRED' }, 400)
+    const individual = person.subject_kind === 'individual'
+    if (individual) {
+      if (
+        person.status !== 'active'
+        || agent.personal !== 1
+        || agent.org !== null
+        || Boolean(agent.suspended_at)
+        || agent.responsible_person_id !== person.id
+      ) {
+        return c.json({ error: 'An active responsible person is required', errorCode: 'RESPONSIBLE_PERSON_REQUIRED' }, 400)
+      }
+      if (person.kyc_status !== 'verified' || person.kyc_provider !== 'stripe_identity') {
+        return c.json({
+          error: 'Verify your identity before this agent can receive a mandate',
+          errorCode: 'INDIVIDUAL_KYC_REQUIRED',
+        }, 403)
+      }
+    } else {
+      if (person.status !== 'active' || person.org_name !== agent.org || agent.suspended_at) {
+        return c.json({ error: 'An active responsible person is required', errorCode: 'RESPONSIBLE_PERSON_REQUIRED' }, 400)
+      }
+      if (person.kyc_status !== 'verified') {
+        return c.json({ error: 'The responsible person must be KYC verified', errorCode: 'KYC_REQUIRED' }, 400)
+      }
+      const org = agent.org ? getOrg(db, agent.org) : null
+      if (!org || org.verified !== 1) {
+        return c.json({ error: 'The organization domain must be verified', errorCode: 'ORG_VERIFICATION_REQUIRED' }, 400)
+      }
     }
     const rights = parseScopeGrant(JSON.parse(person.rights_json) as unknown)
     if (!rights) {
@@ -154,7 +185,7 @@ export function mandatesRouter(db: Database): Hono {
         jti,
         personId: person.id,
         agentBeamId: beamId,
-        orgName: agent.org ?? person.org_name,
+        orgName: individual ? '' : (agent.org ?? person.org_name ?? ''),
         scopes,
         expiresAt,
         escalationPersonId,
@@ -234,7 +265,8 @@ export function mandatesRouter(db: Database): Hono {
       caller
       && (caller.agent.beam_id === beamId || hasAcceptedConnection(db, caller.agent.beam_id, beamId)),
     )
-    if (agent.visibility !== 'public' && !contact && !orgKeyMatches(db, agent.org, c.req.raw)) {
+    const personAuthorized = personKeyMatches(db, agent.responsible_person_id, c.req.raw)
+    if (agent.visibility !== 'public' && !contact && !orgKeyMatches(db, agent.org, c.req.raw) && !personAuthorized) {
       if (!caller) return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
       return c.json({ error: 'Trust assertions for unlisted agents are limited to contacts', errorCode: 'FORBIDDEN' }, 403)
     }

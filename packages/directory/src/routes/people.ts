@@ -7,6 +7,7 @@ import { hashApiKey } from '../api-key.js'
 import { getOrg, logAuditEvent } from '../db.js'
 import { isEd25519Spki } from '../key-validation.js'
 import { getKycAdapter } from '../trust/kyc.js'
+import { beginStripeIdentitySession } from '../trust/stripe-identity.js'
 import { parseScopeGrant, type ScopeGrant } from '../trust/scopes.js'
 import {
   createInvitationToken,
@@ -412,7 +413,21 @@ export function peopleRouter(db: Database): Hono {
     const providerId = typeof raw['provider'] === 'string' ? raw['provider'] : ''
     const adapter = getKycAdapter(providerId)
     if (!adapter) {
-      return c.json({ error: 'provider must be manual', errorCode: 'KYC_PROVIDER_UNKNOWN' }, 400)
+      return c.json({ error: 'provider must be manual or stripe_identity', errorCode: 'KYC_PROVIDER_UNKNOWN' }, 400)
+    }
+    if (adapter.createsVendorSession) {
+      const started = await beginStripeIdentitySession(db, person, `org:${owned.name}`)
+      if ('error' in started) {
+        return c.json({
+          error: started.error,
+          errorCode: started.errorCode,
+          ...(started.verification ? { verification: started.verification } : {}),
+        }, started.status)
+      }
+      return c.json({
+        person: serializePerson(started.person),
+        verification: started.verification,
+      }, 201)
     }
     const request = adapter.request({ personId: person.id, email: person.email })
     const updated = setPersonKyc(db, person.id, {
