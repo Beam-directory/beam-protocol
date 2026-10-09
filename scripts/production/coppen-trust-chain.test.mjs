@@ -255,6 +255,22 @@ test('a revoked mandate is not re-created by replay, and --issue-tag re-issues i
   assert.equal(reissued.results[0].mandate.jti, `${jti}-r2`)
 })
 
+test('a mandate that expires within 14 days is renewed, a fresh one is left alone', async (t) => {
+  const local = await localDirectory(t)
+  const first = await runTrustChain({ ...local.common, apply: true, now: new Date(), log: () => {} })
+  assert.equal(first.ok, true)
+  const later = new Date(Date.parse(first.results[0].mandate.expiresAt) - 10 * 24 * 60 * 60 * 1000)
+  local.calls.length = 0
+  const fresh = await runTrustChain({ ...local.common, apply: true, now: new Date(later.getTime() - 30 * 24 * 60 * 60 * 1000), log: () => {} })
+  assert.equal(fresh.ok, true)
+  assert.deepEqual(writes(local.calls), [])
+  const out = capture()
+  const renewed = await runTrustChain({ ...local.common, apply: true, now: later, log: out.log })
+  assert.match(out.text(), /RENEW mandate/u)
+  assert.equal(renewed.ok, true, out.text())
+  assert.notEqual(renewed.results[0].mandate.jti, first.results[0].mandate.jti)
+})
+
 test('apply stops before any write when the operator session is missing or the person key differs', async (t) => {
   const local = await localDirectory(t)
   await assert.rejects(

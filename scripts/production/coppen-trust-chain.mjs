@@ -22,6 +22,7 @@ export const FORBIDDEN_ACTIONS = ['order']
 export const KEY_FORMAT = 'beam-person-key/v1'
 export const DEFAULT_VALIDITY_DAYS = 90
 export const MAX_AGENTS = 10
+export const RENEW_WITHIN_DAYS = 14
 
 const DAY_MS = 24 * 60 * 60 * 1000
 const MAX_VALIDITY_DAYS = 366
@@ -539,12 +540,15 @@ export async function runTrustChain({
     }
 
     const existing = alreadyResponsible ? current?.mandate ?? null : null
-    if (existing && sameScopes(existing.scopes, agent.scopes) && Date.parse(existing.expiresAt) > now.getTime()) {
+    const scopesMatch = Boolean(existing && sameScopes(existing.scopes, agent.scopes))
+    if (existing && scopesMatch && Date.parse(existing.expiresAt) > now.getTime() + RENEW_WITHIN_DAYS * DAY_MS) {
       log(`  SKIP  active mandate ${existing.jti} already has these scopes, expires ${existing.expiresAt}`)
       planned.push({ beamId: agent.beamId, jti: existing.jti })
       continue
     }
-    if (existing) {
+    if (existing && scopesMatch) {
+      log(`  RENEW mandate ${existing.jti} expires ${existing.expiresAt}, within ${RENEW_WITHIN_DAYS} days. A new one is issued; the old one runs out on its own.`)
+    } else if (existing) {
       warn(`${agent.beamId}: mandate ${existing.jti} (${existing.scopes.actions.join(', ')}) stays active until revoked. Revoke it after this run: revoke --agent ${agent.beamId} --jti ${existing.jti}`)
     }
     const jti = mandateJti(config.org, agent.agentName, stamp, issueTag)
