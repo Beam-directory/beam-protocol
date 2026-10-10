@@ -7,7 +7,7 @@ import net from 'node:net'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { promisify } from 'node:util'
-import { createHash } from 'node:crypto'
+import { createHash, generateKeyPairSync } from 'node:crypto'
 import { setTimeout as sleep } from 'node:timers/promises'
 import { BeamClient, BeamIdentity } from '../../packages/sdk-typescript/dist/index.js'
 import { createDatabase, createOrg, markOrgVerified } from '../../packages/directory/dist/db.js'
@@ -231,6 +231,11 @@ async function main() {
   const receiverIdentity = BeamIdentity.generate({ agentName: 'ts-receiver', orgName: 'e2e' })
   const tsSenderIdentity = BeamIdentity.generate({ agentName: 'ts-sender', orgName: 'e2e' })
   const busSenderIdentity = BeamIdentity.generate({ agentName: 'bus-sender', orgName: 'e2e' })
+  // Throwaway issuer for this run only; production keeps its own pinned key.
+  const issuer = generateKeyPairSync('ed25519')
+  const issuerPublicKey = issuer.publicKey.export({ type: 'spki', format: 'der' }).toString('base64')
+  const issuerPrivateKey = issuer.privateKey.export({ type: 'pkcs8', format: 'der' }).toString('base64')
+  const receivedTrust = new Map()
 
   await writeFile(
     identityBundlePath,
@@ -263,6 +268,8 @@ async function main() {
         DB_PATH: directoryDb,
         JWT_SECRET: 'beam-e2e-jwt-secret',
         BEAM_ADMIN_EMAILS: adminEmail,
+        BEAM_DIRECTORY_SIGNING_PRIVATE_KEY: issuerPrivateKey,
+        BEAM_DIRECTORY_SIGNING_PUBLIC_KEY: issuerPublicKey,
       },
     })
 
@@ -293,12 +300,14 @@ async function main() {
       identity: receiverIdentity.export(),
       directoryUrl,
       apiKey: orgApiKey,
+      trust: { pinnedPublicKey: issuerPublicKey },
     })
 
     await step('registering the TypeScript receiver', async () => {
       await receiver.register('TypeScript Receiver', ['conversation.message'])
       await publishAgent(directoryUrl, adminToken, receiver.beamId)
-      receiver.onTalk(async (message, from, respond) => {
+      receiver.onTalk(async (message, from, respond, frame) => {
+        receivedTrust.set(from, frame.trust)
         respond(`TS receiver heard: ${message}`, {
           echoed: message,
           from,
@@ -314,6 +323,7 @@ async function main() {
         identity: tsSenderIdentity.export(),
         directoryUrl,
         apiKey: orgApiKey,
+        trust: { pinnedPublicKey: issuerPublicKey },
       })
 
       await sender.register('TypeScript Sender', [])
@@ -330,6 +340,12 @@ async function main() {
       const reply = await sender.talk(receiver.beamId, 'hello from typescript')
       assert.equal(reply.message, 'TS receiver heard: hello from typescript', 'TypeScript talk returned the wrong reply')
       assert.equal(reply.structured?.via, 'typescript', 'TypeScript structured reply did not round-trip')
+
+      const stapled = await sender.currentTrustAssertion()
+      assert.equal(stapled?.agentKey, tsSenderIdentity.publicKeyBase64, 'The stapled assertion is not bound to the sender key')
+      const trust = receivedTrust.get(sender.beamId)
+      assert.equal(trust?.source, 'stapled', `The receiver did not see a sender-stapled assertion: ${JSON.stringify(trust)}`)
+      assert.equal(trust?.verified, true, `The stapled assertion did not verify offline: ${JSON.stringify(trust)}`)
     })
 
     await step('validating the Python SDK flow', async () => {
@@ -349,6 +365,10 @@ async function main() {
       assert.equal(payload.lookupBeamId, receiver.beamId, 'Python lookup did not resolve the receiver')
       assert(payload.searchMatches.includes(receiver.beamId), 'Python search did not include the receiver')
       assert.equal(payload.reply.message, 'TS receiver heard: hello from python', 'Python talk returned the wrong reply')
+
+      const trust = receivedTrust.get(payload.senderBeamId)
+      assert.equal(trust?.source, 'relay', `An unstapled Python intent should fall back to the relay assertion: ${JSON.stringify(trust)}`)
+      assert.equal(trust?.verified, true, `The relay assertion did not verify offline: ${JSON.stringify(trust)}`)
     })
 
     await step('validating the CLI flow', async () => {

@@ -86,6 +86,140 @@ export interface AgentCheck {
   httpStatus: number | null
 }
 
+/** Why a stapled (or online) trust check came out the way it did. `ok` is the only verified reason. */
+export type StapledTrustReason =
+  | 'ok'
+  | 'not_stapled'
+  | 'malformed'
+  | 'bad_signature'
+  | 'key_mismatch'
+  | 'address_mismatch'
+  | 'wrong_recipient'
+  | 'no_agent_key'
+  | 'agent_key_mismatch'
+  | 'message_signature_invalid'
+  | 'expired'
+  | 'too_old'
+  | 'suspended'
+  | 'no_org'
+  | 'org_unverified'
+  | 'not_found'
+  | 'rate_limited'
+  | 'directory_error'
+
+/**
+ * Small verdict attached to every received message. `org`, `person` and `may`
+ * are only filled when the directory signature and the binding to this exact
+ * message check out; otherwise they are null/empty so nobody renders unproven claims.
+ */
+export interface StapledTrustResult {
+  verified: boolean
+  reason: StapledTrustReason
+  address: string
+  /** Display name of the organisation, with its domain when known. */
+  org: string | null
+  /** Public role of the responsible person, such as "Prokurist". */
+  person: string | null
+  /** Mandate scopes, such as ["read", "schedule.commit"]. */
+  may: string[]
+  /** One line for a UI or log: "verified: …" or "NOT verified — treat as untrusted". */
+  display: string
+  expiresAt: string | null
+  /** stapled: by the sender · relay: attached by the directory relay · online: fetched via verifyAgent() */
+  source: 'stapled' | 'relay' | 'online' | 'none'
+}
+
+export interface StapledTrustEnvelope {
+  v: 1
+  assertion: Record<string, unknown>
+}
+
+export const MAX_STAPLED_ASSERTION_BYTES = 8_192
+
+const DETAIL_REASON: Record<CheckDetail, StapledTrustReason> = {
+  ok: 'ok',
+  no_org: 'no_org',
+  org_unverified: 'org_unverified',
+  expired: 'expired',
+  suspended: 'suspended',
+  bad_signature: 'bad_signature',
+  tampered: 'bad_signature',
+  key_mismatch: 'key_mismatch',
+  not_found: 'not_found',
+  rate_limited: 'rate_limited',
+  directory_error: 'directory_error',
+  malformed: 'malformed',
+}
+
+export function reasonFromDetail(detail: CheckDetail): StapledTrustReason {
+  return DETAIL_REASON[detail] ?? 'malformed'
+}
+
+/**
+ * Turn a full AgentCheck into the small verdict. `reason` overrides the check's
+ * own detail when a message-level binding failed after the assertion verified.
+ */
+export function trustResultFromCheck(
+  check: AgentCheck,
+  source: StapledTrustResult['source'],
+  reason: StapledTrustReason = reasonFromDetail(check.detail),
+): StapledTrustResult {
+  const verified = check.verified && reason === 'ok'
+  const showClaims = check.claimsAuthenticated && ['ok', 'expired', 'too_old', 'suspended', 'no_org', 'org_unverified'].includes(reason)
+  const org = showClaims && check.org
+    ? (check.org.domain ? `${check.org.name} (${check.org.domain})` : check.org.name)
+    : null
+  return {
+    verified,
+    reason,
+    address: check.address,
+    org,
+    person: showClaims && check.owner ? check.owner.role : null,
+    may: showClaims && check.scopes ? [...check.scopes.actions] : [],
+    display: verified ? check.summary : summaryLine({ status: 'unverified', org: null, owner: null, scopes: null }),
+    expiresAt: showClaims ? check.expiresAt : null,
+    source,
+  }
+}
+
+export function unverifiedTrustResult(
+  address: string,
+  reason: StapledTrustReason,
+  source: StapledTrustResult['source'] = 'none',
+): StapledTrustResult {
+  return {
+    verified: false,
+    reason,
+    address: parseBeamAddress(address) ?? String(address).trim().slice(0, 255),
+    org: null,
+    person: null,
+    may: [],
+    display: summaryLine({ status: 'unverified', org: null, owner: null, scopes: null }),
+    expiresAt: null,
+    source,
+  }
+}
+
+/** Accept a stapled assertion as an object or a JSON string; reject anything oversized. */
+export function parseStapledAssertion(value: unknown): Record<string, unknown> | null {
+  let candidate = value
+  if (typeof candidate === 'string') {
+    if (candidate.length > MAX_STAPLED_ASSERTION_BYTES) return null
+    try {
+      candidate = JSON.parse(candidate) as unknown
+    } catch {
+      return null
+    }
+  }
+  if (!isRecord(candidate)) return null
+  try {
+    if (JSON.stringify(candidate).length > MAX_STAPLED_ASSERTION_BYTES) return null
+  } catch {
+    return null
+  }
+  return candidate
+}
+
 export function parseBeamAddress(value: string): string | null {
   const address = value.trim().toLowerCase()
   return BEAM_ADDRESS_PATTERN.test(address) ? address : null

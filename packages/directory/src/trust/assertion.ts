@@ -8,11 +8,29 @@ import { getPerson } from './person-store.js'
 import { listOrgRegistryFilings } from './registry-store.js'
 import { parseScopeGrant, type ScopeGrant } from './scopes.js'
 
-const ASSERTION_TTL_MS = 15 * 60 * 1000
+export const ASSERTION_TTL_MS = 15 * 60 * 1000
+const MIN_ASSERTION_TTL_MS = 60 * 1000
+const DEFAULT_MAX_ASSERTION_TTL_MS = 24 * 60 * 60 * 1000
+const HARD_MAX_ASSERTION_TTL_MS = 7 * 24 * 60 * 60 * 1000
+
+/** Longest lifetime an agent may request for its own stapled assertion. */
+export function maxAssertionTtlMs(): number {
+  const raw = Number(process.env['BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS'])
+  if (!Number.isFinite(raw) || raw <= 0) return DEFAULT_MAX_ASSERTION_TTL_MS
+  return Math.min(Math.max(raw * 1000, MIN_ASSERTION_TTL_MS), HARD_MAX_ASSERTION_TTL_MS)
+}
+
+/** Clamp a requested lifetime in seconds. Invalid or missing values fall back to the short default. */
+export function requestedAssertionTtlMs(raw: string | undefined): number {
+  if (raw === undefined || !/^\d{1,7}$/.test(raw)) return ASSERTION_TTL_MS
+  return Math.min(Math.max(Number(raw) * 1000, MIN_ASSERTION_TTL_MS), maxAssertionTtlMs())
+}
 
 export type TrustAssertion = {
   v: 1
   beamId: string
+  /** The agent's current Ed25519 key (SPKI, base64). Binds stapled assertions to message signatures. */
+  agentKey: string
   org: {
     name: string
     domain: string | null
@@ -57,7 +75,12 @@ function mandateView(row: MandateRow | null): TrustAssertion['mandate'] {
   }
 }
 
-export function buildTrustAssertion(db: Database, beamId: string, now = new Date()): TrustAssertion {
+export function buildTrustAssertion(
+  db: Database,
+  beamId: string,
+  now = new Date(),
+  ttlMs = ASSERTION_TTL_MS,
+): TrustAssertion {
   const issuer = requireStableDirectoryIssuer()
   const agent = getAgent(db, beamId)
   if (!agent) {
@@ -68,10 +91,11 @@ export function buildTrustAssertion(db: Database, beamId: string, now = new Date
   const person = agent.responsible_person_id ? getPerson(db, agent.responsible_person_id) : null
   const mandate = getActiveMandate(db, beamId, now.toISOString())
   const issuedAt = now.toISOString()
-  const expiresAt = new Date(now.getTime() + ASSERTION_TTL_MS).toISOString()
+  const expiresAt = new Date(now.getTime() + ttlMs).toISOString()
   const unsigned = {
     v: 1 as const,
     beamId,
+    agentKey: agent.public_key,
     org: org
       ? {
           name: org.name,

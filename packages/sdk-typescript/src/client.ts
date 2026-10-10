@@ -3,11 +3,16 @@ import { BeamDirectory } from './directory.js'
 import { BeamCredentialsClient, BeamDID } from './did.js'
 import { canonicalizeFrame, createIntentFrame, createResultFrame, signFrame, validateIntentFrame } from './frames.js'
 import { beamIdFromApiKey } from './api-key.js'
+import { TrustAssertionStapler } from './stapling.js'
+import { unverifiedTrustResult, type StapledTrustEnvelope, type StapledTrustResult } from './trust-assertion.js'
+import { verifyAgentTrust, verifyStapledAssertion } from './verify-agent.js'
 import type {
   AgentProfile,
   AgentKeyState,
   AgentRecord,
   BeamClientConfig,
+  BeamTrustConfig,
+  ReceivedIntentFrame,
   BeamIdString,
   BrowseFilters,
   BrowseResult,
@@ -35,7 +40,7 @@ interface WebSocketLike {
 }
 
 type IntentHandler = (
-  frame: IntentFrame,
+  frame: ReceivedIntentFrame,
   respond: (options: {
     success: boolean
     payload?: Record<string, unknown>
@@ -71,6 +76,8 @@ export class BeamClient {
   private _wsConnected = false
   private readonly _pendingResults = new Map<string, PendingResult>()
   private readonly _intentHandlers = new Map<string, IntentHandler>()
+  private readonly _trust: BeamTrustConfig
+  private readonly _stapler: TrustAssertionStapler
 
   constructor(config: BeamClientConfig) {
     if (!config.identity && !config.apiKey) {
@@ -90,6 +97,21 @@ export class BeamClient {
     this._directory = new BeamDirectory({ baseUrl: config.directoryUrl, apiKey: config.apiKey })
     this._did = new BeamDID({ baseUrl: config.directoryUrl, identity: this._identity ?? undefined })
     this._credentials = new BeamCredentialsClient(config.directoryUrl, config.apiKey)
+    this._trust = config.trust ?? {}
+    this._stapler = new TrustAssertionStapler({
+      beamId: this._beamId,
+      directoryUrl: config.directoryUrl,
+      apiKey: () => this._apiKey,
+      agentPublicKey: () => this._identity?.publicKeyBase64,
+      ttlMs: this._trust.assertionTtlMs,
+      refreshBeforeMs: this._trust.refreshBeforeMs,
+      pinnedPublicKey: this._trust.pinnedPublicKey,
+    })
+  }
+
+  /** The stapled assertion this client attaches to outgoing intents, or null when none is available. */
+  async currentTrustAssertion(): Promise<Record<string, unknown> | null> {
+    return this._stapler.current()
   }
 
   get beamId(): BeamIdString {
@@ -168,6 +190,7 @@ export class BeamClient {
       timestamp,
     })
     this._identity = identity
+    this._stapler.invalidate()
     return result
   }
 
@@ -308,6 +331,54 @@ export class BeamClient {
     if (!handler) return
 
     const startTime = Date.now()
+    void this._incomingTrust(frame, senderPublicKey, msg['stapledTrust'], msg['trustAssertion']).then((trust) => {
+      // Non-enumerable keeps the frame's JSON identical to what the sender signed.
+      Object.defineProperty(frame, 'trust', { value: trust, enumerable: false, configurable: true })
+      this._dispatchIntent(frame as ReceivedIntentFrame, handler, startTime)
+    })
+  }
+
+  /**
+   * Prefer the sender's own staple. Without one, the directory relay's attached
+   * assertion is checked the same way: both are verified offline against the pin.
+   */
+  private async _incomingTrust(
+    frame: IntentFrame,
+    senderPublicKey: string,
+    stapled: unknown,
+    relayAssertion: unknown,
+  ): Promise<StapledTrustResult> {
+    if (this._trust.verifyIncoming === false) return unverifiedTrustResult(frame.from, 'not_stapled', 'none')
+    const senderStaple = stapled && typeof stapled === 'object' && (stapled as { v?: unknown }).v === 1
+      ? (stapled as { assertion?: unknown }).assertion ?? undefined
+      : undefined
+    const relayStaple = relayAssertion && typeof relayAssertion === 'object' ? relayAssertion : undefined
+    const assertion = senderStaple ?? relayStaple
+    const source: StapledTrustResult['source'] = senderStaple !== undefined ? 'stapled' : 'relay'
+    if (assertion === undefined && this._trust.onlineFallback === true) {
+      try {
+        return await verifyAgentTrust(frame.from, {
+          directoryUrl: this._directoryUrl,
+          pinnedPublicKey: this._trust.pinnedPublicKey,
+        })
+      } catch {
+        return unverifiedTrustResult(frame.from, 'directory_error', 'online')
+      }
+    }
+    try {
+      const result = verifyStapledAssertion(frame, assertion, {
+        expectedRecipient: this._beamId,
+        senderPublicKey,
+        pinnedPublicKey: this._trust.pinnedPublicKey,
+        maxAssertionAgeMs: this._trust.maxAssertionAgeMs,
+      })
+      return assertion === undefined ? result : { ...result, source }
+    } catch {
+      return unverifiedTrustResult(frame.from, 'malformed', source)
+    }
+  }
+
+  private _dispatchIntent(frame: ReceivedIntentFrame, handler: IntentHandler, startTime: number): void {
     const respond = (options: {
       success: boolean
       payload?: Record<string, unknown>
@@ -365,13 +436,19 @@ export class BeamClient {
       signFrame(frame, this._identity.export().privateKeyBase64)
     }
 
+    // The assertion travels next to the frame, not inside it: old receivers
+    // cap frame size, and the frame signature stays exactly as before.
+    const stapledTrust = this._identity && this._trust.staple !== false
+      ? await this._stapler.envelope().catch(() => null)
+      : null
+
     if (this._ws && this._wsConnected) {
-      return this._sendViaWebSocket(frame, timeoutMs)
+      return this._sendViaWebSocket(frame, timeoutMs, stapledTrust)
     }
-    return this._sendViaHttp(frame)
+    return this._sendViaHttp(frame, stapledTrust)
   }
 
-  private _sendViaWebSocket(frame: IntentFrame, timeoutMs: number): Promise<ResultFrame> {
+  private _sendViaWebSocket(frame: IntentFrame, timeoutMs: number, stapledTrust: StapledTrustEnvelope | null = null): Promise<ResultFrame> {
     return new Promise<ResultFrame>((resolve, reject) => {
       const timer = setTimeout(() => {
         this._pendingResults.delete(frame.nonce)
@@ -381,7 +458,7 @@ export class BeamClient {
       this._pendingResults.set(frame.nonce, { resolve, reject, timer })
 
       try {
-        this._ws!.send(JSON.stringify({ type: 'intent', frame }))
+        this._ws!.send(JSON.stringify({ type: 'intent', frame, ...(stapledTrust ? { stapledTrust } : {}) }))
       } catch (err) {
         clearTimeout(timer)
         this._pendingResults.delete(frame.nonce)
@@ -390,7 +467,7 @@ export class BeamClient {
     })
   }
 
-  private async _sendViaHttp(frame: IntentFrame): Promise<IntentSendResult> {
+  private async _sendViaHttp(frame: IntentFrame, stapledTrust: StapledTrustEnvelope | null = null): Promise<IntentSendResult> {
     const baseUrl = this._directoryUrl.replace(/\/$/, '')
     const headers: Record<string, string> = { 'Content-Type': 'application/json' }
     if (this._apiKey) {
@@ -399,7 +476,7 @@ export class BeamClient {
     const res = await fetch(`${baseUrl}/intents/send`, {
       method: 'POST',
       headers,
-      body: JSON.stringify(frame)
+      body: JSON.stringify(stapledTrust ? { ...frame, stapledTrust } : frame)
     })
     let body: Record<string, unknown> = {}
     try {
@@ -481,7 +558,7 @@ export class BeamClient {
       message: string,
       from: BeamIdString,
       respond: (reply: string, structured?: Record<string, unknown>) => void,
-      frame: IntentFrame
+      frame: ReceivedIntentFrame
     ) => void | Promise<void>
   ): this {
     this.on('conversation.message', (frame, rawRespond) => {

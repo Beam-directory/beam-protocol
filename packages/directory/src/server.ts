@@ -4644,7 +4644,7 @@ export function createApp(db: Database): Hono {
          ON CONFLICT(beam_id, period) DO UPDATE SET intent_count = intent_count + 1, relayed_count = relayed_count + 1`
       ).run(frame.from, period)
 
-      const result = await relayIntentFromHttp(db, frame, 60_000)
+      const result = await relayIntentFromHttp(db, frame, 60_000, { stapledTrust: raw.stapledTrust })
       return c.json(result)
     } catch (err) {
       if (err instanceof RelayError) {

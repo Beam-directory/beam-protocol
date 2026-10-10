@@ -12,7 +12,7 @@ import {
   saveAcceptanceRule,
   serializeAcceptanceRule,
 } from '../trust/acceptance.js'
-import { buildTrustAssertion } from '../trust/assertion.js'
+import { ASSERTION_TTL_MS, buildTrustAssertion, requestedAssertionTtlMs } from '../trust/assertion.js'
 import {
   getMandateByJti,
   hashCanonical,
@@ -238,8 +238,11 @@ export function mandatesRouter(db: Database): Hono {
       if (!caller) return c.json({ error: `Agent ${beamId} not found`, errorCode: 'NOT_FOUND' }, 404)
       return c.json({ error: 'Trust assertions for unlisted agents are limited to contacts', errorCode: 'FORBIDDEN' }, 403)
     }
+    // Only the agent itself may ask for a longer-lived assertion to staple to its own messages.
+    const self = Boolean(caller && caller.agent.beam_id === beamId)
+    const ttlMs = self ? requestedAssertionTtlMs(c.req.query('ttl')) : ASSERTION_TTL_MS
     try {
-      return c.json(buildTrustAssertion(db, beamId))
+      return c.json(buildTrustAssertion(db, beamId, new Date(), ttlMs))
     } catch (error) {
       if (error instanceof IssuerKeyRequiredError) {
         return c.json({ error: error.message, errorCode: error.code }, 503)

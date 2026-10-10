@@ -1,3 +1,5 @@
+import type { StapledTrustResult } from './trust-assertion.js'
+
 export type BeamIdString = `${string}@beam.directory` | `${string}@${string}.beam.directory`
 
 export type VerificationTier = 'basic' | 'verified' | 'business' | 'enterprise'
@@ -190,11 +192,35 @@ export interface DirectoryConfig {
   apiKey?: string
 }
 
+export interface BeamTrustConfig {
+  /** Staple this agent's signed trust assertion to outgoing intents. Default: true. */
+  staple?: boolean
+  /** Requested lifetime of the stapled assertion. Default: 24 hours. The directory may cap it. */
+  assertionTtlMs?: number
+  /** Refresh the stapled assertion this long before it expires. */
+  refreshBeforeMs?: number
+  /** Verify stapled assertions on incoming intents and expose `frame.trust`. Default: true. */
+  verifyIncoming?: boolean
+  /**
+   * When an incoming intent carries no stapled assertion, ask the directory
+   * once with verifyAgent(). Default: false, so receiving never calls Beam.
+   */
+  onlineFallback?: boolean
+  /** Receivers may refuse assertions older than this, regardless of their expiry. */
+  maxAssertionAgeMs?: number
+  /** Directory signing key to verify against. Default: the pinned production key. */
+  pinnedPublicKey?: string
+}
+
 export interface BeamClientConfig {
   identity?: BeamIdentityData
   apiKey?: string
   directoryUrl: string
+  trust?: BeamTrustConfig
 }
+
+/** An intent as handed to `on()` handlers, with the silent trust verdict attached. */
+export type ReceivedIntentFrame = IntentFrame & { readonly trust: StapledTrustResult }
 
 export interface AgentSearchQuery {
   org?: string

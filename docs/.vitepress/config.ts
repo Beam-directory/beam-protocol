@@ -47,6 +47,7 @@ export default defineConfig({
         { text: 'DID Identity', link: '/guide/did' },
         { text: 'Verification', link: '/guide/verification' },
         { text: 'Trust and Assurance', link: '/guide/trust-assurance' },
+        { text: 'How Beam Works Invisibly', link: '/guide/invisible-trust' },
         { text: 'Federation', link: '/guide/federation' },
         { text: 'Intent Lifecycle', link: '/guide/intent-lifecycle' },
         { text: 'Restart Recovery', link: '/guide/restart-recovery' },

@@ -587,6 +587,71 @@ test('websocket finalizes only a fresh signed result from the intended responder
   }
 })
 
+test('the relay passes a sender-stapled trust assertion next to the frame, untouched', async () => {
+  const db = createDatabase(':memory:')
+  const sender = createFixtureAgent('sender@local.beam.directory')
+  const receiver = createFixtureAgent('receiver@local.beam.directory')
+  const direct = createFixtureAgent('direct@local.beam.directory')
+  const harness = await createWsHarness(db)
+  const stapled = {
+    v: 1,
+    assertion: { v: 1, beamId: sender.beamId, agentKey: sender.publicKeyBase64, signature: 'c2ln', publicKey: 'cGs=' },
+  }
+
+  try {
+    registerFixtureAgent(db, sender, { displayName: 'Sender' })
+    registerFixtureAgent(db, receiver, { displayName: 'Receiver' })
+    registerFixtureAgent(db, direct, { displayName: 'Direct', httpEndpoint: 'https://direct.example/beam' })
+    for (const target of [receiver.beamId, direct.beamId]) {
+      createAcl(db, { targetBeamId: target, intentType: TEST_INTENT, allowedFrom: sender.beamId })
+    }
+
+    const senderWs = await connectClient(harness.url, sender)
+    const receiverWs = await connectClient(harness.url, receiver)
+
+    let deliveryPromise = waitForJson(receiverWs)
+    const frame = createSignedFrame(sender, receiver.beamId)
+    senderWs.send(JSON.stringify({ type: 'intent', frame, stapledTrust: stapled }))
+    let delivery = await deliveryPromise
+    assert.equal(delivery.type, 'intent')
+    assert.deepEqual(delivery.stapledTrust, stapled)
+    assert.equal('stapledTrust' in (delivery.frame as Record<string, unknown>), false)
+    assert.equal((delivery.frame as IntentFrame).signature, frame.signature)
+
+    deliveryPromise = waitForJson(receiverWs)
+    const foreign = { v: 1, assertion: { ...stapled.assertion, beamId: 'someone@local.beam.directory' } }
+    senderWs.send(JSON.stringify({ type: 'intent', frame: createSignedFrame(sender, receiver.beamId), stapledTrust: foreign }))
+    delivery = await deliveryPromise
+    assert.equal('stapledTrust' in delivery, false)
+
+    deliveryPromise = waitForJson(receiverWs)
+    const httpFrame = createSignedFrame(sender, receiver.beamId)
+    const httpRelay = relayIntentFromHttp(db, httpFrame, 1_000, { stapledTrust: stapled })
+    delivery = await deliveryPromise
+    assert.deepEqual(delivery.stapledTrust, stapled)
+    receiverWs.send(JSON.stringify({
+      type: 'result',
+      frame: createSignedResultFrame(receiver, { nonce: httpFrame.nonce, success: true }),
+    }))
+    await httpRelay
+
+    let directBody: Record<string, unknown> = {}
+    await withFetchStub(async (_url, init) => {
+      directBody = JSON.parse(String(init?.body)) as Record<string, unknown>
+      return new Response(JSON.stringify({ success: true }), { status: 200, headers: { 'content-type': 'application/json' } })
+    }, async () => {
+      await relayIntentFromHttp(db, createSignedFrame(sender, direct.beamId), 1_000, { stapledTrust: stapled })
+    })
+    assert.deepEqual(directBody.stapledTrust, stapled)
+
+    await closeSocket(senderWs)
+    await closeSocket(receiverWs)
+  } finally {
+    await harness.close()
+    db.close()
+  }
+})
+
 test('websocket reconnect does not redeliver an in-flight nonce', async () => {
   const db = createDatabase(':memory:')
   const sender = createFixtureAgent('sender@local.beam.directory')

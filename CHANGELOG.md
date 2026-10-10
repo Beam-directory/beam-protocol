@@ -22,6 +22,11 @@
 - add a LICENSE file to `beam-langchain`
 - merge `docs/GETTING-STARTED.md` and `docs/SECURITY.md` into the maintained guide and security pages
 
+### Invisible trust (stapled assertions)
+- The SDK staples the sender's signed trust assertion to agent-to-agent intents. Receivers verify it offline and expose `frame.trust`. See `docs/guide/invisible-trust.md`.
+- The directory signs the agent's current key into the trust assertion (`agentKey`). It issues longer-lived assertions (`?ttl=`, capped by `BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS`, default 24 h) only to the agent itself, and relays `stapledTrust` unchanged next to the frame.
+- `beam_verify_agent` accepts an optional stapled `assertion` (and `message`) and verifies it offline. It stays read-only.
+
 ## v1.8.0 (2026-10-08)
 
 ### Trust layer: organization identity and key custody
