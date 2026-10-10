@@ -10,6 +10,7 @@ export {
   validateIntentFrame,
   validateResultFrame,
   canonicalizeFrame,
+  intentSigningText,
   MAX_FRAME_SIZE,
   REPLAY_WINDOW_MS
 } from './frames.js'
@@ -22,6 +23,8 @@ export type {
   AgentRecord,
   AgentSearchQuery,
   BeamClientConfig,
+  BeamTrustConfig,
+  ReceivedIntentFrame,
   BeamIdentityConfig,
   BeamIdentityData,
   BeamIdString,
@@ -51,9 +54,23 @@ export type {
   Proof,
 } from './did.js'
 export * from './key-management.js'
-export { verifyAgent, spkiKeyId, verifyEd25519Spki } from './verify-agent.js'
-export type { VerifyAgentOptions } from './verify-agent.js'
 export {
+  verifyAgent,
+  verifyAgentTrust,
+  verifyStapledAssertion,
+  checkStapledAssertion,
+  spkiKeyId,
+  verifyEd25519Spki,
+} from './verify-agent.js'
+export type { VerifyAgentOptions, StapledCheckOptions, VerifyStapledOptions } from './verify-agent.js'
+export { TrustAssertionStapler, DEFAULT_ASSERTION_TTL_MS } from './stapling.js'
+export type { TrustStaplerOptions } from './stapling.js'
+export {
+  MAX_STAPLED_ASSERTION_BYTES,
+  parseStapledAssertion,
+  reasonFromDetail,
+  trustResultFromCheck,
+  unverifiedTrustResult,
   DIRECTORY_SIGNING_PUBLIC_KEY,
   DEFAULT_DIRECTORY_URL,
   BEAM_ADDRESS_PATTERN,
@@ -75,5 +92,8 @@ export type {
   PublicOwner,
   PublicScopes,
   SignatureStatus,
+  StapledTrustEnvelope,
+  StapledTrustReason,
+  StapledTrustResult,
   VerificationLevel,
 } from './trust-assertion.js'

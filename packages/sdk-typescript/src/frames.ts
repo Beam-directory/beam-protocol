@@ -26,8 +26,16 @@ export function createIntentFrame(
   return signFrame(frame, identity.export().privateKeyBase64)
 }
 
-export function signFrame(frame: IntentFrame, privateKeyBase64: string): IntentFrame {
-  const signedPayload = JSON.stringify({
+/** Exact text an intent signature covers. Key order matters: the directory relay checks the same bytes. */
+export function intentSigningText(frame: {
+  from: unknown
+  to: unknown
+  intent: unknown
+  payload: unknown
+  timestamp: unknown
+  nonce: unknown
+}): string {
+  return JSON.stringify({
     type: 'intent',
     from: frame.from,
     to: frame.to,
@@ -36,6 +44,10 @@ export function signFrame(frame: IntentFrame, privateKeyBase64: string): IntentF
     timestamp: frame.timestamp,
     nonce: frame.nonce,
   })
+}
+
+export function signFrame(frame: IntentFrame, privateKeyBase64: string): IntentFrame {
+  const signedPayload = intentSigningText(frame)
   const privateKey = createPrivateKey({
     key: Buffer.from(privateKeyBase64, 'base64'),
     format: 'der',
@@ -107,8 +119,7 @@ export function validateIntentFrame(
   }
 
   if (typeof f['signature'] !== 'string') return { valid: false, error: 'Missing signature' }
-  const signedPayload = JSON.stringify({
-    type: 'intent',
+  const signedPayload = intentSigningText({
     from: f['from'],
     to: f['to'],
     intent: f['intent'],

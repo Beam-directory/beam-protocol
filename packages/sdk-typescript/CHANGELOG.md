@@ -9,6 +9,9 @@ npm has 1.6.0. 1.7.0 was tagged but never published to npm. This file lists the 
 - add `verifyAgent(address)`. It fetches `GET /agents/:beamId/trust-assertion` and verifies the Ed25519 signature against the pinned directory key. It sends no API key.
 - add the subpath export `beam-protocol-sdk/trust-assertion` with the browser-safe check helpers (`evaluateTrustCheck`, `canonicalizeJson`, `assertionSigningText`, `parseBeamAddress`, `summaryLine` and others)
 - export `DIRECTORY_SIGNING_PUBLIC_KEY`, `DEFAULT_DIRECTORY_URL`, `spkiKeyId`, `verifyEd25519Spki` and the `AgentCheck` types
+- `BeamClient.send()` staples the agent's own signed trust assertion next to the frame (`stapledTrust`). The client caches it and renews it before it expires. Lifetime is 24 hours by default (`trust.assertionTtlMs`). Turn it off with `trust: { staple: false }`. Frame bytes and signatures are unchanged.
+- received intents carry `frame.trust = { verified, org, person, may, reason, display, expiresAt, source }`. It is checked offline against the pinned directory key, with no call to Beam. `trust.onlineFallback` adds a `verifyAgent()` lookup when nothing was stapled.
+- add `verifyStapledAssertion(message, assertion)`, `checkStapledAssertion(address, assertion)`, `verifyAgentTrust(address)`, `TrustAssertionStapler` and `intentSigningText`
 
 ## 1.8.0 (tag v1.8.0, 2026-10-08)
 
