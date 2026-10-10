@@ -56,6 +56,7 @@ function verdict(result: TrustCheck, copy: CheckCopy): { tone: 'yes' | 'no' | 'u
     const lines: string[] = []
     if (result.owner) lines.push(copy.actingFor(result.owner.role))
     if (!result.scopes) lines.push(copy.noScopes)
+    else if (!result.scopes.actions.includes('order')) lines.push(copy.mayNot)
     return { tone: 'yes', headline: copy.yes(orgLabel(result.org), may), lines }
   }
   return { tone: 'no', headline: copy.no, lines: [reasonText(result, copy)] }
@@ -379,6 +380,11 @@ function signatureText(status: TrustCheck['signature'], copy: CheckCopy): string
   return copy.signatureAbsent
 }
 
+function kycText(status: string, copy: CheckCopy): string {
+  const states: Record<string, string> = copy.kycStates
+  return states[status] ?? status
+}
+
 function levelText(level: VerificationLevel, copy: CheckCopy): string {
   if (level === 'registry') return copy.levelRegistry
   if (level === 'domain') return copy.levelDomain
@@ -431,6 +437,9 @@ function OwnerBody({ owner, copy }: { owner: PublicOwner; copy: CheckCopy }) {
     <div className="flex flex-col gap-1 text-foreground">
       <p className="font-medium">{owner.role}</p>
       <p className="font-mono text-xs">{copy.ref(owner.ref.slice(0, 8))}</p>
+      <p>
+        {copy.personCheck}: {kycText(owner.kycStatus, copy)}
+      </p>
       <p>{copy.personNote}</p>
     </div>
   )
@@ -440,10 +449,18 @@ function ScopeBody({ scopes, copy }: { scopes: PublicScopes; copy: CheckCopy }) 
   return (
     <div className="flex flex-col gap-1 text-foreground">
       <p>
+        {copy.mayLabel}: {describeActions(scopes.actions, scopes.order, copy.actions)}
+      </p>
+      {scopes.fileMaxBytes !== null ? <p>{copy.fileLimit(String(scopes.fileMaxBytes))}</p> : null}
+      {scopes.actions.includes('order') ? null : (
+        <>
+          <p className="font-medium">{copy.mayNot}</p>
+          <p>{copy.mayNotHeld}</p>
+        </>
+      )}
+      <p className="font-mono text-xs text-muted-foreground">
         {copy.scopes}: {scopes.actions.join(', ')}
       </p>
-      {scopes.order ? <p>{copy.orderLimit(scopes.order.maxAmount, scopes.order.currency)}</p> : null}
-      {scopes.fileMaxBytes !== null ? <p>{copy.fileLimit(String(scopes.fileMaxBytes))}</p> : null}
     </div>
   )
 }

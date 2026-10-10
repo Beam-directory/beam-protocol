@@ -65,6 +65,7 @@ jobs:
           node --check scripts/production/extract-vercel-deployment-url.mjs
           node --check scripts/production/external-dogfood-evidence-check.mjs
           node --check scripts/production/mcp-pilot-evidence-check.mjs
+          node --check scripts/production/mcp-pilot-evidence-scope.mjs
           node --check scripts/production/production-readiness-gate.mjs
           node --check scripts/production/workflow-production-guard-check.mjs
           node --check scripts/release/release-smoke.mjs
@@ -274,13 +275,39 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          fetch-depth: 0
 
       - name: Setup Node.js
         uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 22
 
+      - name: Check tag matches package version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          TAG_NAME: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG_NAME#v}"
+          PACKAGE_VERSION="$(node -p "require('./package.json').version")"
+          test "$VERSION" = "$PACKAGE_VERSION" || {
+            echo "Tag version $VERSION does not match package.json version $PACKAGE_VERSION" >&2
+            exit 1
+          }
+
+      # Repository variable MCP_PILOT_EVIDENCE_SCOPE: unset or any other value
+      # means "always". Only "mcp-changes" lets a tag push skip the check when
+      # no MCP pilot file changed since the previous tag. See docs/runbooks/RELEASING.md.
+      - name: Decide whether this release needs hosted MCP pilot evidence
+        id: scope
+        env:
+          MCP_PILOT_EVIDENCE_SCOPE: ${{ vars.MCP_PILOT_EVIDENCE_SCOPE }}
+        run: node scripts/production/mcp-pilot-evidence-scope.mjs
+
       - name: Verify external hosted MCP pilot evidence
+        if: steps.scope.outputs.required != 'false'
         shell: bash
         env:
           DISPATCH_RELEASE: ${{ inputs.release }}

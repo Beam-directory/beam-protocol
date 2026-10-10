@@ -1,0 +1,338 @@
+name: Publish npm package
+
+# Manual npm-only release for beam-protocol-sdk or beam-protocol-cli.
+# It does not deploy the directory, create a tag, or create a GitHub release.
+# The verify job builds, tests, packs and runs npm publish --dry-run. The
+# publish job only runs when dry_run is false. It uses the npm-publish
+# environment, so a required reviewer must approve it. GitHub creates a
+# missing environment without protection, so verify refuses to continue
+# when npm-publish has no required reviewer. See docs/runbooks/RELEASING.md.
+
+on:
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package to publish
+        required: true
+        type: choice
+        options:
+          - sdk
+          - cli
+      version:
+        description: Version to publish (X.Y.Z). Must equal the package.json version at ref.
+        required: true
+        type: string
+      ref:
+        description: Release tag (vX.Y.Z) or full 40-character commit SHA on main
+        required: true
+        type: string
+      dry_run:
+        description: Stop after npm publish --dry-run
+        required: true
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publish-npm
+  cancel-in-progress: false
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      sha: ${{ steps.ref.outputs.sha }}
+      package_dir: ${{ steps.inputs.outputs.package_dir }}
+      package_name: ${{ steps.inputs.outputs.package_name }}
+      tarball_sha256: ${{ steps.pack.outputs.sha256 }}
+    steps:
+      - name: Restrict to main
+        run: |
+          if [ "${GITHUB_REF}" != "refs/heads/main" ] || [ "${GITHUB_REPOSITORY}" != "Beam-directory/beam-protocol" ]; then
+            echo "npm publish only runs from Beam-directory/beam-protocol main (got ${GITHUB_REPOSITORY} ${GITHUB_REF})." >&2
+            exit 1
+          fi
+
+      - name: Validate inputs
+        id: inputs
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          case "$PACKAGE" in
+            sdk)
+              echo "package_dir=packages/sdk-typescript" >> "$GITHUB_OUTPUT"
+              echo "package_name=beam-protocol-sdk" >> "$GITHUB_OUTPUT"
+              ;;
+            cli)
+              echo "package_dir=packages/cli" >> "$GITHUB_OUTPUT"
+              echo "package_name=beam-protocol-cli" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "Unknown package: $PACKAGE" >&2
+              exit 1
+              ;;
+          esac
+          [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Version must be X.Y.Z without a prerelease suffix: $VERSION" >&2
+            exit 1
+          }
+          [[ "$REF" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ || "$REF" =~ ^[0-9a-f]{40}$ ]] || {
+            echo "Ref must be a release tag vX.Y.Z or a full 40-character commit SHA: $REF" >&2
+            exit 1
+          }
+
+      - name: Check npm-publish environment protection
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          REVIEWERS="$(gh api "repos/${GITHUB_REPOSITORY}/environments/npm-publish" \
+            --jq '[.protection_rules[]? | select(.type == "required_reviewers") | .reviewers[]?] | length' 2>/dev/null || echo 0)"
+          if [ "${REVIEWERS:-0}" -lt 1 ]; then
+            if [ "$DRY_RUN" = "true" ]; then
+              echo "::warning::The npm-publish environment has no required reviewer. A real publish will refuse to start until it has one."
+            else
+              echo "The npm-publish environment has no required reviewer. Add one under Settings > Environments before publishing." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Checkout ref
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ inputs.ref }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Check ref is on main
+        id: ref
+        shell: bash
+        env:
+          REF: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          if [[ "$REF" == v* ]]; then
+            git rev-parse --verify --quiet "refs/tags/${REF}" >/dev/null || {
+              echo "Tag $REF does not exist" >&2
+              exit 1
+            }
+          fi
+          SHA="$(git rev-parse HEAD)"
+          git merge-base --is-ancestor "$SHA" origin/main || {
+            echo "Ref $REF ($SHA) is not on main" >&2
+            exit 1
+          }
+          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: node scripts/require-npm.mjs && npm ci
+
+      - name: Check package version
+        shell: bash
+        env:
+          VERSION: ${{ inputs.version }}
+          PACKAGE_DIR: ${{ steps.inputs.outputs.package_dir }}
+          PACKAGE_NAME: ${{ steps.inputs.outputs.package_name }}
+        run: |
+          set -euo pipefail
+          ACTUAL_NAME="$(node -p "require('./${PACKAGE_DIR}/package.json').name")"
+          ACTUAL="$(node -p "require('./${PACKAGE_DIR}/package.json').version")"
+          test "$ACTUAL_NAME" = "$PACKAGE_NAME" || {
+            echo "${PACKAGE_DIR}/package.json name $ACTUAL_NAME is not $PACKAGE_NAME" >&2
+            exit 1
+          }
+          test "$ACTUAL" = "$VERSION" || {
+            echo "${PACKAGE_DIR}/package.json version $ACTUAL does not match requested version $VERSION" >&2
+            exit 1
+          }
+
+      - name: Check npm registry
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+          PACKAGE_NAME: ${{ steps.inputs.outputs.package_name }}
+        run: |
+          set -euo pipefail
+          if [ -n "$(npm view "${PACKAGE_NAME}@${VERSION}" version 2>/dev/null || true)" ]; then
+            echo "${PACKAGE_NAME}@${VERSION} is already on npm" >&2
+            exit 1
+          fi
+          if [ "$PACKAGE" = "cli" ]; then
+            RANGE="$(node -p "require('./packages/cli/package.json').dependencies['beam-protocol-sdk']")"
+            if [ -z "$(npm view "beam-protocol-sdk@${RANGE}" version 2>/dev/null || true)" ]; then
+              echo "The CLI needs beam-protocol-sdk@${RANGE}, which is not on npm. Publish the SDK first." >&2
+              exit 1
+            fi
+          fi
+
+      - name: Build
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          npm run build --workspace=packages/sdk-typescript
+          if [ "$PACKAGE" = "cli" ]; then
+            npm run build --workspace=packages/cli
+          fi
+
+      - name: Test
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          npm test --workspace=packages/sdk-typescript
+          if [ "$PACKAGE" = "cli" ]; then
+            npm run typecheck --workspace=packages/cli
+            CLI_VERSION="$(node packages/cli/dist/index.js --version)"
+            test "$CLI_VERSION" = "$VERSION" || {
+              echo "beam --version printed $CLI_VERSION, expected $VERSION" >&2
+              exit 1
+            }
+          fi
+
+      - name: Pack
+        id: pack
+        shell: bash
+        env:
+          PACKAGE_DIR: ${{ steps.inputs.outputs.package_dir }}
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/npm-pack"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          npm pack --dry-run --workspace="$PACKAGE_DIR"
+          npm pack --workspace="$PACKAGE_DIR" --pack-destination "$OUT"
+          TARBALL="$(ls "$OUT"/*.tgz)"
+          for entry in package/package.json package/README.md package/dist/index.js package/dist/index.d.ts; do
+            tar -tzf "$TARBALL" | grep -qx "$entry" || {
+              echo "Tarball is missing $entry" >&2
+              exit 1
+            }
+          done
+          if ! tar -tzf "$TARBALL" | grep -qx package/LICENSE; then
+            echo "::warning::Tarball has no LICENSE file. Refs before the LICENSE fix ship without it."
+          fi
+          SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+          echo "sha256=$SHA256" >> "$GITHUB_OUTPUT"
+
+      - name: npm publish --dry-run
+        shell: bash
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+        run: npm publish --dry-run "$TARBALL" --access public
+
+      - name: Write summary
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ steps.inputs.outputs.package_name }}
+          VERSION: ${{ inputs.version }}
+          REF: ${{ inputs.ref }}
+          SHA: ${{ steps.ref.outputs.sha }}
+          SHA256: ${{ steps.pack.outputs.sha256 }}
+          DRY_RUN: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## npm publish check"
+            echo ""
+            echo "- package: \`${PACKAGE_NAME}@${VERSION}\`"
+            echo "- ref: \`${REF}\` (\`${SHA}\`)"
+            echo "- tarball sha256: \`${SHA256}\`"
+            echo "- dry run: \`${DRY_RUN}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  publish:
+    needs: verify
+    if: inputs.dry_run == false
+    runs-on: ubuntu-latest
+    environment: npm-publish
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout verified commit
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          ref: ${{ needs.verify.outputs.sha }}
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+          cache: npm
+
+      - name: Install workspace dependencies
+        run: node scripts/require-npm.mjs && npm ci
+
+      - name: Rebuild and match the verified tarball
+        id: pack
+        shell: bash
+        env:
+          PACKAGE: ${{ inputs.package }}
+          PACKAGE_DIR: ${{ needs.verify.outputs.package_dir }}
+          EXPECTED_SHA256: ${{ needs.verify.outputs.tarball_sha256 }}
+        run: |
+          set -euo pipefail
+          npm run build --workspace=packages/sdk-typescript
+          if [ "$PACKAGE" = "cli" ]; then
+            npm run build --workspace=packages/cli
+          fi
+          OUT="${RUNNER_TEMP}/npm-pack"
+          rm -rf "$OUT"
+          mkdir -p "$OUT"
+          npm pack --workspace="$PACKAGE_DIR" --pack-destination "$OUT"
+          TARBALL="$(ls "$OUT"/*.tgz)"
+          SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
+          if [ -z "$EXPECTED_SHA256" ] || [ "$SHA256" != "$EXPECTED_SHA256" ]; then
+            echo "Rebuilt tarball sha256 $SHA256 does not match the verified tarball $EXPECTED_SHA256" >&2
+            exit 1
+          fi
+          echo "tarball=$TARBALL" >> "$GITHUB_OUTPUT"
+
+      - name: Publish to npm
+        shell: bash
+        env:
+          TARBALL: ${{ steps.pack.outputs.tarball }}
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish "$TARBALL" --access public --provenance
+
+      - name: Confirm version on npm
+        shell: bash
+        env:
+          PACKAGE_NAME: ${{ needs.verify.outputs.package_name }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          set -euo pipefail
+          for attempt in 1 2 3 4 5 6; do
+            if [ "$(npm view "${PACKAGE_NAME}@${VERSION}" version 2>/dev/null || true)" = "$VERSION" ]; then
+              echo "${PACKAGE_NAME}@${VERSION} is on npm"
+              exit 0
+            fi
+            sleep $((attempt * 5))
+          done
+          echo "${PACKAGE_NAME}@${VERSION} is not visible on npm yet" >&2
+          exit 1

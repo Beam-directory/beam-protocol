@@ -191,6 +191,7 @@ try {
   if (verified !== yesEn) throw new Error(`expected "${yesEn}", got ${verified}`)
   const plain = await page.getByTestId('agent-check-status').innerText()
   if (!plain.includes('On behalf of: owner')) throw new Error(`expected the person line, got ${plain}`)
+  if (!plain.includes('May not: order or pay.')) throw new Error(`expected the may-not line, got ${plain}`)
   if (plain.includes('Signature valid')) throw new Error('technical details should start collapsed')
   await openDetails()
   const org = await page.getByTestId('agent-check-org').innerText()

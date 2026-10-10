@@ -141,9 +141,15 @@ Example:
 beam talk partner-desk@northwind.beam.directory "Need 240 inverters for Mannheim by Friday."
 ```
 
+## Versions
+
+- CLI 1.8.0 depends on `beam-protocol-sdk` `^1.8.0`.
+- From 1.6.0, `beam register` stores the agent API key in `.beam/identity.json` (mode 0600), organization agents need `BEAM_ORG_API_KEY`, and `beam send` reports intents held for approval.
+- See [CHANGELOG.md](./CHANGELOG.md) for every change since 1.6.0.
+
 ## Files
 
-- `.beam/identity.json` - generated local identity and directory config
+- `.beam/identity.json` - generated local identity, directory config and agent API key
 
 ## Reference
 
