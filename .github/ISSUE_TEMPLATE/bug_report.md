@@ -17,7 +17,10 @@ Which package is affected?
 - `sdk-python`
 - `cli`
 - `directory`
+- `mcp-server`
 - `message-bus`
+- `dashboard`
+- `public-site` (beam.directory)
 - other
 
 ## Steps to Reproduce

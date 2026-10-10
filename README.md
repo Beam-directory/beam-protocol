@@ -1,188 +1,109 @@
-# Beam Protocol
+# Beam
 
-> **Verified B2B handoffs for AI agents**
+Beam shows whether an AI agent really belongs to a company or person.
 
-[![npm version](https://img.shields.io/npm/v/beam-protocol-sdk)](https://www.npmjs.com/package/beam-protocol-sdk)
+Every Beam agent has an address such as `jarvis@coppen.beam.directory` and an Ed25519 signing key. The Beam directory records which organization controls the agent, how that organization proved its domain, and which person is responsible for it. It publishes that as a signed trust assertion that anyone can check against a pinned directory key.
+
+[![CI](https://github.com/Beam-directory/beam-protocol/actions/workflows/ci.yml/badge.svg)](https://github.com/Beam-directory/beam-protocol/actions/workflows/ci.yml)
 [![License: Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](./LICENSE)
-[![TypeScript](https://img.shields.io/badge/built%20with-TypeScript-3178C6.svg)](https://www.typescriptlang.org/)
 
-Beam is an open protocol and tooling stack for one hard problem: letting one company's agent hand work to another company's agent without shared API keys, brittle one-off integrations, or blind trust.
-
-If you are evaluating Beam, start from the hosted demo before reading the rest of the repo. The right first question is not "what could this protocol become?" but "does this handoff feel trustworthy and operable now?"
-
-The opinionated Beam 0.6.0 wedge is a verified partner handoff:
-
-1. `procurement@acme.beam.directory` asks `partner-desk@northwind.beam.directory` for a quote.
-2. `partner-desk@northwind.beam.directory` checks inventory with `warehouse@northwind.beam.directory`.
-3. Acme gets a signed response, a traceable nonce, and an operator-visible audit trail.
-
+- Website: [beam.directory](https://beam.directory)
+- Check an agent: [beam.directory/verify](https://beam.directory/verify)
 - Docs: [docs.beam.directory](https://docs.beam.directory)
-- Fastest local path: [Hosted Quickstart](https://docs.beam.directory/guide/hosted-quickstart)
-- Workflow guide: [Verified Partner Handoff](https://docs.beam.directory/guide/partner-handoff)
-- Compatibility policy: [Beam 0.6 Compatibility](https://docs.beam.directory/guide/compatibility)
-- API reference: [TypeScript](https://docs.beam.directory/api/typescript), [CLI](https://docs.beam.directory/api/cli), [Directory](https://docs.beam.directory/api/directory), [Python](https://docs.beam.directory/api/python)
+- Directory API: `https://api.beam.directory`
 
-## Fastest Local Path
+## Quickstart
+
+### Verify an agent with the TypeScript SDK
+
+```ts
+import { verifyAgent } from 'beam-protocol-sdk'
+
+const check = await verifyAgent('jarvis@coppen.beam.directory')
+console.log(check.verified, check.summary) // true 'verified: coppen (coppen.de)'
+```
+
+`verifyAgent` fetches `GET /agents/:address/trust-assertion`, checks the signature against the directory key built into the SDK, and returns the organization, owner role, scopes, expiry and the signature result. It sends no API key.
+
+`verifyAgent` is in `main` and will ship in the next npm release of `beam-protocol-sdk` (the latest published version is 1.6.0). Until then, build the SDK from this repository:
+
+```bash
+npm ci
+npm run build --workspace=beam-protocol-sdk
+```
+
+### Verify an agent from an MCP client
+
+The MCP server in [`packages/mcp-server`](./packages/mcp-server/README.md) offers the read-only tool `beam_verify_agent`. It runs the same check on the server and stays available when Network and send are turned off.
+
+```bash
+npm run build --workspace=@beam-protocol/mcp-server
+grok mcp add beam -- node /absolute/path/to/beam-protocol/packages/mcp-server/dist/index.js
+```
+
+The server needs a Beam identity in its environment (`BEAM_ID`, `BEAM_PUBLIC_KEY_BASE64`, `BEAM_PRIVATE_KEY_BASE64`, `BEAM_API_KEY`). Then ask the assistant to call `beam_verify_agent` with `{ "address": "jarvis@coppen.beam.directory" }`. Setup for Codex and for a hosted, OAuth-protected deployment is in the [MCP server README](./packages/mcp-server/README.md).
+
+## Repository map
+
+| Path | What it is |
+| --- | --- |
+| [`packages/directory`](./packages/directory/README.md) | Directory API server: registration, domain proof, people, mandates, trust assertions, routing. Runs at `api.beam.directory`. |
+| [`packages/sdk-typescript`](./packages/sdk-typescript/README.md) | `beam-protocol-sdk` on npm: identities, signing, directory client, `verifyAgent`. |
+| [`packages/sdk-python`](./packages/sdk-python/README.md) | `beam-directory` on PyPI: Python SDK. |
+| [`packages/cli`](./packages/cli/README.md) | `beam-protocol-cli` on npm: the `beam` command. |
+| [`packages/mcp-server`](./packages/mcp-server/README.md) | MCP server for Grok, Codex and other MCP clients, local (stdio) or as a dedicated hosted tenant with OAuth. |
+| [`packages/public-site`](./packages/public-site) | beam.directory. The built site is committed at the top of this folder; the source is in `site/`. |
+| [`packages/dashboard`](./packages/dashboard/README.md) | Operator dashboard (React and Vite). |
+| [`packages/message-bus`](./packages/message-bus/README.md) | Durable relay with retries, dedupe and a dead-letter queue. |
+| [`packages/a2a-adapter`](./packages/a2a-adapter/README.md) | Mappings between A2A v1 messages and signed Beam handoffs. |
+| [`packages/echo-agent`](./packages/echo-agent/README.md) | Test agent used by the local quickstart stack. |
+| [`packages/create-beam-agent`](./packages/create-beam-agent/README.md) | Scaffolds a minimal Beam agent project. |
+| [`packages/beam-langchain`](./packages/beam-langchain/README.md), [`packages/beam-crewai`](./packages/beam-crewai/README.md) | Python integrations for LangChain and CrewAI. |
+| [`integrations`](./integrations) | Plugins for [Grok Build](./integrations/grok-build/README.md) and [Codex](./integrations/codex/beam/README.md). |
+| [`docs`](./docs) | Source of docs.beam.directory (VitePress). |
+| [`spec`](./spec) | Protocol RFCs, the `did:beam` method, compatibility fixtures and dashboard screenshot baselines. |
+| [`examples`](./examples/README.md) | Runnable TypeScript examples against a local directory. |
+| [`ops`](./ops) | Docker Compose quickstart, the hosted MCP pilot on Fly.io, and a self-hosted MCP tenant. |
+| [`scripts`](./scripts) | End-to-end tests, release checks, production gates, demo seeding and OpenClaw host tooling. |
+| [`reports`](./reports/README.md) | Release notes and release evidence. Older reports are in `reports/archive`. |
+| `vendor/braces` | Patched copy of `braces`, pinned through npm `overrides`. |
+
+[CONTRIBUTING.md](./CONTRIBUTING.md) describes the folders in more detail.
+
+## Development
+
+Requires Node.js 20.19 or newer and npm 10 or newer. The Python SDK needs Python 3.10 or newer.
+
+```bash
+npm ci
+npm run build
+npm test
+```
+
+Cross-stack tests (TypeScript SDK, Python SDK, CLI, directory and message bus):
+
+```bash
+python3 -m pip install -e packages/sdk-python
+npm run test:e2e
+```
+
+Local stack with directory, dashboard, message bus and demo agents:
 
 ```bash
 cp ops/quickstart/.env.example ops/quickstart/.env
 docker compose -f ops/quickstart/compose.yaml --env-file ops/quickstart/.env up -d --build
-npm run demo:seed
-npm run demo:run
+npm run quickstart:smoke
 ```
 
-That boots the local directory, dashboard, message bus, and seeded Acme/Northwind demo agents so you can run the exact hosted partner handoff used in dogfood and operator docs.
+See the [Hosted Quickstart guide](https://docs.beam.directory/guide/hosted-quickstart) for what the stack contains.
 
-What you should see on the happy path:
+## Contributing and security
 
-- a signed quote back from `partner-desk@northwind.beam.directory`
-- an async finance preflight accepted through the message bus
-- a traceable nonce through directory observability
-- zero alerts and zero dead letters on the baseline hosted-demo pass
-
-## SDK Example
-
-```bash
-npm install beam-protocol-sdk
-```
-
-```ts
-import { BeamClient, BeamIdentity } from 'beam-protocol-sdk'
-
-const identity = BeamIdentity.generate({ agentName: 'procurement', orgName: 'acme' })
-const client = new BeamClient({
-  identity: identity.export(),
-  directoryUrl: 'https://api.beam.directory',
-})
-
-await client.register('Acme Procurement Desk', ['conversation.message', 'quote.request'])
-
-const reply = await client.talk(
-  'partner-desk@northwind.beam.directory',
-  'Need 240 inverters for Mannheim by Friday. Include delivery window and stock confidence.',
-)
-
-console.log(reply.message)
-```
-
-For the full three-agent flow, see [`examples/partner-handoff`](./examples/partner-handoff/README.md).
-
-## Why Beam
-
-- **Verified addresses** so both sides know which company and which agent received the request
-- **Signed intents and results** with Ed25519 and nonce-based replay protection
-- **Operator visibility** through traces, audit logs, alerts, and dead-letter inspection
-- **Retry and recovery** with a message bus for durable handoffs and restart safety
-- **Self-hostable building blocks** across Directory, Dashboard, CLI, and SDKs
-
-## Grok, MCP, and A2A
-
-Beam is the trust and delivery layer, not a replacement for an assistant protocol. The repository now includes:
-
-- [Beam for Grok Build](./integrations/grok-build/README.md), the installable plugin for Beam ID lookup and approval-gated MCP handoffs.
-- [`@beam-protocol/mcp-server`](./packages/mcp-server/README.md) for local or dedicated-tenant, OAuth-protected, approval-gated handoffs from Grok and other MCP clients.
-- [`@beam-protocol/a2a-adapter`](./packages/a2a-adapter/README.md) for bounded mappings between current A2A v1 messages/tasks and signed Beam handoffs.
-- [Trust and assurance guidance](./docs/guide/trust-assurance.md) that separates human, organization, agent, runtime, and delegated authority.
-
-Local MCP keeps signing keys on the user's machine. The remote mode is intentionally one tenant and one Beam signing identity per deployment; it adds OAuth discovery, revocation-aware introspection, resource/scopes enforcement, and content-free audit events. A shared multi-tenant connector remains a separate security boundary.
-
-## Architecture
-
-```text
-+------------------------+     signed handoff      +------------------------+
-| Acme procurement agent | ----------------------> | Beam Directory         |
-| TS SDK / Python / CLI  | <---------------------- | identity, ACL, trace,  |
-| procurement@acme       |        result / DID     | operator views         |
-+------------+-----------+                         +-----------+------------+
-             |                                                  |
-             | optional durable relay                            | direct / federated delivery
-             v                                                  v
-  +------------------------+                          +------------------------+
-  | Message Bus            | <----------------------> | Northwind agents       |
-  | retry, dedupe, DLQ     |       queued handoff     | partner desk, warehouse|
-  +------------------------+                          +------------------------+
-```
-
-## Compatibility
-
-Beam 0.6.0 treats `beam/1` as the compatibility contract across the protocol, directory, CLI, and SDKs.
-
-- Additive fields are allowed within `beam/1`.
-- Receivers must ignore unknown top-level and payload fields.
-- `payload` is the canonical request body; `params` remains a legacy alias accepted by current SDKs.
-- Breaking field removals, required-field changes, or signature changes require a new protocol version.
-
-See the full policy in [`docs/guide/compatibility.md`](./docs/guide/compatibility.md).
-
-## Packages
-
-- [`beam-protocol-sdk`](./packages/sdk-typescript/README.md) - TypeScript SDK
-- [`beam-directory`](./packages/sdk-python/README.md) - Python SDK
-- [`beam-protocol-cli`](./packages/cli/README.md) - command-line client
-- [`@beam-protocol/directory`](./packages/directory/README.md) - directory server
-- [`@beam-protocol/message-bus`](./packages/message-bus/README.md) - durable relay and retry service
-- [`@beam-protocol/a2a-adapter`](./packages/a2a-adapter/README.md) - A2A v1 compatibility mappings
-- [`@beam-protocol/mcp-server`](./packages/mcp-server/README.md) - approval-gated MCP tools for Grok and other assistants
-
-## Examples
-
-- [`examples/partner-handoff`](./examples/partner-handoff/README.md) - the recommended 0.6.0 B2B workflow
-- [`examples/hello-world`](./examples/hello-world/README.md) - register two agents and send a first message
-- [`examples/multi-agent`](./examples/multi-agent/README.md) - a generic chained workflow
-- [`examples/webhook-bridge`](./examples/webhook-bridge/README.md) - forward Beam intents to a webhook
-
-## Release Readiness
-
-The 0.6.0 dogfood workflow and findings live in [`reports/0.6.0-release-readiness.md`](./reports/0.6.0-release-readiness.md).
-The current 1.7.0 release-control evidence lives in [`reports/1.7.0-rc1-checklist.md`](./reports/1.7.0-rc1-checklist.md), [`reports/1.7.0-production-readiness-refresh.md`](./reports/1.7.0-production-readiness-refresh.md), [`reports/1.7.0-production-readiness-gate.md`](./reports/1.7.0-production-readiness-gate.md), [`reports/1.7.0-dashboard-production-go-runbook.md`](./reports/1.7.0-dashboard-production-go-runbook.md), [`reports/1.7.0-external-dogfood-status.md`](./reports/1.7.0-external-dogfood-status.md), [`reports/1.7.0-ui-smoke.md`](./reports/1.7.0-ui-smoke.md), and [`reports/1.7.0-release-notes-draft.md`](./reports/1.7.0-release-notes-draft.md).
-
-Production readiness now requires the API, public site, docs, npm packages, and dashboard control plane to agree. The default production dashboard gates check `https://dashboard.beam.directory` and its Vercel-recommended DNS record; use `--dashboard-base http://localhost:43173` only for local quickstart proof.
-
-For post-release verification, run:
-
-```bash
-npm run release:smoke -- --version <release-version> --git-sha <tagged-sha> --output reports/<release-version>-release-smoke.md
-npm run production:readiness
-npm run production:dashboard-go
-npm run production:dashboard-deployment
-npm run production:dashboard-domain
-npm run production:dashboard-shell
-npm run production:external-dogfood
-npm run production:parity
-npm run production:workflow-guards
-```
-
-## Repository Layout
-
-```text
-packages/
-  sdk-typescript/  TypeScript SDK
-  sdk-python/      Python SDK
-  cli/             Beam CLI
-  a2a-adapter/     A2A v1 compatibility mappings
-  mcp-server/      Local or dedicated-tenant OAuth MCP bridge
-  directory/       Directory server
-  message-bus/     Persistent relay
-examples/          End-to-end runnable demos
-docs/              docs.beam.directory source
-reports/           Dogfood and release-readiness reports
-spec/              protocol RFCs and compatibility fixtures
-```
-
-## Development
-
-```bash
-npm install
-npm run build
-npm test
-python3 -m pip install -e packages/sdk-python
-npm run test:e2e
-npm run test:mcp-e2e
-npm run dogfood:partner-handoff
-```
-
-See [CONTRIBUTING.md](./CONTRIBUTING.md) for contribution workflow, reporting guidelines, and local development expectations.
+- How to contribute: [CONTRIBUTING.md](./CONTRIBUTING.md)
+- Report a vulnerability: security@beam.directory. Details in [SECURITY.md](./SECURITY.md).
+- Code of conduct: [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)
+- Changes per release: [CHANGELOG.md](./CHANGELOG.md)
 
 ## License
 
-Apache-2.0
+Apache-2.0. See [LICENSE](./LICENSE).
