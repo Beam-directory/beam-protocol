@@ -34,7 +34,7 @@ import { getAdminSessionFromRequest } from './admin-auth.js'
 import { acceptanceDenial } from './trust/acceptance.js'
 import { holdConsequentialIntent, releaseOrderSpend } from './trust/consequential.js'
 import { senderOrgSuspended } from './trust/suspension.js'
-import { untrustedIntentEnvelope } from './trust/untrusted.js'
+import { stapledTrustField, stapledTrustFor, untrustedIntentEnvelope, type StapledTrust } from './trust/untrusted.js'
 import { canonicalizeJson, verifyPayload } from './crypto.js'
 import { recordIntentStage, recordShieldDecision } from './observability-hooks.js'
 import { consumeWebSocketTicket } from './websocket-ticket.js'
@@ -743,6 +743,7 @@ async function attemptDirectHttpDelivery(
   db: Database,
   frame: IntentFrame,
   endpoint: string,
+  stapled: StapledTrust | null = null,
 ): Promise<ResultFrame | null> {
   try {
     const startedAt = Date.now()
@@ -762,6 +763,7 @@ async function attemptDirectHttpDelivery(
         nonce: frame.nonce,
         timestamp: frame.timestamp,
         ...untrustedIntentEnvelope(db, frame),
+        ...stapledTrustField(stapled),
       }),
       signal: AbortSignal.timeout(30_000),
     })
@@ -952,9 +954,11 @@ export async function relayIntentFromHttp(
     hopCount?: number
     trustedControlPlane?: boolean
     skipLocalAclCheck?: boolean
+    stapledTrust?: unknown
   } = {},
 ): Promise<ResultFrame> {
   const prepared = normalizeAndValidateFrame(frame)
+  const stapled = stapledTrustFor(options.stapledTrust, prepared.from)
   const sourceDirectory = options.sourceDirectory ?? getLocalDirectoryUrl()
   const hopCount = options.hopCount ?? 0
 
@@ -1060,7 +1064,7 @@ export async function relayIntentFromHttp(
       throw new RelayError(routeBlock.relayCode, routeBlock.message)
     }
 
-    const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint)
+    const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint, stapled)
     if (directResult) {
       updateLastSeen(db, prepared.from)
       return directResult
@@ -1112,6 +1116,7 @@ export async function relayIntentFromHttp(
       frame: prepared,
       senderPublicKey,
       ...untrustedIntentEnvelope(db, prepared),
+      ...stapledTrustField(stapled),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',
@@ -1159,10 +1164,10 @@ async function handleMessage(
     return
   }
 
-  let msg: { type: string; frame: IntentFrame | ResultFrame }
+  let msg: { type: string; frame: IntentFrame | ResultFrame; stapledTrust?: unknown }
 
   try {
-    msg = JSON.parse(data.toString()) as { type: string; frame: IntentFrame | ResultFrame }
+    msg = JSON.parse(data.toString()) as { type: string; frame: IntentFrame | ResultFrame; stapledTrust?: unknown }
   } catch {
     sendJson(senderWs, { type: 'error', message: 'Invalid message format: must be valid JSON' })
     return
@@ -1174,7 +1179,7 @@ async function handleMessage(
   }
 
   if (msg.type === 'intent') {
-    await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame, auth)
+    await handleIntent(db, senderBeamId, senderWs, msg.frame as IntentFrame, auth, msg.stapledTrust)
   } else if (msg.type === 'result') {
     handleResult(db, senderBeamId, senderWs, msg.frame as ResultFrame)
   } else {
@@ -1187,7 +1192,8 @@ async function handleIntent(
   senderBeamId: string,
   senderWs: WebSocket,
   frame: IntentFrame,
-  auth: { authenticatedViaApiKey: boolean }
+  auth: { authenticatedViaApiKey: boolean },
+  stapledTrust?: unknown,
 ): Promise<void> {
   let prepared: IntentFrame
   try {
@@ -1201,6 +1207,8 @@ async function handleIntent(
     })
     return
   }
+
+  const stapled = stapledTrustFor(stapledTrust, prepared.from)
 
   let senderAgent
   try {
@@ -1354,7 +1362,7 @@ async function handleIntent(
       return
     }
 
-    const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint)
+    const directResult = await attemptDirectHttpDelivery(db, prepared, localRecipient.http_endpoint, stapled)
     if (directResult) {
       updateLastSeen(db, senderBeamId)
       sendJson(senderWs, { type: 'result', frame: directResult })
@@ -1428,6 +1436,7 @@ async function handleIntent(
       senderPublicKey: senderAgent.public_key,
       actingBeamId: senderBeamId !== prepared.from ? senderBeamId : undefined,
       ...untrustedIntentEnvelope(db, prepared),
+      ...stapledTrustField(stapled),
     })
     recordIntentStage(db, prepared, 'delivered', {
       transport: 'ws',

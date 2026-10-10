@@ -516,6 +516,32 @@ test('an unlisted trust assertion is visible to the agent and accepted contacts 
     `).run('conn-1', [buyer.beamId, vendor.beamId].sort().join('\n'), vendor.beamId, buyer.beamId, now, now)
     const contact = await app.request(url, { headers: { 'x-api-key': vendor.apiKey } })
     assert.equal(contact.status, 200)
+
+    const lifetime = (body: { issuedAt: string; expiresAt: string }) => Date.parse(body.expiresAt) - Date.parse(body.issuedAt)
+    const selfBody = await self.json() as { agentKey: string; issuedAt: string; expiresAt: string; signature: string; publicKey: string }
+    assert.equal(selfBody.agentKey, buyerKey.publicKey)
+    assert.equal(lifetime(selfBody), 15 * 60 * 1000)
+    const { signature: selfSignature, publicKey: selfIssuer, ...selfUnsigned } = selfBody
+    assert.equal(verifyPayload(selfUnsigned, selfSignature, selfIssuer), true)
+
+    const stapled = await app.request(`${url}?ttl=86400`, { headers: { 'x-api-key': buyer.apiKey } })
+    assert.equal(lifetime(await stapled.json() as { issuedAt: string; expiresAt: string }), 24 * 60 * 60 * 1000)
+    const contactLong = await app.request(`${url}?ttl=86400`, { headers: { 'x-api-key': vendor.apiKey } })
+    assert.equal(lifetime(await contactLong.json() as { issuedAt: string; expiresAt: string }), 15 * 60 * 1000)
+    const tooLong = await app.request(`${url}?ttl=9999999`, { headers: { 'x-api-key': buyer.apiKey } })
+    assert.equal(lifetime(await tooLong.json() as { issuedAt: string; expiresAt: string }), 24 * 60 * 60 * 1000)
+    const previousMaxTtl = process.env['BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS']
+    process.env['BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS'] = '3600'
+    try {
+      const capped = await app.request(`${url}?ttl=86400`, { headers: { 'x-api-key': buyer.apiKey } })
+      assert.equal(lifetime(await capped.json() as { issuedAt: string; expiresAt: string }), 60 * 60 * 1000)
+    } finally {
+      if (previousMaxTtl === undefined) delete process.env['BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS']
+      else process.env['BEAM_TRUST_ASSERTION_MAX_TTL_SECONDS'] = previousMaxTtl
+    }
+    const garbage = await app.request(`${url}?ttl=-5`, { headers: { 'x-api-key': buyer.apiKey } })
+    assert.equal(lifetime(await garbage.json() as { issuedAt: string; expiresAt: string }), 15 * 60 * 1000)
+
     db.prepare('UPDATE agents SET suspended_at = ? WHERE beam_id = ?').run(now, buyer.beamId)
     const suspended = await app.request(url, { headers: { 'x-api-key': buyer.apiKey } })
     assert.equal(suspended.status, 200)

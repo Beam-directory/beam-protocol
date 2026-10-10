@@ -33,6 +33,33 @@ export function untrustedAttachment(input: {
   }
 }
 
+const MAX_STAPLED_TRUST_BYTES = 8_192
+
+export type StapledTrust = { v: 1; assertion: Record<string, unknown> }
+
+/**
+ * The sender's own stapled trust assertion, passed through untouched for the
+ * receiver to verify offline. The relay only checks shape, size and that it
+ * names the sender; it never vouches for it.
+ */
+export function stapledTrustFor(value: unknown, from: string): StapledTrust | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const assertion = record['assertion']
+  if (record['v'] !== 1 || !assertion || typeof assertion !== 'object' || Array.isArray(assertion)) return null
+  if ((assertion as Record<string, unknown>)['beamId'] !== from) return null
+  try {
+    if (JSON.stringify(assertion).length > MAX_STAPLED_TRUST_BYTES) return null
+  } catch {
+    return null
+  }
+  return { v: 1, assertion: assertion as Record<string, unknown> }
+}
+
+export function stapledTrustField(stapled: StapledTrust | null | undefined): { stapledTrust?: StapledTrust } {
+  return stapled ? { stapledTrust: stapled } : {}
+}
+
 export function intentTrustView(db: Database, beamId: string): { assertion: TrustAssertion | null; scopes: ScopeGrant | null } {
   const mandate = getActiveMandate(db, beamId)
   const scopes = mandate ? parseScopeGrant(JSON.parse(mandate.scopes_json) as unknown) : null
