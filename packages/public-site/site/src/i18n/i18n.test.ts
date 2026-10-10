@@ -27,17 +27,30 @@ describe('dictionaries', () => {
   })
 
   it('keep the facts aligned: E2E only for /network chats and files, MCP handoffs not E2E', () => {
-    expect(en.landing.developers.bullets[3]).toContain('MCP handoffs are signed, not end-to-end encrypted')
-    expect(de.landing.developers.bullets[3]).toContain('Übergaben über MCP sind signiert, aber nicht Ende-zu-Ende verschlüsselt')
-    expect(en.landing.developers.bullets[2]).toContain('Sending from Grok is off.')
-    expect(de.landing.developers.bullets[2]).toContain('Senden aus Grok ist aus.')
+    const group = (dict: typeof en, id: string) => dict.landing.features.groups.find((g) => g.id === id)!
+    const handoff = (dict: typeof en) => group(dict, 'communicate').items.find((item) => item.status === 'limited')!
+    expect(handoff(en).note).toBe('Signed, not end-to-end encrypted. Sending from Grok is off.')
+    expect(handoff(de).note).toBe('Signiert, aber nicht Ende-zu-Ende verschlüsselt. Senden aus Grok ist aus.')
+    expect(group(en, 'communicate').tech).toContain('MCP handoffs pass the relay unencrypted')
+    expect(group(de, 'communicate').tech).toContain('Übergaben über MCP laufen unverschlüsselt über das Relay')
     expect(en.onboarding.connect.grokText).toContain('Sending from Grok is off.')
+  })
+
+  it('mark every limited or upcoming feature the same way in both languages, always with a note', () => {
+    const shape = (dict: typeof en) => dict.landing.features.groups.map((g) => [g.id, g.links.map((l) => l.target), g.items.map((i) => i.status ?? 'live')])
+    expect(shape(de)).toEqual(shape(en))
+    for (const dict of [en, de]) {
+      for (const item of dict.landing.features.groups.flatMap((g) => g.items)) {
+        if (item.status) expect(item.note, item.text).toBeTruthy()
+      }
+    }
   })
 
   it('keep technical words out of the main homepage copy', () => {
     for (const dict of [en, de]) {
-      const main = JSON.stringify([dict.landing.hero, dict.landing.how, dict.meta.home.title, dict.meta.home.description])
-      expect(main).not.toMatch(/Ed25519|Scope|MCP|E2E|Keycloak|Mandat|mandate|Vertrauensaussage|trust assertion/i)
+      const headlines = dict.landing.features.groups.map((g) => [g.title, g.line])
+      const main = JSON.stringify([dict.landing.hero, dict.landing.how, dict.meta.home.title, dict.meta.home.description, dict.landing.features.title, dict.landing.features.lead, headlines])
+      expect(main).not.toMatch(/Ed25519|Scope|MCP|E2E|Keycloak|Mandat|mandate|Vertrauensaussage|trust assertion|SDK|API|KYC/i)
     }
   })
 })
