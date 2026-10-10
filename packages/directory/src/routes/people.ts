@@ -1,10 +1,9 @@
-import { timingSafeEqual } from 'node:crypto'
 import { Hono } from 'hono'
 import type { Context } from 'hono'
 import type { Database } from 'better-sqlite3'
 import { requireAdminRole } from '../admin-auth.js'
 import { hashApiKey } from '../api-key.js'
-import { getOrg, logAuditEvent } from '../db.js'
+import { getOrg, getOrgByApiKeyHash, logAuditEvent } from '../db.js'
 import { isEd25519Spki } from '../key-validation.js'
 import { getKycAdapter } from '../trust/kyc.js'
 import { parseScopeGrant, type ScopeGrant } from '../trust/scopes.js'
@@ -41,12 +40,11 @@ function readRole(value: unknown): string | null {
   return role.length >= 1 && role.length <= ROLE_MAX ? role : null
 }
 
+// The key decides which org the caller is. The path must name that org, either
+// by its stored name or, for an unverified claim, by the name it requested.
+// Key problems answer 401/403 so the route does not reveal which orgs exist.
 function orgApiKey(c: Context, db: Database): { name: string; org: NonNullable<ReturnType<typeof getOrg>> } | Response {
   const name = (c.req.param('name') ?? '').trim().toLowerCase()
-  const org = getOrg(db, name)
-  if (!org) {
-    return c.json({ error: `Organization ${name} not found`, errorCode: 'NOT_FOUND' }, 404)
-  }
   const supplied = c.req.header('x-api-key')?.trim()
     ?? (c.req.header('authorization')?.toLowerCase().startsWith('bearer ')
       ? c.req.header('authorization')!.slice(7).trim()
@@ -54,13 +52,21 @@ function orgApiKey(c: Context, db: Database): { name: string; org: NonNullable<R
   if (!supplied) {
     return c.json({ error: 'Missing API key', errorCode: 'UNAUTHORIZED' }, 401)
   }
-  const suppliedHash = hashApiKey(supplied)
-  const left = Buffer.from(suppliedHash)
-  const right = Buffer.from(org.api_key_hash)
-  if (left.length !== right.length || !timingSafeEqual(left, right)) {
+  const keyOrg = getOrgByApiKeyHash(db, hashApiKey(supplied))
+  if (!keyOrg) {
     return c.json({ error: 'Unauthorized', errorCode: 'UNAUTHORIZED' }, 401)
   }
-  return { name, org }
+  const pathOrg = getOrg(db, name) ?? (keyOrg.requested_name === name ? keyOrg : null)
+  if (!pathOrg || pathOrg.name !== keyOrg.name) {
+    return c.json({ error: 'This API key does not belong to this organization', errorCode: 'FORBIDDEN' }, 403)
+  }
+  if (keyOrg.verified !== 1 && keyOrg.claim_expires_at !== null && Date.parse(keyOrg.claim_expires_at) <= Date.now()) {
+    return c.json({
+      error: 'Organization claim has expired; register the namespace again',
+      errorCode: 'ORG_CLAIM_EXPIRED',
+    }, 410)
+  }
+  return { name: keyOrg.name, org: keyOrg }
 }
 
 function activeSupervisor(db: Database, orgName: string, supervisorId: string | null, personId: string | null): PersonRow | null | Response {

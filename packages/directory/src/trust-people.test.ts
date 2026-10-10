@@ -445,3 +445,79 @@ test('person import upserts by email and only accepts an active supervisor', asy
     db.close()
   }
 })
+
+test('people routes check the org key before verification and never answer 404 for a key problem', async () => {
+  const db = createDatabase(':memory:')
+  try {
+    process.env['JWT_SECRET'] = process.env['JWT_SECRET'] ?? 'people-test-secret'
+    const app = createApp(db)
+    const claimed = await app.request(new Request('http://localhost/orgs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.51' },
+      body: JSON.stringify({ name: 'coppen', displayName: 'COPPEN GmbH', domain: 'coppen.de' }),
+    }))
+    assert.equal(claimed.status, 201)
+    const claim = await claimed.json() as { apiKey: string; name: string; verified: boolean }
+    assert.equal(claim.name, 'coppen--de')
+    assert.equal(claim.verified, false)
+
+    const other = await app.request(new Request('http://localhost/orgs', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-forwarded-for': '203.0.113.52' },
+      body: JSON.stringify({ name: 'example', displayName: 'Example', domain: 'example.org' }),
+    }))
+    assert.equal(other.status, 201)
+    const otherKey = (await other.json() as { apiKey: string }).apiKey
+
+    const person = (key?: string, path = 'coppen') => app.request(new Request(`http://localhost/orgs/${path}/people`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', ...(key ? { 'x-api-key': key } : {}) },
+      body: JSON.stringify({
+        email: 'clara@coppen.de',
+        displayName: 'Clara',
+        role: 'Vertrieb',
+        publicKey: publicKeyOf().publicKey,
+      }),
+    }))
+
+    const unverified = await person(claim.apiKey)
+    assert.equal(unverified.status, 201)
+    const listedByStoredName = await app.request(new Request('http://localhost/orgs/coppen--de/people', {
+      headers: { 'x-api-key': claim.apiKey },
+    }))
+    assert.equal(listedByStoredName.status, 200)
+    assert.equal((await listedByStoredName.json() as { total: number }).total, 1)
+
+    const missing = await person(undefined)
+    assert.equal(missing.status, 401)
+    const wrong = await person('beam_org_wrong')
+    assert.equal(wrong.status, 401)
+    const unknownOrg = await person('beam_org_wrong', 'does-not-exist')
+    assert.equal(unknownOrg.status, 401)
+    const foreign = await person(otherKey)
+    assert.equal(foreign.status, 403)
+    assert.equal((await foreign.json() as { errorCode: string }).errorCode, 'FORBIDDEN')
+
+    db.prepare('UPDATE orgs SET claim_expires_at = ? WHERE name = ?').run('2000-01-01T00:00:00.000Z', 'example--org')
+    const expired = await app.request(new Request('http://localhost/orgs/example/people', {
+      headers: { 'x-api-key': otherKey },
+    }))
+    assert.equal(expired.status, 410)
+    assert.equal((await expired.json() as { errorCode: string }).errorCode, 'ORG_CLAIM_EXPIRED')
+
+    assert.equal(markOrgVerified(db, claim.name)?.name, 'coppen')
+    const listed = await app.request(new Request('http://localhost/orgs/coppen/people', {
+      headers: { 'x-api-key': claim.apiKey },
+    }))
+    assert.equal(listed.status, 200)
+    const listedBody = await listed.json() as { total: number; people: Array<{ email: string }> }
+    assert.equal(listedBody.total, 1)
+    assert.equal(listedBody.people[0]?.email, 'clara@coppen.de')
+    const staleName = await person(claim.apiKey, 'coppen--de')
+    assert.equal(staleName.status, 403)
+    const foreignAfterVerify = await person(otherKey)
+    assert.equal(foreignAfterVerify.status, 403)
+  } finally {
+    db.close()
+  }
+})

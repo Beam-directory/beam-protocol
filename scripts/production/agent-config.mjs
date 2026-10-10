@@ -1,6 +1,6 @@
 import { createPrivateKey, randomBytes, sign } from 'node:crypto'
 
-function canonicalize(value) {
+export function canonicalize(value) {
   if (Array.isArray(value)) return value.map(canonicalize)
   if (value && typeof value === 'object') {
     const sorted = {}
