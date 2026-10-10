@@ -1,0 +1,21 @@
+{
+  "directoryUrl": "https://api.beam.directory",
+  "org": "coppen",
+  "person": {
+    "email": "tobias@coppen.de",
+    "displayName": "Tobias Kub",
+    "role": "Prokurist"
+  },
+  "kyc": {
+    "note": "Manual KYC per docs/runbooks/manual-kyc.md: identity of Tobias Kub and his Einzelprokura for COPPEN GmbH checked against the commercial register extract. No external provider."
+  },
+  "validityDays": 90,
+  "defaultScopes": {
+    "actions": ["read", "schedule.commit", "file.send"]
+  },
+  "agents": [
+    { "beamId": "jarvis@coppen.beam.directory" },
+    { "beamId": "clara@coppen.beam.directory" },
+    { "beamId": "fischer@coppen.beam.directory" }
+  ]
+}
