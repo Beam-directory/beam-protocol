@@ -18,7 +18,8 @@
 ### Repository
 - rewrite the README around agent verification, add `SECURITY.md`, and update `CONTRIBUTING.md` with a repository map
 - move 0.6.0 to 1.6.0 release reports to `reports/archive`
-- remove unused code: the old `packages/register` page, the Convex stub and an unrouted page in the dashboard, and the unmounted magic-link route in the directory
+- remove unused code: the old `packages/register` page, the Convex stub, an unrouted page and the unused shadcn components in the dashboard, and the unmounted magic-link route in the directory
+- add a LICENSE file to `beam-langchain`
 - merge `docs/GETTING-STARTED.md` and `docs/SECURITY.md` into the maintained guide and security pages
 
 ## v1.8.0 (2026-10-08)
