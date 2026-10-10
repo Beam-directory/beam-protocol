@@ -63,6 +63,7 @@ const workflowSpecs = [
       ['refuses an existing npm version', 'is already on npm'],
       ['CLI needs a published SDK', 'Publish the SDK first.'],
       ['SDK tests before publish', 'npm test --workspace=packages/sdk-typescript'],
+      ['tarball listing is searched from a file', 'tar -tzf "$TARBALL" > "$LIST"'],
       ['npm publish dry run', 'npm publish --dry-run "$TARBALL" --access public'],
       ['publish only when dry run is off', 'if: inputs.dry_run == false'],
       ['published tarball matches the verified one', 'does not match the verified tarball'],
@@ -79,6 +80,7 @@ const workflowSpecs = [
       ['workflow_run trigger', 'workflow_run'],
       ['ignored job failures', 'continue-on-error'],
       ['dry run off by default', 'default: false'],
+      ['tarball listing piped into grep', 'tar -tzf "$TARBALL" | grep'],
     ],
     counted: [
       ['NPM_TOKEN only in the publish step', 'secrets.NPM_TOKEN', 1],

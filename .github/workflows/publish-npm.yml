@@ -225,13 +225,18 @@ jobs:
           npm pack --dry-run --workspace="$PACKAGE_DIR"
           npm pack --workspace="$PACKAGE_DIR" --pack-destination "$OUT"
           TARBALL="$(ls "$OUT"/*.tgz)"
+          # List the archive before searching it. `tar -tzf | grep -q` exits at
+          # the first match, and pipefail turns tar's SIGPIPE ("stdout: write
+          # error") into a failed step even when the entry is present.
+          LIST="${OUT}/contents.txt"
+          tar -tzf "$TARBALL" > "$LIST"
           for entry in package/package.json package/README.md package/dist/index.js package/dist/index.d.ts; do
-            tar -tzf "$TARBALL" | grep -qx "$entry" || {
+            grep -qxF "$entry" "$LIST" || {
               echo "Tarball is missing $entry" >&2
               exit 1
             }
           done
-          if ! tar -tzf "$TARBALL" | grep -qx package/LICENSE; then
+          if ! grep -qxF package/LICENSE "$LIST"; then
             echo "::warning::Tarball has no LICENSE file. Refs before the LICENSE fix ship without it."
           fi
           SHA256="$(sha256sum "$TARBALL" | cut -d' ' -f1)"
