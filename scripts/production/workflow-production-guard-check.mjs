@@ -30,6 +30,9 @@ const workflowSpecs = [
       ['release-scoped pilot evidence', 'EVIDENCE="reports/${VERSION}-mcp-pilot-evidence.json"'],
       ['hosted pilot verifier', 'npm run production:mcp-pilot'],
       ['release depends on MCP gates', 'needs: [monorepo, e2e, docs, quickstart, mcp-container, mcp-pilot-evidence]'],
+      ['tested pilot evidence scope', 'run: node scripts/production/mcp-pilot-evidence-scope.mjs'],
+      ['pilot evidence scope from repository variable', 'MCP_PILOT_EVIDENCE_SCOPE: ${{ vars.MCP_PILOT_EVIDENCE_SCOPE }}'],
+      ['fail-closed pilot evidence skip', "if: steps.scope.outputs.required != 'false'"],
     ],
     forbidden: [
       ['floating checkout action', 'actions/checkout@v'],
@@ -38,6 +41,49 @@ const workflowSpecs = [
       ['floating artifact action', 'actions/upload-artifact@v'],
       ['floating Trivy image', 'aquasec/trivy:latest'],
       ['ignored unfixed vulnerabilities', '--ignore-unfixed'],
+      ['fail-open pilot evidence skip', "if: steps.scope.outputs.required == 'true'"],
+      ['ignored job failures', 'continue-on-error'],
+    ],
+  },
+  {
+    name: 'publish-npm',
+    path: path.join(workflowRoot, 'publish-npm.yml'),
+    required: [
+      ['read-only default permissions', 'permissions:\n  contents: read'],
+      ['manual dispatch only', 'on:\n  workflow_dispatch:\n'],
+      ['pinned checkout action', 'actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803'],
+      ['pinned setup-node action', 'actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38'],
+      ['dry run by default', 'dry_run:\n        description: Stop after npm publish --dry-run\n        required: true\n        default: true'],
+      ['dispatch only from main', 'npm publish only runs from Beam-directory/beam-protocol main'],
+      ['protected npm-publish environment', 'environment: npm-publish'],
+      ['required reviewer check', 'The npm-publish environment has no required reviewer.'],
+      ['ref must be on main', 'git merge-base --is-ancestor "$SHA" origin/main'],
+      ['no persisted git credentials', 'persist-credentials: false'],
+      ['package version matches input', 'does not match requested version $VERSION'],
+      ['refuses an existing npm version', 'is already on npm'],
+      ['CLI needs a published SDK', 'Publish the SDK first.'],
+      ['SDK tests before publish', 'npm test --workspace=packages/sdk-typescript'],
+      ['npm publish dry run', 'npm publish --dry-run "$TARBALL" --access public'],
+      ['publish only when dry run is off', 'if: inputs.dry_run == false'],
+      ['published tarball matches the verified one', 'does not match the verified tarball'],
+      ['npm provenance', 'npm publish "$TARBALL" --access public --provenance'],
+      ['OIDC token for provenance', 'id-token: write'],
+      ['same NPM_TOKEN usage as the tag release', 'NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}'],
+    ],
+    forbidden: [
+      ['floating checkout action', 'actions/checkout@v'],
+      ['floating setup-node action', 'actions/setup-node@v'],
+      ['push trigger', 'push:'],
+      ['pull_request trigger', 'pull_request'],
+      ['schedule trigger', 'schedule:'],
+      ['workflow_run trigger', 'workflow_run'],
+      ['ignored job failures', 'continue-on-error'],
+      ['dry run off by default', 'default: false'],
+    ],
+    counted: [
+      ['NPM_TOKEN only in the publish step', 'secrets.NPM_TOKEN', 1],
+      ['one protected environment', 'environment:', 1],
+      ['one real publish', 'npm publish "$TARBALL"', 1],
     ],
   },
   {
@@ -136,6 +182,14 @@ export async function evaluateWorkflowProductionGuards({ readFileImpl = readFile
       checks.push({ label, ok, forbidden: true })
       if (!ok) {
         failures.push(`${spec.name}: forbidden ${label} is present`)
+      }
+    }
+    for (const [label, pattern, expected] of spec.counted ?? []) {
+      const count = text.split(pattern).length - 1
+      const ok = count === expected
+      checks.push({ label, ok, counted: true, expected, count })
+      if (!ok) {
+        failures.push(`${spec.name}: ${label} expected ${expected} occurrence(s) of ${pattern}, found ${count}`)
       }
     }
 
