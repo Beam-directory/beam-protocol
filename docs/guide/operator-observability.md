@@ -79,29 +79,29 @@ For release-control dry runs, use one shared inbox instead of a personal mailbox
 Current recommended path:
 
 ```bash
-BEAM_ADMIN_EMAILS=jarvis@coppen.de
+BEAM_ADMIN_EMAILS=ops@example.com
 ```
 
 If you need to keep an existing personal operator inbox live during the transition, include both:
 
 ```bash
-BEAM_ADMIN_EMAILS=jarvis@coppen.de,tobias.kub@appfor.de
+BEAM_ADMIN_EMAILS=ops@example.com,alice@example.com
 ```
 
-On a machine that already has COPPEN Microsoft Graph credentials, you can request, read, and verify the live admin magic link end to end:
+On a machine that already has Microsoft Graph credentials for the shared inbox, you can request, read, and verify the live admin magic link end to end:
 
 ```bash
-source ~/.openclaw/workspace/secrets/all-keys.env
+source /path/to/admin-mail-secrets.env
 npm run release:admin-auth -- \
   --api-url https://api.beam.directory \
-  --email jarvis@coppen.de \
-  --mailbox jarvis@coppen.de
+  --email ops@example.com \
+  --mailbox ops@example.com
 ```
 
 The helper script:
 
 - requests `POST /admin/auth/magic-link`
-- polls `jarvis@coppen.de` through Microsoft Graph for the latest `Beam admin sign-in link`
+- polls `ops@example.com` through Microsoft Graph for the latest `Beam admin sign-in link`
 - extracts the callback token
 - verifies it through `POST /admin/auth/verify`
 - confirms the live session with `GET /admin/auth/session`
