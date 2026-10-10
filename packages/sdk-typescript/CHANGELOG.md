@@ -2,9 +2,9 @@
 
 npm has 1.6.0. 1.7.0 was tagged but never published to npm. This file lists the SDK changes since 1.6.0, taken from `git log v1.6.0.. -- packages/sdk-typescript`.
 
-## Unreleased (on main after tag v1.8.0)
+## 1.9.0 (2026-10-10)
 
-`packages/sdk-typescript/package.json` on main still says 1.8.0, but this code is not part of tag `v1.8.0`.
+Not tagged and not on npm yet. This is the SDK on main after tag `v1.8.0`.
 
 - add `verifyAgent(address)`. It fetches `GET /agents/:beamId/trust-assertion` and verifies the Ed25519 signature against the pinned directory key. It sends no API key.
 - add the subpath export `beam-protocol-sdk/trust-assertion` with the browser-safe check helpers (`evaluateTrustCheck`, `canonicalizeJson`, `assertionSigningText`, `parseBeamAddress`, `summaryLine` and others)
