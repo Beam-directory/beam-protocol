@@ -1,5 +1,9 @@
 name: Deploy Operator Candidate
 
+# Legacy: used for the 0.9.0 release candidate. The defaults below (0.9.0-rc1,
+# the dashboard-phi-five-73.vercel.app URL) are out of date. Kept until the
+# owners decide whether to retire it; check every input before running it.
+
 on:
   workflow_dispatch:
     inputs:

@@ -14,7 +14,6 @@ COPY vite.config.ts ./vite.config.ts
 COPY postcss.config.js ./postcss.config.js
 COPY tailwind.config.js ./tailwind.config.js
 COPY index.html ./index.html
-COPY convex.json ./convex.json
 COPY src ./src
 
 RUN node -e "const v=require('node:child_process').execSync('npm -v').toString().trim(); if(Number(v.split('.')[0])<10){console.error('npm '+v+' is too old; need npm >= 10'); process.exit(1)}" \

@@ -6,10 +6,21 @@
 - point company onboarding at the live directory routes: domain proof (DNS or `/.well-known`), register filing, person, manual KYC request, invitation, agent public key, signed encryption key, and a person-signed mandate
 - keep third-party ID checks, Personio sync, automatic representation checks, and sending from Grok marked as not available
 - private keys stay in the browser; the directory only receives public keys and signatures
-- Check a public Beam address on the website. The page loads the trust assertion and verifies the Ed25519 signature in the browser against the pinned directory key.
-- Add read-only MCP tool `beam_verify_agent`. It verifies the same assertion on the server and stays available when Network and send are off.
-- Export `verifyAgent(address)` from `beam-protocol-sdk` for the same check without MCP.
-- Count `GET /agents/:beamId/trust-assertion` in the existing public lookup rate limit.
+- check a public Beam address on the website; the page loads the trust assertion and verifies the Ed25519 signature in the browser against the pinned directory key
+
+### SDK and MCP server
+- export `verifyAgent(address)` from `beam-protocol-sdk` to run the same trust check without MCP
+- add the read-only MCP tool `beam_verify_agent`; it verifies the same assertion on the server and stays available when Network and send are off
+
+### Directory
+- count `GET /agents/:beamId/trust-assertion` in the existing public lookup rate limit
+
+### Repository
+- rewrite the README around agent verification, add `SECURITY.md`, and update `CONTRIBUTING.md` with a repository map
+- move 0.6.0 to 1.6.0 release reports to `reports/archive`
+- remove unused code: the old `packages/register` page, the Convex stub, an unrouted page and the unused shadcn components in the dashboard, and the unmounted magic-link route in the directory
+- add a LICENSE file to `beam-langchain`
+- merge `docs/GETTING-STARTED.md` and `docs/SECURITY.md` into the maintained guide and security pages
 
 ## v1.8.0 (2026-10-08)
 
@@ -92,7 +103,7 @@
 - expose scoped Network tools through dedicated Grok and Codex MCP connectors and add OpenClaw receive/reply support
 - refresh the public home, claim, Network, status, and supporting pages with the light Beam design and responsive browser checks
 
-### Hosted Fleet Adoption
+### Hosted fleet adoption
 - package the OpenClaw host installer and bootstrap-token flow into a reusable host-adoption path
 - add guided enrollment links, recent enrollment visibility, and install-pack operator onboarding in the fleet surface
 - add operator/member management with explicit `viewer`, `operator`, and `admin` administration in Settings
@@ -100,24 +111,24 @@
 - add fleet analytics and support-bundle export so operators can package host, workspace, and trace context for support handoff
 - commit installer, buyer, operator, UI-smoke, and external-dogfood status reports before cutting the release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.7.0` remains on `beam/1`.
 
 ## v1.6.0 (2026-04-03)
 
-### Fleet Production Readiness
+### Fleet production readiness
 - add external fleet alerting with persisted webhook delivery evidence and escalation history
 - enforce `viewer`, `operator`, and `admin` role boundaries for risky fleet actions and keep destructive confirmation guards explicit
 - prove backup, restore, revoke, recovery, and rollback flows against the three-host OpenClaw fleet harness
 - add accelerated multi-day fleet soak evidence with real heartbeats, route churn, maintenance, conflict, rotation, and recovery state changes
 - commit buyer, operator, incident, recovery, and soak reports before cutting the release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.6.0` remains on `beam/1`.
 
 ## v1.5.0 (2026-04-02)
 
-### OpenClaw Fleet Autonomy
+### OpenClaw fleet autonomy
 - add host maintenance mode, drain, and resume controls that block delivery with a clear operator-visible reason
 - add connector version inventory, rollout rings, and canary visibility so rollout lag is visible at fleet scope
 - add fleet policy packs and workspace templates with drift detection and remediation paths
@@ -125,12 +136,12 @@
 - add recurring rollout and maintenance digests with persisted schedule, run, and delivery history
 - commit buyer, operator, and fleet autonomy reports before cutting the release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.5.0` remains on `beam/1`.
 
 ## v1.4.0 (2026-04-02)
 
-### OpenClaw Fleet Automation
+### OpenClaw fleet automation
 - add a credential review queue with rotation windows, recovery ownership, and explicit post-recovery cleanup
 - add fleet receipt coverage, latency buckets, and route-health summaries with direct host, workspace, and trace links
 - automate approval-heavy outbound motion for fleet-backed workspaces through the workspace approval queue
@@ -139,24 +150,24 @@
 - schedule fleet digests with persisted run history, delivery history, and escalation delivery evidence
 - commit buyer, operator, fleet, digest, and Linux parity reports before cutting the release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.4.0` remains on `beam/1`.
 
 ## v1.3.0 (2026-04-02)
 
-### OpenClaw Fleet Operations
+### OpenClaw fleet operations
 - rotate and recover OpenClaw host credentials without rebuilding workspace bindings
 - resolve duplicate Beam identity conflicts through explicit route-owner actions in the fleet surface
 - add a recurring fleet digest and escalation loop for stale hosts, pending credential work, duplicate conflicts, and delivery follow-up
 - harden Linux/systemd parity for `beam-openclaw-host` and verify it with a repo-owned smoke
 - commit buyer, operator, fleet, digest, and Linux parity evidence before cutting the release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.3.0` remains on `beam/1`.
 
 ## v1.2.0 (2026-04-02)
 
-### OpenClaw Fleet Connector
+### OpenClaw fleet connector
 - add first-class OpenClaw host enrollment, approval, heartbeat, inventory, route-event, and revoke flows to the Beam control plane
 - add a dedicated OpenClaw Fleet dashboard surface with host health, route totals, duplicate conflict visibility, and host-detail drilldowns
 - extend workspace identities with host badges, host health, route source, and runtime session state so operators can see which host currently owns delivery
@@ -164,12 +175,12 @@
 - block duplicate Beam identities across hosts until an operator resolves or revokes the conflicting host
 - add repo-visible buyer, operator, and fleet smoke reports for the three-host OpenClaw fleet candidate
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.2.0` remains on `beam/1`.
 
 ## v1.1.0 (2026-04-01)
 
-### Workspace Control Plane
+### Workspace control plane
 - expose workspace partner channels with health states and partner-channel ownership controls
 - show identity lifecycle status, ownership state, and outbound permission toggles in the workspace roster
 - add the thread composer for internal prep work, blocked handoff drafts, and linked handoff threads with trace links
@@ -180,46 +191,46 @@
 
 ## v1.0.0 (2026-04-01)
 
-### First Production Partner
+### First production partner
 - formalize one production-grade cross-company workflow with a shared workflow contract, onboarding pack, and go-live checklist
 - keep Beam `1.0.0` narrow around one boring external workflow instead of widening the protocol or product scope
 
-### Partner Operations
+### Partner operations
 - add partner health, SLA-risk, incident attribution, and operator shortcuts for the first production partner motion
 - add recurring operator digest and reminder delivery so follow-through is procedural instead of memory-driven
 - add a redaction-safe proof pack export from live evidence for external sharing
 
-### Recovery and Release Control
+### Recovery and release control
 - add backup/restore and environment-parity drills with repo-visible reports
 - add a repeatable production fire drill and final buyer/operator/production-partner dry runs
 - publish an explicit `1.0.0` RC checklist, release notes draft, and go/no-go gates before the final cut
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `1.0.0` remains on `beam/1`.
 
 ## v0.9.0 (2026-03-31)
 
-### Design-Partner Motion
+### Design-partner motion
 - extend hosted-beta requests with stage age, reminders, next meeting, and follow-up due signals
 - add partner-stage analytics so operators can see where requests stall during weekly funnel review
 - add shareable pilot proof summaries tied to real trace evidence inside the beta-request workflow
 
-### Public Funnel
+### Public funnel
 - keep the landing page, guided evaluation path, hosted beta intake, and onboarding pack on one proof-first design-partner story
 - make the buyer path easier to understand in plain language before any deeper technical evaluation
 
-### Release Control
+### Release control
 - add repo-visible `0.9.0` buyer and operator dry runs before the final cut
 - add an explicit `0.9.0` cut checklist and release-notes draft before release week
 - track current operator blockers as explicit GitHub issues instead of chat-only notes
 - rerun the operator path on the real `0.9.0-rc1` candidate with shared-inbox admin auth before release
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `0.9.0` remains on `beam/1`.
 
 ## v0.8.1 (2026-03-31)
 
-### Release Hygiene
+### Release hygiene
 - automate GitHub release creation from tagged builds using repo-owned release notes
 - automate the public-site deployment path from the repo workflow and keep the live deploy path inside GitHub
 - automate API release-truth injection so tagged version, SHA, and deploy timestamp are written into the directory image and verified live after deploy
@@ -228,40 +239,40 @@
 
 ## v0.8.0 (2026-03-31)
 
-### Buyer Path
+### Buyer path
 - keep Beam on one plain-language path: landing page -> guided evaluation -> hosted pilot request
 - treat hosted beta as a guided design-partner engagement around one narrow workflow
 
-### Operator Workflow
+### Operator workflow
 - tighten alert, dead-letter, and recovery shortcuts around owner and next action
 - add first-party funnel analytics and repo-visible dry-run evidence for buyer and operator flows
 - fix live CORS allowlists for the real dashboard production URL on both Directory and Message Bus
 - enable live admin magic-link delivery for the real dashboard with explicit admin emails, dashboard URL, and Resend-backed delivery
 - prove the live hosted-beta queue and operator notification loop end to end on the `0.8.0` candidate
 
-### Release Control
+### Release control
 - add repo-visible `0.8.0` dry-run reports, cut checklist, and release-notes draft
 - record the final buyer and operator passes on the `0.8.0` candidate
 
 ## v0.7.0 (2026-03-30)
 
-### Hosted Beta
+### Hosted beta
 - align Beam around a hosted beta for verified B2B handoffs instead of an open-ended protocol pitch
 - keep landing page, hosted beta intake, quickstart, docs, and demo flow on the same hosted evaluation path
 
-### Operator Workflow
+### Operator workflow
 - add a dedicated hosted-beta request queue with stable request status, owner, notes, and export surfaces
 - improve operator-facing proof across trace, audit, alerts, dead letters, and hosted-beta review
 
-### Reliability and Security
+### Reliability and security
 - harden retries, dead-letter handling, restart recovery, key lifecycle, and abuse controls for the hosted-beta baseline
 - keep cross-stack compatibility fixtures and test coverage across directory, CLI, TypeScript SDK, Python SDK, and message bus
 
-### Release Control
+### Release control
 - add repo-visible RC and cut artifacts for `0.7.0`
 - expose live release truth on the API, status page, dashboard, SDK, and CLI so deploy drift is visible before tagging
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam `0.7.0` remains on `beam/1`.
 
 ## v0.6.1 (2026-03-30)
@@ -272,7 +283,7 @@
 
 ## v0.6.0 (2026-03-30)
 
-### Release Direction
+### Release direction
 - narrow Beam onboarding around one verified B2B workflow: Acme procurement -> Northwind partner desk -> Northwind warehouse
 - align README, docs landing, getting started, examples, and public-site copy around the same handoff story
 
@@ -281,11 +292,11 @@
 - make schema evolution rules explicit: additive fields only, ignore unknown fields, `payload` canonical with legacy `params` alias
 - add shared compatibility fixtures and parser regression tests
 
-### Dogfood and Operations
+### Dogfood and operations
 - add a reproducible partner-handoff dogfood run
 - publish a 0.6.0 release-readiness report with concrete findings, risks, and follow-ups
 
-### Compatibility Note
+### Compatibility note
 - No protocol-family change in this release train. Beam 0.6 remains on `beam/1`.
 
 ## v0.5.2 (2026-03-28)
@@ -296,35 +307,35 @@
 
 ## v0.5.1 (2026-03-08)
 
-### 🆔 DID Identity System
+### DID identity
 - `did:beam:tobias` (personal), `did:beam:lufthansa:booking` (org-bound), `did:beam:z6Mk...` (key-based)
-- W3C DID v1.1 compatible — Ed25519VerificationKey2020, no blockchain
+- W3C DID v1.1 compatible: Ed25519VerificationKey2020, no blockchain
 - DID resolution via `GET /agents/did/:didString`
 - Directory issuer DID: `did:beam:beam:directory`
-- Verifiable Credentials: Email, Domain, Business — all W3C VC format
+- Verifiable Credentials: Email, Domain, Business, all in W3C VC format
 
-### ✅ Verification Tiers
+### Verification tiers
 - Email verification via Resend API (SMTP fallback)
 - Domain verification via DNS TXT records
 - Business verification: DE (Handelsregister HRB/HRA) + UK (Companies House API)
-- 4 tiers: Basic ⚪, Verified 🔵, Business 🟢, Enterprise 🟠
+- 4 tiers: Basic, Verified, Business, Enterprise
 
-### 🔑 Consumer Key Management (SDK)
+### Consumer key management (SDK)
 - AES-256-GCM encrypted export/import with PBKDF2 key derivation
 - BIP-39 12-word recovery phrase generation and recovery
 - QR code data format for mobile identity transfer
 
-### 💳 Stripe Billing
-- `POST /billing/checkout` — creates Stripe Checkout session for tier upgrades
+### Stripe billing
+- `POST /billing/checkout` creates a Stripe Checkout session for tier upgrades
 - Webhook handler: auto-upgrade verification tier on payment
-- Subscription management: cancel → auto-downgrade
+- Subscription management: cancelling downgrades the tier
 
-### 🌐 Public Website
+### Public website
 - New beam.directory with agent directory, live search, verification pricing
 - Self-registration UI (vanilla HTML+JS, Ed25519 key gen in browser)
 - Mobile-responsive with hamburger menu
 
-### 🔧 Production Fixes
+### Production fixes
 - All 10 route files now mounted in server.ts (credentials, DID, federation were dead code)
 - Deduplicated route mounts
 - `.dockerignore` for native module isolation (better-sqlite3 arm64/amd64)
@@ -332,11 +343,10 @@
 - `catalog.yaml` try/catch resilience in all 3 files
 - Persistent SQLite volume on Fly.io
 
-### 📦 Packages Published
+### Packages published
 - npm: `beam-protocol-sdk@0.5.1`, `beam-protocol-cli@0.5.1`
 - PyPI: `beam-directory@0.5.1`, `beam-langchain@0.5.1`, `beam-crewai@0.5.1`
 
----
 
 ## v0.5.0 (2026-03-08)
 
@@ -345,9 +355,7 @@
 - Dashboard v2 on Vercel
 - Federation protocol (RFC-0002)
 - SDK v0.5.0 with DID and credentials support
-- 17 parallel Codex agents built this release
 
----
 
 ## v0.3.0 (2026-03-07)
 
@@ -358,7 +366,6 @@
 - VitePress documentation site (11 pages)
 - RFC-0002 Federation draft
 
----
 
 ## v0.2.2 (2026-03-06)
 
@@ -368,11 +375,10 @@
 - Python SDK on PyPI
 - LangChain and CrewAI integrations
 
----
 
 ## v0.1.0 (2026-03-04)
 
-### Initial Release
+### Initial release
 - Beam-ID system
 - Intent/Result frame specification (RFC-0001)
 - Ed25519 signature verification

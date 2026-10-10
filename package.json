@@ -1,7 +1,7 @@
 {
   "name": "beam-protocol",
   "version": "1.8.0",
-  "description": "Verified B2B handoffs for AI agents",
+  "description": "Beam shows whether an AI agent really belongs to a company or person.",
   "private": true,
   "workspaces": [
     "packages/*",

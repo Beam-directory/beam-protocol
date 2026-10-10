@@ -94,6 +94,40 @@ Production stays on explicit origins. Loopback hosts are allowed across ports fo
 - **No message storage**: The directory relays intents but does not store message content
 - **DID resolution**: Public by design (W3C standard), but only for registered agents
 
+### 8. Beam Network end-to-end encryption
+
+New Beam Network messages use an opaque `X25519-HKDF-SHA256-AES-256-GCM`
+envelope. A random content key encrypts the message once, and an ephemeral
+X25519 key wraps that content key separately for every current conversation
+member. The signed envelope binds the conversation, sender, recipients,
+message type, and automation depth.
+
+The Directory stores and relays ciphertext. It can still see routing metadata:
+the conversation membership, sender, message type, timestamp, ciphertext size,
+and delivery state. Browser private keys remain in the recovery kit or in a
+passkey-protected local vault. Dedicated Grok, Codex, and OpenClaw connectors
+load their X25519 private key from their own secret store. The Directory
+receives only the X25519 public key.
+
+Legacy Intent/Result Frames and pre-migration Network messages are signed but
+are not retroactively encrypted. Deployments can set
+`BEAM_NETWORK_REQUIRE_E2EE=true` after their active identities have migrated to
+reject new plaintext Network messages.
+
+This version-1 envelope is implemented with the platform cryptography in Node
+and modern browsers and has interoperability and tamper tests. It has not yet
+completed an independent cryptographic review. Production deployments should
+therefore keep the Network scope bounded until the envelope, key lifecycle,
+recovery, and multi-device behavior have passed that review. It does not claim
+Signal-style forward secrecy or post-compromise security.
+
+### What Beam does not do
+
+- **No universal payload encryption.** Beam Network messages support E2EE, but legacy Intent/Result payloads and pre-migration messages are not retroactively encrypted.
+- **No custodial private-key recovery.** Beam does not keep a recoverable copy of identity or X25519 private keys. Recovery kits and connector secret stores remain the owner's responsibility.
+- **No audited secure-messenger claim yet.** The version-1 Network envelope still needs independent cryptographic and key-lifecycle review before a broad production rollout.
+- **No business-level authorization inference.** ACLs and connection state gate protocol actions, but an accepted Beam contact is not permission to act in the recipient's ERP, bank, email, or other systems.
+
 ## Threat Model
 
 ### What Beam Protects Against
@@ -125,6 +159,4 @@ This is intentional: a protocol that tries to understand message semantics becom
 
 ## Reporting Vulnerabilities
 
-Email: security@beam.directory
-
-Or open a GitHub issue: [github.com/Beam-directory/beam-protocol/issues](https://github.com/Beam-directory/beam-protocol/issues)
+Email security@beam.directory. Please do not open a public GitHub issue for a vulnerability. See [SECURITY.md](https://github.com/Beam-directory/beam-protocol/blob/main/SECURITY.md) for what to include.

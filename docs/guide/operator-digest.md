@@ -28,4 +28,4 @@ The Partner Digest is the recurring briefing that keeps an operator informed abo
 
 Operators should add the digest delivery to their weekly cadence. The reproducible path now lives at `npm run production:digest`, which exercises the digest endpoint, records the action queue, and attempts delivery when SMTP or Resend is configured.
 
-For release documentation, capture who owns the digest, how often it runs, and what follow-up thread or partner list it touches. The repo-visible evidence file is [reports/1.0.0-operator-digest.md](/Users/tobik/Documents/BEAM/beam-protocol/reports/1.0.0-operator-digest.md).
+For release documentation, capture who owns the digest, how often it runs, and what follow-up thread or partner list it touches. The repo-visible evidence file is [reports/archive/1.0.0-operator-digest.md](https://github.com/Beam-directory/beam-protocol/blob/main/reports/archive/1.0.0-operator-digest.md).

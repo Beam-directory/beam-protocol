@@ -502,7 +502,7 @@ On macOS, Beam stores generated private keys, API keys, and admin-session cache 
 The merged file is the easiest local runtime handoff path:
 
 ```bash
-node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
+node ~/.openclaw/workspace/skills/beam-protocol/beam-send.js \
   --agent clara \
   --to fischer@coppen.beam.directory \
   --intent conversation.message \
@@ -512,7 +512,7 @@ node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
 With the receiver installed, imported OpenClaw agents can also receive Beam messages directly. A simple local proof is:
 
 ```bash
-node /Users/tobik/.openclaw/workspace/skills/beam-protocol/beam-send.js \
+node ~/.openclaw/workspace/skills/beam-protocol/beam-send.js \
   --agent archivar \
   --to jarvis@coppen.beam.directory \
   --intent conversation.message \
