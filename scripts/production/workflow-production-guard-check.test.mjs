@@ -56,6 +56,7 @@ does not match requested version $VERSION
 is already on npm
 Publish the SDK first.
 npm test --workspace=packages/sdk-typescript
+tar -tzf "$TARBALL" > "$LIST"
 npm publish --dry-run "$TARBALL" --access public
   publish:
     if: inputs.dry_run == false
@@ -171,6 +172,19 @@ test('workflow production guards reject an npm publish without approval, dry run
   assert.equal(result.failures.some((failure) => failure.includes('publish-npm: missing npm provenance')), true)
   assert.equal(result.failures.some((failure) => failure.includes('publish-npm: forbidden push trigger')), true)
   assert.equal(result.failures.some((failure) => failure.includes('publish-npm: one protected environment expected 1')), true)
+})
+
+test('workflow production guards reject a piped tarball listing that SIGPIPE can fail', async () => {
+  const result = await evaluateWorkflowProductionGuards({
+    readFileImpl: fakeReader({
+      [path.join(workflowRoot, 'publish-npm.yml')]: publishNpmWorkflow
+        .replace('tar -tzf "$TARBALL" > "$LIST"', 'tar -tzf "$TARBALL" | grep -qx package/package.json'),
+    }),
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: missing tarball listing is searched from a file')), true)
+  assert.equal(result.failures.some((failure) => failure.includes('publish-npm: forbidden tarball listing piped into grep')), true)
 })
 
 test('workflow production guards reject NPM_TOKEN outside the approved publish step', async () => {
