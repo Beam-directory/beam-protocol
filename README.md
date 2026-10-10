@@ -62,7 +62,7 @@ The server needs a Beam identity in its environment (`BEAM_ID`, `BEAM_PUBLIC_KEY
 | [`integrations`](./integrations) | Plugins for [Grok Build](./integrations/grok-build/README.md) and [Codex](./integrations/codex/beam/README.md). |
 | [`docs`](./docs) | Source of docs.beam.directory (VitePress). |
 | [`spec`](./spec) | Protocol RFCs, the `did:beam` method, compatibility fixtures and dashboard screenshot baselines. |
-| [`examples`](./examples/README.md) | Runnable TypeScript examples against a local directory. |
+| [`examples`](./examples/README.md) | Runnable TypeScript examples against a local directory. [`natural-language-chat.ts`](./examples/natural-language-chat.ts) shows two agents exchanging plain-language messages with `client.talk`. |
 | [`ops`](./ops) | Docker Compose quickstart, the hosted MCP pilot on Fly.io, and a self-hosted MCP tenant. |
 | [`scripts`](./scripts) | End-to-end tests, release checks, production gates, demo seeding and OpenClaw host tooling. |
 | [`reports`](./reports/README.md) | Release notes and release evidence. Older reports are in `reports/archive`. |
