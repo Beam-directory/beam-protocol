@@ -86,7 +86,3 @@ Robots join the network. Delivery drones, home robots, autonomous vehicles — a
 4. **Privacy is non-negotiable.** The directory knows who's registered, not what they're saying.
 5. **Interoperable, not imperial.** Federation built in. Multiple directories.
 6. **Physical and digital are the same.** A robot's Beam-ID looks like a software agent's.
-
----
-
-[Full Vision Document on GitHub →](https://github.com/Beam-directory/beam-protocol/blob/main/VISION.md)

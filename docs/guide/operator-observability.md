@@ -91,7 +91,7 @@ BEAM_ADMIN_EMAILS=jarvis@coppen.de,tobias.kub@appfor.de
 On a machine that already has COPPEN Microsoft Graph credentials, you can request, read, and verify the live admin magic link end to end:
 
 ```bash
-source /Users/tobik/.openclaw/workspace/secrets/all-keys.env
+source ~/.openclaw/workspace/secrets/all-keys.env
 npm run release:admin-auth -- \
   --api-url https://api.beam.directory \
   --email jarvis@coppen.de \

@@ -6,7 +6,7 @@
 **Authors:** Tobias Kub (Beam Protocol)
 **Version:** 1.0.0
 **Last Updated:** 2026-03-09
-**Specification URL:** https://docs.beam.directory/security/did-beam-method
+**Specification URL:** https://github.com/Beam-directory/beam-protocol/blob/main/spec/did-beam-method.md
 
 ---
 
