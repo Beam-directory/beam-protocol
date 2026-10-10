@@ -20,7 +20,7 @@ const LANGUAGE_NAMES: Record<Locale, { short: string; name: string }> = {
 /** `germanOnly`: the target page exists in German only (marked "DE" in the English shell). */
 type NavItem = { label: string; to?: string; href?: string; external?: boolean; germanOnly?: boolean }
 
-function GermanOnlyMarker() {
+export function GermanOnlyMarker() {
   const { locale, t } = useI18n()
   if (locale === 'de') return null
   return (

@@ -2,8 +2,22 @@
  * English copy (default locale). The inferred type of this object is the dictionary contract:
  * de.ts is typed against it, so a missing or extra key is a TypeScript error.
  * Facts must match de.ts exactly (E2E only for /network chats and files, MCP handoffs signed but not E2E, etc.).
- * Main copy stays free of protocol terms; they belong in landing.developers and the collapsed "Advanced"/"Details" parts.
+ * Main copy stays free of protocol terms; they belong in the `tech` lines of landing.features and the collapsed "Advanced"/"Details" parts.
+ * landing.features lists only what runs in production; anything limited or not live carries a status and a note.
  */
+export type FeatureStatus = 'limited' | 'soon'
+export type FeatureLinkTarget = 'verify' | 'start' | 'network' | 'docs' | 'directory' | 'seal' | 'dashboard'
+export type FeatureGroupId = 'check' | 'chain' | 'communicate' | 'developers' | 'directory' | 'control'
+export type FeatureItem = { text: string; status?: FeatureStatus; note?: string }
+export type FeatureGroup = {
+  id: FeatureGroupId
+  title: string
+  line: string
+  items: FeatureItem[]
+  tech: string
+  links: { label: string; target: FeatureLinkTarget }[]
+}
+
 export const en = {
   meta: {
     ogLocale: 'en_US',
@@ -94,18 +108,104 @@ export const en = {
         { title: 'Anyone can check it', text: 'Customers and partners enter the address here and see right away who is behind the agent.' },
       ],
     },
-    developers: {
-      title: 'For developers',
-      bullets: [
-        'Each address has a trust assertion signed by the directory with Ed25519. The check above verifies it in your browser against a pinned key.',
-        'The chain behind an agent: verified domain, then a person, then a signed mandate with scopes. A mandate can never exceed the person’s rights. The person check is a manual review by Beam, not an ID-document check.',
-        'MCP server for Grok, Claude, OpenAI and other MCP clients, including the read-only beam_verify_agent tool. Sending from Grok is off.',
-        'Chats and files at /network are end-to-end encrypted. MCP handoffs are signed, not end-to-end encrypted; Beam can see their content on the relay.',
-        'SDKs for TypeScript and Python, plus the beam CLI.',
-      ],
-      docsLink: 'Read the docs',
-      networkLink: 'Open the network',
-      dashboardLink: 'Dashboard',
+    features: {
+      title: 'What Beam does',
+      lead: 'Everything here works today. Where something is limited or not ready yet, it says so.',
+      status: { limited: 'Limited', soon: 'Coming soon' },
+      groups: [
+        {
+          id: 'check',
+          title: 'Check',
+          line: 'See in seconds who is behind an agent.',
+          items: [
+            { text: 'Live check on this page and at /verify' },
+            { text: 'A link to each check that you can share' },
+            { text: 'A plain yes or no, with the reason if it’s no' },
+            { text: 'Other agents can run the same check' },
+          ],
+          tech: 'Trust assertion signed by the directory (Ed25519), verified in the browser against a pinned key · read-only MCP tool beam_verify_agent',
+          links: [{ label: 'Check an agent', target: 'verify' }],
+        },
+        {
+          id: 'chain',
+          title: 'Chain of trust',
+          line: 'No agent may do more than the person behind it.',
+          items: [
+            { text: 'Company confirmed through its own website domain' },
+            { text: 'A named person answers for each agent', status: 'limited', note: 'Beam checks people by hand, without an ID document so far.' },
+            { text: 'Signed permissions with limits, for example orders up to €500 a day' },
+            { text: 'Anything beyond those permissions is held, not delivered' },
+            { text: 'Invite colleagues to your company' },
+            { text: 'Private persons without a company', status: 'soon', note: 'Identity check with Stripe, in preparation.' },
+          ],
+          tech: 'Domain proof via DNS TXT or a /.well-known file · optional commercial register or LEI entry, reviewed by hand · manual KYC · person-signed mandate with scopes, valid 90 days · held intents return HTTP 202 APPROVAL_REQUIRED',
+          links: [{ label: 'Connect your agent', target: 'start' }],
+        },
+        {
+          id: 'communicate',
+          title: 'Communicate safely',
+          line: 'Messages show who sent them. Chats stay between you and the other side.',
+          items: [
+            { text: 'Every message is signed by the agent that sends it' },
+            { text: 'End-to-end encrypted chats and files up to 6 MB in the Beam network' },
+            { text: 'Groups, also across companies' },
+            { text: 'Nobody can write to your agent until you accept a contact request' },
+            { text: 'Handoffs from AI assistants', status: 'limited', note: 'Signed, not end-to-end encrypted. Sending from Grok is off.' },
+          ],
+          tech: 'Ed25519 signatures · X25519 key exchange and AES-256-GCM at /network · MCP handoffs pass the relay unencrypted, so Beam can see their content',
+          links: [{ label: 'Open the network', target: 'network' }],
+        },
+        {
+          id: 'developers',
+          title: 'For developers',
+          line: 'Build Beam into your own agent or app.',
+          items: [
+            { text: 'TypeScript SDK and the beam CLI', status: 'limited', note: 'npm has 1.6.0. Version 1.8.0 with the trust check is pending.' },
+            { text: 'Python SDK', status: 'limited', note: 'PyPI has 0.5.1, which is behind the repository.' },
+            {
+              text: 'MCP server for Grok, Claude, OpenAI and other assistants',
+              status: 'limited',
+              note: 'Run it yourself or as your own tenant. Beam’s hosted server is a read-only pilot.',
+            },
+            { text: 'Public REST API' },
+            { text: 'Message bus that queues and retries deliveries' },
+            { text: 'Documentation with guides and API reference' },
+          ],
+          tech: 'REST at api.beam.directory · MCP over stdio or Streamable HTTP with OAuth 2.1 · Grok Build and Codex plugins in the repository',
+          links: [{ label: 'Read the docs', target: 'docs' }],
+        },
+        {
+          id: 'directory',
+          title: 'Directory and seal',
+          line: 'Show in public that your agent is real.',
+          items: [
+            { text: 'Public directory of company agents, no account needed' },
+            { text: 'A profile page for every listed agent' },
+            { text: 'A seal for your website and email footer', status: 'limited', note: 'Applications are reviewed by hand. Payment is not connected yet.' },
+            { text: 'Report a suspicious agent' },
+          ],
+          tech: 'Seal as an SVG per agent from the API · public review guidelines · reports via the API or beam report',
+          links: [
+            { label: 'Open the directory', target: 'directory' },
+            { label: 'Apply for a seal', target: 'seal' },
+          ],
+        },
+        {
+          id: 'control',
+          title: 'Control',
+          line: 'You decide what an agent may do, and you can take it back.',
+          items: [
+            { text: 'Change or withdraw permissions' },
+            { text: 'Replace or revoke keys' },
+            { text: 'When someone leaves the company, their agents are blocked at once' },
+            { text: 'Beam can block an agent, for example after a report' },
+            { text: 'Change settings and choose whether your agent is listed' },
+            { text: 'Dashboard with message history, delivery status and audit log', status: 'limited', note: 'For operators, by invitation.' },
+          ],
+          tech: 'Mandate revocation · key rotation · signed config changes · all through the API, CLI or SDK; there is no page for them on this site yet',
+          links: [{ label: 'Dashboard', target: 'dashboard' }],
+        },
+      ] as FeatureGroup[],
     },
   },
 
