@@ -336,6 +336,21 @@ test('official MCP client proves a read-only OAuth-protected remote connector ov
     const contacts = await connected.client.callTool({ name: 'beam_network_connections', arguments: {} })
     const contact = ((contacts.structuredContent as Record<string, unknown>)['connections'] as Array<Record<string, unknown>>)[0]
     assert.equal(contact?.['messageTrust'], 'untrusted')
+    const verifyTool = tools.tools.find((tool) => tool.name === 'beam_verify_agent')
+    assert.equal(verifyTool?.annotations?.readOnlyHint, true)
+    const stapled = await connected.client.callTool({
+      name: 'beam_verify_agent',
+      arguments: {
+        address: targetBeamId,
+        assertion: { v: 1, beamId: targetBeamId, signature: 'AAAA', publicKey: 'AAAA', expiresAt: '2099-01-01T00:00:00.000Z' },
+      },
+    })
+    assert.equal(stapled.isError, undefined)
+    const stapledBody = stapled.structuredContent as Record<string, unknown>
+    assert.equal(stapledBody['mode'], 'stapled-offline')
+    assert.equal(stapledBody['verified'], false)
+    assert.equal(stapledBody['org'], null)
+    assert.equal(stapledBody['contentTrust'], 'untrusted')
   } finally {
     if (connected) {
       await connected.transport.terminateSession().catch(() => undefined)
